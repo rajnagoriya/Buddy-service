@@ -38,7 +38,12 @@ export const verifyToken = (req, res, next) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    req.user = decoded; // { id, role }
+    req.user = { ...decoded };
+    if (decoded.userId && !decoded.id) {
+      req.user.id = decoded.userId;
+    } else if (decoded.id && !decoded.userId) {
+      req.user.userId = decoded.id;
+    }
     next();
   } catch (error) {
     return handleResponse(res, 401, "Invalid or expired token");
@@ -55,7 +60,12 @@ export const optionalVerifyToken = (req, res, next) => {
     if (token) {
       try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        req.user = decoded; // { id, role }
+        req.user = { ...decoded };
+        if (decoded.userId && !decoded.id) {
+          req.user.id = decoded.userId;
+        } else if (decoded.id && !decoded.userId) {
+          req.user.userId = decoded.id;
+        }
       } catch (error) {
         // Token is invalid, but we don't block the request
         req.user = null;

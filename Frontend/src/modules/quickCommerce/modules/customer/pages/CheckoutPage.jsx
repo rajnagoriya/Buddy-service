@@ -773,7 +773,7 @@ const CheckoutPage = () => {
             "Order placed but ID not received. Checking order history...",
             "warning"
           );
-          navigate("/orders");
+          navigate("/qc/orders");
           return;
         }
 
@@ -799,7 +799,7 @@ const CheckoutPage = () => {
                 "Order created but payment gateway failed. Please pay from order details.",
               "error"
             );
-            navigate(`/orders/${mainOrderId}`);
+            navigate(`/qc/orders/${mainOrderId}`);
             return;
           }
         }
@@ -816,7 +816,7 @@ const CheckoutPage = () => {
         postOrderNavigateRef.current = setTimeout(() => {
           postOrderNavigateRef.current = null;
           setIsPlacingOrder(false);
-          navigate(`/orders/${mainOrderId}`);
+          navigate(`/qc/orders/${mainOrderId}`);
         }, 3000);
       } else {
         setIsPlacingOrder(false);
@@ -848,7 +848,7 @@ const CheckoutPage = () => {
         }
         setShowSuccess(false);
         showToast("Order cancelled — seller did not accept in time.", "error");
-        navigate(`/orders/${orderId}`, { replace: true });
+        navigate(`/qc/orders/${orderId}`, { replace: true });
         return true;
       }
       return false;

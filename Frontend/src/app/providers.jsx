@@ -19,17 +19,21 @@ function shouldUseHashRouter() {
   )
 }
 
+import { GlobalAuthProvider } from '../core/auth/GlobalAuthContext'
+
 export function AppProviders({ children }) {
   const Router = shouldUseHashRouter() ? HashRouter : BrowserRouter
 
   return (
     <StrictMode>
-      <ReduxProvider store={store}>
-        <Router>
-          {children}
-          <Toaster position="top-center" richColors offset="80px" />
-        </Router>
-      </ReduxProvider>
+      <GlobalAuthProvider>
+        <ReduxProvider store={store}>
+          <Router>
+            {children}
+            <Toaster position="top-center" richColors offset="80px" />
+          </Router>
+        </ReduxProvider>
+      </GlobalAuthProvider>
     </StrictMode>
   )
 }

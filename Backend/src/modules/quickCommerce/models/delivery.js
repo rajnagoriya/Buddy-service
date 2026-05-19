@@ -113,6 +113,17 @@ const deliverySchema = new mongoose.Schema(
         lastLocationAt: {
             type: Date,
         },
+        // Compatibility fields for Food module
+        status: {
+            type: String,
+            enum: ['pending', 'approved', 'rejected'],
+            default: 'approved' // Default to approved for QC migrations
+        },
+        availabilityStatus: {
+            type: String,
+            enum: ['online', 'offline'],
+            default: 'online'
+        }
     },
     {
         timestamps: true,
@@ -128,5 +139,5 @@ deliverySchema.virtual('id').get(function () {
     return this._id.toHexString();
 });
 
-export default mongoose.model("Delivery", deliverySchema, "quick_deliveries");
+export default mongoose.model("Delivery", deliverySchema, "buddy_deliveries");
 

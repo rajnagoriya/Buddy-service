@@ -915,16 +915,15 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
       {/* ─── 2. MAIN CONTENT ─── */}
       <div className={`flex-1 relative overflow-y-auto ${currentTab === 'history' ? 'pt-0' : (currentTab === 'feed' ? 'pt-[105px]' : 'pt-[56px]')} no-scrollbar`}>
          {currentTab === 'feed' ? (
-           <div className="absolute inset-0 top-[-105px]">
-             {isOnline ? (
-               <>
+           <div className="absolute inset-0 top-[-105px] bg-white">
+             {isOnline && (
+               <div className="absolute inset-0">
                  <LiveMap 
                    onMapLoad={(m) => mapRef.current = m}
                    onMapClick={handleMapClick}
                    onPathReceived={setSimPath}
                    onPolylineReceived={(poly) => {
                      setActivePolyline(poly);
-                     // If we have an order, push the INITIAL polyline to Firebase immediately for the customer
                      const orderId = activeOrder?.orderId || activeOrder?._id;
                      if (orderId && poly) {
                        writeOrderTracking(orderId, { polyline: poly, status: tripStatus, eta: eta }).catch(() => {});
@@ -932,7 +931,21 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                    }}
                    zoom={zoom}
                  />
-                 
+               </div>
+             )}
+
+             {!isOnline && (
+               <div className="absolute inset-0 z-0 overflow-hidden bg-[#F8FAFC] pointer-events-none">
+                 {/* Fake CSS Map Pattern for Offline State (Saves API Quota) */}
+                 <div className="absolute w-[200%] h-[200%] -top-[50%] -left-[50%] rotate-[15deg] opacity-[0.35]" style={{ backgroundImage: 'linear-gradient(#94A3B8 2px, transparent 2px), linear-gradient(90deg, #94A3B8 2px, transparent 2px)', backgroundSize: '80px 80px' }} />
+                 <div className="absolute w-[200%] h-[200%] -top-[50%] -left-[50%] -rotate-[20deg] opacity-[0.25]" style={{ backgroundImage: 'linear-gradient(#64748B 3px, transparent 3px)', backgroundSize: '200px 200px' }} />
+                 <div className="absolute w-[200%] h-[200%] -top-[50%] -left-[50%] rotate-[45deg] opacity-[0.2]" style={{ backgroundImage: 'linear-gradient(#94A3B8 1px, transparent 1px), linear-gradient(90deg, #94A3B8 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
+                 <div className="absolute inset-0 bg-gradient-to-t from-white via-transparent to-white opacity-30 pointer-events-none" />
+               </div>
+             )}
+
+             {isOnline ? (
+               <>
                  {/* SIMULATION INDICATOR */}
                  {isSimMode && (
                    <div className="absolute top-[160px] left-4 right-4 z-[100] bg-black/80 backdrop-blur-md rounded-xl p-3 border border-white/20 flex items-center justify-between shadow-2xl">
@@ -1028,27 +1041,30 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                  </div>
                </>
              ) : (
-               <div className="h-full w-full bg-white flex flex-col items-center justify-center pt-[100px] px-6 text-center">
+               <div className="absolute inset-0 z-[150] bg-white/20 flex flex-col items-center justify-center pt-24 pb-4 px-6 text-center">
                   <motion.div 
                     initial={{ opacity: 0, scale: 0.8 }}
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ duration: 0.5 }}
-                    className="w-64 h-64 mb-8"
+                    className="w-60 h-60 mb-8 rounded-[1.5rem] bg-white p-1 shadow-[0_12px_30px_-10px_rgba(0,0,0,0.15)] border-2 border-white overflow-hidden relative"
                   >
-                     <img 
-                       src="/delivery_boy_welcome.png" 
-                       alt="Welcome" 
-                       className="w-full h-full object-contain drop-shadow-2xl" 
-                     />
+                     <div className="w-full h-full rounded-[1.25rem] overflow-hidden bg-[#F1F5F9]">
+                       <img 
+                         src="/delivery_boy_welcome.png" 
+                         alt="Welcome" 
+                         className="w-full h-full object-cover scale-105" 
+                       />
+                     </div>
                   </motion.div>
+                  
                   <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.2 }}
                   >
-                    <h2 className="text-2xl font-black text-[#0F172A] uppercase tracking-tight mb-2">Welcome Back!</h2>
-                    <p className="text-[#5D6D5D] text-xs font-bold uppercase tracking-widest max-w-[280px] leading-relaxed mx-auto">
-                      Go online to start receiving new delivery requests in your area.
+                    <h2 className="text-[22px] font-black text-[#111827] mb-2 tracking-tight">WELCOME, PARTNER!</h2>
+                    <p className="text-[#475569] text-[13px] font-medium max-w-[260px] leading-relaxed mx-auto">
+                      Go Online to Accept Local Orders and Maximise Your Earnings.
                     </p>
                   </motion.div>
                   
@@ -1062,10 +1078,19 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                          deliveryAPI.updateLocation(pos.coords.latitude, pos.coords.longitude, true).catch(() => {});
                       }, (err) => console.warn('Online sync position failed:', err), { enableHighAccuracy: true });
                     }}
-                    className="mt-8 px-10 py-4 bg-[#16A34A] hover:bg-[#15803D] text-[#0F172A] rounded-[2rem] font-black uppercase tracking-[0.2em] shadow-2xl shadow-green-600/30 active:scale-95 transition-all flex items-center gap-4 border-b-4 border-[#15803D]"
+                    className="mt-7 px-10 py-3.5 bg-gradient-to-b from-[#16A34A] to-[#0F766E] hover:from-[#15803D] hover:to-[#0F766E] text-white rounded-full font-bold text-[13px] uppercase tracking-wide shadow-[0_8px_20px_-6px_rgba(22,163,74,0.6)] active:scale-95 transition-all"
                   >
-                    Go Online Now
+                    GO ONLINE NOW
                   </motion.button>
+
+                  <motion.p 
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: 0.6 }}
+                    className="mt-8 text-[11px] text-[#475569] max-w-[260px] leading-relaxed"
+                  >
+                     <span className="font-bold text-[#111827]">QUICK TIP:</span> Complete 5 more orders to unlock the ₹100 evening bonus!
+                  </motion.p>
                </div>
              )}
            </div>

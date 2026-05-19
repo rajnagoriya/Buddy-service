@@ -40,7 +40,7 @@ const PaymentStatusPage = () => {
                     // Auto redirect after 3 seconds
                     setTimeout(() => {
                         const targetId = payment.checkoutGroupId || payment.publicOrderId || payment.order;
-                        navigate(`/orders/${targetId}`, { replace: true });
+                        navigate(`/qc/orders/${targetId}`, { replace: true });
                     }, 4000);
                 } else if (paymentStatus === "FAILED" || paymentStatus === "CANCELLED") {
                     setStatus("failure");
@@ -214,7 +214,7 @@ const PaymentStatusPage = () => {
                                     <p className="text-[11px] text-slate-500 font-medium">Redirecting to your order details in 4 seconds...</p>
                                 </div>
                                 <Button 
-                                    onClick={() => navigate('/orders')}
+                                    onClick={() => navigate('/qc/orders')}
                                     className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold h-12 rounded-xl flex items-center justify-center gap-2"
                                 >
                                     Go to My Orders <ArrowRight size={18} />
@@ -264,7 +264,7 @@ const PaymentStatusPage = () => {
                                     </Button>
                                     <Button 
                                         variant="outline"
-                                        onClick={() => navigate('/orders')}
+                                        onClick={() => navigate('/qc/orders')}
                                         className="w-full border-slate-200 text-slate-600 font-bold h-12 rounded-xl"
                                     >
                                         View Order History

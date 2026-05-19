@@ -91,13 +91,41 @@ function RestaurantDetailsContent() {
   const [showLocationSheet, setShowLocationSheet] = useState(false)
   const [showScheduleSheet, setShowScheduleSheet] = useState(false)
   const [showOffersSheet, setShowOffersSheet] = useState(false)
-  const [selectedDate, setSelectedDate] = useState(null)
-  const [selectedTimeSlot, setSelectedTimeSlot] = useState(null)
+  const [selectedDate, setSelectedDate] = useState(() => {
+    try {
+      const stored = localStorage.getItem('scheduled_order_time')
+      if (stored) {
+        const parsed = JSON.parse(stored)
+        if (parsed.date) return parsed.date
+      }
+    } catch {}
+    return new Date().toISOString().split('T')[0]
+  })
+  const [selectedTimeSlot, setSelectedTimeSlot] = useState(() => {
+    try {
+      const stored = localStorage.getItem('scheduled_order_time')
+      if (stored) {
+        const parsed = JSON.parse(stored)
+        if (parsed.time) return parsed.time
+      }
+    } catch {}
+    return null
+  })
+  const [fulfillmentMode, setFulfillmentMode] = useState(() => {
+    try {
+      const stored = localStorage.getItem('scheduled_order_time')
+      if (stored) {
+        const parsed = JSON.parse(stored)
+        if (parsed.isScheduled) return "schedule"
+      }
+    } catch {}
+    return "delivery"
+  })
+
   const [expandedCoupons, setExpandedCoupons] = useState(new Set())
   const [showMenuSheet, setShowMenuSheet] = useState(false)
   const [showSearch, setShowSearch] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
-  const [fulfillmentMode, setFulfillmentMode] = useState("delivery") // options: "delivery", "pickup", "schedule"
   const [availabilityTick, setAvailabilityTick] = useState(Date.now())
   const [showMenuOptionsSheet, setShowMenuOptionsSheet] = useState(false)
   const [showShareModal, setShowShareModal] = useState(false)
@@ -172,6 +200,65 @@ function RestaurantDetailsContent() {
   const fetchedRestaurantRef = useRef(false) // Track if restaurant has been fetched for current slug
   const fetchedSlugRef = useRef(null)
 
+  const availableTimeSlots = useMemo(() => {
+    if (!selectedDate || !restaurant) return []
+
+    try {
+      const targetDate = new Date(selectedDate)
+      const status = getRestaurantAvailabilityStatus(restaurant, targetDate)
+
+      let openingHour = 9
+      let closingHour = 22
+
+      if (status.openingTime) {
+        const [h] = status.openingTime.split(':')
+        openingHour = parseInt(h, 10)
+      }
+
+      if (status.closingTime) {
+        const [h] = status.closingTime.split(':')
+        closingHour = parseInt(h, 10)
+      }
+
+      if (closingHour < openingHour) {
+        closingHour += 24
+      }
+
+      const slots = []
+      const now = new Date()
+      const nowStr = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().split('T')[0]
+      const isToday = selectedDate === nowStr
+      const currentHour = now.getHours()
+
+      for (let h = openingHour; h <= closingHour; h++) {
+        const actualHour = h % 24
+        if (isToday && h <= currentHour + 1) continue
+
+        const period = actualHour >= 12 ? 'PM' : 'AM'
+        const display12 = actualHour % 12 || 12
+        const timeString = `${String(actualHour).padStart(2, '0')}:00`
+        const displayString = `${display12}:00 ${period}`
+
+        slots.push({ value: timeString, label: displayString })
+      }
+
+      return slots
+    } catch {
+      return []
+    }
+  }, [selectedDate, restaurant])
+
+  useEffect(() => {
+    if (availableTimeSlots.length > 0) {
+      const isValid = availableTimeSlots.some(slot => slot.value === selectedTimeSlot)
+      if (!isValid) {
+        setSelectedTimeSlot(availableTimeSlots[0].value)
+      }
+    } else {
+      setSelectedTimeSlot(null)
+    }
+  }, [availableTimeSlots, selectedTimeSlot])
+
   useEffect(() => {
     const intervalId = setInterval(() => {
       setAvailabilityTick(Date.now())
@@ -179,6 +266,15 @@ function RestaurantDetailsContent() {
 
     return () => clearInterval(intervalId)
   }, [])
+
+  useEffect(() => {
+    if (restaurant) {
+      const status = getRestaurantAvailabilityStatus(restaurant)
+      if (!status.isOpen && fulfillmentMode !== "schedule") {
+        setFulfillmentMode("schedule")
+      }
+    }
+  }, [restaurant, fulfillmentMode, availabilityTick])
 
   useEffect(() => {
     setSelectedMenuCategory("all")
@@ -2011,7 +2107,7 @@ function RestaurantDetailsContent() {
 
   const availabilityStatus = getRestaurantAvailabilityStatus(restaurant, new Date(availabilityTick))
   const isRestaurantOffline = !availabilityStatus.isOpen
-  const shouldShowGrayscale = isOutOfService || isRestaurantOffline
+  const shouldShowGrayscale = isOutOfService
 
   return (
     <AnimatedPage
@@ -2149,8 +2245,8 @@ function RestaurantDetailsContent() {
 
       {/* Offline Alert */}
       {isRestaurantOffline && (
-        <div className="bg-rose-500 text-white text-center py-2 text-xs font-bold uppercase tracking-widest z-20">
-          Restaurant is currently offline. Orders are unavailable.
+        <div className="bg-amber-500 text-white text-center py-2 text-xs font-bold uppercase tracking-widest z-20">
+          Restaurant is closed. You can schedule an order for later.
         </div>
       )}
 
@@ -2159,8 +2255,8 @@ function RestaurantDetailsContent() {
         <div className="max-w-7xl mx-auto space-y-3 md:space-y-4 lg:space-y-5">
 
           {isRestaurantOffline && (
-            <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-              This restaurant is currently offline. Orders are unavailable right now.
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+              This restaurant is currently offline. You can still schedule an order for when it opens.
             </div>
           )}
 
@@ -2172,23 +2268,31 @@ function RestaurantDetailsContent() {
               {/* Fulfillment Mode Toggle (Delivery, Pick-up, Schedule) */}
               <div className="flex justify-center">
                 <div className="inline-flex items-center bg-gray-200/60 dark:bg-gray-800/60 p-1 rounded-full shadow-inner">
-                  {["delivery", "pickup", "schedule"].map((mode) => (
+                  {["delivery", "pickup", "schedule"].map((mode) => {
+                    const isDisabled = isRestaurantOffline && mode !== "schedule";
+                    return (
                     <button
                       key={mode}
+                      disabled={isDisabled}
                       onClick={() => {
+                        if (isDisabled) return;
                         setFulfillmentMode(mode)
                         if (mode === "schedule") {
                           setShowScheduleSheet(true)
+                        } else {
+                          try {
+                            localStorage.removeItem('scheduled_order_time')
+                          } catch {}
                         }
                       }}
                       className={`px-5 py-1.5 rounded-full text-xs font-bold capitalize transition-all duration-300 ${fulfillmentMode === mode
                         ? "bg-white text-gray-900 shadow-md dark:bg-gray-700 dark:text-white"
                         : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                        }`}
+                        } ${isDisabled ? "opacity-50 cursor-not-allowed" : ""}`}
                     >
                       {mode === "pickup" ? "Pick-up" : mode}
                     </button>
-                  ))}
+                  )})}
                 </div>
               </div>
 
@@ -3503,21 +3607,27 @@ function RestaurantDetailsContent() {
 
                     {/* Time Slot Selection */}
                     <div className="space-y-2 mb-4">
-                      {["6:30 - 7 PM", "7 - 7:30 PM", "7:30 - 8 PM", "8 - 8:30 PM"].map((slot, index) => {
-                        const isSelected = selectedTimeSlot === slot
-                        return (
-                          <button
-                            key={index}
-                            onClick={() => setSelectedTimeSlot(slot)}
-                            className={`w-full text-left px-4 py-2.5 rounded-lg transition-all ${isSelected
-                              ? "bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600"
-                              : "bg-white dark:bg-[#2a2a2a] text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 border border-transparent"
-                              }`}
-                          >
-                            <span className="text-sm font-medium">{slot}</span>
-                          </button>
-                        )
-                      })}
+                      {availableTimeSlots.length > 0 ? (
+                        availableTimeSlots.map((slot, index) => {
+                          const isSelected = selectedTimeSlot === slot.value
+                          return (
+                            <button
+                              key={index}
+                              onClick={() => setSelectedTimeSlot(slot.value)}
+                              className={`w-full text-left px-4 py-2.5 rounded-lg transition-all ${isSelected
+                                ? "bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600"
+                                : "bg-white dark:bg-[#2a2a2a] text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 border border-transparent"
+                                }`}
+                            >
+                              <span className="text-sm font-medium">{slot.label}</span>
+                            </button>
+                          )
+                        })
+                      ) : (
+                        <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-4">
+                          No delivery slots available for this date.
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -3526,8 +3636,15 @@ function RestaurantDetailsContent() {
                     <Button
                       className="w-full bg-red-500 hover:bg-red-600 text-white py-3 rounded-lg font-semibold"
                       onClick={() => {
+                        if (selectedDate && selectedTimeSlot) {
+                          localStorage.setItem('scheduled_order_time', JSON.stringify({
+                            isScheduled: true,
+                            date: selectedDate,
+                            time: selectedTimeSlot
+                          }))
+                          toast.success(`Delivery scheduled for ${selectedDate} at ${selectedTimeSlot}`)
+                        }
                         setShowScheduleSheet(false)
-                        // Handle schedule confirmation
                       }}
                     >
                       Confirm

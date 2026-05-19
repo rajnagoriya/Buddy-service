@@ -162,9 +162,36 @@ function Cart() {
   const [isPlacingOrder, setIsPlacingOrder] = useState(false)
   const [showBillDetails, setShowBillDetails] = useState(true)
   const [showPlacingOrder, setShowPlacingOrder] = useState(false)
-  const [isScheduled, setIsScheduled] = useState(false)
-  const [scheduledDate, setScheduledDate] = useState("")
-  const [scheduledTime, setScheduledTime] = useState("")
+  const [isScheduled, setIsScheduled] = useState(() => {
+    try {
+      const stored = localStorage.getItem('scheduled_order_time')
+      if (stored) {
+        const parsed = JSON.parse(stored)
+        return parsed.isScheduled || false
+      }
+    } catch {}
+    return false
+  })
+  const [scheduledDate, setScheduledDate] = useState(() => {
+    try {
+      const stored = localStorage.getItem('scheduled_order_time')
+      if (stored) {
+        const parsed = JSON.parse(stored)
+        return parsed.date || ""
+      }
+    } catch {}
+    return ""
+  })
+  const [scheduledTime, setScheduledTime] = useState(() => {
+    try {
+      const stored = localStorage.getItem('scheduled_order_time')
+      if (stored) {
+        const parsed = JSON.parse(stored)
+        return parsed.time || ""
+      }
+    } catch {}
+    return ""
+  })
   const [orderProgress, setOrderProgress] = useState(0)
   const [showSavingsCongrats, setShowSavingsCongrats] = useState(false)
   const [congratsSavingsAmount, setCongratssSavingsAmount] = useState(0)
@@ -1737,6 +1764,7 @@ function Cart() {
         setShowRestaurantNoteInput(false)
         try {
           window.localStorage.removeItem(CART_ORDER_NOTE_STORAGE_KEY)
+          window.localStorage.removeItem('scheduled_order_time')
         } catch {
           // ignore
         }
@@ -1763,6 +1791,7 @@ function Cart() {
         setShowRestaurantNoteInput(false)
         try {
           window.localStorage.removeItem(CART_ORDER_NOTE_STORAGE_KEY)
+          window.localStorage.removeItem('scheduled_order_time')
         } catch {
           // ignore
         }
@@ -1870,6 +1899,9 @@ function Cart() {
               }
               window.dispatchEvent(new CustomEvent('order-placed', { detail: { order } }))
               clearCart()
+              try {
+                window.localStorage.removeItem('scheduled_order_time')
+              } catch {}
               setIsPlacingOrder(false)
             } else {
               throw new Error(verifyResponse.data.message || "Payment verification failed")

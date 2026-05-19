@@ -262,7 +262,7 @@ const DeliveryAuth = () => {
       login({ ...delivery, token, role: "delivery" });
 
       toast.success("Welcome! Redirecting to dashboard...");
-      navigate("/delivery/dashboard");
+      navigate("/qc/delivery/dashboard");
     } catch (error) {
       console.error(error);
       toast.error(error.response?.data?.message || "Invalid OTP");

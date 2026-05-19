@@ -367,7 +367,7 @@ const Auth = () => {
           role: "seller",
         });
         toast.success("Welcome back, Partner!");
-        navigate("/seller");
+        navigate("/qc/seller");
       } else {
         setIsLogin(true);
         setSignupStep(1);
@@ -387,7 +387,7 @@ const Auth = () => {
         toast.success(
           "Application submitted. Login is enabled only after admin approval.",
         );
-        navigate("/seller/pending-approval", {
+        navigate("/qc/seller/pending-approval", {
           replace: true,
           state: {
             approvalRequired: true,
@@ -401,7 +401,7 @@ const Auth = () => {
           error.response?.data?.result?.applicationStatus || "pending";
         const rejectionReason =
           error.response?.data?.result?.rejectionReason || "";
-        navigate("/seller/pending-approval", {
+        navigate("/qc/seller/pending-approval", {
           replace: true,
           state: {
             approvalRequired: true,

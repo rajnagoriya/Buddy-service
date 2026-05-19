@@ -121,7 +121,7 @@ const userSchema = new mongoose.Schema(
     }
 );
 
-userSchema.index({ role: 1, isActive: 1 });
+userSchema.index({ phone: 1 }, { unique: true });
 
 userSchema.pre("validate", function(next) {
     if (this.phone) {
@@ -130,5 +130,5 @@ userSchema.pre("validate", function(next) {
     next();
 });
 
-export default mongoose.model("User", userSchema, "quick_users");
+export default mongoose.model("User", userSchema, "buddy_users");
 

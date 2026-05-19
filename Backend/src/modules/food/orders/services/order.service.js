@@ -272,6 +272,8 @@ export async function createOrder(userId, dto) {
     qr: {},
   };
 
+  const isScheduledOrder = dto.scheduledAt && new Date(dto.scheduledAt) > new Date();
+
   const order = new FoodOrder({
     userId: new mongoose.Types.ObjectId(userId),
     restaurantId: mainRestaurant._id,
@@ -284,7 +286,7 @@ export async function createOrder(userId, dto) {
     customerPhone: deliveryAddress.phone,
     pricing: normalizedPricing,
     payment,
-    orderStatus: "created",
+    orderStatus: isScheduledOrder ? "scheduled" : "created",
     restaurantNote: dto.restaurantNote || "",
     note: dto.note || "",
     sendCutlery: dto.sendCutlery !== false,
@@ -298,8 +300,8 @@ export async function createOrder(userId, dto) {
         at: new Date(),
         byRole: "SYSTEM",
         from: "",
-        to: "created",
-        note: "Order placed",
+        to: isScheduledOrder ? "scheduled" : "created",
+        note: isScheduledOrder ? "Scheduled order placed" : "Order placed",
       },
     ],
   });
@@ -745,7 +747,7 @@ export async function cancelOrder(orderId, userId, reason, refundDestination = "
   });
   if (!order) throw new NotFoundError("Order not found");
 
-  const allowed = ["created"];
+  const allowed = ["created", "scheduled"];
   if (!allowed.includes(order.orderStatus))
     throw new ValidationError("Order cannot be cancelled");
 
@@ -1921,3 +1923,87 @@ export async function acceptSharedOrderDelivery(orderId, newPartnerId) {
   ]);
   return normalizeOrderForClient(order);
 }
+
+/**
+ * Background job to process scheduled orders that are due in 30 minutes or less.
+ * Activated by server.js interval.
+ */
+export async function processScheduledOrderAlerts() {
+  const now = new Date();
+  const triggerWindow = new Date(now.getTime() + 30 * 60 * 1000); // 30 mins from now
+
+  try {
+    const scheduledOrders = await FoodOrder.find({
+      orderStatus: 'scheduled',
+      scheduledAt: { $lte: triggerWindow },
+      'payment.status': { $ne: 'failed' } // skip failed payment orders
+    });
+
+    if (scheduledOrders.length === 0) {
+      return;
+    }
+
+    logger.info(`[ScheduledOrders] Found ${scheduledOrders.length} orders to activate.`);
+
+    for (const order of scheduledOrders) {
+      const from = order.orderStatus;
+      order.orderStatus = 'created';
+      order.restaurantNotifiedForSchedule = true;
+      
+      order.statusHistory.push({
+        at: new Date(),
+        byRole: 'SYSTEM',
+        from,
+        to: 'created',
+        note: 'Scheduled order activated (30-minute buffer reached).'
+      });
+
+      await order.save();
+
+      // Emit socket status updates
+      try {
+        const io = getIO();
+        if (io) {
+          const payload = {
+            orderMongoId: order._id.toString(),
+            orderId: order.order_id || order._id.toString(),
+            orderStatus: 'created',
+            message: `Your scheduled order #${order.order_id || order._id} is now being processed.`
+          };
+          io.to(rooms.user(order.userId)).emit("order_status_update", payload);
+          io.to(rooms.restaurant(order.restaurantId)).emit("order_status_update", payload);
+        }
+      } catch (socketErr) {
+        logger.warn(`[ScheduledOrders] Socket emission failed for order ${order._id}: ${socketErr.message}`);
+      }
+
+      // Send push notification to user
+      try {
+        await notifyOwnersSafely([{ ownerType: "USER", ownerId: order.userId }], {
+          title: "Scheduled Order Activated! 🍔",
+          body: `Your scheduled order #${order.order_id || order._id} is now active and we are searching for a rider.`,
+          data: {
+            type: "order_created",
+            orderId: String(order._id),
+            link: `/food/user/orders/${order._id}`,
+          },
+        });
+      } catch (notificationErr) {
+        logger.warn(`[ScheduledOrders] Push notification failed for user ${order.userId}: ${notificationErr.message}`);
+      }
+
+      // Trigger automatic rider assignment
+      const settings = await dispatchService.getDispatchSettings();
+      if (settings.dispatchMode === "auto") {
+        try {
+          await tryAutoAssign(order._id);
+        } catch (assignErr) {
+          logger.error(`[ScheduledOrders] Auto-assign failed for activated order ${order._id}: ${assignErr.message}`);
+        }
+      }
+    }
+  } catch (err) {
+    logger.error(`Error in processScheduledOrderAlerts: ${err.message}`);
+  }
+}
+

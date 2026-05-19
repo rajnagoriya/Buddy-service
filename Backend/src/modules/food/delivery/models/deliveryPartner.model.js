@@ -130,15 +130,36 @@ const deliveryPartnerSchema = new mongoose.Schema(
             type: mongoose.Schema.Types.ObjectId,
             ref: 'FoodZone',
             default: null
+        },
+        // Compatibility fields for QC module
+        isVerified: {
+            type: Boolean,
+            default: true
+        },
+        isOnline: {
+            type: Boolean,
+            default: false
+        },
+        location: {
+            type: {
+                type: String,
+                enum: ["Point"],
+                default: "Point",
+            },
+            coordinates: {
+                type: [Number],
+                default: [0, 0],
+            },
         }
     },
     {
-        collection: 'food_delivery_partners',
+        collection: 'buddy_deliveries',
         timestamps: true
     }
 );
 
 // Indices
 deliveryPartnerSchema.index({ lastLocation: '2dsphere' });
+deliveryPartnerSchema.index({ location: '2dsphere' });
 
 export const FoodDeliveryPartner = mongoose.model('FoodDeliveryPartner', deliveryPartnerSchema);

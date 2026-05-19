@@ -142,10 +142,19 @@ const userSchema = new mongoose.Schema(
         addresses: {
             type: [userAddressSchema],
             default: []
+        },
+        // Compatibility for QC module
+        walletBalance: {
+            type: Number,
+            default: 0
+        },
+        isVerified: {
+            type: Boolean,
+            default: true
         }
     },
     {
-        collection: 'food_users',
+        collection: 'buddy_users',
         timestamps: true
     }
 );
