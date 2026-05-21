@@ -41,6 +41,7 @@ import {
 } from '../controllers/outletTimings.controller.js';
 import {
     createRestaurantFoodController,
+    bulkCreateRestaurantFoodController,
     updateRestaurantFoodController
 } from '../controllers/restaurantFood.controller.js';
 import {
@@ -179,6 +180,10 @@ router.post('/foods', authMiddleware, requireRestaurant, async (req, res, next) 
     await invalidateCache('restaurant_menu:*');
     next();
 }, createRestaurantFoodController);
+router.post('/foods/bulk', authMiddleware, requireRestaurant, async (req, res, next) => {
+    await invalidateCache('restaurant_menu:*');
+    next();
+}, bulkCreateRestaurantFoodController);
 router.patch('/foods/:id', authMiddleware, requireRestaurant, async (req, res, next) => {
     await invalidateCache('restaurant_menu:*');
     next();

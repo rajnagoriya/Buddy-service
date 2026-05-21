@@ -56,7 +56,7 @@ export default function UnifiedHeader({
   const isLight = tone === "light";
   const currentIndex = placeholderIndex ?? internalPlaceholderIndex;
   
-  const glowColor = theme?.icon || (isLight ? "bg-[#15803d]/30" : "bg-[#0F172A]/10");
+  const glowColor = theme?.icon || (isLight ? "bg-[#1A2517]/30" : "bg-[#0F172A]/10");
 
   const [notifications, setNotifications] = useState(() => {
     const saved = localStorage.getItem('food_user_notifications');
@@ -111,9 +111,9 @@ export default function UnifiedHeader({
   const unreadCount = notifications.filter(n => !n.read).length + broadcastUnreadCount;
 
   const services = [
-    { id: "food", label: "Food", icon: UtensilsCrossed, color: "bg-[#15803d]/10", iconColor: "text-[#15803d]", activeBg: "bg-[#15803d]", activeIcon: "text-white", path: "/food/user" },
-    { id: "quick", label: "Store", icon: ShoppingBag, color: "bg-[#c2410c]/10", iconColor: "text-[#c2410c]", activeBg: "bg-[#c2410c]", activeIcon: "text-white", badge: "FAST", path: "/qc" },
-    { id: "taxi", label: "Taxi", icon: Zap, color: "bg-[#4338ca]/10", iconColor: "text-[#4338ca]", activeBg: "bg-[#4338ca]", activeIcon: "text-white", path: "/food/user/taxi" },
+    { id: "food", label: "Food", icon: UtensilsCrossed, color: "bg-[#1A2517]/10", iconColor: "text-[#1A2517]", activeBg: "bg-[#1A2517]", activeIcon: "text-white", path: "/food/user" },
+    { id: "quick", label: "Store", icon: ShoppingBag, color: "bg-[#FFF0ED]", iconColor: "text-[#c2410c]", activeBg: "bg-[#c2410c]", activeIcon: "text-white", badge: "FAST", path: "/qc" },
+    { id: "taxi", label: "Taxi", icon: Zap, color: "bg-[#EEF2FF]", iconColor: "text-[#4338ca]", activeBg: "bg-[#4338ca]", activeIcon: "text-white", path: "/food/user/taxi" },
   ];
 
   return (
@@ -122,7 +122,7 @@ export default function UnifiedHeader({
       embedded ? "pb-1" : "pb-4",
       theme?.section || (
         activeTab === 'food' 
-          ? 'bg-gradient-to-b from-[#15803d]/15 to-transparent' 
+          ? 'bg-gradient-to-b from-[#1A2517]/10 to-transparent' 
           : 'bg-white'
       )
     )}>
@@ -165,7 +165,7 @@ export default function UnifiedHeader({
                   className={cn(
                     "flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all",
                     vegMode 
-                      ? "bg-[#15803d] border-[#15803d] text-white shadow-md shadow-[#15803d]/20" 
+                      ? "bg-[#1A2517] border-[#1A2517] text-white shadow-md shadow-[#1A2517]/20" 
                       : (isLight ? "bg-white border-gray-100" : "bg-white/5 border-white/10") + " text-gray-400"
                   )}
                   onClick={(e) => {
@@ -177,7 +177,7 @@ export default function UnifiedHeader({
                     "w-3 h-3 rounded-[3px] border flex items-center justify-center transition-colors",
                     vegMode ? "border-white bg-white" : "border-gray-300 bg-transparent"
                   )}>
-                    {vegMode && <div className="w-1.5 h-1.5 rounded-full bg-[#15803d]" />}
+                    {vegMode && <div className="w-1.5 h-1.5 rounded-full bg-[#1A2517]" />}
                   </div>
                   <span className="text-[10px] font-black uppercase tracking-tight">Veg</span>
                 </button>
@@ -209,7 +209,7 @@ export default function UnifiedHeader({
                           const Icon = ICON_MAP[notif.icon] || Bell;
                           return (
                             <div key={notif.id} className="p-4 flex items-start gap-3 border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                              <div className="mt-1 p-2 rounded-full bg-gray-100 text-[#15803d]">
+                              <div className="mt-1 p-2 rounded-full bg-gray-100 text-[#1A2517]">
                                 <Icon className="h-3.5 w-3.5" />
                               </div>
                               <div className="flex-1 min-w-0">
@@ -270,25 +270,34 @@ export default function UnifiedHeader({
                 const Icon = service.icon;
                 
                 return (
-                  <motion.button
-                    key={service.id}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={() => {
-                      setActiveTab?.(service.id);
-                      navigate(service.path);
-                    }}
-                    className={cn(
-                      "flex flex-col items-center gap-2 py-4 rounded-[28px] transition-all duration-300 border",
-                      isActive 
-                        ? (service.activeBg || "bg-[#15803d]") + " text-white border-transparent shadow-xl shadow-black/5" 
-                        : (isLight ? "bg-white border-gray-100 shadow-sm" : "bg-white/5 border-white/5") + " text-gray-500"
-                    )}
-                  >
-                    <Icon className={cn("h-6 w-6", isActive ? "text-white" : service.iconColor)} strokeWidth={2.5} />
-                    <span className="text-[11px] font-black uppercase tracking-widest">
+                  <div key={service.id} className="flex flex-col items-center gap-2">
+                    <motion.button
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => {
+                        setActiveTab?.(service.id);
+                        navigate(service.path);
+                      }}
+                      className={cn(
+                        "relative w-[85px] h-[85px] rounded-[30px] flex items-center justify-center transition-all duration-300",
+                        isActive 
+                          ? (service.activeBg || "bg-[#1A2517]") + " shadow-xl shadow-black/10" 
+                          : (isLight ? (service.color || "bg-white") : "bg-white/5")
+                      )}
+                    >
+                      <Icon className={cn("h-7 w-7", isActive ? "text-white" : service.iconColor)} strokeWidth={2.5} />
+                      {service.badge && (
+                        <span className="absolute -top-1 -right-1 bg-[#ff4500] text-white text-[9px] font-black px-1.5 py-0.5 rounded-full z-10 shadow-sm border border-white">
+                          {service.badge}
+                        </span>
+                      )}
+                    </motion.button>
+                    <span className={cn(
+                      "text-[12px] font-bold tracking-wide capitalize",
+                      isActive ? "text-[#1A2517]" : "text-gray-500"
+                    )}>
                       {service.label}
                     </span>
-                  </motion.button>
+                  </div>
                 );
               })}
             </div>

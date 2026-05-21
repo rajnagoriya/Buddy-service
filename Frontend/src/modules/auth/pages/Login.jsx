@@ -1,22 +1,21 @@
 import React, { useEffect, useState, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Link, useNavigate } from "react-router-dom"
-import { Phone, ArrowRight, ShieldCheck, Loader2, Utensils, Star, Heart } from "lucide-react"
+import { ArrowRight, Loader2, Utensils, ShoppingBag, Car, ChevronDown, ShieldCheck, Zap, BadgeCheck, User } from "lucide-react"
 import { toast } from "sonner"
 import { authAPI, userAPI } from "@food/api"
 import { setAuthData } from "@food/utils/auth"
 import logoImage from "@/assets/logo.png"
+import heroImage from "@/assets/login_hero_3d.png" 
 import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogHeader,
   DialogTitle,
 } from "@food/components/ui/dialog"
 import { Button } from "@food/components/ui/button"
 import { Input } from "@food/components/ui/input"
 import { Label } from "@food/components/ui/label"
-import { User } from "lucide-react"
 
 export default function UnifiedOTPFastLogin() {
   const RESEND_COOLDOWN_SECONDS = 60
@@ -146,7 +145,6 @@ export default function UnifiedOTPFastLogin() {
 
       setAuthData("user", accessToken, user, refreshToken)
       
-      // If user has no name, show name modal instead of immediate navigation
       if (!user.name || user.name.trim() === "") {
         setTempAuth({ accessToken, user, refreshToken })
         setShowNameModal(true)
@@ -212,10 +210,8 @@ export default function UnifiedOTPFastLogin() {
         return
       }
 
-      // Call update profile API
       await userAPI.updateProfile({ name: newName.trim() })
 
-      // Update local storage and auth data with the new name
       const updatedUser = { ...tempAuth.user, name: newName.trim() }
       setAuthData("user", tempAuth.accessToken, updatedUser, tempAuth.refreshToken)
 
@@ -224,7 +220,6 @@ export default function UnifiedOTPFastLogin() {
       navigate("/user/auth/portal", { replace: true })
     } catch (err) {
       toast.error("Failed to update name. You can skip this for now or try again.")
-      console.error(err)
     } finally {
       setIsUpdatingName(false)
     }
@@ -244,68 +239,80 @@ export default function UnifiedOTPFastLogin() {
     return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`
   }
 
-  const primaryColor = "#23361A" // Rebranded Dark Green color
-
   return (
-    <div className="min-h-screen bg-white dark:bg-[#0a0a0a] flex flex-col relative overflow-hidden font-['Poppins']">
-      {/* Decorative Background Elements */}
-      <div className="absolute top-0 left-0 w-full h-[600px] bg-gradient-to-b from-[#23361A]/10 via-[#23361A]/5 to-transparent pointer-events-none" />
-      <div className="absolute top-[-100px] right-[-100px] w-[500px] h-[500px] bg-[#23361A]/5 rounded-full blur-[120px] pointer-events-none animate-pulse" />
-      <div className="absolute bottom-[-100px] left-[-100px] w-[400px] h-[400px] bg-[#23361A]/5 rounded-full blur-[120px] pointer-events-none" />
+    <div className="min-h-screen bg-gray-50 flex flex-col font-['Poppins'] sm:justify-center sm:items-center">
+      
+      <div className="sm:w-[420px] sm:bg-white sm:rounded-[2.5rem] sm:shadow-2xl sm:overflow-hidden sm:relative flex flex-col h-full w-full max-w-full">
+        
+        {/* Top Banner Section */}
+        <div className="relative w-full overflow-hidden bg-[#78B45A] pt-4 pb-[3.5rem] flex-shrink-0">
+          
+          {/* Abstract wavy background layer (Light top area) */}
+          <div className="absolute top-[-30%] left-[-20%] w-[140%] h-[120%] bg-gradient-to-br from-[#F5F9F3] via-[#E7F3E2] to-[#CCE3C4] rounded-br-[50%] z-0"></div>
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col items-center justify-center px-6 py-12 relative z-10">
-        <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8, ease: "easeOut" }}
-          className="w-full max-w-md lg:max-w-lg"
-        >
-          {/* Logo & Header */}
-          <div className="text-center mb-8">
-            <motion.div
-              initial={{ scale: 0, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ type: "spring", stiffness: 200, damping: 20 }}
-              className="relative inline-block mb-4"
-            >
-              {/* Modern Logo Background Glow */}
-              <div className="absolute inset-0 bg-gradient-to-br from-[#23361A]/20 to-[#6B8A2F]/10 rounded-full blur-2xl scale-110" />
-              <div className="absolute inset-0 border-2 border-[#23361A]/10 rounded-full scale-105" />
-              
-              <img 
-                src={logoImage} 
-                alt="Buddy Service Logo" 
-                className="w-40 h-40 md:w-48 md:h-48 object-contain mx-auto relative z-10 drop-shadow-xl"
-              />
-            </motion.div>
+          <div className="px-6 pt-4 pb-2 relative z-10 flex flex-col justify-between h-full">
+            
+            <div>
+              {/* Logo */}
+              <div className="mb-6 flex items-center gap-2">
+                <div className="w-9 h-9 rounded-xl bg-[#00923F] flex items-center justify-center shadow-md">
+                   {/* Fallback to image if B logo isn't perfect, but we mimic the green B icon */}
+                   <span className="text-white font-black text-xl leading-none">B</span>
+                </div>
+                <span className="font-black text-[#13491E] text-lg tracking-tight">Buddy Service</span>
+              </div>
 
-            <motion.p
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.5 }}
-              className="text-gray-400 dark:text-gray-500 font-semibold text-sm uppercase tracking-[0.2em]"
-            >
-              TASTE THE DIFFERENCE
-            </motion.p>
-          </div>
-
-          {/* Login Card */}
-          <div className="bg-white/80 dark:bg-[#1a1a1a]/80 backdrop-blur-2xl rounded-[3rem] p-8 sm:p-12 shadow-[0_40px_80px_-20px_rgba(126,56,102,0.2)] dark:shadow-none border border-white/20 dark:border-gray-800 relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-transparent via-[#23361A]/20 to-transparent" />
-
-            <div className="mb-10 text-center sm:text-left">
-              <h2 className="text-3xl font-black text-gray-900 dark:text-white mb-2 font-['Outfit'] tracking-tight">
-                {step === 1 ? "Welcome Back" : "Security Check"}
-              </h2>
-              <div className="h-1 w-10 bg-[#23361A] rounded-full mb-3 hidden sm:block" />
-              <p className="text-base text-gray-500 dark:text-gray-400 font-medium">
-                {step === 1
-                  ? "Enter your details to access your account"
-                  : `We've sent a code to +91 ${phoneNumber}`}
+              <h1 className="text-[34px] md:text-4xl font-extrabold text-[#113B17] leading-[1.15] mb-2 tracking-tight">
+                One App.<br />Everything<br />You Need.
+              </h1>
+              <div className="h-1 w-14 bg-[#4C883A] my-4 rounded-full"></div>
+              <p className="text-[#647C5E] font-medium text-[15px] leading-snug mb-20 max-w-[200px]">
+                Food, Quick Commerce<br />and Taxi – all in one app.
               </p>
             </div>
+            
+          </div>
+          
+          {/* Right side illustration */}
+          <div className="absolute top-8 -right-[30%] w-[90%] max-w-[340px] z-[5] sm:-right-8">
+            <img src={heroImage} alt="Services Illustration" className="w-full h-full object-contain drop-shadow-2xl scale-[1.1] origin-top-right" />
+          </div>
 
+          {/* Glassmorphism Icon Container */}
+          <div className="absolute bottom-6 left-6 right-6 z-10 bg-[#5A8C41]/30 backdrop-blur-md rounded-[24px] p-4 flex items-center shadow-lg border border-white/10">
+            <div className="flex-1 flex flex-col items-center gap-2">
+              <div className="w-[50px] h-[50px] bg-white rounded-[16px] flex items-center justify-center shadow-sm">
+                <Utensils className="w-6 h-6 text-[#113B17]" strokeWidth={2} />
+              </div>
+              <span className="text-white text-[11px] font-semibold">Food</span>
+            </div>
+            
+            <div className="w-px h-8 bg-white/20"></div>
+            
+            <div className="flex-1 flex flex-col items-center gap-2">
+              <div className="w-[50px] h-[50px] bg-white rounded-[16px] flex items-center justify-center shadow-sm">
+                <ShoppingBag className="w-6 h-6 text-[#113B17]" strokeWidth={2} />
+              </div>
+              <span className="text-white text-[11px] font-semibold text-center leading-tight">Quick<br/>Commerce</span>
+            </div>
+            
+            <div className="w-px h-8 bg-white/20"></div>
+            
+            <div className="flex-1 flex flex-col items-center gap-2">
+              <div className="w-[50px] h-[50px] bg-white rounded-[16px] flex items-center justify-center shadow-sm">
+                <Car className="w-6 h-6 text-[#113B17]" strokeWidth={2} />
+              </div>
+              <span className="text-white text-[11px] font-semibold">Taxi</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Bottom Sheet Form & Footer */}
+        <div className="flex-1 bg-white rounded-t-[2.5rem] mt-[-1.5rem] relative z-20 flex flex-col">
+          <div className="p-8 pb-4">
+            <h2 className="text-[32px] font-black text-[#13491E] mb-1">Welcome!</h2>
+            <p className="text-gray-500 font-medium text-[15px] mb-8">Login to continue</p>
+            
             <AnimatePresence mode="wait">
               {step === 1 ? (
                 <motion.form
@@ -316,40 +323,40 @@ export default function UnifiedOTPFastLogin() {
                   onSubmit={handleSendOTP}
                   className="space-y-6"
                 >
-                  <div className="relative group">
-                    <div className="absolute inset-y-0 left-5 flex items-center pointer-events-none">
-                      <span className="text-sm font-bold text-[#23361A] border-r border-gray-200 dark:border-gray-800 pr-3">+91</span>
+                  <div>
+                    <Label className="text-[#354839] text-[13px] font-bold mb-2 block ml-1">Mobile Number</Label>
+                    <div className="flex items-center border border-[#4C883A] rounded-[14px] focus-within:ring-2 focus-within:ring-[#4C883A]/20 transition-all bg-white overflow-hidden shadow-sm h-14">
+                      <div className="flex items-center gap-1.5 px-4 h-full text-gray-800">
+                        <span className="font-bold text-[15px]">+91</span>
+                        <ChevronDown className="w-4 h-4 text-gray-400" strokeWidth={3} />
+                      </div>
+                      <div className="w-px h-6 bg-gray-200"></div>
+                      <input
+                        type="tel"
+                        required
+                        autoFocus
+                        value={phoneNumber}
+                        onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                        maxLength={10}
+                        className="flex-1 px-4 h-full outline-none text-gray-900 font-bold placeholder:text-gray-400 text-[15px]"
+                        placeholder="Enter mobile number"
+                      />
                     </div>
-                    <input
-                      type="tel"
-                      required
-                      autoFocus
-                      value={phoneNumber}
-                      onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, "").slice(0, 10))}
-                      maxLength={10}
-                      className="block w-full pl-16 pr-6 py-4 bg-gray-50 dark:bg-gray-900/50 text-gray-900 dark:text-white border-2 border-transparent focus:border-[#23361A]/50 rounded-2xl outline-none transition-all placeholder:text-gray-300 font-bold text-lg shadow-sm"
-                      placeholder="Phone number"
-                    />
                   </div>
 
                   <button
                     type="submit"
                     disabled={loading || phoneNumber.length < 10}
-                    className="w-full py-4.5 bg-[#23361A] hover:bg-[#1a2614] disabled:bg-gray-200 dark:disabled:bg-gray-800 disabled:text-gray-400 text-white rounded-2xl font-bold text-lg shadow-xl shadow-[#23361A]/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2 group overflow-hidden relative"
+                    className="w-full h-14 bg-[#569143] hover:bg-[#467A34] disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-[14px] font-bold text-[16px] shadow-lg shadow-[#569143]/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2 relative overflow-hidden mt-2"
                   >
                     {loading ? (
-                      <Loader2 className="w-6 h-6 animate-spin" />
+                      <Loader2 className="w-5 h-5 animate-spin" />
                     ) : (
                       <>
-                        <span>Continue</span>
-                        <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                        <span>Get OTP</span>
+                        <ArrowRight className="w-[22px] h-[22px] absolute right-5" strokeWidth={2.5} />
                       </>
                     )}
-                    <motion.div
-                      className="absolute inset-0 bg-white/20 translate-x-[-100%]"
-                      whileHover={{ translateX: "100%" }}
-                      transition={{ duration: 0.6 }}
-                    />
                   </button>
                 </motion.form>
               ) : (
@@ -361,53 +368,56 @@ export default function UnifiedOTPFastLogin() {
                   onSubmit={handleVerifyOTP}
                   className="space-y-6"
                 >
-                  <div className="flex justify-between gap-3">
-                    {[0, 1, 2, 3].map((index) => (
-                      <input
-                        key={index}
-                        id={`otp-${index}`}
-                        type="tel"
-                        inputMode="numeric"
-                        required
-                        autoFocus={index === 0}
-                        value={otp[index] || ""}
-                        onChange={(e) => {
-                          const val = e.target.value.replace(/\D/g, "").slice(-1);
-                          if (!val) return;
-                          const newOtp = otp.split("");
-                          newOtp[index] = val;
-                          const combined = newOtp.join("").slice(0, 4);
-                          setOtp(combined);
-                          if (index < 3 && val) {
-                            document.getElementById(`otp-${index + 1}`)?.focus();
-                          }
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Backspace") {
-                            if (!otp[index] && index > 0) {
-                              document.getElementById(`otp-${index - 1}`)?.focus();
-                            } else {
-                              const newOtp = otp.split("");
-                              newOtp[index] = "";
-                              setOtp(newOtp.join(""));
+                  <div>
+                    <Label className="text-[#354839] text-[13px] font-bold mb-2 block ml-1">Enter OTP Code</Label>
+                    <div className="flex justify-between gap-3">
+                      {[0, 1, 2, 3].map((index) => (
+                        <input
+                          key={index}
+                          id={`otp-${index}`}
+                          type="tel"
+                          inputMode="numeric"
+                          required
+                          autoFocus={index === 0}
+                          value={otp[index] || ""}
+                          onChange={(e) => {
+                            const val = e.target.value.replace(/\D/g, "").slice(-1);
+                            if (!val) return;
+                            const newOtp = otp.split("");
+                            newOtp[index] = val;
+                            const combined = newOtp.join("").slice(0, 4);
+                            setOtp(combined);
+                            if (index < 3 && val) {
+                              document.getElementById(`otp-${index + 1}`)?.focus();
                             }
-                          }
-                        }}
-                        className="w-full h-16 text-center text-3xl font-bold bg-gray-50 dark:bg-gray-900 border-2 border-transparent focus:border-[#23361A]/50 rounded-2xl outline-none transition-all text-gray-900 dark:text-white shadow-sm"
-                        placeholder="•"
-                      />
-                    ))}
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Backspace") {
+                              if (!otp[index] && index > 0) {
+                                document.getElementById(`otp-${index - 1}`)?.focus();
+                              } else {
+                                const newOtp = otp.split("");
+                                newOtp[index] = "";
+                                setOtp(newOtp.join(""));
+                              }
+                            }
+                          }}
+                          className="w-full h-14 text-center text-2xl font-bold bg-white border border-[#4C883A] focus:ring-2 focus:ring-[#4C883A]/20 rounded-[14px] outline-none transition-all text-gray-900 shadow-sm"
+                          placeholder="•"
+                        />
+                      ))}
+                    </div>
                   </div>
 
-                  <div className="flex flex-col items-center gap-4">
-                    <div className="flex items-center gap-2 text-xs font-semibold">
+                  <div className="flex flex-col items-center gap-3 mt-4">
+                    <div className="flex items-center gap-2 text-[13px] font-semibold">
                       {resendTimer > 0 ? (
-                        <span className="text-gray-400">Resend code in <span className="text-[#23361A]">{formatResendTimer(resendTimer)}</span></span>
+                        <span className="text-gray-400">Resend code in <span className="text-[#4C883A]">{formatResendTimer(resendTimer)}</span></span>
                       ) : (
                         <button
                           type="button"
                           onClick={handleResendOTP}
-                          className="text-[#23361A] hover:underline"
+                          className="text-[#4C883A] hover:underline"
                         >
                           Didn't receive code? Resend
                         </button>
@@ -417,7 +427,7 @@ export default function UnifiedOTPFastLogin() {
                     <button
                       type="button"
                       onClick={handleEditNumber}
-                      className="text-xs text-gray-400 hover:text-[#23361A] transition-colors"
+                      className="text-[13px] text-gray-400 hover:text-[#4C883A] transition-colors"
                     >
                       Edit phone number
                     </button>
@@ -426,43 +436,52 @@ export default function UnifiedOTPFastLogin() {
                   <button
                     type="submit"
                     disabled={loading || otp.length < 4}
-                    className="w-full py-4.5 bg-[#23361A] hover:bg-[#1a2614] disabled:bg-gray-200 dark:disabled:bg-gray-800 disabled:text-gray-400 text-white rounded-2xl font-bold text-lg shadow-xl shadow-[#23361A]/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                    className="w-full h-14 bg-[#569143] hover:bg-[#467A34] disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-[14px] font-bold text-[16px] shadow-lg shadow-[#569143]/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2 relative overflow-hidden"
                   >
-                    {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : "Verify & Continue"}
+                    {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : (
+                      <>
+                        <span>Verify & Continue</span>
+                        <ArrowRight className="w-[22px] h-[22px] absolute right-5" strokeWidth={2.5} />
+                      </>
+                    )}
                   </button>
                 </motion.form>
               )}
             </AnimatePresence>
           </div>
 
-          {/* Footer Info */}
-          <div className="mt-8 text-center">
-            <p className="text-[11px] text-gray-400 font-medium leading-relaxed max-w-[320px] mx-auto">
-              By continuing, you agree to our <br />
-              <Link to="/food/user/profile/terms" className="text-gray-900 dark:text-white font-bold hover:text-[#23361A] transition-colors">Terms of Service</Link> & <Link to="/food/user/profile/privacy" className="text-gray-900 dark:text-white font-bold hover:text-[#23361A] transition-colors">Privacy Policy</Link>
+          {/* Footer Section */}
+          <div className="mt-auto bg-[#F6F8F5] px-6 py-8 rounded-t-[2rem] flex flex-col items-center">
+            <div className="flex justify-between w-full max-w-sm mb-6">
+              <div className="flex gap-2 items-center">
+                <ShieldCheck className="w-[22px] h-[22px] text-[#2E7D32]" strokeWidth={1.5} />
+                <span className="text-[10px] font-semibold text-gray-600 leading-tight">Secure<br/>& Safe</span>
+              </div>
+              <div className="flex gap-2 items-center">
+                <Zap className="w-[22px] h-[22px] text-[#2E7D32]" strokeWidth={1.5} />
+                <span className="text-[10px] font-semibold text-gray-600 leading-tight">Fast<br/>Delivery</span>
+              </div>
+              <div className="flex gap-2 items-center">
+                <BadgeCheck className="w-[22px] h-[22px] text-[#2E7D32]" strokeWidth={1.5} />
+                <span className="text-[10px] font-semibold text-gray-600 leading-tight">Trusted by<br/>Millions</span>
+              </div>
+            </div>
+            
+            <p className="text-center text-[10px] text-gray-500 font-medium max-w-[280px]">
+              By continuing, you agree to our <Link to="/terms" className="text-[#2E7D32] font-semibold hover:underline">Terms & Conditions</Link> and <Link to="/privacy" className="text-[#2E7D32] font-semibold hover:underline">Privacy Policy</Link>.
             </p>
           </div>
+        </div>
 
-          <div className="mt-12 flex justify-center items-center gap-6 opacity-30 grayscale hover:opacity-60 transition-opacity">
-            <div className="flex items-center gap-1.5">
-              <ShieldCheck className="w-4 h-4" />
-              <span className="text-[10px] font-black uppercase tracking-widest">Secure Payment</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Heart className="w-4 h-4" />
-              <span className="text-[10px] font-black uppercase tracking-widest">Handmade with Love</span>
-            </div>
-          </div>
-        </motion.div>
       </div>
 
       {/* Name Collection Modal */}
       <Dialog open={showNameModal} onOpenChange={setShowNameModal}>
         <DialogContent
-          className="sm:max-w-[425px] rounded-3xl border-none p-0 overflow-hidden bg-white dark:bg-[#1a1a1a]"
+          className="sm:max-w-[425px] rounded-3xl border-none p-0 overflow-hidden bg-white"
           showCloseButton={false}
         >
-          <div className="bg-[#23361A] p-8 text-center relative">
+          <div className="bg-[#4C883A] p-8 text-center relative">
             <div className="absolute top-[-20%] right-[-10%] w-32 h-32 bg-white/10 rounded-full blur-2xl" />
             <motion.div 
               initial={{ scale: 0 }}
@@ -479,7 +498,7 @@ export default function UnifiedOTPFastLogin() {
           
           <form onSubmit={handleNameSubmit} className="p-8 pt-6 space-y-6">
             <div className="space-y-4">
-              <Label htmlFor="name" className="text-sm font-medium text-gray-700 dark:text-gray-300 ml-1">
+              <Label htmlFor="name" className="text-sm font-medium text-gray-700 ml-1">
                 Full Name
               </Label>
               <div className="relative group">
@@ -488,7 +507,7 @@ export default function UnifiedOTPFastLogin() {
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                   placeholder="Enter your name"
-                  className="pl-4 h-14 bg-gray-50 dark:bg-gray-800 border-gray-100 dark:border-gray-700 rounded-2xl focus:ring-2 focus:ring-[#23361A] transition-all group-hover:border-[#23361A]/30"
+                  className="pl-4 h-14 bg-gray-50 border-gray-200 rounded-[14px] focus:ring-2 focus:ring-[#4C883A] transition-all group-hover:border-[#4C883A]/30"
                   autoFocus
                 />
               </div>
@@ -498,7 +517,7 @@ export default function UnifiedOTPFastLogin() {
               <Button 
                 type="submit" 
                 disabled={isUpdatingName}
-                className="w-full h-14 bg-[#23361A] hover:bg-[#1a2614] text-white rounded-2xl font-bold text-lg shadow-lg shadow-[#23361A]/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                className="w-full h-14 bg-[#569143] hover:bg-[#467A34] text-white rounded-[14px] font-bold text-lg shadow-lg shadow-[#569143]/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
               >
                 {isUpdatingName ? (
                   <Loader2 className="h-5 w-5 animate-spin" />
@@ -527,4 +546,3 @@ export default function UnifiedOTPFastLogin() {
     </div>
   )
 }
-

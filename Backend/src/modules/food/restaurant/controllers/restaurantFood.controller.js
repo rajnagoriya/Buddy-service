@@ -1,5 +1,5 @@
 import { sendResponse, sendError } from '../../../../utils/response.js';
-import { createRestaurantFood, updateRestaurantFood } from '../services/restaurantFood.service.js';
+import { createRestaurantFood, updateRestaurantFood, bulkCreateFood } from '../services/restaurantFood.service.js';
 
 export const createRestaurantFoodController = async (req, res, next) => {
     try {
@@ -21,4 +21,13 @@ export const updateRestaurantFoodController = async (req, res, next) => {
         next(error);
     }
 };
-
+export const bulkCreateRestaurantFoodController = async (req, res, next) => {
+    try {
+        const restaurantId = req.user?.userId;
+        const items = Array.isArray(req.body?.items) ? req.body.items : (Array.isArray(req.body) ? req.body : []);
+        const results = await bulkCreateFood(restaurantId, items);
+        return sendResponse(res, 201, 'Bulk upload completed', results);
+    } catch (error) {
+        next(error);
+    }
+};
