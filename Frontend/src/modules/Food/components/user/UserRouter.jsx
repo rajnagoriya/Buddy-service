@@ -9,7 +9,7 @@ import Cart from "@food/pages/user/cart/Cart"
 
 // Home & Discovery
 const Home = lazy(() => import("@food/pages/user/Home"))
-const Dining = lazy(() => import("@food/pages/user/dining"))
+const Dining = lazy(() => import("@food/pages/user/Dining.jsx"))
 const DiningCategory = lazy(() => import("@food/pages/user/DiningCategory"))
 const DiningExplore50 = lazy(() => import("@food/pages/user/DiningExplore50"))
 const DiningExploreNear = lazy(() => import("@food/pages/user/DiningExploreNear"))

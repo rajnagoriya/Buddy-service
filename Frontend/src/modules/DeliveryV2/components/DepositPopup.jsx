@@ -131,7 +131,7 @@ export default function DepositPopup({ onSuccess, cashInHand = 0 }) {
         {loading || processing ? (
           <Loader2 className="w-4 h-4 animate-spin" />
         ) : null}
-        {loading ? "Creating…" : processing ? "Complete payment…" : "Deposit"}
+        {loading ? "Creatingï¿½" : processing ? "Complete paymentï¿½" : "Deposit"}
       </button>
     </div>
   )
