@@ -1,6 +1,6 @@
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Plus, Home, Briefcase, MapPin, Trash2, Edit2, ChevronLeft } from 'lucide-react';
-import { Button } from '@shared/components/ui/button';
+import { Button } from '@shared/components/ui/Button';
 import {
     Dialog,
     DialogContent,
@@ -9,7 +9,7 @@ import {
     DialogTitle,
     DialogFooter,
 } from "@shared/components/ui/dialog";
-import { Input } from "@shared/components/ui/input";
+import { Input } from "@shared/components/ui/Input";
 import { Label } from "@shared/components/ui/label";
 import { Textarea } from "@shared/components/ui/textarea";
 import { useState, useEffect, useCallback } from 'react';

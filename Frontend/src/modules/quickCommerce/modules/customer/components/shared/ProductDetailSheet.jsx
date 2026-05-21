@@ -10,7 +10,7 @@ import { useSettings } from '@core/context/SettingsContext';
 import { cn } from '@qc/lib/utils';
 import { applyCloudinaryTransform } from '@core/utils/imageUtils';
 import { customerApi } from '../../services/customerApi';
-import { Button } from '@shared/components/ui/button';
+import { Button } from '@shared/components/ui/Button';
 import { Loader2 } from 'lucide-react';
 
 const ProductDetailSheet = () => {

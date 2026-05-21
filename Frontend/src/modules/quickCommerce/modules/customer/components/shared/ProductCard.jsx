@@ -1,7 +1,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { Heart, Plus, Minus, Star } from "lucide-react";
-import { Button } from "@shared/components/ui/button";
+import { Button } from "@shared/components/ui/Button";
 import { cn } from "@qc/lib/utils";
 import { useWishlist } from "../../context/WishlistContext";
 import { useCart } from "../../context/CartContext";

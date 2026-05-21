@@ -11,7 +11,7 @@ import {
     ShieldCheck,
     Truck,
 } from 'lucide-react';
-import { Button } from '@shared/components/ui/button';
+import { Button } from '@shared/components/ui/Button';
 import { useToast } from '@shared/components/ui/Toast';
 import { applyCloudinaryTransform } from '@core/utils/imageUtils';
 

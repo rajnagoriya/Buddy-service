@@ -4,7 +4,7 @@ import { MessageCircle, Phone, Mail, ChevronDown, ChevronUp, FileText, ChevronLe
 import { useToast } from '@shared/components/ui/Toast';
 import { useSettings } from '@core/context/SettingsContext';
 import { customerApi } from '../services/customerApi';
-import { Button } from '@shared/components/ui/button';
+import { Button } from '@shared/components/ui/Button';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@qc/lib/utils';
 import axiosInstance from '@core/api/axios';

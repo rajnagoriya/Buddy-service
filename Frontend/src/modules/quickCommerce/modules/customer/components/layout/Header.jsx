@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Search, ShoppingCart, Heart, User, Menu, MapPin } from 'lucide-react';
-import { Button } from '@shared/components/ui/button';
+import { Button } from '@shared/components/ui/Button';
 import { useWishlist } from '../../context/WishlistContext';
 import { useCart } from '../../context/CartContext';
 import { useLocation as useAppLocation } from "../../context/LocationContext";

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowRight, Sparkles, Tag, Star } from 'lucide-react';
-import { Button } from '@shared/components/ui/button';
+import { Button } from '@shared/components/ui/Button';
 import heroVideo from '@assets/hero_video.mp4';
 import LazyImage from '@shared/components/LazyImage';
 

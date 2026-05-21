@@ -1,7 +1,7 @@
 import React from 'react';
 import { useRouteError, Link, useNavigate } from 'react-router-dom';
 import { AlertTriangle, Home, RotateCcw, ChevronLeft } from 'lucide-react';
-import { Button } from '@shared/components/ui/button';
+import { Button } from '@shared/components/ui/Button';
 
 const ErrorPage = () => {
     const error = useRouteError();

@@ -33,7 +33,7 @@ import {
   Contact2,
   Wallet,
 } from "lucide-react";
-import { Button } from "@shared/components/ui/button";
+import { Button } from "@shared/components/ui/Button";
 import { motion, AnimatePresence } from "framer-motion";
 import { useToast } from "@shared/components/ui/Toast";
 import { useSettings } from "@core/context/SettingsContext";
@@ -53,7 +53,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@shared/components/ui/dialog";
-import { Input } from "@shared/components/ui/input";
+import { Input } from "@shared/components/ui/Input";
 import { Label } from "@shared/components/ui/label";
 
 

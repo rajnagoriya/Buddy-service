@@ -4,7 +4,7 @@ import { Heart, Plus, Minus, Star, ShieldCheck, Clock, ArrowLeft, MessageSquare 
 import { useCart } from '../context/CartContext';
 import { useWishlist } from '../context/WishlistContext';
 import { useToast } from '@shared/components/ui/Toast';
-import { Button } from '@shared/components/ui/button';
+import { Button } from '@shared/components/ui/Button';
 import { cn } from '@qc/lib/utils';
 import { customerApi } from '../services/customerApi';
 import { useLocation as useAppLocation } from '../context/LocationContext';

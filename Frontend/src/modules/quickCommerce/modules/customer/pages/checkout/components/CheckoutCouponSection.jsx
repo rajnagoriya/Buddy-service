@@ -1,7 +1,7 @@
 import React from "react";
 import { Tag, Check, Search } from "lucide-react";
 import { motion } from "framer-motion";
-import { Input } from "@shared/components/ui/input";
+import { Input } from "@shared/components/ui/Input";
 import {
   Dialog,
   DialogContent,

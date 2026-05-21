@@ -10,7 +10,7 @@ import DeliveryConfirmation from "../pages/DeliveryConfirmation";
 import EarningsPage from "../pages/EarningsPage";
 import CodCash from "../pages/CodCash";
 import OrderHistory from "../pages/OrderHistory";
-import Profile from "../pages/Profile";
+import Profile from "../pages/profile";
 import PersonalDetails from "../pages/profile/PersonalDetails";
 import VehicleInfo from "../pages/profile/VehicleInfo";
 import BankAccount from "../pages/profile/BankAccount";
