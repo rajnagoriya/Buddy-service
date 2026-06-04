@@ -6,6 +6,8 @@ import { cn } from "@qc/lib/utils";
 import { HiChevronDown } from "react-icons/hi2";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, UtensilsCrossed } from "lucide-react";
+import quickSpicyLogo from "@food/assets/quicky-spicy-logo.png";
+import { getCachedSettings, loadBusinessSettings } from '@food/utils/businessSettings';
 
 const colorMap = {
   indigo:
@@ -221,37 +223,55 @@ const SidebarItem = ({
 const SidebarContent = ({ items, title, onClose, openMenu, handleToggle, hoveredIdx, setHoveredIdx }) => {
   const { settings } = useSettings();
   const appName = settings?.appName || 'App';
+  
+  const [foodLogoUrl, setFoodLogoUrl] = React.useState(() => getCachedSettings()?.logo?.url || null);
+  
+  React.useEffect(() => {
+      const loadLogo = async () => {
+          try {
+              let cached = getCachedSettings();
+              if (cached?.logo?.url) setFoodLogoUrl(cached.logo.url);
+              
+              const bizSettings = await loadBusinessSettings();
+              if (bizSettings?.logo?.url) setFoodLogoUrl(bizSettings.logo.url);
+          } catch (error) {}
+      };
+      loadLogo();
+      
+      const handleSettingsUpdate = () => {
+          const cached = getCachedSettings();
+          if (cached?.logo?.url) setFoodLogoUrl(cached.logo.url);
+      };
+      window.addEventListener('businessSettingsUpdated', handleSettingsUpdate);
+      return () => window.removeEventListener('businessSettingsUpdated', handleSettingsUpdate);
+  }, []);
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="flex-shrink-0 flex h-16 items-center justify-between px-5 border-b border-white/5 bg-gradient-to-b from-white/[0.02] to-transparent z-10">
-        <div className="flex items-center space-x-2.5">
-          {settings?.logoUrl ? (
-            <div className="h-9 w-9 rounded-xl overflow-hidden shadow-sm ring-1 ring-white/10 group-hover:scale-110 transition-all duration-500 ease-out">
-              <img src={settings.logoUrl} alt={appName} className="h-full w-full object-contain" />
+      <div className="flex-shrink-0 flex flex-col justify-center px-5 py-4 border-b border-white/5 bg-gradient-to-b from-white/[0.02] to-transparent z-10 animate-in fade-in duration-300">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <div className="w-24 h-12 rounded-lg flex items-center justify-center shadow-black/20">
+              {foodLogoUrl || settings?.logoUrl ? (
+                <img src={foodLogoUrl || settings.logoUrl} alt={appName} className="w-24 h-10 object-contain" loading="lazy" onError={(e) => { e.target.src = quickSpicyLogo; }} />
+              ) : (
+                <img src={quickSpicyLogo} alt="Buddy Services" className="w-24 h-10 object-contain" loading="lazy" />
+              )}
             </div>
-          ) : (
-            <div className="h-9 w-9 rounded-xl bg-primary flex items-center justify-center text-white shadow-sm transform -rotate-6 hover:rotate-0 transition-all duration-500 ease-out">
-              <span className="text-lg font-black italic">{appName.charAt(0)}</span>
-            </div>
-          )}
-          <div>
-            <h1 className="text-base font-black tracking-tight text-white leading-none">
-              {appName}
-            </h1>
-            <span className="text-[9px] font-black text-primary uppercase tracking-[0.2em] mt-1 block">
-              {title}
-            </span>
           </div>
+          {/* Mobile Close Button */}
+          <button
+            onClick={onClose}
+            className="p-2 md:hidden text-gray-500 hover:text-white transition-colors"
+          >
+            <X className="h-5 w-5" />
+          </button>
         </div>
-
-        {/* Mobile Close Button */}
-        <button
-          onClick={onClose}
-          className="p-2 md:hidden text-gray-500 hover:text-white transition-colors"
-        >
-          <X className="h-5 w-5" />
-        </button>
+        <div className="mb-3">
+          <h2 className="text-sm font-semibold text-neutral-300 uppercase tracking-wider text-left">
+            {title || "Admin Panel"}
+          </h2>
+        </div>
       </div>
 
       <nav
@@ -260,23 +280,27 @@ const SidebarContent = ({ items, title, onClose, openMenu, handleToggle, hovered
         className="mt-4 px-3 space-y-1.5 flex-1 overflow-y-auto overscroll-contain custom-scrollbar-dark min-h-0 pb-6 relative z-20"
         style={{ WebkitOverflowScrolling: 'touch' }}
       >
-        <p className="px-3 text-[9px] font-black text-gray-600 uppercase tracking-[0.3em] mb-3">
-          Cross-Module Navigation
-        </p>
+        {!title?.toLowerCase().includes("seller") && (
+          <>
+            <p className="px-3 text-[9px] font-black text-gray-600 uppercase tracking-[0.3em] mb-3">
+              Cross-Module Navigation
+            </p>
 
-        <Link
-          to="/admin/food"
-          className={cn(
-            "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-gradient-to-r from-orange-600 to-amber-600 text-white hover:from-orange-500 hover:to-amber-500 transition-all duration-300 shadow-lg shadow-orange-900/20 group border border-orange-400/20 mb-6",
-            "justify-start"
-          )}
-        >
-          <UtensilsCrossed className="w-4 h-4 shrink-0 text-orange-100 group-hover:scale-110 transition-transform" />
-          <div className="flex-1 flex items-center justify-between overflow-hidden">
-            <span className="font-semibold text-xs uppercase tracking-wider truncate">Food Module</span>
-            <HiChevronDown className="w-3.5 h-3.5 shrink-0 text-orange-200 group-hover:translate-x-0.5 transition-transform -rotate-90" />
-          </div>
-        </Link>
+            <Link
+              to="/admin/food"
+              className={cn(
+                "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-gradient-to-r from-orange-600 to-amber-600 text-white hover:from-orange-500 hover:to-amber-500 transition-all duration-300 shadow-lg shadow-orange-900/20 group border border-orange-400/20 mb-6",
+                "justify-start"
+              )}
+            >
+              <UtensilsCrossed className="w-4 h-4 shrink-0 text-orange-100 group-hover:scale-110 transition-transform" />
+              <div className="flex-1 flex items-center justify-between overflow-hidden">
+                <span className="font-semibold text-xs uppercase tracking-wider truncate">Food Module</span>
+                <HiChevronDown className="w-3.5 h-3.5 shrink-0 text-orange-200 group-hover:translate-x-0.5 transition-transform -rotate-90" />
+              </div>
+            </Link>
+          </>
+        )}
 
         <p className="px-3 text-[9px] font-black text-gray-600 uppercase tracking-[0.3em] mb-3">
           Core Management
@@ -298,33 +322,6 @@ const SidebarContent = ({ items, title, onClose, openMenu, handleToggle, hovered
           ))}
         </AnimatePresence>
       </nav>
-
-      <div className="p-4 border-t border-white/5 bg-gradient-to-t from-white/[0.02] to-transparent flex-shrink-0">
-        <div className="bg-white/5 rounded-lg p-3 shadow-sm border border-white/5 hover:bg-white/[0.08] hover:border-white/10 transition-all group cursor-pointer">
-          <div className="flex items-center space-x-2.5">
-            <div className="relative group">
-              {settings?.logoUrl ? (
-                <div className="h-8 w-8 rounded-lg overflow-hidden border border-white/10 shadow-lg group-hover:scale-110 transition-all duration-500">
-                  <img src={settings.logoUrl} alt={appName} className="h-full w-full object-contain" />
-                </div>
-              ) : (
-                <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-primary via-brand-500 to-violet-600 flex items-center justify-center text-white font-black text-xs shadow-lg group-hover:scale-110 transition-all duration-500">
-                  {appName.charAt(0)}
-                </div>
-              )}
-              <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 bg-brand-500 rounded-full border-2 border-[#0a0c10] shadow-sm animate-pulse"></div>
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-bold text-white truncate group-hover:text-primary transition-colors">
-                {title?.toLowerCase().includes('seller') ? 'Seller Console' : 'Admin Console'}
-              </p>
-              <p className="text-[9px] text-gray-500 truncate font-black uppercase tracking-widest">
-                {title?.toLowerCase().includes('seller') ? 'Seller' : 'Super Admin'}
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
   );
 };

@@ -60,6 +60,27 @@ export function buildSellerOrdersQuery({
   endDate,
 }) {
   const base = role === "admin" ? {} : { seller: userId };
+
+  if (process.env.ENABLE_UNIFIED_QC_DISPATCH === "true" && role === "seller") {
+    base.$or = [
+      { workflowVersion: { $lt: 2 } },
+      { workflowVersion: { $exists: false } },
+      {
+        workflowStatus: {
+          $in: [
+            "DELIVERY_ASSIGNED",
+            "SELLER_ACCEPTED",
+            "PREPARING",
+            "READY_FOR_PICKUP",
+            "OUT_FOR_DELIVERY",
+            "DELIVERED",
+            "CANCELLED"
+          ]
+        }
+      }
+    ];
+  }
+
   const withStatus = {
     ...base,
     ...normalizeSellerStatusFilter(statusParam),
@@ -210,11 +231,9 @@ function filterV2OrdersByRadius(v2Orders, deliveryCoords) {
     if (!Array.isArray(coords) || coords.length < 2) return true;
 
     const [slng, slat] = coords;
-    const searchR = order.deliverySearchMeta?.radiusMeters || 5000;
-    const serviceKm = Number(order.seller?.serviceRadius ?? 5);
-    const serviceM = Math.max(serviceKm, 0) * 1000;
-    const maxR = Math.min(searchR, serviceM);
-    return distanceMeters(dlat, dlng, slat, slng) <= maxR;
+    // Follow the same rider proximity logic as Food (bypass seller.serviceRadius restriction)
+    const searchR = order.deliverySearchMeta?.radiusMeters || 15000;
+    return distanceMeters(dlat, dlng, slat, slng) <= searchR;
   });
 }
 

@@ -128,19 +128,25 @@ const QuickCommerceModule = () => {
 
                                 {/* Protected Portals */}
                                 <Route path="seller/*" element={
-                                    <RoleGuard allowedRoles={[UserRole.SELLER]}>
-                                        <SellerModule />
-                                    </RoleGuard>
+                                    <ProtectedRoute>
+                                        <RoleGuard allowedRoles={[UserRole.SELLER]}>
+                                            <SellerModule />
+                                        </RoleGuard>
+                                    </ProtectedRoute>
                                 } />
                                 <Route path="admin/*" element={
-                                    <RoleGuard allowedRoles={[UserRole.ADMIN]}>
-                                        <AdminModule />
-                                    </RoleGuard>
+                                    <ProtectedRoute>
+                                        <RoleGuard allowedRoles={[UserRole.ADMIN]}>
+                                            <AdminModule />
+                                        </RoleGuard>
+                                    </ProtectedRoute>
                                 } />
                                 <Route path="delivery/*" element={
-                                    <RoleGuard allowedRoles={[UserRole.DELIVERY_BOY]}>
-                                        <DeliveryModule />
-                                    </RoleGuard>
+                                    <ProtectedRoute>
+                                        <RoleGuard allowedRoles={[UserRole.DELIVERY_BOY]}>
+                                            <DeliveryModule />
+                                        </RoleGuard>
+                                    </ProtectedRoute>
                                 } />
 
                                 <Route path="*" element={<Navigate to="./" replace />} />

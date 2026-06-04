@@ -1,6 +1,7 @@
 import Seller from "../models/seller.js";
 import { calculateDistance } from "../utils/helper.js";
 import { buildKey, getOrSet, getTTL } from "./cacheService.js";
+import { detectZoneIdForCoordinates } from "./zoneDetectionService.js";
 
 const MAX_SELLER_SEARCH_DISTANCE_M = 100000;
 
@@ -31,33 +32,20 @@ function buildNearbySellersKey(lat, lng) {
 
 export async function getNearbySellerIdsForCustomer(lat, lng) {
   const fetchFn = async () => {
+    const customerZoneId = await detectZoneIdForCoordinates(lat, lng);
+    if (!customerZoneId) {
+      return [];
+    }
+
     const sellers = await Seller.find({
       isActive: true,
-      location: {
-        $near: {
-          $geometry: {
-            type: "Point",
-            coordinates: [lng, lat],
-          },
-          $maxDistance: MAX_SELLER_SEARCH_DISTANCE_M,
-        },
-      },
+      isVerified: true,
+      zoneId: customerZoneId,
     })
-      .select("_id location serviceRadius")
+      .select("_id")
       .lean();
 
-    return sellers
-      .filter((seller) => {
-        const coords = seller?.location?.coordinates;
-        if (!Array.isArray(coords) || coords.length < 2) return false;
-        const [sellerLng, sellerLat] = coords;
-        if (!Number.isFinite(sellerLat) || !Number.isFinite(sellerLng)) {
-          return false;
-        }
-        const distanceKm = calculateDistance(lat, lng, sellerLat, sellerLng);
-        return distanceKm <= (seller.serviceRadius || 5);
-      })
-      .map((seller) => String(seller._id));
+    return sellers.map((seller) => String(seller._id));
   };
 
   return getOrSet(buildNearbySellersKey(lat, lng), fetchFn, getTTL("nearbySellers"));

@@ -181,7 +181,7 @@ const AddProduct = () => {
       } else {
         toast.success(response?.data?.message || "Product saved successfully!");
       }
-      navigate("/seller/products");
+      navigate("/qc/seller/products");
     } catch (error) {
       toast.error(error.response?.data?.message || "Failed to save product");
     } finally {

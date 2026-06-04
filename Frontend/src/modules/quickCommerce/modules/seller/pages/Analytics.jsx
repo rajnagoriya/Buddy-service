@@ -561,7 +561,7 @@ const Analytics = () => {
             </div>
             <div className="p-4 bg-slate-50/50 border-t border-slate-50 text-center">
               <button
-                onClick={() => navigate("/seller/products")}
+                onClick={() => navigate("/qc/seller/products")}
                 className="text-xs font-black text-primary uppercase tracking-widest hover:underline">
                 View All Products Analytics
               </button>

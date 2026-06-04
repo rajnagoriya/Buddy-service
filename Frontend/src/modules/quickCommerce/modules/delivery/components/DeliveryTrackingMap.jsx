@@ -10,7 +10,7 @@ import {
   saveDeliveryPartnerLocation,
 } from "../utils/deliveryLastLocation";
 
-const libraries = ["geometry"];
+const libraries = ["places", "drawing", "geometry"];
 const ROUTE_REFRESH_THRESHOLD_M = 150;
 const ROUTE_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 const RECENTER_INTERVAL_MS = 15000;
@@ -127,7 +127,7 @@ const DeliveryTrackingMapComponent = ({
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
 
   const { isLoaded, loadError } = useJsApiLoader({
-    id: "delivery-tracking-map",
+    id: "google-map-script",
     googleMapsApiKey: apiKey,
     libraries,
   });

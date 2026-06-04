@@ -441,6 +441,18 @@ const ActiveSellers = () => {
                             {seller.location || "Location not set"}
                           </span>
                         </div>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Zone:</span>
+                          {seller.zoneId ? (
+                            <span className="text-[10px] font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md">
+                              {seller.zoneId.name || seller.zoneId}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-black text-rose-600 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-100 animate-pulse">
+                              No Zone Assigned
+                            </span>
+                          )}
+                        </div>
                         <div className="flex items-center gap-2 text-slate-400">
                           <HiOutlineCalendarDays className="h-3.5 w-3.5" />
                           <span className="text-[10px] font-bold">
@@ -612,8 +624,16 @@ const ActiveSellers = () => {
                           <span>{selectedSeller.joinedDate || "N/A"}</span>
                         </div>
                         <div className="flex items-center justify-between text-xs font-bold text-slate-600 mt-3">
-                          <span>Service radius</span>
-                          <span>{selectedSeller.serviceRadius || 5} km</span>
+                          <span>Assigned Zone</span>
+                          {selectedSeller.zoneId ? (
+                            <span className="text-xs font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md">
+                              {selectedSeller.zoneId.name || selectedSeller.zoneId}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-black text-rose-600 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-100">
+                              No Zone Assigned
+                            </span>
+                          )}
                         </div>
                         <div className="flex items-center justify-between text-xs font-bold text-slate-600 mt-3">
                           <span>Last order</span>

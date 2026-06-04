@@ -1,6 +1,8 @@
 import Seller from "../models/seller.js";
 import Category from "../models/category.js";
 import { distanceMeters } from "../utils/geoUtils.js";
+import { isPointInPolygon } from "./zoneDetectionService.js";
+import { FoodZone } from "../../food/admin/models/zone.model.js";
 import { HANDLING_FEE_STRATEGY } from "../constants/finance.js";
 import {
   calculateHandlingFee,
@@ -38,7 +40,7 @@ async function computeDistanceKmForSeller({ sellerId, addressLocation, session =
   const normalizedLocation = normalizeLocation(addressLocation);
   if (!normalizedLocation) return 0;
 
-  const query = Seller.findById(sellerId).select("location serviceRadius shopName").lean();
+  const query = Seller.findById(sellerId).select("location serviceRadius shopName zoneId").lean();
   if (session) query.session(session);
   const seller = await query;
   if (!seller) {
@@ -58,9 +60,16 @@ async function computeDistanceKmForSeller({ sellerId, addressLocation, session =
   );
   const distanceKm = Number((distanceInMeters / 1000).toFixed(3));
   
-  const radius = Number(seller.serviceRadius || 5);
-  if (distanceKm > radius) {
-    const err = new Error(`${seller.shopName || "Store"} does not deliver to your current location (Distance: ${distanceKm}km, Service Radius: ${radius}km)`);
+  // Validate customer coordinates against seller's administrative FoodZone boundary
+  if (!seller.zoneId) {
+    const err = new Error(`${seller.shopName || "Store"} is currently not assigned to any delivery zone.`);
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const zone = await FoodZone.findById(seller.zoneId).lean();
+  if (!zone || !zone.isActive || !isPointInPolygon(normalizedLocation.lat, normalizedLocation.lng, zone.coordinates)) {
+    const err = new Error(`${seller.shopName || "Store"} does not deliver to your current location (Out of delivery zone).`);
     err.statusCode = 400;
     throw err;
   }

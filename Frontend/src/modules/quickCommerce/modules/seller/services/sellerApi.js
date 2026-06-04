@@ -43,4 +43,7 @@ export const sellerApi = {
     approveReturn: (orderId, data) => axiosInstance.put(`/orders/returns/${orderId}/approve`, data),
     rejectReturn: (orderId, data) => axiosInstance.put(`/orders/returns/${orderId}/reject`, data),
     assignReturnDelivery: (orderId, data) => axiosInstance.put(`/orders/returns/${orderId}/assign-delivery`, data),
+
+    // Zones (Public)
+    getPublicZones: () => axiosInstance.get('/v1/food/zones/public', { baseURL: '/api' }),
 };

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MapPin, ChevronDown, Search, Mic, Bell, CheckCircle2, Tag, Gift, AlertCircle, Clock, BellOff, X, IndianRupee, UtensilsCrossed, ShoppingBag, Zap, Sparkles, Flame } from 'lucide-react';
+import { MapPin, ChevronDown, Search, Mic, Bell, CheckCircle2, Tag, Gift, AlertCircle, Clock, BellOff, X, IndianRupee, UtensilsCrossed, ShoppingBag, Zap, Sparkles, Flame, Bike } from 'lucide-react';
 
 function cn(...inputs) {
   return inputs.filter(Boolean).join(' ');
@@ -111,9 +111,9 @@ export default function UnifiedHeader({
   const unreadCount = notifications.filter(n => !n.read).length + broadcastUnreadCount;
 
   const services = [
-    { id: "food", label: "Food", icon: UtensilsCrossed, color: "bg-[#1A2517]/10", iconColor: "text-[#1A2517]", activeBg: "bg-[#1A2517]", activeIcon: "text-white", path: "/food/user" },
-    { id: "quick", label: "Store", icon: ShoppingBag, color: "bg-[#FFF0ED]", iconColor: "text-[#c2410c]", activeBg: "bg-[#c2410c]", activeIcon: "text-white", badge: "FAST", path: "/qc" },
-    { id: "taxi", label: "Taxi", icon: Zap, color: "bg-[#EEF2FF]", iconColor: "text-[#4338ca]", activeBg: "bg-[#4338ca]", activeIcon: "text-white", path: "/food/user/taxi" },
+    { id: "food", label: "Food", icon: "/super-app/food.png", isImage: true, color: "bg-[#F0F9F9]", activeBg: "bg-[#E0F2F1]", path: "/food/user" },
+    { id: "taxi", label: "Transport", icon: "/super-app/taxi.png", isImage: true, color: "bg-[#F0F9F9]", activeBg: "bg-[#E0F2F1]", path: "/food/user/taxi" },
+    { id: "quick", label: "Mart", icon: "/super-app/grocery.png", isImage: true, color: "bg-[#F0F9F9]", activeBg: "bg-[#E0F2F1]", badge: "MEGA", path: "/qc" },
   ];
 
   return (
@@ -278,13 +278,21 @@ export default function UnifiedHeader({
                         navigate(service.path);
                       }}
                       className={cn(
-                        "relative w-[85px] h-[85px] rounded-[30px] flex items-center justify-center transition-all duration-300",
+                        "relative w-[85px] h-[85px] rounded-[30px] flex items-center justify-center transition-all duration-300 border-2",
                         isActive 
-                          ? (service.activeBg || "bg-[#1A2517]") + " shadow-xl shadow-black/10" 
-                          : (isLight ? (service.color || "bg-white") : "bg-white/5")
+                          ? (service.activeBg || "bg-[#1A2517]") + " border-black/5 shadow-lg" 
+                          : (isLight ? (service.color || "bg-white") : "bg-white/5") + " border-transparent"
                       )}
                     >
-                      <Icon className={cn("h-7 w-7", isActive ? "text-white" : service.iconColor)} strokeWidth={2.5} />
+                      {service.isImage ? (
+                        <img 
+                          src={Icon} 
+                          alt={service.label} 
+                          className="h-14 w-14 object-contain" 
+                        />
+                      ) : (
+                        <Icon className={cn("h-7 w-7", isActive ? "text-white" : service.iconColor)} strokeWidth={2.5} />
+                      )}
                       {service.badge && (
                         <span className="absolute -top-1 -right-1 bg-[#ff4500] text-white text-[9px] font-black px-1.5 py-0.5 rounded-full z-10 shadow-sm border border-white">
                           {service.badge}

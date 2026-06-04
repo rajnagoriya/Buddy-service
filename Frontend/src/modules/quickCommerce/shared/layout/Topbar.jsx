@@ -7,6 +7,16 @@ import {
     HiOutlineSearch,
     HiOutlineMenu
 } from 'react-icons/hi';
+import { ChevronDown, User, LogOut } from 'lucide-react';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuGroup,
+    DropdownMenuItem,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from "@food/components/ui/dropdown-menu";
+import quickSpicyLogo from "@food/assets/quicky-spicy-logo.png";
 import { useNavigate, useLocation } from 'react-router-dom';
 import { cn } from '@qc/lib/utils';
 import { sellerApi } from '@modules/seller/services/sellerApi';
@@ -16,6 +26,7 @@ import NotificationPopup from './NotificationPopup';
 import { toast } from 'sonner';
 
 import { useSettings } from '@core/context/SettingsContext';
+import { getCachedSettings, loadBusinessSettings } from '@food/utils/businessSettings';
 
 const Topbar = ({ onMenuClick }) => {
     const { user, logout, role } = useAuth();
@@ -32,7 +43,50 @@ const Topbar = ({ onMenuClick }) => {
     const [showNotifications, setShowNotifications] = React.useState(false);
     const notificationRef = React.useRef(null);
 
-    const isSeller = location.pathname.startsWith('/seller');
+    const [foodLogoUrl, setFoodLogoUrl] = React.useState(() => getCachedSettings()?.logo?.url || null);
+    const [adminData, setAdminData] = React.useState(null);
+
+    // Load admin data from localStorage (same source as Food AdminNavbar)
+    React.useEffect(() => {
+        const loadAdminData = () => {
+            try {
+                const adminUserStr = localStorage.getItem('admin_user');
+                if (adminUserStr) {
+                    setAdminData(JSON.parse(adminUserStr));
+                }
+            } catch (error) {}
+        };
+        loadAdminData();
+        const handleAuthChange = () => loadAdminData();
+        window.addEventListener('adminAuthChanged', handleAuthChange);
+        window.addEventListener('storage', handleAuthChange);
+        return () => {
+            window.removeEventListener('adminAuthChanged', handleAuthChange);
+            window.removeEventListener('storage', handleAuthChange);
+        };
+    }, []);
+    
+    React.useEffect(() => {
+        const loadLogo = async () => {
+            try {
+                let cached = getCachedSettings();
+                if (cached?.logo?.url) setFoodLogoUrl(cached.logo.url);
+                
+                const settings = await loadBusinessSettings();
+                if (settings?.logo?.url) setFoodLogoUrl(settings.logo.url);
+            } catch (error) {}
+        };
+        loadLogo();
+        
+        const handleSettingsUpdate = () => {
+            const cached = getCachedSettings();
+            if (cached?.logo?.url) setFoodLogoUrl(cached.logo.url);
+        };
+        window.addEventListener('businessSettingsUpdated', handleSettingsUpdate);
+        return () => window.removeEventListener('businessSettingsUpdated', handleSettingsUpdate);
+    }, []);
+
+    const isSeller = location.pathname.startsWith('/qc/seller') || location.pathname.startsWith('/seller');
     const isAdmin = location.pathname.startsWith('/qc/admin');
 
     const handleSearchSubmit = (e) => {
@@ -105,57 +159,72 @@ const Topbar = ({ onMenuClick }) => {
 
     return (
         <header className={cn(
-            "bg-white/70 backdrop-blur-xl border-b border-gray-100/50 flex items-center justify-between shadow-[0_4px_30px_rgba(0,0,0,0.02)] transition-all duration-300",
+            "sticky top-0 z-50 bg-white border-b border-neutral-200 shadow-sm transition-all duration-300",
             (role === 'admin' || role === 'seller')
-                ? "fixed top-0 left-0 right-0 z-[200] h-14 px-4 md:sticky md:top-0 md:h-16 md:px-6"
-                : "fixed top-0 left-72 right-0 h-16 px-6 z-40"
+                ? "px-4 md:px-6"
+                : "px-6"
         )}>
-            <div className="flex items-center flex-1 mr-4 overflow-hidden">
-                <button
-                    onClick={onMenuClick}
-                    className="p-2.5 mr-3 bg-gray-100/80 hover:bg-white rounded-xl text-gray-600 hover:text-primary transition-all duration-300 md:hidden border border-transparent hover:border-primary/20 shadow-sm"
-                >
-                    <HiOutlineMenu className="h-5 w-5" />
-                </button>
-
-                {/* Mobile Logo */}
-                <div className="flex items-center space-x-2 mr-4 md:hidden">
-                    {logoUrl ? (
-                        <div className="h-8 w-8 rounded-lg overflow-hidden shadow-md shadow-primary/10 border border-gray-100">
-                            <img src={logoUrl} alt={appName} className="h-full w-full object-contain" />
-                        </div>
-                    ) : (
-                        <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center text-white font-black text-sm shadow-md">
-                            {appName.charAt(0)}
-                        </div>
-                    )}
+            <div className="flex items-center justify-between py-3">
+                <div className="flex items-center gap-3">
+                    <button
+                        onClick={onMenuClick}
+                        className="md:hidden p-2 rounded-md text-neutral-700 hover:bg-neutral-100 hover:text-black transition-colors"
+                    >
+                        <HiOutlineMenu className="w-5 h-5" />
+                    </button>
+                    {/* Logo block mirroring Food */}
+                    <div className="flex items-center gap-2">
+                      <div className="w-24 h-12 rounded-lg bg-white flex items-center justify-center ring-neutral-200">
+                        {foodLogoUrl || logoUrl ? (
+                          <img
+                            src={foodLogoUrl || logoUrl}
+                            alt={appName}
+                            className="w-24 h-10 object-contain"
+                            loading="lazy"
+                            onError={(e) => {
+                              e.target.src = quickSpicyLogo;
+                            }}
+                          />
+                        ) : (
+                          <img src={quickSpicyLogo} alt="Buddy Services" className="w-24 h-10 object-contain" loading="lazy" />
+                        )}
+                      </div>
+                    </div>
                 </div>
 
-                <form onSubmit={handleSearchSubmit} className="relative w-full md:w-[400px] group hidden md:block">
-                    <HiOutlineSearch className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 group-focus-within:text-primary transition-all duration-300" />
-                    <input
-                        type="text"
-                        placeholder={isSeller ? "Search products by name or SKU..." : "Search anything..."}
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleSearchSubmit()}
-                        className="w-full pl-10 pr-4 py-2 bg-gray-100/50 border border-transparent rounded-xl text-xs font-medium focus:bg-white focus:ring-2 focus:ring-primary/10 focus:border-primary/20 transition-all duration-500 outline-none"
-                    />
-                </form>
-            </div>
+                {/* Center: Search Bar */}
+                <div className="hidden md:flex flex-1 justify-center max-w-md mx-8">
+                    <form onSubmit={handleSearchSubmit} className="relative w-full group flex items-center">
+                        <button type="button" className="flex items-center gap-2 px-4 py-2 rounded-full bg-neutral-100 text-neutral-600 cursor-text w-full border border-neutral-200" onClick={(e) => e.currentTarget.nextElementSibling.focus()}>
+                            <HiOutlineSearch className="w-4 h-4 text-neutral-700" />
+                            <input
+                                type="text"
+                                placeholder={isSeller ? "Search products..." : "Search"}
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleSearchSubmit()}
+                                className="flex-1 bg-transparent border-none text-sm text-neutral-900 placeholder:text-neutral-500 focus:outline-none focus:ring-0"
+                            />
+                            <span className="text-xs px-2 py-0.5 rounded bg-white text-neutral-600 border border-neutral-200 shrink-0">
+                                Ctrl+K
+                            </span>
+                        </button>
+                    </form>
+                </div>
 
-            <div className="flex items-center space-x-4">
+
+            <div className="flex items-center gap-3">
                 <div className="relative" ref={notificationRef}>
                     <button
                         onClick={() => setShowNotifications(!showNotifications)}
-                        className={cn(
-                            "p-2 hover:bg-primary/5 text-gray-500 hover:text-primary rounded-xl transition-all duration-300 relative group",
-                            showNotifications && "bg-primary/5 text-primary"
-                        )}
+                        className="relative h-10 w-10 rounded-full border border-neutral-200 bg-neutral-50 text-neutral-700 flex items-center justify-center hover:bg-neutral-100 transition-colors"
+                        aria-label="Notifications"
                     >
-                        <HiOutlineBell className="h-5 w-5" />
+                        <HiOutlineBell className="w-5 h-5" />
                         {unreadCount > 0 && (
-                            <span className="absolute top-2 right-2 h-2 w-2 bg-rose-500 rounded-full ring-2 ring-white shadow-sm"></span>
+                            <span className="absolute top-1.5 right-1.5 min-w-4 h-4 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center px-1">
+                                {unreadCount > 9 ? "9+" : unreadCount}
+                            </span>
                         )}
                     </button>
 
@@ -171,38 +240,55 @@ const Topbar = ({ onMenuClick }) => {
                     </AnimatePresence>
                 </div>
 
-                <div className="h-8 w-px bg-gray-100 mx-1"></div>
-                <button
-                    onClick={() => {
-                        if (location.pathname.startsWith('/qc/admin')) {
-                            navigate('/qc/admin/profile');
-                        } else if (location.pathname.startsWith('/admin')) {
-                            navigate('/admin/profile');
-                        } else if (location.pathname.startsWith('/seller')) {
-                            navigate('/seller/profile');
-                        } else if (location.pathname.startsWith('/delivery')) {
-                            navigate('/delivery/profile');
-                        } else {
-                            navigate('/profile');
-                        }
-                    }}
-                    className="flex items-center space-x-2.5 p-1 pr-3 hover:bg-gray-50 rounded-xl transition-all duration-300 group ring-1 ring-transparent hover:ring-gray-100 shadow-sm hover:shadow-md"
-                >
-                    <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center text-white font-bold text-xs shadow-md group-hover:scale-105 transition-transform">
-                        {user?.name?.[0] || 'A'}
+                <div className="h-8 w-px bg-neutral-200 mx-1"></div>
+                
+                {/* User Profile */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <div className="flex items-center gap-2 pl-3 border-l border-neutral-200 cursor-pointer hover:bg-neutral-100 rounded-md px-2 py-1 transition-colors">
+                      <div className="hidden md:block">
+                        <p className="text-sm font-medium text-neutral-900">
+                          {isSeller ? (user?.shopName || user?.ownerName || user?.name || "Seller") : (adminData?.name || user?.name || "System Admin")}
+                        </p>
+                        <p className="text-xs text-neutral-500">
+                          {isSeller ? (user?.email || "seller@example.com") : (adminData?.email || user?.email || "admin@example.com")}
+                        </p>
+                      </div>
+                      <ChevronDown className="w-4 h-4 text-neutral-700 hidden md:block" />
                     </div>
-                    <div>
-                        <p className="text-xs font-bold text-gray-900 leading-tight">{user?.name || 'Demo User'}</p>
-                        <p className="text-[9px] text-gray-400 font-bold uppercase tracking-wider">{user?.role || 'Member'}</p>
-                    </div>
-                </button>
-                <button
-                    onClick={handleLogout}
-                    className="flex items-center space-x-1.5 px-3 py-2 text-rose-600 hover:bg-rose-50 rounded-xl transition-all duration-300 font-bold text-xs shadow-sm hover:shadow-rose-100/50"
-                >
-                    <HiOutlineLogout className="h-4 w-4" />
-                    <span className="hidden lg:block">Sign Out</span>
-                </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="end"
+                    className="w-56 bg-white border border-neutral-200 rounded-lg shadow-lg z-50 text-neutral-900"
+                  >
+                    <DropdownMenuGroup>
+                      <DropdownMenuItem
+                        className="cursor-pointer hover:bg-neutral-100 focus:bg-neutral-100"
+                        onClick={() => {
+                            if (location.pathname.startsWith('/qc/admin')) navigate('/qc/admin/profile');
+                            else if (location.pathname.startsWith('/admin')) navigate('/admin/profile');
+                            else if (location.pathname.startsWith('/qc/seller')) navigate('/qc/seller/profile');
+                            else if (location.pathname.startsWith('/seller')) navigate('/qc/seller/profile');
+                            else if (location.pathname.startsWith('/delivery')) navigate('/delivery/profile');
+                            else navigate('/profile');
+                        }}
+                      >
+                        <User className="mr-2 w-4 h-4" />
+                        <span>Profile</span>
+                      </DropdownMenuItem>
+                    </DropdownMenuGroup>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      className="cursor-pointer text-red-600 hover:bg-red-50 focus:bg-red-50"
+                      onClick={handleLogout}
+                    >
+                      <LogOut className="mr-2 w-4 h-4" />
+                      <span>Logout</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+            </div>
             </div>
         </header>
     );

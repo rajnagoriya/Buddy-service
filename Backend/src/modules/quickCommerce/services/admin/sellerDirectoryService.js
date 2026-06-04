@@ -299,7 +299,7 @@ export async function getActiveSellersData({
   const query = filters.length > 1 ? { $and: filters } : baseQuery;
 
   const [sellers, totalActiveCount, allActiveSellers] = await Promise.all([
-    Seller.find(query).lean(),
+    Seller.find(query).populate("zoneId").lean(),
     Seller.countDocuments(baseQuery),
     Seller.find(baseQuery)
       .select("_id createdAt category")
@@ -438,6 +438,7 @@ export async function getActiveSellersData({
       productCount,
       activeProductCount,
       serviceRadius: Number(seller.serviceRadius || 5),
+      zoneId: seller.zoneId,
       location: getSellerDisplayLocation(seller),
       city: seller.address || "Location not set",
       latitude: Array.isArray(seller.location?.coordinates)

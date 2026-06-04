@@ -257,7 +257,7 @@ const StockManagement = () => {
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <Button
-                                        onClick={() => navigate('/seller/products/add')}
+                                        onClick={() => navigate('/qc/seller/products/add')}
                                         className="rounded-xl px-4 py-2 text-[10px] font-bold shadow-lg shadow-primary/20"
                                     >
                                         <HiOutlinePlus className="h-4 w-4 mr-2" />

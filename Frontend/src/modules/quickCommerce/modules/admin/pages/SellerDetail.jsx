@@ -56,7 +56,7 @@ const SellerDetail = () => {
         totalRevenue: 540000,
         commissionRate: '10%',
         coords: { lat: 19.0760, lng: 72.8777 },
-        serviceRadius: 5,
+        zoneId: { name: 'Mumbai West Zone' },
         bankInfo: {
             bankName: 'HDFC Bank',
             accountNo: 'XXXX XXXX 1234',
@@ -270,17 +270,6 @@ const SellerDetail = () => {
 
                                 <div className="absolute inset-0 flex items-center justify-center">
                                     <div className="relative">
-                                        {/* Service Area Radar */}
-                                        <motion.div
-                                            initial={{ scale: 0, opacity: 0 }}
-                                            animate={{ scale: 1, opacity: 1 }}
-                                            transition={{ duration: 1, ease: "easeOut" }}
-                                            className="rounded-full bg-primary/20 border-2 border-primary/40 shadow-[0_0_50px_rgba(var(--primary),0.3)] animate-pulse"
-                                            style={{
-                                                width: `${seller.serviceRadius * 40}px`,
-                                                height: `${seller.serviceRadius * 40}px`
-                                            }}
-                                        />
                                         {/* Store Marker */}
                                         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
                                             <div className="h-10 w-10 bg-slate-900 text-white rounded-2xl flex items-center justify-center shadow-2xl ring-4 ring-white z-10 relative">
@@ -295,12 +284,12 @@ const SellerDetail = () => {
                                 <div className="absolute top-6 left-6 flex flex-col gap-2">
                                     <div className="bg-white/90 backdrop-blur px-4 py-2 rounded-xl shadow-lg border border-white/50">
                                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Coverage View</p>
-                                        <h5 className="text-sm font-black text-slate-900">{seller.serviceRadius}km Delivery Area</h5>
+                                        <h5 className="text-sm font-black text-slate-900">{seller.zoneId?.name || "No Zone Assigned"}</h5>
                                     </div>
                                 </div>
                                 <div className="absolute bottom-6 right-6 p-4 max-w-[200px] bg-slate-900/90 backdrop-blur rounded-2xl text-white shadow-2xl border border-white/10">
                                     <p className="text-[9px] font-black opacity-60 uppercase mb-1">Live Telemetry</p>
-                                    <p className="text-[10px] font-bold leading-relaxed">System monitoring active traffic within the {seller.serviceRadius}km designated boundary.</p>
+                                    <p className="text-[10px] font-bold leading-relaxed">System monitoring active traffic within the administrative zone boundaries.</p>
                                 </div>
                             </div>
                         )}

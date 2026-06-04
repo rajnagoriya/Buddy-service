@@ -33,10 +33,16 @@ function isSellerAlertEligible(order) {
     const hasExpiry = Boolean(order.sellerPendingExpiresAt ?? order.expiresAt);
 
     if (hasExpiry && secondsLeftUntilSellerExpiry(order) <= 0) return false;
-    if (ws) return ws === 'SELLER_PENDING';
+    
+    let eligible = false;
+    if (ws) {
+        eligible = ws === 'SELLER_PENDING' || (ws === 'DELIVERY_ASSIGNED' && status === 'pending');
+    } else {
+        eligible = status === 'pending';
+    }
 
-    // Backward compatibility: older payloads may not include workflowStatus.
-    return status === 'pending';
+    console.log(`[SELLER POPUP DEBUG] orderId: ${order.orderId}, workflowStatus: ${ws}, status: ${status}, eligible: ${eligible}`);
+    return eligible;
 }
 
 const isEarningsRoute = (path) =>

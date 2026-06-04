@@ -30,6 +30,7 @@ import Lottie from "lottie-react";
 import sellerAnimation from "../../../assets/INSTANT_6.json";
 import { sellerApi } from "../services/sellerApi";
 import MapPicker from "../../../shared/components/MapPicker";
+import logoImage from "@/assets/logo.png";
 
 const createInitialVerificationState = () => ({
   status: "idle",
@@ -481,15 +482,14 @@ const Auth = () => {
           style={{ WebkitOverflowScrolling: "touch" }}>
           <div className="hidden md:flex absolute top-8 right-8 z-20">
             <div className="w-20 h-20 rounded-2xl bg-slate-50 border border-slate-200 shadow-sm flex items-center justify-center overflow-hidden">
-              {logoUrl ? (
-                <img
-                  src={logoUrl}
-                  alt={`${appName} logo`}
-                  className="w-14 h-14 object-contain"
-                />
-              ) : (
-                <Store size={30} className="text-slate-700" />
-              )}
+              <img
+                src={logoImage}
+                alt={`${appName} logo`}
+                className="w-14 h-14 object-contain"
+                onError={(e) => {
+                  if (logoUrl) e.target.src = logoUrl;
+                }}
+              />
             </div>
           </div>
           <AnimatePresence mode="wait">
@@ -762,7 +762,7 @@ const Auth = () => {
                             </p>
                             <p className="text-xs text-slate-600 font-medium truncate max-w-[250px]">
                               {formData.lat
-                                ? `${formData.address} (${formData.radius}km)`
+                                ? formData.address
                                 : "Precisely mark your shop location"}
                             </p>
                           </div>
@@ -967,7 +967,8 @@ const Auth = () => {
           initialLocation={
             formData.lat ? { lat: formData.lat, lng: formData.lng } : null
           }
-          initialRadius={formData.radius}
+          hideRadiusSlider={true}
+          showZones={true}
         />
       )}
     </div>

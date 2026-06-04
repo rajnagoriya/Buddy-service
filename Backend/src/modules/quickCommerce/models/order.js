@@ -301,6 +301,64 @@ const orderSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Delivery",
     },
+    dispatch: {
+      status: {
+        type: String,
+        enum: ["unassigned", "offered", "accepted", "rejected", "cancelled", "timed_out"],
+        default: "unassigned",
+      },
+      offeredTo: [
+        {
+          partnerId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "FoodDeliveryPartner",
+          },
+          at: {
+            type: Date,
+            default: Date.now,
+          },
+          action: {
+            type: String,
+            enum: ["offered", "rejected", "timeout"],
+            default: "offered",
+          },
+        },
+      ],
+      deliveryPartnerId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "FoodDeliveryPartner",
+        default: null,
+      },
+      assignedAt: {
+        type: Date,
+      },
+      acceptedAt: {
+        type: Date,
+      },
+      rejectedBy: [
+        {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "FoodDeliveryPartner",
+        },
+      ],
+      timeoutAt: {
+        type: Date,
+      },
+      history: [
+        {
+          at: {
+            type: Date,
+            default: Date.now,
+          },
+          action: String,
+          partnerId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "FoodDeliveryPartner",
+          },
+          note: String,
+        },
+      ],
+    },
     cancelledBy: {
       type: String,
       enum: ["customer", "seller", "admin", "system"],

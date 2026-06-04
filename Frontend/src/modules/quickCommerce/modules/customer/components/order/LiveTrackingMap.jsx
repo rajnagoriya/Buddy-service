@@ -16,7 +16,7 @@ import customerPin from "@assets/customer-pin.png";
 import deliveryIcon from "@assets/deliveryIcon.png";
 import storePin from "@assets/store-pin.png";
 
-const libraries = ["geometry"];
+const libraries = ["places", "drawing", "geometry"];
 
 const containerStyle = {
   width: "100%",
@@ -68,7 +68,7 @@ const LiveTrackingMap = memo(({
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
 
   const { isLoaded, loadError } = useJsApiLoader({
-    id: "customer-tracking-map",
+    id: "google-map-script",
     googleMapsApiKey: apiKey,
     libraries,
   });

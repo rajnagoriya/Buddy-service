@@ -35,6 +35,8 @@ const SellerProfile = () => {
     lng: null,
     radius: 5,
     address: "",
+    zoneId: "",
+    zoneName: "",
   });
 
   useEffect(() => {
@@ -55,6 +57,8 @@ const SellerProfile = () => {
         lng: data.location?.coordinates[0] || null,
         radius: data.serviceRadius || 5,
         address: data.address || "",
+        zoneId: data.zoneId?._id || data.zoneId || "",
+        zoneName: data.zoneId?.name || "",
       });
     } catch (error) {
       toast.error("Failed to fetch profile");
@@ -63,14 +67,31 @@ const SellerProfile = () => {
     }
   };
 
-  const handleLocationSelect = (location) => {
-    setFormData((prev) => ({
-      ...prev,
-      lat: location.lat,
-      lng: location.lng,
-      radius: location.radius,
-      address: location.address,
-    }));
+  const handleLocationSelect = async (location) => {
+    try {
+      const payload = {
+        ...formData,
+        lat: location.lat,
+        lng: location.lng,
+        radius: location.radius,
+        address: location.address,
+      };
+      await sellerApi.updateProfile(payload);
+      setFormData((prev) => ({
+        ...prev,
+        lat: location.lat,
+        lng: location.lng,
+        radius: location.radius,
+        address: location.address,
+        zoneId: location.zoneId,
+        zoneName: location.zoneName,
+      }));
+      toast.success("Location updated successfully");
+      setIsEditing(false);
+      fetchProfile();
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to update location");
+    }
   };
 
   const handleChange = (e) => {
@@ -369,15 +390,30 @@ const SellerProfile = () => {
                   <div className="pt-6 border-t border-slate-200/60 flex flex-wrap gap-8">
                     <div className="space-y-2">
                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">
-                        Service Radius
+                        Assigned Zone
                       </span>
                       <div className="flex items-center gap-2">
-                        <span className="text-lg font-black text-slate-900">
-                          {formData.radius}
-                        </span>
-                        <span className="text-xs font-bold text-slate-500 bg-slate-200/50 px-2 py-0.5 rounded-md">
-                          KM
-                        </span>
+                        {isEditing ? (
+                          formData.zoneName ? (
+                            <span className="text-sm font-bold text-slate-900 bg-slate-100 px-3 py-1 rounded-md">
+                              {formData.zoneName}
+                            </span>
+                          ) : (
+                            <span className="text-xs font-black text-rose-600 bg-rose-50 px-2 py-1 rounded-md border border-rose-100 animate-pulse">
+                              No Zone Assigned
+                            </span>
+                          )
+                        ) : (
+                          profile?.zoneId?.name ? (
+                            <span className="text-sm font-bold text-slate-900 bg-slate-100 px-3 py-1 rounded-md">
+                              {profile.zoneId.name}
+                            </span>
+                          ) : (
+                            <span className="text-xs font-black text-rose-600 bg-rose-50 px-2 py-1 rounded-md border border-rose-100 animate-pulse">
+                              No Zone Assigned
+                            </span>
+                          )
+                        )}
                       </div>
                     </div>
                     <div className="space-y-2">
@@ -403,10 +439,10 @@ const SellerProfile = () => {
               <div className="flex items-start gap-3 p-4 bg-amber-50 rounded-xl border border-amber-100">
                 <Shield size={16} className="text-amber-600 mt-0.5" />
                 <p className="text-xs text-amber-700 font-medium leading-relaxed">
-                  Your shop location and service radius determine which
-                  customers can view your products. Ensure the marker is placed
-                  exactly at your physical storefront for accurate delivery
-                  assignments.
+                  Your shop location determines which customers can view your
+                  products. The system automatically assigns your store to the
+                  matching administrative zone. Ensure the marker is placed exactly
+                  at your physical storefront for accurate delivery assignments.
                 </p>
               </div>
             </div>
@@ -470,7 +506,8 @@ const SellerProfile = () => {
           initialLocation={
             formData.lat ? { lat: formData.lat, lng: formData.lng } : null
           }
-          initialRadius={formData.radius}
+          hideRadiusSlider={true}
+          showZones={true}
         />
       )}
     </div>

@@ -79,11 +79,47 @@ export function resolveWorkflowStatus(order) {
   return workflowFromLegacyStatus(order.status);
 }
 
-/**
- * After creating a new order document (v2), schedule seller timeout and emit.
- */
 export async function afterPlaceOrderV2(orderDoc) {
   const orderId = orderDoc.orderId;
+
+  console.log("[QC UNIFIED DEBUG] afterPlaceOrderV2 called");
+  console.log("[QC UNIFIED DEBUG] orderId:", orderDoc.orderId);
+  console.log("[QC UNIFIED DEBUG] ENABLE_UNIFIED_QC_DISPATCH:", process.env.ENABLE_UNIFIED_QC_DISPATCH);
+  console.log("[QC UNIFIED DEBUG] before workflow:", orderDoc.workflowStatus);
+
+  if (process.env.ENABLE_UNIFIED_QC_DISPATCH === "true") {
+    orderDoc.workflowStatus = WORKFLOW_STATUS.DELIVERY_SEARCH;
+    orderDoc.status = "pending";
+    orderDoc.orderStatus = "pending";
+    orderDoc.dispatch = {
+      status: "offered",
+      offeredTo: [],
+      deliveryPartnerId: null
+    };
+    orderDoc.sellerPendingExpiresAt = undefined;
+    orderDoc.expiresAt = undefined;
+
+    await orderDoc.save();
+    console.log("[QC UNIFIED DEBUG] saved workflow:", orderDoc.workflowStatus);
+    console.log("[QC UNIFIED DEBUG] dispatch:", orderDoc.dispatch);
+
+    // Immediately trigger rider search via Food dispatch service
+    const { tryAutoAssign } = await import("../../food/orders/services/order-dispatch.service.js");
+    console.log("[QC UNIFIED DEBUG] calling tryAutoAssign");
+    void tryAutoAssign(orderDoc._id).catch((error) => {
+      console.error(`[afterPlaceOrderV2] tryAutoAssign failed for QC order ${orderId}:`, error.message);
+    });
+
+    emitOrderStatusUpdate(
+      orderDoc.orderId,
+      {
+        workflowStatus: WORKFLOW_STATUS.DELIVERY_SEARCH,
+      },
+      orderDoc.customer?._id || orderDoc.customer,
+    );
+    return;
+  }
+
   await scheduleSellerTimeoutJob(orderId);
   emitToSeller(orderDoc.seller?.toString(), {
     event: "order:new",
@@ -224,6 +260,51 @@ export async function sellerAcceptAtomic(sellerId, orderId) {
   const sellerMs = DEFAULT_SELLER_TIMEOUT_MS();
   const deliveryMs = DEFAULT_DELIVERY_TIMEOUT_MS();
 
+  if (process.env.ENABLE_UNIFIED_QC_DISPATCH === "true") {
+    const updated = await Order.findOneAndUpdate(
+      {
+        orderId,
+        seller: sellerId,
+        workflowVersion: { $gte: 2 },
+        workflowStatus: WORKFLOW_STATUS.DELIVERY_ASSIGNED,
+      },
+      {
+        $set: {
+          workflowStatus: WORKFLOW_STATUS.SELLER_ACCEPTED,
+          status: "confirmed",
+          sellerAcceptedAt: now,
+        },
+      },
+      { new: true },
+    )
+      .populate("customer", "name phone")
+      .populate("seller", "shopName address name location serviceRadius");
+
+    if (!updated) {
+      const err = new Error("Order not available for acceptance or expired");
+      err.statusCode = 409;
+      throw err;
+    }
+
+    emitOrderStatusUpdate(
+      updated.orderId,
+      {
+        workflowStatus: WORKFLOW_STATUS.SELLER_ACCEPTED,
+        status: "confirmed",
+      },
+      updated.customer?._id || updated.customer,
+    );
+
+    emitNotificationEvent(NOTIFICATION_EVENTS.ORDER_CONFIRMED, {
+      orderId: updated.orderId,
+      customerId: updated.customer?._id || updated.customer,
+      userId: updated.customer?._id || updated.customer,
+      sellerId: updated.seller?._id || updated.seller,
+    });
+
+    return updated;
+  }
+
   const updated = await Order.findOneAndUpdate(
     {
       orderId,
@@ -303,6 +384,50 @@ export async function sellerAcceptAtomic(sellerId, orderId) {
 export async function sellerRejectAtomic(sellerId, orderId) {
   orderId = await requireCanonicalOrderId(orderId);
   const now = new Date();
+
+  if (process.env.ENABLE_UNIFIED_QC_DISPATCH === "true") {
+    const order = await Order.findOneAndUpdate(
+      {
+        orderId,
+        seller: sellerId,
+        workflowVersion: { $gte: 2 },
+        workflowStatus: WORKFLOW_STATUS.DELIVERY_ASSIGNED,
+      },
+      {
+        $set: {
+          workflowStatus: WORKFLOW_STATUS.CANCELLED,
+          status: "cancelled",
+          cancelledBy: "seller",
+          cancelReason: "Rejected by seller",
+        },
+      },
+      { new: true },
+    );
+
+    if (!order) {
+      const err = new Error("Order not available to reject");
+      err.statusCode = 409;
+      throw err;
+    }
+
+    await compensateOrderCancellation(order, orderId);
+
+    emitOrderStatusUpdate(order.orderId, {
+      workflowStatus: WORKFLOW_STATUS.CANCELLED,
+    }, order.customer);
+
+    emitNotificationEvent(NOTIFICATION_EVENTS.ORDER_CANCELLED, {
+      orderId: order.orderId,
+      customerId: order.customer,
+      userId: order.customer,
+      sellerId: order.seller,
+      customerMessage: "Your order was cancelled by the seller.",
+      sellerMessage: `Order #${order.orderId} was cancelled.`,
+    });
+
+    return order;
+  }
+
   const order = await Order.findOneAndUpdate(
     {
       orderId,

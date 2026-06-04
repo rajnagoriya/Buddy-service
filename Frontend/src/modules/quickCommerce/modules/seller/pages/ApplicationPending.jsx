@@ -26,7 +26,7 @@ const ApplicationPending = () => {
       applicationStatus === "approved";
 
     if (isApproved) {
-      return <Navigate to="/seller" replace />;
+      return <Navigate to="/qc/seller" replace />;
     }
   }
 
@@ -96,7 +96,7 @@ const ApplicationPending = () => {
 
           <div className="mt-8 flex flex-col sm:flex-row gap-3">
             <Link
-              to="/seller/auth"
+              to="/qc/seller/auth"
               className="inline-flex items-center justify-center rounded-xl bg-white text-slate-900 px-5 py-3 text-sm font-black tracking-wide hover:bg-slate-100 transition-colors"
             >
               Back To Seller Login

@@ -79,8 +79,10 @@ export const initSocket = async (server) => {
                 tokenPreview: maskToken(token),
             });
             const decoded = verifyAccessToken(token);
-            socket.user = { userId: decoded.userId, role: decoded.role };
-            logger.info(`Socket auth success: ${decoded.role}:${decoded.userId} for socket ${socket.id}`);
+            const userId = decoded.userId || decoded.id || decoded._id;
+            console.log(`[SOCKET AUTH DEBUG] role: ${decoded.role}, resolvedUserId: ${userId}, tokenPayload: ${JSON.stringify(decoded)}`);
+            socket.user = { userId, role: decoded.role };
+            logger.info(`Socket auth success: ${decoded.role}:${userId} for socket ${socket.id}`);
             return next();
         } catch (err) {
             logger.error(`Socket auth failed for socket ${socket.id}: ${err.message}`);

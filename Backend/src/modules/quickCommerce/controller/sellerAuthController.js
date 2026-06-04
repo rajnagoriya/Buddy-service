@@ -7,6 +7,7 @@ import {
     verifySellerVerificationToken,
 } from "../services/sellerVerificationService.js";
 import { uploadToCloudinary } from "../services/mediaService.js";
+import { detectZoneIdForCoordinates } from "../services/zoneDetectionService.js";
 
 /* ===============================
    Utils
@@ -205,6 +206,10 @@ export const signupSeller = async (req, res) => {
                 type: "Point",
                 coordinates: [parsedLng, parsedLat],
             };
+            const zoneId = await detectZoneIdForCoordinates(parsedLat, parsedLng);
+            if (zoneId) {
+                sellerData.zoneId = zoneId;
+            }
         }
 
         if (parsedRadius !== undefined) {

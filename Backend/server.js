@@ -1,6 +1,7 @@
 import http from 'http';
 import app from './src/app.js';
 import { config } from './src/config/env.js';
+console.log('[ENV DEBUG] ENABLE_UNIFIED_QC_DISPATCH:', process.env.ENABLE_UNIFIED_QC_DISPATCH);
 import { validateConfig } from './src/config/validateEnv.js';
 import { connectDB, disconnectDB } from './src/config/db.js';
 import { connectRedis, closeRedis } from './src/config/redis.js';

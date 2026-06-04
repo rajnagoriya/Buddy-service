@@ -4,13 +4,15 @@ import {
   useJsApiLoader,
   Marker,
   Autocomplete,
+  Polygon,
 } from "@react-google-maps/api";
-import { Search, MapPin, Navigation, Loader2 } from "lucide-react";
+import { Search, MapPin, Navigation, Loader2, AlertTriangle } from "lucide-react";
 import Modal from "./ui/Modal";
 import Button from "./ui/Button";
 import Input from "./ui/Input";
+import { sellerApi } from "../../modules/seller/services/sellerApi";
 
-const libraries = ["places"];
+const libraries = ["places", "drawing", "geometry"];
 const mapContainerStyle = {
   width: "100%",
   height: "340px",
@@ -72,15 +74,48 @@ const MapPicker = ({
   initialRadius = 5,
   maxRadius = 20,
   preferCurrentLocationOnOpen = false,
+  hideRadiusSlider = false,
+  showZones = false,
 }) => {
   const [center, setCenter] = useState(initialLocation || defaultCenter);
   const [marker, setMarker] = useState(initialLocation);
   const [radius, setRadius] = useState(initialRadius);
   const [address, setAddress] = useState("");
   const [isGeocoding, setIsGeocoding] = useState(false);
+  const [zones, setZones] = useState([]);
+  const [selectedZone, setSelectedZone] = useState(null);
+  const [zoneError, setZoneError] = useState("");
   const mapRef = useRef(null);
   const autocompleteRef = useRef(null);
   const circleRef = useRef(null);
+
+  const zonesRef = useRef([]);
+  const showZonesRef = useRef(showZones);
+
+  useEffect(() => {
+    zonesRef.current = zones;
+  }, [zones]);
+
+  useEffect(() => {
+    showZonesRef.current = showZones;
+  }, [showZones]);
+
+  useEffect(() => {
+    if (isOpen && showZones) {
+      fetchZones();
+    }
+  }, [isOpen, showZones]);
+
+  const fetchZones = async () => {
+    try {
+      const response = await sellerApi.getPublicZones();
+      if (response.data.success) {
+        setZones(response.data.data.zones || []);
+      }
+    } catch (error) {
+      console.error("Failed to fetch zones:", error);
+    }
+  };
 
   const clearCircleOverlay = useCallback(() => {
     if (circleRef.current) {
@@ -99,12 +134,64 @@ const MapPicker = ({
     libraries,
   });
 
+  const validateZone = useCallback((pos) => {
+    const currentZones = zonesRef.current;
+    const currentShowZones = showZonesRef.current;
+
+    console.log("validateZone called with pos:", pos, "zones:", currentZones);
+    if (!currentShowZones || !currentZones.length) {
+      console.log("validateZone early exit: showZones =", currentShowZones, "zones.length =", currentZones.length);
+      return;
+    }
+
+    let foundZone = null;
+    
+    // Manual fallback is actually more reliable than google maps geometrycontainsLocation for literal paths
+    const isPointInPolygon = (lat, lng, polygon) => {
+      if (!Array.isArray(polygon) || polygon.length < 3) return false;
+      let inside = false;
+      for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+        const xi = Number(polygon[i].longitude);
+        const yi = Number(polygon[i].latitude);
+        const xj = Number(polygon[j].longitude);
+        const yj = Number(polygon[j].latitude);
+        const intersect =
+          yi > lat !== yj > lat &&
+          lng < ((xj - xi) * (lat - yi)) / (yj - yi + 0.0) + xi;
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    };
+
+    for (const zone of currentZones) {
+      const contains = isPointInPolygon(pos.lat, pos.lng, zone.coordinates);
+      console.log(`Checking zone ${zone.name || zone.zoneName}: contains = ${contains}`);
+      if (contains) {
+        foundZone = zone;
+        break;
+      }
+    }
+
+    if (foundZone) {
+      console.log("validateZone found matching zone:", foundZone);
+      setSelectedZone(foundZone);
+      setZoneError("");
+    } else {
+      console.log("validateZone: No matching zone found for pos:", pos);
+      setSelectedZone(null);
+      setZoneError("Selected location is outside all operational zones.");
+    }
+  }, []);
+
   useEffect(() => {
     if (initialLocation) {
       setCenter(initialLocation);
       setMarker(initialLocation);
+      if (showZones && zones.length > 0) {
+        validateZone(initialLocation);
+      }
     }
-  }, [initialLocation]);
+  }, [initialLocation, showZones, zones.length, validateZone]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -126,13 +213,20 @@ const MapPicker = ({
   }, [isOpen, initialLocation, initialRadius, preferCurrentLocationOnOpen]);
 
   const onMapClick = useCallback((e) => {
+    console.log("onMapClick event:", e);
+    if (!e.latLng) {
+      console.error("onMapClick: e.latLng is not defined!");
+      return;
+    }
     clearCircleOverlay();
     const newPos = {
       lat: e.latLng.lat(),
       lng: e.latLng.lng(),
     };
+    console.log("onMapClick newPos:", newPos);
     setMarker(newPos);
-  }, [clearCircleOverlay]);
+    validateZone(newPos);
+  }, [clearCircleOverlay, validateZone]);
 
   const onMarkerDragEnd = useCallback((e) => {
     clearCircleOverlay();
@@ -141,7 +235,8 @@ const MapPicker = ({
       lng: e.latLng.lng(),
     };
     setMarker(newPos);
-  }, [clearCircleOverlay]);
+    validateZone(newPos);
+  }, [clearCircleOverlay, validateZone]);
 
   const handlePlaceChanged = () => {
     if (autocompleteRef.current) {
@@ -155,6 +250,7 @@ const MapPicker = ({
         setCenter(newPos);
         setMarker(newPos);
         setAddress(place.formatted_address || "");
+        validateZone(newPos);
       }
     }
   };
@@ -173,6 +269,7 @@ const MapPicker = ({
           };
           setCenter(newPos);
           setMarker(newPos);
+          validateZone(newPos);
         },
         () => {
           if (fallbackToInitial && initialLocation) {
@@ -214,7 +311,7 @@ const MapPicker = ({
 
     clearCircleOverlay();
 
-    if (!marker) {
+    if (!marker || hideRadiusSlider) {
       return;
     }
 
@@ -258,6 +355,8 @@ const MapPicker = ({
         ...marker,
         radius,
         address: result.formatted_address,
+        zoneId: selectedZone?._id,
+        zoneName: selectedZone?.name,
         ...extractAddressDetails(result),
       });
       onClose();
@@ -302,7 +401,10 @@ const MapPicker = ({
             <Button variant="outline" onClick={onClose}>
               Cancel
             </Button>
-            <Button onClick={handleConfirm} disabled={!marker || isGeocoding}>
+            <Button 
+              onClick={handleConfirm} 
+              disabled={!marker || isGeocoding || (showZones && !!zoneError)}
+            >
               {isGeocoding ? (
                 <Loader2 className="w-4 h-4 animate-spin mr-2" />
               ) : null}
@@ -369,36 +471,77 @@ const MapPicker = ({
                   animation={window.google.maps.Animation.DROP}
                 />
               )}
+
+              {showZones && zones.map((zone) => (
+                <Polygon
+                  key={zone._id}
+                  paths={zone.coordinates.map(coord => ({
+                    lat: Number(coord.latitude),
+                    lng: Number(coord.longitude)
+                  }))}
+                  options={{
+                    fillColor: selectedZone?._id === zone._id ? "#10b981" : "#64748b",
+                    fillOpacity: 0.2,
+                    strokeColor: selectedZone?._id === zone._id ? "#059669" : "#475569",
+                    strokeWeight: 2,
+                    clickable: true,
+                  }}
+                  onClick={onMapClick}
+                />
+              ))}
             </GoogleMap>
           )}
         </div>
 
-        <div className="bg-gray-50 p-4 rounded-lg space-y-3">
-          <div className="flex justify-between items-center">
-            <label className="text-sm font-medium text-gray-700">
-              Service Radius (km)
-            </label>
-            <span className="text-sm font-bold text-primary">{radius} km</span>
+        {showZones && (
+          <div className="space-y-2">
+            {zoneError ? (
+              <div className="flex items-start gap-2 p-3 bg-rose-50 border border-rose-100 rounded-lg text-rose-600 text-xs font-medium animate-pulse">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <p>{zoneError}</p>
+              </div>
+            ) : selectedZone ? (
+              <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-100 rounded-lg text-emerald-700 text-xs font-bold">
+                <MapPin className="w-4 h-4 shrink-0" />
+                <p>Selected Zone: {selectedZone.name}</p>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-100 rounded-lg text-slate-500 text-xs font-bold">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <p>Please click inside an operational zone on the map.</p>
+              </div>
+            )}
           </div>
-          <input
-            type="range"
-            min="1"
-            max={maxRadius}
-            step="1"
-            value={radius}
-            onChange={(e) => setRadius(Number(e.target.value))}
-            className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary"
-          />
-          <div className="flex justify-between text-[10px] text-gray-400">
-            <span>1 km</span>
-            <span>{maxRadius} km</span>
+        )}
+
+        {!hideRadiusSlider && (
+          <div className="bg-gray-50 p-4 rounded-lg space-y-3">
+            <div className="flex justify-between items-center">
+              <label className="text-sm font-medium text-gray-700">
+                Service Radius (km)
+              </label>
+              <span className="text-sm font-bold text-primary">{radius} km</span>
+            </div>
+            <input
+              type="range"
+              min="1"
+              max={maxRadius}
+              step="1"
+              value={radius}
+              onChange={(e) => setRadius(Number(e.target.value))}
+              className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary"
+            />
+            <div className="flex justify-between text-[10px] text-gray-400">
+              <span>1 km</span>
+              <span>{maxRadius} km</span>
+            </div>
+            <p className="text-xs text-gray-500 flex items-start gap-1">
+              <MapPin className="w-3 h-3 mt-0.5 flex-shrink-0" />
+              Customers within this radius from your shop will be able to see and
+              order from you.
+            </p>
           </div>
-          <p className="text-xs text-gray-500 flex items-start gap-1">
-            <MapPin className="w-3 h-3 mt-0.5 flex-shrink-0" />
-            Customers within this radius from your shop will be able to see and
-            order from you.
-          </p>
-        </div>
+        )}
       </div>
     </Modal>
   );

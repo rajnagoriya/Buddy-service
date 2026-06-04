@@ -138,21 +138,21 @@ const Dashboard = () => {
       title: "Add New Product",
       description: "List a new item in your store",
       icon: Plus,
-      path: "/seller/products/add",
+      path: "/qc/seller/products/add",
       variant: "primary", // dark bg, white text
     },
     {
       title: "Process Orders",
       description: "View and manage pending orders",
       icon: Truck,
-      path: "/seller/orders",
+      path: "/qc/seller/orders",
       variant: "outline", // white bg, border, primary accent
     },
     {
       title: "View Earnings",
       description: "Check your revenue and payouts",
       icon: DollarSign,
-      path: "/seller/earnings",
+      path: "/qc/seller/earnings",
       variant: "outline-emerald", // white bg, border, emerald accent
     },
   ];
@@ -412,7 +412,7 @@ const Dashboard = () => {
         subtitle="Latest transactions from your store"
         actions={
           <button
-            onClick={() => navigate("/seller/orders")}
+            onClick={() => navigate("/qc/seller/orders")}
             className="text-sm font-medium text-primary hover:text-primary/80 flex items-center gap-1"
           >
             View All

@@ -20,6 +20,7 @@ import {
   Terminal,
   Sparkles,
   User,
+  MapPin,
 } from "lucide-react";
 
 const Dashboard = React.lazy(() => import("../pages/Dashboard"));
@@ -91,6 +92,8 @@ const ShopByStoreManagement = React.lazy(
 const AdminSettings = React.lazy(() => import("../pages/AdminSettings"));
 const EnvSettings = React.lazy(() => import("../pages/EnvSettings"));
 const AdminProfile = React.lazy(() => import("../pages/AdminProfile"));
+const ZoneManagement = React.lazy(() => import("../pages/ZoneManagement"));
+
 
 const navItems = [
   {
@@ -203,6 +206,12 @@ const navItems = [
     icon: Settings,
     color: "slate",
   },
+  {
+    label: "Zone Management",
+    path: "/qc/admin/zones",
+    icon: MapPin,
+    color: "rose",
+  },
   { label: "My Profile", path: "/qc/admin/profile", icon: User, color: "indigo" },
   { label: "System Settings", path: "/qc/admin/env", icon: Terminal, color: "dark" },
 ];
@@ -222,7 +231,7 @@ const AdminRoutes = () => {
   }, [totalUnread]);
 
   return (
-    <DashboardLayout navItems={navItemsWithBadges} title="Admin Center">
+    <DashboardLayout navItems={navItemsWithBadges} title="Admin Panel">
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="users" element={<UserManagement />} />
@@ -269,6 +278,7 @@ const AdminRoutes = () => {
         <Route path="returns" element={<Returns />} />
         <Route path="billing" element={<BillingCharges />} />
         <Route path="settings" element={<AdminSettings />} />
+        <Route path="zones" element={<ZoneManagement />} />
         <Route path="env" element={<EnvSettings />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

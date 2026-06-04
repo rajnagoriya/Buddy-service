@@ -36,11 +36,11 @@ function filterByHaversine(candidates, lat, lng, maxDistanceM) {
  * Uses MongoDB $near first; if that returns no rows, falls back to Haversine
  * (helps when geo index / $near is strict or data is borderline).
  */
-export async function getDeliveryPartnerIdsWithinSellerRadius(sellerId) {
+export async function getDeliveryPartnerIdsWithinSellerRadius(sellerId, searchRadiusKm = 15) {
   if (!sellerId) return [];
 
   const seller = await Seller.findById(sellerId)
-    .select("location serviceRadius")
+    .select("location")
     .lean();
 
   if (!seller?.location?.coordinates?.length) return [];
@@ -49,10 +49,8 @@ export async function getDeliveryPartnerIdsWithinSellerRadius(sellerId) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return [];
   if (Math.abs(lat) < 1e-5 && Math.abs(lng) < 1e-5) return [];
 
-  const radiusKm = Math.min(
-    Math.max(Number(seller.serviceRadius) || 5, 1),
-    100,
-  );
+  // Use the search radius passed by caller, defaulting to 15km proximity matching
+  const radiusKm = Number(searchRadiusKm || 15);
   const maxDistanceM = radiusKm * 1000;
 
   const base = buildDeliveryFilter();

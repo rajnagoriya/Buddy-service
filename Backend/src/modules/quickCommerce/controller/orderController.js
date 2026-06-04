@@ -461,7 +461,21 @@ export const getOrderDetails = async (req, res) => {
       (roleNorm === "customer" || roleNorm === "user") &&
       order.customer &&
       customerIdStr === uid;
-    const isOwnerSeller = role === "seller" && sellerIdStr === uid;
+    const isOwnerSeller =
+      role === "seller" &&
+      sellerIdStr === uid &&
+      (process.env.ENABLE_UNIFIED_QC_DISPATCH !== "true" ||
+        !order.workflowVersion ||
+        order.workflowVersion < 2 ||
+        [
+          "DELIVERY_ASSIGNED",
+          "SELLER_ACCEPTED",
+          "PREPARING",
+          "READY_FOR_PICKUP",
+          "OUT_FOR_DELIVERY",
+          "DELIVERED",
+          "CANCELLED"
+        ].includes(order.workflowStatus));
     const primaryRiderId = refToIdString(order.deliveryBoy);
     const returnRiderId = refToIdString(order.returnDeliveryBoy);
     const isAssignedDeliveryBoy =

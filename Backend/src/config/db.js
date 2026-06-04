@@ -1,6 +1,11 @@
 import mongoose from 'mongoose';
+import dns from 'dns';
 import { config } from './env.js';
 import { logger } from '../utils/logger.js';
+
+// Override default DNS servers with Google DNS & Cloudflare DNS to ensure SRV record resolution
+dns.setServers(['8.8.8.8', '1.1.1.1']);
+
 
 export const connectDB = async () => {
     try {

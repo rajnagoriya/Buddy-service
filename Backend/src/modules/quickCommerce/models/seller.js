@@ -134,6 +134,11 @@ const sellerSchema = new mongoose.Schema(
       type: Number,
       default: 5, // Default 5km
     },
+    zoneId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "FoodZone",
+      index: true,
+    },
     lastLogin: Date,
   },
   { timestamps: true },

@@ -80,15 +80,15 @@ export function emitToDelivery(deliveryId, { event, payload }) {
 }
 
 /**
- * Notify only delivery partners whose live location is within the seller's
- * service radius (see Delivery model location + Seller.serviceRadius).
+ * Notify only delivery partners near the seller location (following proximity matching rules).
  */
 export async function emitDeliveryBroadcastForSeller(sellerId, payload) {
   const s = getIo();
   const sid = normalizeSellerId(sellerId);
   if (!sid) return;
 
-  const ids = await getDeliveryPartnerIdsWithinSellerRadius(sid);
+  const searchRadiusKm = payload && payload.radiusMeters ? (payload.radiusMeters / 1000) : 15;
+  const ids = await getDeliveryPartnerIdsWithinSellerRadius(sid, searchRadiusKm);
   if (!ids.length) {
     if (process.env.NODE_ENV !== "production" && s) {
       s.to("delivery:online").emit("delivery:broadcast", {

@@ -29,10 +29,10 @@ axiosInstance.interceptors.request.use(
         // Determination strategy: 
         // 1. If we are on a module-specific page (e.g. /seller/dashboard), prioritize that module's token
         // This is crucial for shared APIs like /products or /admin/categories
-        if (pagePath.includes('/seller')) {
-            token = getStoredAuthToken('auth_seller');
-        } else if (pagePath.includes('/admin')) {
+        if (pagePath.includes('/admin')) {
             token = getStoredAuthToken('auth_admin') || localStorage.getItem('admin_accessToken');
+        } else if (pagePath.includes('/seller')) {
+            token = getStoredAuthToken('auth_seller');
         } else if (pagePath.includes('/delivery')) {
             token = getStoredAuthToken('auth_delivery');
         } else if (pagePath.includes('/customer')) {

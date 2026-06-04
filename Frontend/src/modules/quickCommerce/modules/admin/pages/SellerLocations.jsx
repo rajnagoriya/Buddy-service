@@ -21,7 +21,7 @@ import { cn } from "@qc/lib/utils";
 import { toast } from "sonner";
 import { adminApi } from "../services/adminApi";
 
-const MAP_LIBRARIES = ["geometry"];
+const MAP_LIBRARIES = ["places", "drawing", "geometry"];
 const DEFAULT_CENTER = { lat: 20.5937, lng: 78.9629 };
 const PAGE_SIZE = 25;
 const TARGET_VIEW_RADIUS_KM = 25;
@@ -115,7 +115,7 @@ const ActiveSellerMap = ({
 }) => {
   const mapRef = useRef(null);
   const { isLoaded: mapLoaded, loadError: mapLoadError } = useJsApiLoader({
-    id: "admin-seller-locations-map",
+    id: "google-map-script",
     googleMapsApiKey: googleMapApiKey,
     libraries: MAP_LIBRARIES,
   });

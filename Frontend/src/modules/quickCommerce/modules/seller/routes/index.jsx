@@ -30,33 +30,33 @@ const Profile = React.lazy(() => import("../pages/Profile"));
 const Withdrawals = React.lazy(() => import("../pages/Withdrawals"));
 
 const navItems = [
-  { label: "Dashboard", path: "/seller", icon: HiOutlineSquares2X2, end: true },
-  { label: "Products", path: "/seller/products", icon: HiOutlineCube },
-  { label: "Stock", path: "/seller/inventory", icon: HiOutlineArchiveBox },
-  { label: "Orders", path: "/seller/orders", icon: HiOutlineTruck },
-  { label: "Returns", path: "/seller/returns", icon: HiOutlineArchiveBox },
-  { label: "Track Orders", path: "/seller/tracking", icon: HiOutlineMapPin },
+  { label: "Dashboard", path: "/qc/seller", icon: HiOutlineSquares2X2, end: true },
+  { label: "Products", path: "/qc/seller/products", icon: HiOutlineCube },
+  { label: "Stock", path: "/qc/seller/inventory", icon: HiOutlineArchiveBox },
+  { label: "Orders", path: "/qc/seller/orders", icon: HiOutlineTruck },
+  { label: "Returns", path: "/qc/seller/returns", icon: HiOutlineArchiveBox },
+  { label: "Track Orders", path: "/qc/seller/tracking", icon: HiOutlineMapPin },
   {
     label: "Sales Reports",
-    path: "/seller/analytics",
+    path: "/qc/seller/analytics",
     icon: HiOutlineChartBarSquare,
   },
   {
     label: "Money Request",
-    path: "/seller/withdrawals",
+    path: "/qc/seller/withdrawals",
     icon: HiOutlineCurrencyDollar,
   },
   {
     label: "Payment History",
-    path: "/seller/transactions",
+    path: "/qc/seller/transactions",
     icon: HiOutlineCreditCard,
   },
   {
     label: "Earnings",
-    path: "/seller/earnings",
+    path: "/qc/seller/earnings",
     icon: HiOutlineCurrencyDollar,
   },
-  { label: "Profile", path: "/seller/profile", icon: HiOutlineUser },
+  { label: "Profile", path: "/qc/seller/profile", icon: HiOutlineUser },
 ];
 
 const SellerRoutes = () => {

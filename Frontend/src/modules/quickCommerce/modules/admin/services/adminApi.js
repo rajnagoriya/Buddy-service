@@ -139,3 +139,14 @@ export const adminApi = {
     updateCoupon: (id, data) => axiosInstance.put(`/admin/coupons/${id}`, data),
     deleteCoupon: (id) => axiosInstance.delete(`/admin/coupons/${id}`),
 };
+
+const FOOD_ADMIN_BASE = "/api/v1/food/admin";
+
+export const zoneApi = {
+    getZones: (params) => axiosInstance.get('/zones', { params, baseURL: FOOD_ADMIN_BASE }),
+    getZoneById: (id) => axiosInstance.get(`/zones/${id}`, { baseURL: FOOD_ADMIN_BASE }),
+    createZone: (data) => axiosInstance.post('/zones', data, { baseURL: FOOD_ADMIN_BASE }),
+    updateZone: (id, data) => axiosInstance.patch(`/zones/${id}`, data, { baseURL: FOOD_ADMIN_BASE }),
+    deleteZone: (id) => axiosInstance.delete(`/zones/${id}`, { baseURL: FOOD_ADMIN_BASE }),
+};
+

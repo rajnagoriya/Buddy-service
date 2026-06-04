@@ -3,6 +3,7 @@ import Transaction from "../models/transaction.js";
 import { handleResponse, calculateDistance } from "../utils/helper.js";
 import mongoose from "mongoose";
 import { invalidateSellerName } from "../services/entityNameCache.js";
+import { detectZoneIdForCoordinates } from "../services/zoneDetectionService.js";
 
 /* ===============================
    GET NEARBY SELLERS
@@ -18,45 +19,42 @@ export const getNearbySellers = async (req, res) => {
     const customerLat = Number(lat);
     const customerLng = Number(lng);
 
-    // Fetch all active/verified sellers
-    // We could use $geoNear, but to strictly follow the requirement of individual radii,
-    // we'll fetch sellers within a reasonable max distance (e.g. 100km) and then filter.
+    const customerZoneId = await detectZoneIdForCoordinates(customerLat, customerLng);
+    if (!customerZoneId) {
+      return handleResponse(
+        res,
+        200,
+        "Nearby sellers fetched successfully",
+        [],
+      );
+    }
+
     const sellers = await Seller.find({
       isActive: true,
       isVerified: true,
-      location: {
-        $near: {
-          $geometry: {
-            type: "Point",
-            coordinates: [customerLng, customerLat],
-          },
-          $maxDistance: 100000, // 100km max search area for performance
-        },
-      },
+      zoneId: customerZoneId,
     }).lean();
 
-    // Filter based on individual service radius
-    const nearbySellers = sellers.filter((seller) => {
-      const sellerLng = seller.location.coordinates[0];
-      const sellerLat = seller.location.coordinates[1];
-      const distance = calculateDistance(
-        customerLat,
-        customerLng,
-        sellerLat,
-        sellerLng,
-      );
-
-      // Add distance to seller object for frontend
-      seller.distance = distance;
-
-      return distance <= (seller.serviceRadius || 5);
+    // Inject distance score for client compatibility
+    sellers.forEach((seller) => {
+      if (seller.location && Array.isArray(seller.location.coordinates)) {
+        const [sellerLng, sellerLat] = seller.location.coordinates;
+        seller.distance = calculateDistance(
+          customerLat,
+          customerLng,
+          sellerLat,
+          sellerLng
+        );
+      } else {
+        seller.distance = 999;
+      }
     });
 
     return handleResponse(
       res,
       200,
       "Nearby sellers fetched successfully",
-      nearbySellers,
+      sellers,
     );
   } catch (error) {
     return handleResponse(res, 500, error.message);
@@ -133,7 +131,7 @@ export const requestWithdrawal = async (req, res) => {
 ================================ */
 export const getSellerProfile = async (req, res) => {
   try {
-    const seller = await Seller.findById(req.user.id);
+    const seller = await Seller.findById(req.user.id).populate("zoneId");
     if (!seller) {
       return handleResponse(res, 404, "Seller not found");
     }
@@ -182,6 +180,8 @@ export const updateSellerProfile = async (req, res) => {
         type: "Point",
         coordinates: [Number(lng), Number(lat)],
       };
+      const zoneId = await detectZoneIdForCoordinates(Number(lat), Number(lng));
+      seller.zoneId = zoneId;
     }
 
     if (radius !== undefined) {
@@ -191,6 +191,7 @@ export const updateSellerProfile = async (req, res) => {
     }
 
     const updatedSeller = await seller.save();
+    await updatedSeller.populate("zoneId");
 
     // Invalidate cached seller name in case shopName changed
     invalidateSellerName(req.user.id).catch((err) => {

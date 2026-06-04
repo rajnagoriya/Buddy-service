@@ -6,12 +6,14 @@
 let mapsLoadPromise = null;
 let isLoaded = false;
 
-const ensurePlacesLibrary = async () => {
+const ensureLibraries = async () => {
   if (!window.google?.maps) return;
-  if (window.google.maps.places) return;
-  if (typeof window.google.maps.importLibrary === "function") {
+  const missing = [];
+  if (!window.google.maps.places) missing.push("places");
+  if (!window.google.maps.drawing) missing.push("drawing");
+  if (missing.length > 0 && typeof window.google.maps.importLibrary === "function") {
     try {
-      await window.google.maps.importLibrary("places");
+      await Promise.all(missing.map(lib => window.google.maps.importLibrary(lib)));
     } catch {
       // ignore; caller can decide fallback behavior
     }
@@ -22,7 +24,7 @@ export const loadGoogleMaps = (apiKey) => {
   // Return existing promise if already loading
   if (mapsLoadPromise) {
     return mapsLoadPromise.then(async (maps) => {
-      await ensurePlacesLibrary();
+      await ensureLibraries();
       return maps;
     });
   }
@@ -30,7 +32,7 @@ export const loadGoogleMaps = (apiKey) => {
   // Return resolved promise if already loaded
   if (isLoaded && window.google?.maps) {
     return Promise.resolve(window.google.maps).then(async (maps) => {
-      await ensurePlacesLibrary();
+      await ensureLibraries();
       return maps;
     });
   }
@@ -46,13 +48,13 @@ export const loadGoogleMaps = (apiKey) => {
 
     // Create script element
     const script = document.createElement('script');
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=geometry,places`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=geometry,places,drawing`;
     script.async = true;
     script.defer = true;
 
     script.onload = async () => {
       isLoaded = true;
-      await ensurePlacesLibrary();
+      await ensureLibraries();
       resolve(window.google.maps);
     };
 
@@ -70,3 +72,4 @@ export const loadGoogleMaps = (apiKey) => {
 export const isGoogleMapsLoaded = () => {
   return isLoaded && window.google?.maps;
 };
+

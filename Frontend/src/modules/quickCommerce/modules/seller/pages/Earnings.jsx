@@ -114,7 +114,7 @@ const Earnings = () => {
               Download Report
             </Button>
             <ShimmerButton
-              onClick={() => navigate("/seller/withdrawals")}
+              onClick={() => navigate("/qc/seller/withdrawals")}
               className="px-6 py-2 rounded-xl text-sm font-bold text-white shadow-lg">
               <span className="text-white">Withdraw Funds</span>
             </ShimmerButton>
