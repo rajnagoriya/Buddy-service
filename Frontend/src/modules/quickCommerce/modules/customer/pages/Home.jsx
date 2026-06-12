@@ -412,7 +412,7 @@ const Home = () => {
   return (
     <div className={`min-h-screen ${products.length === 0 && !isLoading ? "bg-transparent" : "bg-transparent"}`}>
       {/* Sticky Header: Location & Search */}
-      <div className={cn("sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-white/20 shadow-sm", isProductDetailOpen && "hidden md:block")}>
+      <div className={cn("sticky top-0 z-50 bg-gradient-to-br from-[#ACC8A2] to-[#99B68F] backdrop-blur-xl border-b border-transparent shadow-sm", isProductDetailOpen && "hidden md:block")}>
         <UnifiedHeader 
           location={currentLocation}
           handleLocationClick={() => {
@@ -423,12 +423,13 @@ const Home = () => {
           hideLocation={false}
           hideServiceGrid={true}
           placeholders={["Search for milk", "Search for bread", "Search for chips", "Search for fresh fruits"]}
-          theme={{ section: 'bg-transparent' }}
+          theme={{ section: 'bg-transparent', text: "text-[#1A2517]", sub: "text-[#1A2517]/80", icon: "text-[#1A2517]" }}
+          tone="light"
         />
       </div>
 
       {/* Service Switcher: Non-Sticky */}
-      <div className={cn("relative z-10", isProductDetailOpen && "hidden md:block")}>
+      <div className={cn("relative z-10 bg-gradient-to-br from-[#99B68F] to-[#8FA986] rounded-b-[2rem] shadow-sm pb-2 mb-2", isProductDetailOpen && "hidden md:block")}>
         <UnifiedHeader 
           activeTab={activeTab}
           setActiveTab={setActiveTab}
@@ -436,7 +437,8 @@ const Home = () => {
           hideLocation={true}
           hideActions={true}
           hideServiceGrid={false}
-          theme={{ section: 'bg-transparent' }}
+          theme={{ section: 'bg-transparent', text: "text-[#1A2517]", sub: "text-[#1A2517]/80" }}
+          tone="light"
         />
       </div>
 

@@ -1,5 +1,6 @@
 import { ApiError } from '../../../utils/ApiError.js';
 import { ensureThirdPartySettings } from '../admin/services/adminService.js';
+import { env } from '../../../config/env.js';
 
 const PAYMENT_GATEWAY_SPECS = {
   razor_pay: {
@@ -200,8 +201,8 @@ export const resolveConfiguredGatewayCredentials = async (gatewayKey) => {
   const validatedGateway = validateGatewayConfiguration(gatewayKey, gateway);
 
   if (gatewayKey === 'razor_pay') {
-    const keyId = normalizeString(isLive ? validatedGateway.live_api_key : validatedGateway.test_api_key);
-    const keySecret = normalizeString(isLive ? validatedGateway.live_secret_key : validatedGateway.test_secret_key);
+    let keyId = normalizeString(isLive ? validatedGateway.live_api_key : validatedGateway.test_api_key);
+    let keySecret = normalizeString(isLive ? validatedGateway.live_secret_key : validatedGateway.test_secret_key);
 
     if (keyId.toLowerCase().includes('demo') || keySecret.toLowerCase().includes('demo')) {
       throw new ApiError(500, 'Razorpay keys are demo placeholders. Configure real keys in Admin > Payment Gateways');

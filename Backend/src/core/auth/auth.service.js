@@ -153,6 +153,21 @@ export const verifyUserOtpAndLogin = async (
     if (needsSave) await userDoc.save();
   }
 
+  // Always ensure TaxiUser exists for this user
+  try {
+    const { User: TaxiUser } = await import("../../modules/taxi/user/models/User.js");
+    const existingTaxiUser = await TaxiUser.findOne({ phone }).lean();
+    if (!existingTaxiUser) {
+      await TaxiUser.create({
+        phone,
+        name: userDoc.name || trimmedName || "User",
+        isVerified: true,
+      });
+    }
+  } catch (err) {
+    logger.warn({ err }, "Auto-creating TaxiUser failed during user authentication");
+  }
+
   // Block login for deactivated users
   if (userDoc.isActive === false) {
     throw new AuthError(

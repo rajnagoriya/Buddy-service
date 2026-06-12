@@ -7,7 +7,7 @@ const navItems = [
     { label: 'Home', icon: Home, path: '/qc' },
     { label: 'Category', icon: LayoutGrid, path: '/qc/categories' },
     { label: 'Orders', icon: ShoppingBag, path: '/qc/orders' },
-    { label: 'Profile', icon: User, path: '/qc/profile' },
+    { label: 'Profile', icon: User, path: '/food/user/profile' },
 ];
 
 const BottomNav = () => {

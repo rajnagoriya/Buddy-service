@@ -213,7 +213,7 @@ const navItems = [
     color: "rose",
   },
   { label: "My Profile", path: "/qc/admin/profile", icon: User, color: "indigo" },
-  { label: "System Settings", path: "/qc/admin/env", icon: Terminal, color: "dark" },
+  // { label: "System Settings", path: "/qc/admin/env", icon: Terminal, color: "dark" },
 ];
 
 const BillingCharges = React.lazy(() => import("../pages/BillingCharges"));
@@ -279,7 +279,7 @@ const AdminRoutes = () => {
         <Route path="billing" element={<BillingCharges />} />
         <Route path="settings" element={<AdminSettings />} />
         <Route path="zones" element={<ZoneManagement />} />
-        <Route path="env" element={<EnvSettings />} />
+        {/* <Route path="env" element={<EnvSettings />} /> */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </DashboardLayout>

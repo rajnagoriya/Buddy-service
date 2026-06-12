@@ -224,7 +224,7 @@ const AddressSettings = () => {
       <header className="sticky top-0 z-30">
         <div className="bg-white/70 backdrop-blur-md border-b border-white/70 shadow-[0_10px_20px_rgba(15,23,42,0.05)]">
           <div className="px-5 py-4 flex items-center gap-3">
-            <button onClick={() => navigate('/taxi/user/profile')} className="p-2 -ml-2 active:scale-95 transition-all rounded-full">
+            <button onClick={() => navigate('/food/user/profile')} className="p-2 -ml-2 active:scale-95 transition-all rounded-full">
               <ArrowLeft size={22} className="text-slate-900" strokeWidth={3} />
             </button>
             <div className="min-w-0">

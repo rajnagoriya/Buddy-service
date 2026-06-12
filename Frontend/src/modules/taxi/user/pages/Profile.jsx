@@ -226,7 +226,7 @@ const Profile = () => {
             <MotionButton
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
-              onClick={() => navigate('/taxi/user/profile/settings')}
+              onClick={() => navigate('/food/user/profile/settings')}
               className="h-10 w-10 rounded-xl bg-white/10 backdrop-blur-md border border-white/10 flex items-center justify-center text-white"
             >
               <Settings size={20} />

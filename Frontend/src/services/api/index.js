@@ -2066,8 +2066,12 @@ export const deliveryAPI = {
 };
 
 export const userAPI = {
+  /** Get aggregated master profile (Bearer USER). */
+  getMasterProfile: () =>
+    apiClient.get("/profile/master", { contextModule: "user" }),
   /** Get current user profile (Bearer USER). */
   getProfile: () =>
+
     getUserMeOnce().then((res) => {
       const user =
         res?.data?.data?.user ??

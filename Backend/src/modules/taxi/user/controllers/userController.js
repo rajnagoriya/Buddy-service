@@ -244,9 +244,10 @@ const getFrontendBaseUrl = (req) => {
     })(),
   ].filter(Boolean);
 
+  const validRequestCandidates = requestCandidates.filter(c => !c.includes('razorpay.com') && !c.includes('phonepe.com'));
   const preferredPublicOrigin =
     configuredOrigins.find(isPublicWebOrigin) ||
-    requestCandidates.find(isPublicWebOrigin);
+    validRequestCandidates.find(isPublicWebOrigin);
 
   if (preferredPublicOrigin) {
     return preferredPublicOrigin;
@@ -254,7 +255,7 @@ const getFrontendBaseUrl = (req) => {
 
   return (
     configuredOrigins[0] ||
-    requestCandidates[0] ||
+    validRequestCandidates[0] ||
     'http://localhost:5173'
   ).replace(/\/+$/, '');
 };
@@ -2037,6 +2038,7 @@ export const requestAccountDeletion = async (req, res) => {
 
 export const getUserWallet = async (req, res) => {
   const userId = req.auth?.sub;
+  console.log("Wallet req.auth.sub =", userId);
   const user = await User.findById(userId).select('_id').lean();
 
   if (!user) {
@@ -2299,7 +2301,7 @@ export const createRazorpayWalletTopupOrder = async (req, res) => {
   const proto = req.get('x-forwarded-proto') || req.protocol || 'http';
   const host = req.get('x-forwarded-host') || req.get('host') || 'localhost:5000';
   const backendOrigin = `${proto}://${host}`;
-  const callbackUrl = `${backendOrigin}/api/v1/users/wallet/razorpay/callback`;
+  const callbackUrl = `${backendOrigin}/api/v1/taxi/users/wallet/razorpay/callback`;
 
   const order = await razorpayRequest({
     method: 'POST',
@@ -2721,7 +2723,7 @@ export const verifyRazorpayWalletTopup = async (req, res) => {
 
 export const handleUserRazorpayWalletTopupCallback = async (req, res) => {
   const frontendBaseUrl = getFrontendBaseUrl(req);
-  const redirectUrl = new URL(`${frontendBaseUrl}/razorpay/status`);
+  const redirectUrl = new URL(`${frontendBaseUrl}/taxi/razorpay/status`);
   redirectUrl.searchParams.set('flow', 'user-wallet');
 
   try {

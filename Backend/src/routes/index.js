@@ -20,8 +20,10 @@ import webhookRoutes from '../core/payments/routes/webhook.routes.js'; // ✅ NE
 import searchRoutes from '../modules/food/search/routes/search.routes.js';
 import qcRoutes from '../modules/quickCommerce/routes/index.js';
 import { taxiRouter } from '../modules/taxi/routes/index.js';
+import masterProfileRoutes from '../core/profile/profile.routes.js';
 
 const router = express.Router();
+
 // ... (previous routes)
 router.use('/v1/qc', qcRoutes);
 router.use('/v1/taxi', taxiRouter);
@@ -50,6 +52,8 @@ router.get('/v1/food/admin/business-settings/public', businessSettingsController
 
 router.use('/v1/food/admin', authMiddleware, requireRoles('ADMIN'), restaurantAdminRoutes);
 router.use('/v1/food/user', authMiddleware, requireRoles('USER'), userRoutes);
+router.use('/v1/profile', authMiddleware, requireRoles('USER'), masterProfileRoutes);
+
 router.use('/v1/food/notifications', authMiddleware, requireRoles('USER', 'RESTAURANT', 'DELIVERY_PARTNER'), notificationRoutes);
 router.use('/v1/food/orders', authMiddleware, requireRoles('USER'), orderUserRoutes);
 router.use('/v1/food/payments', authMiddleware, paymentRoutes);

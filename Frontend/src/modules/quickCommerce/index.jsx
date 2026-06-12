@@ -103,8 +103,8 @@ const QuickCommerceModule = () => {
                                         <Route path="orders" element={<OrdersPage />} />
                                         <Route path="orders/:orderId" element={<OrderDetailPage />} />
                                         <Route path="transactions" element={<OrderTransactionsPage />} />
-                                        <Route path="profile" element={<ProfilePage />} />
-                                        <Route path="profile/edit" element={<EditProfilePage />} />
+                                        <Route path="profile" element={<Navigate to="/food/user/profile" replace />} />
+                                        <Route path="profile/edit" element={<Navigate to="/food/user/profile" replace />} />
                                         <Route path="wishlist" element={<WishlistPage />} />
                                         <Route path="addresses" element={<AddressesPage />} />
                                         <Route path="wallet" element={<WalletPage />} />

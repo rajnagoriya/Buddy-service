@@ -658,7 +658,7 @@ export default function TaxiApp() {
               <Route path="user/tours" element={<ComingSoon />} />
 
               <Route path="user/activity" element={<Activity />} />
-              <Route path="user/profile" element={<Profile />} />
+              <Route path="user/profile" element={<Navigate to="/food/user/profile" replace />} />
               <Route path="user/wallet" element={<Wallet />} />
               <Route path="user/notifications" element={<UserNotifications />} />
               <Route path="user/promo" element={<PromoCodes />} />
@@ -906,6 +906,8 @@ export default function TaxiApp() {
               <Route path="settings/bid" element={<AdminBidRideSettings />} />
               <Route path="settings/wallet" element={<AdminWalletSettings />} />
               <Route path="settings/tip" element={<AdminTipSettings />} />
+              <Route path="settings/app-modules/create" element={<AdminAppModules />} />
+              <Route path="settings/app-modules/edit/:id" element={<AdminAppModules />} />
               <Route path="settings/app-modules" element={<AdminAppModules />} />
               <Route path="settings/onboarding" element={<AdminOnboardingScreens />} />
               <Route path="settings/payment-gateways" element={<AdminPaymentGateways />} />

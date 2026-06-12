@@ -55,7 +55,7 @@ const PaymentSettings = () => {
   return (
     <div className="min-h-screen bg-[#FDFDFD] max-w-lg mx-auto flex flex-col font-sans">
       <header className="bg-white p-5 flex items-center gap-6 border-b border-gray-50 sticky top-0 z-20">
-        <button onClick={() => navigate('/taxi/user/profile')} className="p-2 active:scale-95"><ArrowLeft size={24} /></button>
+        <button onClick={() => navigate('/food/user/profile')} className="p-2 active:scale-95"><ArrowLeft size={24} /></button>
         <h1 className="text-[18px] font-black">Payments</h1>
       </header>
 

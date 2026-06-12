@@ -171,7 +171,7 @@ const Header = () => {
                             )}
                         </Link>
 
-                        <Link to="/qc/profile" className="flex items-center justify-center">
+                        <Link to="/food/user/profile" className="flex items-center justify-center">
                             <User className="h-6 w-6 text-slate-600 hover:text-[var(--primary)] transition-colors" />
                         </Link>
                     </div>

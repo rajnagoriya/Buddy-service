@@ -899,13 +899,7 @@ const AdminLayout = () => {
       {
         title: 'Home',
         items: [
-          {
-            icon: UserCog,
-            label: 'Admin Management',
-            subItems: [
-              { label: 'Admins', path: '/admin/management/admins', permission: 'subadmins.manage' },
-            ],
-          },
+
           { icon: Home, label: 'Dashboard', path: '/admin/dashboard', permission: 'dashboard.view' },
           { icon: IndianRupee, label: 'Admin Earnings', path: '/admin/earnings', permission: 'earnings.view' },
           { icon: MessageCircle, label: 'Chat', path: '/admin/chat', permission: 'chat.view' },
@@ -931,43 +925,7 @@ const AdminLayout = () => {
               { label: 'Goods Types', path: '/admin/pricing/goods-types', permission: 'goods_types.view' },
             ],
           },
-          {
-            icon: Briefcase,
-            label: 'Rental',
-            subItems: [
-              { label: 'Service Stores', path: '/admin/pricing/service-stores', permission: 'service_stores.view' },
-              { label: 'Pending Service Stores', path: '/admin/pricing/service-stores/pending', permission: 'service_stores.view' },
-              { label: 'Pending Service Staff', path: '/admin/pricing/service-stores/pending-staff', permission: 'service_stores.view' },
-              { label: 'Rental Commission', path: '/admin/pricing/rental-commission', permission: 'rental.view' },
-              { label: 'Rental Vehicles', path: '/admin/pricing/rental-vehicles', permission: 'rental.view' },
-              { label: 'Track Vehicles', path: '/admin/pricing/rental-tracking', permission: 'rental.view' },
-              { label: 'Rental Requests', path: '/admin/pricing/rental-requests', permission: 'rental.view' },
-              { label: 'Rental Quote Requests', path: '/admin/pricing/rental-quotes', permission: 'rental.view' },
-              { label: 'Rental Package Types', path: '/admin/pricing/rental-packages', permission: 'rental.view' },
-              { label: 'Package Pricing', path: '/admin/pricing/package-pricing', permission: 'rental.view' },
-            ],
-          },
-          {
-            icon: Bus,
-            label: 'Bus Service',
-            subItems: [
-              { label: 'Fleet Manager', path: '/admin/bus-service', permission: 'bus_service.view' },
-              { label: 'Pending Bus Drivers', path: '/admin/bus-service/pending-drivers', permission: 'bus_service.view' },
-              { label: 'Bus Commission', path: '/admin/bus-service/commission', permission: 'bus_service.view' },
-              { label: 'Bus Bookings', path: '/admin/bus-service/bookings', permission: 'bus_service.view' },
-            ],
-          },
-          {
-            icon: Share2,
-            label: 'Car Pooling',
-            subItems: [
-              { label: 'Pending Pooling Drivers', path: '/admin/pooling/pending-drivers', permission: 'pooling.view' },
-              { label: 'Pooling Vehicles', path: '/admin/pooling/vehicles', permission: 'pooling.view' },
-              { label: 'Pooling Commission', path: '/admin/pooling/commission', permission: 'pooling.view' },
-              { label: 'Routes & Stops', path: '/admin/pooling/routes', permission: 'pooling.view' },
-              { label: 'Pooling Bookings', path: '/admin/pooling/bookings', permission: 'pooling.view' },
-            ],
-          },
+
           {
             icon: MapPin,
             label: 'Geofencing',
@@ -991,7 +949,8 @@ const AdminLayout = () => {
             label: 'Customer Management',
             subItems: [
               { label: 'User List', path: '/admin/users', permission: 'users.view' },
-              { label: 'Subscription Management', path: '/admin/users/subscriptions', permission: 'users.view' },
+              // Subscription Management hidden — re-enable when ready
+              // { label: 'Subscription Management', path: '/admin/users/subscriptions', permission: 'users.view' },
               { label: 'Delete Request Users', path: '/admin/users/delete-requests', permission: 'users.view' },
               { label: 'User Bulk Upload', path: '/admin/users/bulk-upload', permission: 'users.view' },
             ],

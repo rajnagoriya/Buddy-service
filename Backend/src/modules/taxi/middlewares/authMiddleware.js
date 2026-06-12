@@ -60,6 +60,33 @@ export const authenticate = (allowedRoles = [], options = {}) => async (req, _re
 
     let normalizedRole = normalizeRole(payload.role);
 
+    // Bridge: Support FoodUser (buddy_users) with linked TaxiUser profile
+    if (normalizedRole === 'user') {
+      const tokenUserId = payload.sub || payload.userId || payload.id;
+      console.log('--- AUTH BRIDGE TRACE ---');
+      console.log(`Original payload.sub: ${tokenUserId}`);
+      console.log(`Original role: ${payload.role}`);
+      
+      const directTaxiUser = await User.findById(tokenUserId).select('_id');
+      if (!directTaxiUser) {
+        const foodUser = await FoodUser.findById(tokenUserId).select('phone');
+        console.log(`Food user found?: ${!!foodUser}`);
+        if (foodUser) {
+          console.log(`Food user phone: ${foodUser.phone}`);
+          const linkedTaxiUser = await User.findOne({ phone: foodUser.phone }).select('_id');
+          console.log(`Linked Taxi user found?: ${!!linkedTaxiUser}`);
+          if (linkedTaxiUser) {
+            console.log(`Linked Taxi user _id: ${linkedTaxiUser._id}`);
+            payload.sub = String(linkedTaxiUser._id);
+          }
+        }
+      } else {
+         console.log('directTaxiUser found');
+      }
+      console.log(`Final payload.sub after mapping: ${payload.sub}`);
+      console.log('-------------------------');
+    }
+
     // Bridge: Support DELIVERY_PARTNER with linked Taxi Driver profile
     if (normalizedRole === 'delivery_partner') {
       const userId = payload.sub || payload.userId || payload.id;

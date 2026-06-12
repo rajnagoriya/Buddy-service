@@ -359,9 +359,7 @@ api.interceptors.request.use(
   (config) => {
     if (
       config.url === '/users/me' ||
-      config.url === '/users/wallet' ||
-      config.url?.startsWith('/users/me/') ||
-      config.url?.startsWith('/users/wallet/')
+      config.url?.startsWith('/users/me/')
     ) {
       config.baseURL = config.baseURL ? config.baseURL.replace(/\/taxi$/, '') : '';
     }

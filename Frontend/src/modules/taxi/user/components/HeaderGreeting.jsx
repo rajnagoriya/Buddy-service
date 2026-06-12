@@ -91,7 +91,7 @@ const HeaderGreeting = () => {
         </div>
 
         <button
-          onClick={() => navigate('/wallet')}
+          onClick={() => navigate(`${routePrefix}/wallet`)}
           className="relative w-12 h-12 overflow-hidden rounded-full border border-white/80 bg-white/95 flex items-center justify-center shadow-[0_12px_30px_rgba(15,23,42,0.08)] shrink-0 active:scale-95 transition-transform"
         >
           <motion.div

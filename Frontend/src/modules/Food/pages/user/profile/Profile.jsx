@@ -25,7 +25,13 @@ import {
   Share2,
   Utensils,
   Trash2,
+  History,
+  Shield,
+  Star,
+  Heart,
+  Package,
 } from "lucide-react";
+
 
 import AnimatedPage from "@food/components/user/AnimatedPage";
 import { Card, CardContent } from "@food/components/ui/card";
@@ -78,7 +84,10 @@ export default function Profile() {
 
   // Popup states
   const [vegModeOpen, setVegModeOpen] = useState(false);
+  const [masterData, setMasterData] = useState(null);
+  const [loadingMaster, setLoadingMaster] = useState(true);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
+
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [referralReward, setReferralReward] = useState(0);
@@ -249,31 +258,30 @@ export default function Profile() {
   useEffect(() => {
     let mounted = true;
     userAPI
-      .getReferralStats()
+      .getMasterProfile()
       .then((res) => {
-        const reward = res?.data?.data?.stats?.rewardAmount;
-        if (mounted) setReferralReward(Number(reward) || 0);
+        if (mounted) {
+          const profileData = res?.data?.data || res?.data;
+          setMasterData(profileData);
+          setLoadingMaster(false);
+          // Set legacy state variables for compatibility
+          if (profileData?.referrals?.food_reward) {
+            setReferralReward(Number(profileData.referrals.food_reward) || 0);
+          }
+          if (profileData?.wallets?.food_qc_balance != null) {
+            setWalletBalance(Number(profileData.wallets.food_qc_balance) || 0);
+          }
+        }
       })
-      .catch(() => { });
+      .catch((err) => {
+        console.error("Failed to load master profile", err);
+        if (mounted) setLoadingMaster(false);
+      });
     return () => {
       mounted = false;
     };
   }, []);
 
-  useEffect(() => {
-    let mounted = true;
-    userAPI
-      .getWallet()
-      .then((res) => {
-        const w = res?.data?.data?.wallet || res?.data?.wallet;
-        const bal = Number(w?.balance);
-        if (mounted) setWalletBalance(Number.isFinite(bal) ? bal : 0);
-      })
-      .catch(() => { });
-    return () => {
-      mounted = false;
-    };
-  }, []);
 
   const refId =
     userProfile?._id || userProfile?.id || userProfile?.referralCode || "";
@@ -856,9 +864,145 @@ export default function Profile() {
             </motion.div>
           </Link>
         </div>
+        {/* Quick Commerce Summary Section */}
+        <div className="mb-4">
+          <div className="flex items-center gap-2 mb-2 px-1">
+            <div className="w-1 h-4 bg-[#10B981] rounded"></div>
+            <h3 className="text-base font-semibold text-gray-900 dark:text-white">
+              Quick Commerce Summary
+            </h3>
+          </div>
+          <Card className="bg-white dark:bg-[#1a1a1a] border-0 shadow-sm rounded-2xl overflow-hidden mb-3">
+            <CardContent className="p-4">
+              <div className="grid grid-cols-2 gap-4 pb-4 border-b border-gray-100 dark:border-gray-800">
+                <div className="flex items-center gap-3">
+                  <div className="bg-emerald-50 dark:bg-emerald-950/20 p-2 rounded-xl text-emerald-600">
+                    <Wallet className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">QC Wallet</p>
+                    <p className="text-sm font-bold text-slate-800 dark:text-white">
+                      ₹{masterData?.wallets?.food_qc_balance != null ? Number(masterData.wallets.food_qc_balance).toFixed(0) : "0"}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="bg-rose-50 dark:bg-rose-950/20 p-2 rounded-xl text-rose-500">
+                    <Heart className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Wishlist</p>
+                    <p className="text-sm font-bold text-slate-800 dark:text-white">
+                      {masterData?.modules?.qc?.wishlistCount ?? masterData?.qc?.wishlistCount ?? 0} Items
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-between items-center py-3 border-b border-gray-100 dark:border-gray-800">
+                <div className="flex items-center gap-3">
+                  <div className="bg-slate-100 dark:bg-slate-800 p-2 rounded-xl text-slate-600 dark:text-slate-300">
+                    <Building2 className="h-5 w-5" />
+                  </div>
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Total Orders</span>
+                </div>
+                <span className="text-sm font-bold text-gray-900 dark:text-white">
+                  {masterData?.modules?.qc?.orderCount ?? masterData?.qc?.orderCount ?? 0}
+                </span>
+              </div>
+
+              <div className="pt-3 space-y-2">
+                <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest px-1">Navigation Shortcuts</p>
+                <div className="grid grid-cols-3 gap-2">
+                  <Link to="/qc/orders" className="text-center p-2 rounded-xl bg-slate-50 dark:bg-slate-800/40 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Orders
+                  </Link>
+                  <Link to="/qc/wishlist" className="text-center p-2 rounded-xl bg-slate-50 dark:bg-slate-800/40 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Wishlist
+                  </Link>
+                  <Link to="/qc/transactions" className="text-center p-2 rounded-xl bg-slate-50 dark:bg-slate-800/40 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Payments
+                  </Link>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Taxi Summary Section */}
+        <div className="mb-4">
+          <div className="flex items-center gap-2 mb-2 px-1">
+            <div className="w-1 h-4 bg-[#6366F1] rounded"></div>
+            <h3 className="text-base font-semibold text-gray-900 dark:text-white">
+              Taxi Summary
+            </h3>
+          </div>
+          {masterData?.modules?.taxi?.enabled ? (
+            <Card className="bg-white dark:bg-[#1a1a1a] border-0 shadow-sm rounded-2xl overflow-hidden mb-3">
+              <CardContent className="p-4">
+                <div className="grid grid-cols-2 gap-4 pb-4 border-b border-gray-100 dark:border-gray-800">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-indigo-50 dark:bg-indigo-950/20 p-2 rounded-xl text-indigo-600">
+                      <Wallet className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Taxi Wallet</p>
+                      <p className="text-sm font-bold text-slate-800 dark:text-white">
+                        ₹{masterData?.wallets?.taxi_balance != null ? Number(masterData.wallets.taxi_balance).toFixed(0) : "0"}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="bg-amber-50 dark:bg-amber-950/20 p-2 rounded-xl text-amber-500">
+                      <Star className="h-5 w-5 fill-amber-400 stroke-amber-500" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Rating</p>
+                      <p className="text-sm font-bold text-slate-800 dark:text-white">
+                        {masterData?.taxi?.rating ?? "4.9"} ★
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2 py-3 border-b border-gray-100 dark:border-gray-800 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500 font-medium">Total Rides</span>
+                    <span className="font-bold text-gray-900 dark:text-white">{masterData?.taxi?.rideCount ?? 0}</span>
+                  </div>
+
+                </div>
+
+                <div className="pt-3 space-y-2">
+                  <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest px-1">Navigation Shortcuts</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Link to="/taxi/user/wallet" className="text-center p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      Taxi Wallet
+                    </Link>
+                    <Link to="/taxi/user/activity" className="text-center p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      Ride History
+                    </Link>
+                  </div>
+                  <Link to="/taxi/user/safety/sos" className="block text-center p-2.5 mt-2 rounded-xl bg-red-50 hover:bg-red-100 text-xs font-bold text-red-600 transition-colors">
+                    Emergency & SOS Contacts
+                  </Link>
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card className="bg-slate-50 dark:bg-slate-900 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl p-5 mb-3 text-center">
+              <p className="text-sm font-semibold text-slate-800 dark:text-white mb-1">Taxi Profile Inactive</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">Start using Taxi to book rides, view subscription plans, and manage emergency contacts.</p>
+              <Link to="/taxi" className="inline-block bg-[#6366F1] text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-indigo-700 transition-colors">
+                Activate Taxi Profile
+              </Link>
+            </Card>
+          )}
+        </div>
 
         {/* Food Orders Section */}
         <div className="mb-3">
+
           <div className="flex items-center gap-2 mb-2 px-1">
             <div className="w-1 h-4 bg-[#16A34A] rounded"></div>
             <h3 className="text-base font-semibold text-gray-900 dark:text-white">

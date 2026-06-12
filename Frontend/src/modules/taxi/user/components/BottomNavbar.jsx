@@ -41,9 +41,10 @@ const BottomNavbar = () => {
   const navItems = [
     { icon: Home, label: 'Ride', path: '/taxi/user' },
     { icon: Clock, label: 'Rides', path: '/taxi/user/activity' },
-    ...(showBusService ? [{ imageIcon: dynamicBusIcon, label: 'Bus', path: '/taxi/user/bus' }] : []),
+    // Bus tab hidden — re-enable when bus service is ready
+    // ...(showBusService ? [{ imageIcon: dynamicBusIcon, label: 'Bus', path: '/taxi/user/bus' }] : []),
     { icon: Map, label: 'Support', path: '/taxi/user/support' },
-    { icon: User, label: 'Profile', path: '/taxi/user/profile' },
+    { icon: User, label: 'Profile', path: '/food/user/profile' },
   ];
 
   if (showNavSkeleton) {

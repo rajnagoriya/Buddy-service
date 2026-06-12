@@ -5695,9 +5695,10 @@ const getFrontendBaseUrl = (req) => {
     })(),
   ].filter(Boolean);
 
+  const validRequestCandidates = requestCandidates.filter(c => !c.includes('razorpay.com') && !c.includes('phonepe.com'));
   const preferredPublicOrigin =
     configuredOrigins.find(isPublicWebOrigin) ||
-    requestCandidates.find(isPublicWebOrigin);
+    validRequestCandidates.find(isPublicWebOrigin);
 
   if (preferredPublicOrigin) {
     return preferredPublicOrigin;
@@ -5705,7 +5706,7 @@ const getFrontendBaseUrl = (req) => {
 
   return (
     configuredOrigins[0] ||
-    requestCandidates[0] ||
+    validRequestCandidates[0] ||
     "http://localhost:5173"
   ).replace(/\/+$/, "");
 };
@@ -5987,7 +5988,7 @@ export const createDriverWalletTopupOrder = async (req, res) => {
   const proto = req.get('x-forwarded-proto') || req.protocol || 'http';
   const host = req.get('x-forwarded-host') || req.get('host') || 'localhost:5000';
   const backendOrigin = `${proto}://${host}`;
-  const callbackUrl = `${backendOrigin}/api/v1/drivers/wallet/top-up/razorpay/callback`;
+  const callbackUrl = `${backendOrigin}/api/v1/taxi/drivers/wallet/top-up/razorpay/callback`;
 
   const userAgent = String(req.headers["user-agent"] || "");
   const isWebView = /; wv\)/i.test(userAgent) || /Version\/[\d.]+/i.test(userAgent) || req.body.usePaymentLink === true;
@@ -6229,7 +6230,7 @@ const verifyAndApplyDriverRazorpayWalletTopup = async ({
 
 export const handleDriverRazorpayWalletTopupCallback = async (req, res) => {
   const frontendBaseUrl = getFrontendBaseUrl(req);
-  const redirectUrl = new URL(`${frontendBaseUrl}/razorpay/status`);
+  const redirectUrl = new URL(`${frontendBaseUrl}/taxi/razorpay/status`);
   redirectUrl.searchParams.set("flow", "driver-wallet");
   const callbackPayload = {
     razorpay_order_id: req.body?.razorpay_order_id || req.query?.razorpay_order_id,

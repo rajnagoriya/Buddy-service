@@ -14,7 +14,7 @@ const MobileFooterMessage = () => {
                 <div className="w-full h-[1px] bg-slate-200 mt-6 mb-4"></div>
 
                 <div className="text-slate-300 font-black text-2xl tracking-tighter text-left">
-                    {appName}
+                    Buddy Service
                 </div>
             </div>
         </div>

@@ -158,8 +158,8 @@ const AppRouter = () => {
                         { path: 'chat', element: <ProtectedRoute><ChatPage /></ProtectedRoute> },
                         { path: 'checkout', element: <ProtectedRoute><CheckoutPage /></ProtectedRoute> },
                         { path: 'payment-status', element: <PaymentStatusPage /> },
-                        { path: 'profile', element: <ProtectedRoute><ProfilePage /></ProtectedRoute> },
-                        { path: 'profile/edit', element: <ProtectedRoute><EditProfilePage /></ProtectedRoute> },
+                        { path: 'profile', element: <Navigate to="/food/user/profile" replace /> },
+                        { path: 'profile/edit', element: <Navigate to="/food/user/profile" replace /> },
                         { path: 'wallet', element: <ProtectedRoute><WalletPage /></ProtectedRoute> },
                         { path: 'search', element: <SearchPage /> },
                     ]
