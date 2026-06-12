@@ -46,6 +46,7 @@ import {
   IndianRupee,
   PiggyBank,
   Lock,
+  Car,
 } from "lucide-react"
 import { cn } from "@food/utils/utils"
 import { Input } from "@food/components/ui/input"
@@ -728,7 +729,7 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
           )}
 
           {/* Quick Commerce Switcher */}
-          <div className={cn("mt-4 animate-[slideIn_0.4s_ease-out_0.3s_both]", isCollapsed ? "px-1" : "px-0")}>
+          <div className={cn("mt-2 animate-[slideIn_0.4s_ease-out_0.32s_both]", isCollapsed ? "px-1" : "px-0")}>
             <Link 
               to="/qc/admin" 
               className={cn(
@@ -742,6 +743,26 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
                 <div className="flex-1 flex items-center justify-between overflow-hidden">
                   <span className="font-semibold text-xs uppercase tracking-wider truncate">Quick Commerce</span>
                   <ChevronRight className="w-3.5 h-3.5 shrink-0 text-emerald-200 group-hover:translate-x-0.5 transition-transform" />
+                </div>
+              )}
+            </Link>
+          </div>
+
+          {/* Taxi Switcher */}
+          <div className={cn("mt-2 animate-[slideIn_0.4s_ease-out_0.35s_both]", isCollapsed ? "px-1" : "px-0")}>
+            <Link 
+              to="/taxi/admin" 
+              className={cn(
+                "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-yellow-600 text-white hover:from-amber-500 hover:to-yellow-500 transition-all duration-300 shadow-lg shadow-amber-900/20 group border border-amber-400/20",
+                isCollapsed && "justify-center"
+              )}
+              title={isCollapsed ? "Switch to Taxi" : undefined}
+            >
+              <Car className={cn("w-4 h-4 shrink-0 text-amber-100 group-hover:scale-110 transition-transform", isCollapsed ? "" : "")} />
+              {!isCollapsed && (
+                <div className="flex-1 flex items-center justify-between overflow-hidden">
+                  <span className="font-semibold text-xs uppercase tracking-wider truncate">Taxi Service</span>
+                  <ChevronRight className="w-3.5 h-3.5 shrink-0 text-amber-200 group-hover:translate-x-0.5 transition-transform" />
                 </div>
               )}
             </Link>

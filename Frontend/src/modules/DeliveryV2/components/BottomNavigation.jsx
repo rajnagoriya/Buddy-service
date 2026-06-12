@@ -8,14 +8,16 @@ import {
   HomeIcon as HomeOutline,
   WalletIcon as WalletOutline,
   ClockIcon as ClockOutline,
-} from "@heroicons/react/24/outline"
+  TruckIcon as TruckOutline,
+} from '@heroicons/react/24/outline'
 
 // Heroicons Solid
 import {
   HomeIcon as HomeSolid,
   WalletIcon as WalletSolid,
   ClockIcon as ClockSolid,
-} from "@heroicons/react/24/solid"
+  TruckIcon as TruckSolid,
+} from '@heroicons/react/24/solid'
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -109,6 +111,15 @@ export default function BottomNavigation() {
         >
           {TabIcon(isActive("/food/delivery/pocket"), WalletOutline, WalletSolid)}
           {TabLabel(isActive("/food/delivery/pocket"), "Pocket")}
+        </button>
+
+        {/* Taxi */}
+        <button
+          onClick={() => navigate("/food/delivery/taxi")}
+          className="flex flex-col items-center gap-1.5 p-2.5"
+        >
+          {TabIcon(isActive("/food/delivery/taxi"), TruckOutline, TruckSolid)}
+          {TabLabel(isActive("/food/delivery/taxi"), "Taxi")}
         </button>
 
         {/* Trip History */}

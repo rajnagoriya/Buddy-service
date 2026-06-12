@@ -137,6 +137,75 @@ export default function AdminRouter() {
         <Route path="forgot-password" element={<AdminForgotPassword />} />
         <Route path="signup" element={<AdminSignup />} />
 
+        {/* Redirect legacy taxi routes to the integrated /taxi/admin/... paths */}
+        <Route path="pricing/service-location" element={<Navigate to="/taxi/admin/price-management/service-locations" replace />} />
+        <Route path="pricing/zone" element={<Navigate to="/taxi/admin/price-management/zones" replace />} />
+        <Route path="pricing/airport" element={<Navigate to="/taxi/admin/price-management/airport" replace />} />
+        <Route path="pricing/app-modules" element={<Navigate to="/taxi/admin/settings/app-modules" replace />} />
+        <Route path="pricing/vehicle-type" element={<Navigate to="/taxi/admin/price-management/vehicle-types" replace />} />
+        <Route path="pricing/set-price" element={<Navigate to="/taxi/admin/price-management/set-prices" replace />} />
+        <Route path="pricing/goods-types" element={<Navigate to="/taxi/admin/price-management/goods-types" replace />} />
+        <Route path="pricing/service-stores" element={<Navigate to="/taxi/admin/price-management/service-stores" replace />} />
+        <Route path="pricing/service-stores/pending" element={<Navigate to="/taxi/admin/price-management/pending-service-stores" replace />} />
+        <Route path="pricing/service-stores/pending-staff" element={<Navigate to="/taxi/admin/price-management/pending-service-staff" replace />} />
+        <Route path="pricing/rental-commission" element={<Navigate to="/taxi/admin/price-management/rental-commission" replace />} />
+        <Route path="pricing/rental-vehicles" element={<Navigate to="/taxi/admin/price-management/rental-vehicle-types" replace />} />
+        <Route path="pricing/rental-tracking" element={<Navigate to="/taxi/admin/price-management/rental-tracking" replace />} />
+        <Route path="pricing/rental-requests" element={<Navigate to="/taxi/admin/price-management/rental-bookings" replace />} />
+        <Route path="pricing/rental-quotes" element={<Navigate to="/taxi/admin/price-management/rental-quotes" replace />} />
+        <Route path="pricing/rental-packages" element={<Navigate to="/taxi/admin/price-management/rental-package-types" replace />} />
+        <Route path="pricing/package-pricing" element={<Navigate to="/taxi/admin/price-management/set-package-prices" replace />} />
+        
+        <Route path="promotions/promo-codes" element={<Navigate to="/taxi/admin/promos" replace />} />
+        <Route path="promotions/send-notification" element={<Navigate to="/taxi/admin/promotions/send-notification" replace />} />
+        <Route path="promotions/banner-image" element={<Navigate to="/taxi/admin/promotions/banner" replace />} />
+        
+        <Route path="geo/gods-eye" element={<Navigate to="/taxi/admin/geo/godseye" replace />} />
+        <Route path="geo/heatmap" element={<Navigate to="/taxi/admin/geo/heatmap" replace />} />
+        <Route path="geo/peak-zone" element={<Navigate to="/taxi/admin/geo/fencing" replace />} />
+        
+        <Route path="drivers/subscription" element={<Navigate to="/taxi/admin/drivers/subscriptions" replace />} />
+        <Route path="drivers/wallet/withdrawals" element={<Navigate to="/taxi/admin/drivers/withdrawals" replace />} />
+        <Route path="drivers/wallet/negative" element={<Navigate to="/taxi/admin/drivers/negative-balance" replace />} />
+        <Route path="drivers/documents" element={<Navigate to="/taxi/admin/drivers/global-documents" replace />} />
+        
+        <Route path="referrals/dashboard" element={<Navigate to="/taxi/admin/referrals" replace />} />
+        <Route path="referrals/translation" element={<Navigate to="/taxi/admin/referrals/translations" replace />} />
+        
+        <Route path="owners/dashboard" element={<Navigate to="/taxi/admin/owners" replace />} />
+        <Route path="owners" element={<Navigate to="/taxi/admin/owners/manage" replace />} />
+        <Route path="owners/wallet/withdrawals" element={<Navigate to="/taxi/admin/owners/withdrawals" replace />} />
+        <Route path="fleet/drivers" element={<Navigate to="/taxi/admin/owners/fleet-drivers" replace />} />
+        <Route path="fleet/blocked" element={<Navigate to="/taxi/admin/owners/blocked-fleet-drivers" replace />} />
+        <Route path="fleet/documents" element={<Navigate to="/taxi/admin/owners/fleet-needed-documents" replace />} />
+        <Route path="fleet/manage" element={<Navigate to="/taxi/admin/owners/manage-fleet" replace />} />
+        <Route path="owners/documents" element={<Navigate to="/taxi/admin/owners/needed-documents" replace />} />
+        
+        <Route path="reports/user" element={<Navigate to="/taxi/admin/reports/users" replace />} />
+        <Route path="reports/driver" element={<Navigate to="/taxi/admin/reports/drivers" replace />} />
+        <Route path="reports/owner" element={<Navigate to="/taxi/admin/reports/owners" replace />} />
+        
+        <Route path="settings/business/general" element={<Navigate to="/taxi/admin/settings/general" replace />} />
+        <Route path="settings/business/customization" element={<Navigate to="/taxi/admin/settings/customization" replace />} />
+        <Route path="settings/business/transport-ride" element={<Navigate to="/taxi/admin/settings/transport" replace />} />
+        <Route path="settings/business/bid-ride" element={<Navigate to="/taxi/admin/settings/bid" replace />} />
+        <Route path="settings/app/wallet" element={<Navigate to="/taxi/admin/settings/wallet" replace />} />
+        <Route path="settings/app/tip" element={<Navigate to="/taxi/admin/settings/tip" replace />} />
+        <Route path="settings/app/onboard" element={<Navigate to="/taxi/admin/settings/onboarding" replace />} />
+        <Route path="settings/third-party/payment" element={<Navigate to="/taxi/admin/settings/payment-gateways" replace />} />
+        <Route path="settings/third-party/sms" element={<Navigate to="/taxi/admin/settings/sms-gateways" replace />} />
+        <Route path="settings/third-party/firebase" element={<Navigate to="/taxi/admin/settings/firebase" replace />} />
+        <Route path="settings/third-party/map-apis" element={<Navigate to="/taxi/admin/settings/map" replace />} />
+        <Route path="settings/third-party/mail" element={<Navigate to="/taxi/admin/settings/mail" replace />} />
+        
+        <Route path="settings/cms/header-footer" element={<Navigate to="/taxi/admin/cms/header-footer" replace />} />
+        <Route path="settings/cms/home" element={<Navigate to="/taxi/admin/cms/builder" replace />} />
+        <Route path="settings/cms/about" element={<Navigate to="/taxi/admin/cms/builder" replace />} />
+        <Route path="settings/cms/driver" element={<Navigate to="/taxi/admin/cms/builder" replace />} />
+        <Route path="settings/cms/user" element={<Navigate to="/taxi/admin/cms/builder" replace />} />
+        <Route path="settings/cms/contact" element={<Navigate to="/taxi/admin/cms/builder" replace />} />
+        <Route path="settings/cms/legal" element={<Navigate to="/taxi/admin/cms/builder" replace />} />
+
         {/* Protected Routes - With Layout */}
         <Route
           element={
@@ -293,8 +362,8 @@ export default function AdminRouter() {
             <Route path="dining-requests" element={<DiningRequests />} />
           </Route>
 
-          {/* TAXI ADMIN - Placeholder for future implementation */}
-          <Route path="taxi/*" element={<div className="p-8 text-center text-gray-500 bg-white min-h-[50vh] flex items-center justify-center border rounded-xl m-4">Taxi Administration - Coming Soon</div>} />
+          {/* TAXI ADMIN - Redirect to Taxi Module's Admin */}
+          <Route path="taxi/*" element={<Navigate to="/taxi/admin" replace />} />
 
           {/* QUICK COMMERCE ADMIN - Placeholder for future implementation */}
           <Route path="quick-commerce/*" element={<div className="p-8 text-center text-gray-500 bg-white min-h-[50vh] flex items-center justify-center border rounded-xl m-4">Quick Commerce Administration - Coming Soon</div>} />

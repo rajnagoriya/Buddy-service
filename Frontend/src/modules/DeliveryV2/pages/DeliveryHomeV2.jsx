@@ -28,7 +28,7 @@ import {
   Bell, HelpCircle, AlertTriangle, 
   Wallet, History, User as UserIcon, LayoutGrid,
   Plus, Minus, Navigation2, Target, Play, CheckCircle2, Clock, ChevronDown,
-  Contact, Package
+  Contact, Package, Truck
 } from 'lucide-react';
 
 import { getHaversineDistance, calculateETA, calculateHeading } from '@/modules/DeliveryV2/utils/geo';
@@ -1387,6 +1387,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
            {[
              { id: 'feed', label: 'Delivery', icon: LayoutGrid, path: '/food/delivery/feed' },
              { id: 'pocket', label: 'Pocket', icon: Wallet, path: '/food/delivery/pocket' },
+             { id: 'taxi', label: 'Taxi', icon: Truck, path: '/food/delivery/taxi' },
              { id: 'history', label: 'History', icon: History, path: '/food/delivery/history' },
              { id: 'profile', label: 'Profile', icon: UserIcon, path: '/food/delivery/profile' },
            ].map((item) => {

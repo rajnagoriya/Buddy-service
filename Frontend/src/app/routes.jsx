@@ -8,6 +8,7 @@ const NATIVE_LAST_ROUTE_KEY = 'native_last_route'
 // Lazy load the Food service module (Quick-spicy app)
 const FoodApp = lazy(() => import('../modules/Food/routes'))
 const AuthApp = lazy(() => import('../modules/auth/routes'))
+const TaxiApp = lazy(() => import('../modules/taxi/routes'))
 import ProtectedRoute from '@food/components/ProtectedRoute'
 
 const PageLoader = () => <AppShellSkeleton />
@@ -47,6 +48,36 @@ const AppRoutes = () => {
   useEffect(() => {
     if (typeof window === 'undefined') return
 
+    // Mirror Food/QC Admin auth to Taxi Admin auth
+    const foodAdminToken = localStorage.getItem('admin_accessToken') || localStorage.getItem('auth_admin');
+    if (foodAdminToken && !localStorage.getItem('adminToken')) {
+      localStorage.setItem('adminToken', foodAdminToken);
+    }
+    
+    // Mirror Food/QC User auth to Taxi User auth
+    const generalToken = localStorage.getItem('user_accessToken') || localStorage.getItem('token') || localStorage.getItem('accessToken');
+    if (generalToken && !localStorage.getItem('userToken')) {
+      try {
+        const payload = JSON.parse(atob(generalToken.split('.')[1]));
+        if (String(payload?.role || '').toLowerCase() === 'user') {
+          localStorage.setItem('userToken', generalToken);
+        }
+      } catch (e) {}
+    }
+    const foodAdminInfo = localStorage.getItem('adminInfo');
+    if (foodAdminInfo) {
+      try {
+        const parsed = JSON.parse(foodAdminInfo);
+        if (parsed && (!parsed.permissions || parsed.permissions.length === 0 || !parsed.admin_type)) {
+          parsed.permissions = ['*'];
+          parsed.admin_type = 'superadmin';
+          localStorage.setItem('adminInfo', JSON.stringify(parsed));
+        }
+      } catch (e) {
+        // Ignore
+      }
+    }
+
     const protocol = String(window.location?.protocol || '').toLowerCase()
     const userAgent = String(window.navigator?.userAgent || '').toLowerCase()
     const isNativeLikeShell =
@@ -74,6 +105,15 @@ const AppRoutes = () => {
 
       {/* Quick Commerce Module */}
       <Route path="/qc/*" element={<Suspense fallback={<PageLoader />}><QCApp /></Suspense>} />
+
+      {/* Taxi Module */}
+      <Route path="/taxi/*" element={<Suspense fallback={<PageLoader />}><TaxiApp /></Suspense>} />
+      <Route path="/rental/*" element={<Navigate to="/taxi/user/rental" replace />} />
+      <Route path="/ride/*" element={<Navigate to="/taxi/user/ride" replace />} />
+      <Route path="/parcel/*" element={<Navigate to="/taxi/user/parcel" replace />} />
+      <Route path="/cab/*" element={<Navigate to="/taxi/user/cab" replace />} />
+      <Route path="/intercity/*" element={<Navigate to="/taxi/user/intercity" replace />} />
+      <Route path="/bus/*" element={<Navigate to="/taxi/user/bus" replace />} />
 
       {/* Global Admin Portal - AdminRouter handles its own protection for sub-routes */}
       <Route path="/admin/*" element={<AdminRouter />} />

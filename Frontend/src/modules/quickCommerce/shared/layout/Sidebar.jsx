@@ -3,9 +3,9 @@ import { NavLink, Link, useLocation } from "react-router-dom";
 import { useAuth } from "@core/context/AuthContext";
 import { useSettings } from "@core/context/SettingsContext";
 import { cn } from "@qc/lib/utils";
-import { HiChevronDown } from "react-icons/hi2";
+import { HiChevronDown, HiChevronRight } from "react-icons/hi2";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, UtensilsCrossed } from "lucide-react";
+import { X, UtensilsCrossed, Car, Zap } from "lucide-react";
 import quickSpicyLogo from "@food/assets/quicky-spicy-logo.png";
 import { getCachedSettings, loadBusinessSettings } from '@food/utils/businessSettings';
 
@@ -281,25 +281,35 @@ const SidebarContent = ({ items, title, onClose, openMenu, handleToggle, hovered
         style={{ WebkitOverflowScrolling: 'touch' }}
       >
         {!title?.toLowerCase().includes("seller") && (
-          <>
-            <p className="px-3 text-[9px] font-black text-gray-600 uppercase tracking-[0.3em] mb-3">
-              Cross-Module Navigation
-            </p>
-
+          <div className="space-y-2 mb-6">
+            {/* Food Module Switcher */}
             <Link
               to="/admin/food"
               className={cn(
-                "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-gradient-to-r from-orange-600 to-amber-600 text-white hover:from-orange-500 hover:to-amber-500 transition-all duration-300 shadow-lg shadow-orange-900/20 group border border-orange-400/20 mb-6",
-                "justify-start"
+                "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-gradient-to-r from-orange-600 to-amber-600 text-white hover:from-orange-500 hover:to-amber-500 transition-all duration-300 shadow-lg shadow-orange-900/20 group border border-orange-400/20"
               )}
             >
               <UtensilsCrossed className="w-4 h-4 shrink-0 text-orange-100 group-hover:scale-110 transition-transform" />
               <div className="flex-1 flex items-center justify-between overflow-hidden">
                 <span className="font-semibold text-xs uppercase tracking-wider truncate">Food Module</span>
-                <HiChevronDown className="w-3.5 h-3.5 shrink-0 text-orange-200 group-hover:translate-x-0.5 transition-transform -rotate-90" />
+                <HiChevronRight className="w-3.5 h-3.5 shrink-0 text-orange-200 group-hover:translate-x-0.5 transition-transform" />
               </div>
             </Link>
-          </>
+
+            {/* Taxi Service */}
+            <Link
+              to="/taxi/admin"
+              className={cn(
+                "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-yellow-600 text-white hover:from-amber-500 hover:to-yellow-500 transition-all duration-300 shadow-lg shadow-amber-900/20 group border border-amber-400/20"
+              )}
+            >
+              <Car className="w-4 h-4 shrink-0 text-amber-100 group-hover:scale-110 transition-transform" />
+              <div className="flex-1 flex items-center justify-between overflow-hidden">
+                <span className="font-semibold text-xs uppercase tracking-wider truncate">Taxi Service</span>
+                <HiChevronRight className="w-3.5 h-3.5 shrink-0 text-amber-200 group-hover:translate-x-0.5 transition-transform" />
+              </div>
+            </Link>
+          </div>
         )}
 
         <p className="px-3 text-[9px] font-black text-gray-600 uppercase tracking-[0.3em] mb-3">
@@ -349,7 +359,7 @@ const Sidebar = ({ items, title, isOpen, onClose }) => {
     <>
       {/* Desktop Sidebar */}
       <aside className={cn(
-        "fixed left-0 inset-y-0 w-72 bg-[#0a0c10] text-gray-400 border-r border-white/5 shadow-[20px_0_60px_rgba(0,0,0,0.4)] md:flex flex-col z-50 transition-all duration-300",
+        "fixed left-0 inset-y-0 w-80 bg-[#0a0c10] text-gray-400 border-r border-white/5 shadow-[20px_0_60px_rgba(0,0,0,0.4)] md:flex flex-col z-50 transition-all duration-300",
         (role === "admin" || role === "seller") ? "hidden md:flex" : "flex",
       )}>
         <SidebarContent {...commonProps} />
@@ -369,7 +379,7 @@ const Sidebar = ({ items, title, isOpen, onClose }) => {
             />
 
             {/* Outer Container (Fixed Shell - NO TRANSFORM) */}
-            <div className="absolute left-0 inset-y-0 w-72 flex flex-col pointer-events-none">
+            <div className="absolute left-0 inset-y-0 w-80 flex flex-col pointer-events-none">
               {/* Inner Animation Wrapper (TRANSFORM APPLIED HERE) */}
               <motion.div
                 initial={{ x: "-100%" }}

@@ -54,11 +54,29 @@ const startServer = async () => {
         // 1. Connect to Database (MongoDB)
         await connectDB();
 
+        // Restore scheduled dispatches for Taxi
+        try {
+            const { restoreScheduledDispatches } = await import('./src/modules/taxi/services/dispatchService.js');
+            await restoreScheduledDispatches();
+            console.log('Taxi scheduled dispatches restored');
+        } catch (err) {
+            console.error(`Failed to restore taxi dispatches: ${err.message}`);
+        }
+
         // 2. Create HTTP server from Express app
         const httpServer = http.createServer(app);
 
         // 3. Initialize Socket.IO with the HTTP server (Redis adapter when Redis enabled)
         await initSocket(httpServer);
+
+        // Initialize Taxi Socket server
+        try {
+            const { configureTaxiSocketServer } = await import('./src/modules/taxi/socket/index.js');
+            configureTaxiSocketServer(httpServer);
+            console.log('Taxi Socket server initialized');
+        } catch (err) {
+            console.error(`Failed to initialize taxi socket server: ${err.message}`);
+        }
 
         if (config.redisEnabled) {
             await connectRedis();

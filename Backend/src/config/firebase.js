@@ -99,4 +99,12 @@ export const getFirebaseMessaging = () => {
     return messaging;
 };
 
+export const getFirebaseDatabase = () => {
+    return admin.database();
+};
+
+export const firebaseServerTimestamp = () => {
+    return admin.database.ServerValue.TIMESTAMP;
+};
+
 export default admin;

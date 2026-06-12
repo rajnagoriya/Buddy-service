@@ -153,6 +153,11 @@ export function clearModuleAuth(module) {
   // Clear cached FCM web token for this module
   localStorage.removeItem(`fcm_web_registered_token_${module}`);
   
+  if (module === "admin") {
+    localStorage.removeItem("adminToken");
+    localStorage.removeItem("adminInfo");
+  }
+
   if (module === "user") {
     clearUserSession();
   }
@@ -271,6 +276,13 @@ export function setAuthData(module, token, user, refreshToken = null) {
     }
     localStorage.setItem(authKey, 'true');
     
+    if (module === "admin") {
+      localStorage.setItem("adminToken", token);
+      if (user) {
+        localStorage.setItem("adminInfo", JSON.stringify(user));
+      }
+    }
+
     if (user) {
       try {
         localStorage.setItem(userKey, JSON.stringify(user));

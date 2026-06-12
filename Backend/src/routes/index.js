@@ -19,10 +19,12 @@ import { getPublicEnvController } from '../modules/food/landing/controllers/publ
 import webhookRoutes from '../core/payments/routes/webhook.routes.js'; // ✅ NEW
 import searchRoutes from '../modules/food/search/routes/search.routes.js';
 import qcRoutes from '../modules/quickCommerce/routes/index.js';
+import { taxiRouter } from '../modules/taxi/routes/index.js';
 
 const router = express.Router();
 // ... (previous routes)
 router.use('/v1/qc', qcRoutes);
+router.use('/v1/taxi', taxiRouter);
 
 
 router.get('/v1/health', (req, res) => {

@@ -49,18 +49,32 @@ const isEarningsRoute = (path) =>
     path.includes('earnings') || path.includes('withdrawals') || path.includes('transactions');
 
 const DashboardLayout = ({ children, navItems, title }) => {
-    const [newOrderAlert, setNewOrderAlert] = useState(null);
-    const [newReturnAlert, setNewReturnAlert] = useState(null);
-    const [shownOrderIds, setShownOrderIds] = useState(() => new Set());
-    const [shownReturnOrderIds, setShownReturnOrderIds] = useState(() => new Set());
-    const [timeLeft, setTimeLeft] = useState(0);
-    /** Total seconds in this acceptance window (for progress bar), set when modal opens */
-    const acceptWindowTotalRef = useRef(60);
-    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-    const [returnDropOtpAlert, setReturnDropOtpAlert] = useState(null); // { orderId, otp, expiresAt }
-    const { user, logout, role } = useAuth();
-    const location = useLocation();
-    const navigate = useNavigate();
+  const [newOrderAlert, setNewOrderAlert] = useState(null);
+  const [newReturnAlert, setNewReturnAlert] = useState(null);
+  const [shownOrderIds, setShownOrderIds] = useState(() => new Set());
+  const [shownReturnOrderIds, setShownReturnOrderIds] = useState(() => new Set());
+  const [timeLeft, setTimeLeft] = useState(0);
+  /** Total seconds in this acceptance window (for progress bar), set when modal opens */
+  const acceptWindowTotalRef = useRef(60);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [returnDropOtpAlert, setReturnDropOtpAlert] = useState(null); // { orderId, otp, expiresAt }
+  const { user, logout, role } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+
+  // Get initial collapsed state from localStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('qc_admin_sidebar_state')
+      if (saved !== null) {
+        const state = JSON.parse(saved)
+        if (state && typeof state.isCollapsed !== 'undefined') {
+          setIsSidebarCollapsed(state.isCollapsed)
+        }
+      }
+    } catch (e) {}
+  }, [])
 
     // Shared data for seller – single source, avoids duplicate API calls
     const [sellerOrders, setSellerOrders] = useState([]);
@@ -394,148 +408,158 @@ const DashboardLayout = ({ children, navItems, title }) => {
     };
 
     return (
-        <div className="min-h-screen mesh-gradient-light relative overflow-x-hidden">
-            {/* Background Blobs for depth */}
-            <div className="fixed top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/5 rounded-full blur-[120px] -z-10 animate-pulse pointer-events-none"></div>
-            <div className="fixed bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-brand-500/5 rounded-full blur-[120px] -z-10 animate-pulse pointer-events-none" style={{ animationDelay: '2s' }}></div>
+    <div className="h-screen bg-neutral-200 flex overflow-hidden">
+      {/* Mobile Overlay */}
+      {isSidebarOpen && (
+        <div
+          className="fixed inset-0 bg-gray-900/50 z-40 lg:hidden"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
 
-            <Sidebar
-                items={navItems}
-                title={title}
-                isOpen={isSidebarOpen}
-                onClose={() => setIsSidebarOpen(false)}
-            />
-            <div className={cn("transition-all duration-300", (role === "admin" || role === "seller") ? "pl-0 md:pl-72" : "pl-72")}>
-                <Topbar onMenuClick={() => setIsSidebarOpen(true)} />
-                <main className={cn("p-4 md:p-6 min-h-screen", (role === "admin" || role === "seller") ? "pt-20 md:pt-6 pb-24 md:pb-6" : "pt-20")}>
-                    <div className="w-full pb-12">
-                        <SellerOrdersContext.Provider
-                            value={{
-                                orders: role === 'seller' ? sellerOrders : [],
-                                ordersLoading: role === 'seller' ? ordersLoading : false,
-                                refreshOrders,
-                            }}>
-                            <SellerEarningsContext.Provider
-                                value={{
-                                    earningsData: role === 'seller' ? sellerEarningsData : defaultEarnings,
-                                    earningsLoading: role === 'seller' ? earningsLoading : false,
-                                    refreshEarnings,
-                                }}>
-                                {children}
-                            </SellerEarningsContext.Provider>
-                        </SellerOrdersContext.Provider>
+      <Sidebar
+        items={navItems}
+        title={title}
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
+        onCollapseChange={setIsSidebarCollapsed}
+      />
+
+      <div className={`
+        flex-1 flex min-h-0 flex-col transition-all duration-300 ease-in-out min-w-0
+        ${isSidebarCollapsed ? 'lg:ml-20' : 'lg:ml-80'}
+      `}>
+        <Topbar onMenuClick={() => setIsSidebarOpen(!isSidebarOpen)} />
+
+        <main className="flex-1 min-h-0 w-full max-w-full overflow-x-hidden overflow-y-auto bg-neutral-100">
+          <div className="p-4 md:p-6 pb-12">
+            <SellerOrdersContext.Provider
+              value={{
+                orders: role === 'seller' ? sellerOrders : [],
+                ordersLoading: role === 'seller' ? ordersLoading : false,
+                refreshOrders,
+              }}>
+              <SellerEarningsContext.Provider
+                value={{
+                  earningsData: role === 'seller' ? sellerEarningsData : defaultEarnings,
+                  earningsLoading: role === 'seller' ? earningsLoading : false,
+                  refreshEarnings,
+                }}>
+                {children}
+              </SellerEarningsContext.Provider>
+            </SellerOrdersContext.Provider>
+          </div>
+        </main>
+      </div>
+
+      {/* Global Order Alert Modal */}
+      <AnimatePresence>
+        {newOrderAlert && (
+          <div className="fixed inset-0 z-[999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl border border-slate-100"
+            >
+              <div className="flex flex-col items-center text-center">
+                <div className="h-20 w-20 bg-primary/10 rounded-full flex items-center justify-center mb-6 animate-bounce">
+                  <BellRing className="h-10 w-10 text-primary" />
+                </div>
+
+                <h2 className="text-2xl font-black text-slate-900 mb-2">New Order Received!</h2>
+                <p className="text-slate-600 font-medium mb-6">
+                  You have a new order <span className="text-primary font-bold">#{newOrderAlert.orderId}</span> for <span className="text-slate-900 font-bold">₹{newOrderAlert.pricing?.total || newOrderAlert.total}</span>
+                </p>
+
+                {/* Timer Bar — width from real server deadline */}
+                <div className="w-full bg-slate-100 h-2 rounded-full mb-8 overflow-hidden">
+                  <div
+                    className={cn(
+                      "h-full transition-[width] duration-1000 ease-linear",
+                      timeLeft < 15 ? "bg-rose-500" : "bg-primary",
+                    )}
+                    style={{
+                      width: `${acceptWindowTotalRef.current > 0 ? (timeLeft / acceptWindowTotalRef.current) * 100 : 0}%`,
+                    }}
+                  />
+                </div>
+
+                <div className="flex items-center gap-4 text-sm font-bold mb-8">
+                  <Clock className={cn("h-4 w-4", timeLeft < 15 ? "text-rose-500 animate-pulse" : "text-slate-600")} />
+                  <span className={timeLeft < 15 ? "text-rose-500" : "text-slate-600"}>
+                    Accept within {timeLeft} {timeLeft === 1 ? "second" : "seconds"}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 w-full">
+                  <button
+                    onClick={() => handleDeclineOrder(newOrderAlert.orderId)}
+                    className="flex items-center justify-center gap-2 py-4 rounded-2xl bg-slate-100 text-slate-600 font-bold hover:bg-slate-200 transition-colors"
+                  >
+                    <X className="h-5 w-5" />
+                    Decline
+                  </button>
+                  <button
+                    onClick={() => handleAcceptOrder(newOrderAlert.orderId)}
+                    className="flex items-center justify-center gap-2 py-4 rounded-2xl bg-primary text-primary-foreground font-bold hover:bg-primary/90 shadow-xl shadow-primary/20 transition-all active:scale-95"
+                  >
+                    <Check className="h-5 w-5" />
+                    Accept
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Global Return Drop OTP Modal */}
+        {returnDropOtpAlert && (
+          <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl border border-brand-100"
+            >
+              <div className="flex flex-col items-center text-center">
+                <div className="h-20 w-20 bg-brand-50 rounded-full flex items-center justify-center mb-6 animate-pulse">
+                  <Truck className="h-10 w-10 text-brand-600" />
+                </div>
+
+                <h2 className="text-2xl font-black text-slate-900 mb-2">Rider at Store!</h2>
+                <p className="text-slate-600 font-medium mb-6">
+                  A rider is at your store for Return <span className="text-brand-600 font-bold">#{returnDropOtpAlert.orderId}</span>.
+                  Please share the OTP below:
+                </p>
+
+                <div className="flex items-center justify-center gap-3 mb-8">
+                  {returnDropOtpAlert.otp.split('').map((char, i) => (
+                    <div key={i} className="h-16 w-14 bg-slate-50 rounded-2xl shadow-sm border border-brand-100 flex items-center justify-center text-4xl font-black text-slate-900 border-b-4 border-b-brand-600">
+                      {char}
                     </div>
-                </main>
-            </div>
+                  ))}
+                </div>
 
-            {/* Global Order Alert Modal */}
-            <AnimatePresence>
-                {newOrderAlert && (
-                    <div className="fixed inset-0 z-[999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-                        <motion.div
-                            initial={{ scale: 0.9, opacity: 0, y: 20 }}
-                            animate={{ scale: 1, opacity: 1, y: 0 }}
-                            exit={{ scale: 0.9, opacity: 0, y: 20 }}
-                            className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl border border-slate-100"
-                        >
-                            <div className="flex flex-col items-center text-center">
-                                <div className="h-20 w-20 bg-primary/10 rounded-full flex items-center justify-center mb-6 animate-bounce">
-                                    <BellRing className="h-10 w-10 text-primary" />
-                                </div>
+                <p className="text-xs font-bold text-slate-500 italic mb-8">
+                  Confirm receipt of the product by sharing this code.
+                </p>
 
-                                <h2 className="text-2xl font-black text-slate-900 mb-2">New Order Received!</h2>
-                                <p className="text-slate-600 font-medium mb-6">
-                                    You have a new order <span className="text-primary font-bold">#{newOrderAlert.orderId}</span> for <span className="text-slate-900 font-bold">₹{newOrderAlert.pricing?.total || newOrderAlert.total}</span>
-                                </p>
+                <button
+                  onClick={() => setReturnDropOtpAlert(null)}
+                  className="w-full py-4 rounded-2xl bg-primary text-primary-foreground font-black hover:bg-primary/90 shadow-xl shadow-primary/20 transition-all active:scale-95 uppercase tracking-widest text-xs"
+                >
+                  Dismiss Alert
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
-                                {/* Timer Bar — width from real server deadline */}
-                                <div className="w-full bg-slate-100 h-2 rounded-full mb-8 overflow-hidden">
-                                    <div
-                                        className={cn(
-                                            "h-full transition-[width] duration-1000 ease-linear",
-                                            timeLeft < 15 ? "bg-rose-500" : "bg-primary",
-                                        )}
-                                        style={{
-                                            width: `${acceptWindowTotalRef.current > 0 ? (timeLeft / acceptWindowTotalRef.current) * 100 : 0}%`,
-                                        }}
-                                    />
-                                </div>
-
-                                <div className="flex items-center gap-4 text-sm font-bold mb-8">
-                                    <Clock className={cn("h-4 w-4", timeLeft < 15 ? "text-rose-500 animate-pulse" : "text-slate-600")} />
-                                    <span className={timeLeft < 15 ? "text-rose-500" : "text-slate-600"}>
-                                        Accept within {timeLeft} {timeLeft === 1 ? "second" : "seconds"}
-                                    </span>
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-4 w-full">
-                                    <button
-                                        onClick={() => handleDeclineOrder(newOrderAlert.orderId)}
-                                        className="flex items-center justify-center gap-2 py-4 rounded-2xl bg-slate-100 text-slate-600 font-bold hover:bg-slate-200 transition-colors"
-                                    >
-                                        <X className="h-5 w-5" />
-                                        Decline
-                                    </button>
-                                    <button
-                                        onClick={() => handleAcceptOrder(newOrderAlert.orderId)}
-                                        className="flex items-center justify-center gap-2 py-4 rounded-2xl bg-primary text-primary-foreground font-bold hover:bg-primary/90 shadow-xl shadow-primary/20 transition-all active:scale-95"
-                                    >
-                                        <Check className="h-5 w-5" />
-                                        Accept
-                                    </button>
-                                </div>
-                            </div>
-                        </motion.div>
-                    </div>
-                )}
-
-                {/* Global Return Drop OTP Modal */}
-                {returnDropOtpAlert && (
-                    <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
-                        <motion.div
-                            initial={{ scale: 0.9, opacity: 0, y: 20 }}
-                            animate={{ scale: 1, opacity: 1, y: 0 }}
-                            exit={{ scale: 0.9, opacity: 0, y: 20 }}
-                            className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl border border-brand-100"
-                        >
-                            <div className="flex flex-col items-center text-center">
-                                <div className="h-20 w-20 bg-brand-50 rounded-full flex items-center justify-center mb-6 animate-pulse">
-                                    <Truck className="h-10 w-10 text-brand-600" />
-                                </div>
-
-                                <h2 className="text-2xl font-black text-slate-900 mb-2">Rider at Store!</h2>
-                                <p className="text-slate-600 font-medium mb-6">
-                                    A rider is at your store for Return <span className="text-brand-600 font-bold">#{returnDropOtpAlert.orderId}</span>.
-                                    Please share the OTP below:
-                                </p>
-
-                                <div className="flex items-center justify-center gap-3 mb-8">
-                                    {returnDropOtpAlert.otp.split('').map((char, i) => (
-                                        <div key={i} className="h-16 w-14 bg-slate-50 rounded-2xl shadow-sm border border-brand-100 flex items-center justify-center text-4xl font-black text-slate-900 border-b-4 border-b-brand-600">
-                                            {char}
-                                        </div>
-                                    ))}
-                                </div>
-
-                                <p className="text-xs font-bold text-slate-500 italic mb-8">
-                                    Confirm receipt of the product by sharing this code.
-                                </p>
-
-                                <button
-                                    onClick={() => setReturnDropOtpAlert(null)}
-                                    className="w-full py-4 rounded-2xl bg-primary text-primary-foreground font-black hover:bg-primary/90 shadow-xl shadow-primary/20 transition-all active:scale-95 uppercase tracking-widest text-xs"
-                                >
-                                    Dismiss Alert
-                                </button>
-                            </div>
-                        </motion.div>
-                    </div>
-                )}
-            </AnimatePresence>
-
-            {(role === "admin" || role === "seller") && <BottomNav navItems={navItems} />}
-        </div>
-    );
+      {(role === "admin" || role === "seller") && <BottomNav navItems={navItems} />}
+    </div>
+  );
 };
 
 export default DashboardLayout;

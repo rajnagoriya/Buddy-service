@@ -16,6 +16,8 @@ export const config = {
     jwtRefreshSecret: process.env.JWT_REFRESH_SECRET,
     jwtAccessExpiresIn: process.env.JWT_ACCESS_EXPIRES || '15m',
     jwtRefreshExpiresIn: process.env.JWT_REFRESH_EXPIRES || '7d',
+    jwtSecret: process.env.JWT_ACCESS_SECRET || process.env.JWT_SECRET,
+    jwtExpiresIn: process.env.JWT_ACCESS_EXPIRES || '7d',
 
     // OTP
     otpExpiry: process.env.OTP_EXPIRY || '5m',
@@ -85,3 +87,5 @@ export const config = {
     emailPass: process.env.EMAIL_PASS ? String(process.env.EMAIL_PASS).replace(/\s/g, '') : '',
     emailFrom: process.env.EMAIL_FROM || process.env.EMAIL_USER || 'noreply@example.com'
 };
+
+export const env = config;

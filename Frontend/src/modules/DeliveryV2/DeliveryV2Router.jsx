@@ -1,7 +1,11 @@
-import React, { Suspense, lazy } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import React, { Suspense, lazy, useEffect } from 'react';
+import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute';
 import Loader from "@food/components/Loader";
+
+// Import Taxi Providers & Components
+import { SettingsProvider } from '../taxi/shared_core/context/SettingsContext';
+import DriverLayout from '../taxi/driver/components/DriverLayout';
 
 // Auth Pages (Lazy loaded)
 const Welcome = lazy(() => import("./pages/auth/Welcome"))
@@ -29,6 +33,113 @@ import { ProfileDetailsV2 } from './pages/profile/ProfileDetailsV2';
 import TermsAndConditionsV2 from './pages/TermsAndConditionsV2';
 import PrivacyPolicyV2 from './pages/PrivacyPolicyV2';
 import NotificationsV2 from './pages/NotificationsV2';
+
+// Taxi Driver Pages (Lazy loaded to avoid duplication)
+const PhoneRegistration = lazy(() => import("../taxi/driver/pages/registration/PhoneRegistration"));
+const OTPVerification = lazy(() => import("../taxi/driver/pages/registration/OTPVerification"));
+const RoleSelection = lazy(() => import("../taxi/driver/pages/registration/RoleSelection"));
+const RegistrationStatus = lazy(() => import("../taxi/driver/pages/registration/RegistrationStatus"));
+const StepPersonal = lazy(() => import("../taxi/driver/pages/registration/StepPersonal"));
+const StepReferral = lazy(() => import("../taxi/driver/pages/registration/StepReferral"));
+const StepVehicle = lazy(() => import("../taxi/driver/pages/registration/StepVehicle"));
+const StepDocuments = lazy(() => import("../taxi/driver/pages/registration/StepDocuments"));
+const RoleSpecificOnboarding = lazy(() => import("../taxi/driver/pages/registration/RoleSpecificOnboarding"));
+const ApplicationStatus = lazy(() => import("../taxi/driver/pages/registration/ApplicationStatus"));
+const DriverHome = lazy(() => import("../taxi/driver/pages/DriverHome"));
+const OwnerDashboard = lazy(() => import("../taxi/driver/pages/OwnerDashboard"));
+const OwnerBusServicePage = lazy(() => import("../taxi/driver/pages/OwnerBusServicePage"));
+const OwnerBusBookingsPage = lazy(() => import("../taxi/driver/pages/OwnerBusBookingsPage"));
+const OwnerPoolingVehicleForm = lazy(() => import("../taxi/driver/pages/OwnerPoolingVehicleForm"));
+const ActiveTrip = lazy(() => import("../taxi/driver/pages/ActiveTrip"));
+const DriverWallet = lazy(() => import("../taxi/driver/pages/DriverWallet"));
+const DriverProfile = lazy(() => import("../taxi/driver/pages/DriverProfile"));
+const DriverBankDetailsPage = lazy(() => import("../taxi/driver/pages/DriverBankDetailsPage"));
+const ServiceCenterDashboard = lazy(() => import("../taxi/driver/pages/ServiceCenterDashboard"));
+const ServiceCenterVehicleDetails = lazy(() => import("../taxi/driver/pages/ServiceCenterVehicleDetails"));
+const RideRequests = lazy(() => import("../taxi/driver/pages/RideRequests"));
+const DriverIncentives = lazy(() => import("../taxi/driver/pages/DriverIncentives"));
+const BusDriverHome = lazy(() => import("../taxi/driver/pages/BusDriverHome"));
+const BusDriverLiveRoute = lazy(() => import("../taxi/driver/pages/BusDriverLiveRoute"));
+const PoolingDriverDashboard = lazy(() => import("../taxi/driver/pages/PoolingDriverDashboard"));
+const PoolingDriverOnboarding = lazy(() => import("../taxi/driver/pages/pooling/PoolingDriverOnboarding"));
+const PoolingDriverPendingStatus = lazy(() => import("../taxi/driver/pages/pooling/PoolingDriverPendingStatus"));
+const PoolingDriverBookings = lazy(() => import("../taxi/driver/pages/pooling/PoolingDriverBookings"));
+const PortalSupportPage = lazy(() => import("../taxi/driver/pages/PortalSupportPage"));
+const EditProfile = lazy(() => import("../taxi/driver/pages/settings/EditProfile"));
+const DriverDocuments = lazy(() => import("../taxi/driver/pages/settings/DriverDocuments"));
+const Notifications = lazy(() => import("../taxi/driver/pages/settings/Notifications"));
+const PayoutMethods = lazy(() => import("../taxi/driver/pages/settings/PayoutMethods"));
+const Referral = lazy(() => import("../taxi/driver/pages/settings/Referral"));
+const DriverDeleteAccount = lazy(() => import("../taxi/driver/pages/settings/DeleteAccount"));
+const SecuritySOS = lazy(() => import("../taxi/driver/pages/settings/SecuritySOS"));
+const DriverSupport = lazy(() => import("../taxi/driver/pages/settings/Support"));
+const DriverHelpSupportOptions = lazy(() => import("../taxi/driver/pages/settings/HelpSupportOptions"));
+const DriverSupportChat = lazy(() => import("../taxi/driver/pages/settings/SupportChat"));
+const VehicleFleet = lazy(() => import("../taxi/driver/pages/settings/VehicleFleet"));
+const OwnerVehicleFleet = lazy(() => import("../taxi/driver/pages/settings/OwnerVehicleFleet"));
+const AddVehicle = lazy(() => import("../taxi/driver/pages/settings/AddVehicle"));
+const ManageDrivers = lazy(() => import("../taxi/driver/pages/settings/ManageDrivers"));
+const AddDriver = lazy(() => import("../taxi/driver/pages/settings/AddDriver"));
+const LegalPage = lazy(() => import("../taxi/shared/pages/LegalPage"));
+
+// Helper functions from Taxi module
+const getLocalDriverToken = () => {
+  return localStorage.getItem('driverToken') || localStorage.getItem('taxiDriverToken');
+};
+const getAuthenticatedDriverRole = () => {
+  try {
+    const driverInfo = localStorage.getItem('driverInfo');
+    if (driverInfo) {
+      const parsed = JSON.parse(driverInfo);
+      console.log("DeliveryV2Router getAuthenticatedDriverRole driverInfo.role:", parsed.role);
+      return parsed.role || 'driver';
+    }
+  } catch {}
+  console.log("localStorage role", localStorage.getItem("role"));
+  console.log("localStorage driverRole", localStorage.getItem("driverRole"));
+  return 'driver';
+};
+const DriverEntryRedirect = () => {
+  const token = getLocalDriverToken();
+  const role = String(getAuthenticatedDriverRole() || 'driver').toLowerCase();
+
+  useEffect(() => {
+    console.log("ENTRY_ROLE", role);
+    if (token) {
+      import('../taxi/driver/services/registrationService').then(({ getCurrentDriver }) => {
+        getCurrentDriver()
+          .then((response) => {
+            const data = response?.data?.data || response?.data || response;
+            console.log("ME_RESPONSE", data);
+          })
+          .catch((err) => {
+            console.error("ME_RESPONSE error", err);
+          });
+      });
+    }
+  }, [token, role]);
+
+  if (!token) {
+    return <Navigate to="/food/delivery/taxi/login" replace />;
+  }
+
+  return (
+    <Navigate
+      to={
+        role === 'owner'
+          ? '/food/delivery/taxi/owner-dashboard'
+          : role === 'service_center' || role === 'service_center_staff'
+            ? '/food/delivery/taxi/service-center'
+            : role === 'bus_driver'
+              ? '/food/delivery/taxi/bus-home'
+              : role === 'pooling_driver'
+                ? '/food/delivery/taxi/pooling'
+                : '/food/delivery/taxi/home'
+      }
+      replace
+    />
+  );
+};
 
 
 
@@ -73,6 +184,64 @@ const DeliveryV2Router = () => {
         <Route path="/pocket/cash-limit" element={<ProtectedRoute><CashLimitInfoV2 /></ProtectedRoute>} />
         <Route path="/pocket/details" element={<ProtectedRoute><PocketDetailsV2 /></ProtectedRoute>} />
 
+        <Route path="/taxi" element={
+          <ProtectedRoute>
+            <SettingsProvider>
+              <DriverLayout />
+            </SettingsProvider>
+          </ProtectedRoute>
+        }>
+          <Route index element={<DriverEntryRedirect />} />
+          <Route path="login" element={<PhoneRegistration />} />
+          <Route path="terms" element={<LegalPage />} />
+          <Route path="privacy" element={<LegalPage />} />
+          <Route path="otp-verify" element={<OTPVerification />} />
+          <Route path="select-role" element={<RoleSelection />} />
+          <Route path="step-personal" element={<StepPersonal />} />
+          <Route path="role-signup" element={<RoleSpecificOnboarding />} />
+          <Route path="step-referral" element={<StepReferral />} />
+          <Route path="step-vehicle" element={<StepVehicle />} />
+          <Route path="step-documents" element={<StepDocuments />} />
+          <Route path="registration-status" element={<RegistrationStatus />} />
+          <Route path="status" element={<ApplicationStatus />} />
+          <Route path="home" element={<DriverHome />} />
+          <Route path="bus-home" element={<BusDriverHome />} />
+          <Route path="bus-home/live-route" element={<BusDriverLiveRoute />} />
+          <Route path="pooling" element={<PoolingDriverDashboard />} />
+          <Route path="pooling/onboarding" element={<PoolingDriverOnboarding />} />
+          <Route path="pooling/status" element={<PoolingDriverPendingStatus />} />
+          <Route path="pooling/bookings" element={<PoolingDriverBookings />} />
+          <Route path="owner-dashboard" element={<OwnerDashboard />} />
+          <Route path="active-trip" element={<ActiveTrip />} />
+          <Route path="wallet" element={<DriverWallet />} />
+          <Route path="profile" element={<DriverProfile />} />
+          <Route path="profile/bank-details" element={<DriverBankDetailsPage />} />
+          <Route path="service-center" element={<ServiceCenterDashboard />} />
+          <Route path="service-center/vehicles/new" element={<ServiceCenterVehicleDetails />} />
+          <Route path="service-center/vehicles/:vehicleId" element={<ServiceCenterVehicleDetails />} />
+          <Route path="history" element={<RideRequests />} />
+          <Route path="incentives" element={<DriverIncentives />} />
+          <Route path="support" element={<PortalSupportPage />} />
+          <Route path="settings/profile" element={<EditProfile />} />
+          <Route path="settings/documents" element={<DriverDocuments />} />
+          <Route path="settings/notifications" element={<Notifications />} />
+          <Route path="settings/payouts" element={<PayoutMethods />} />
+          <Route path="settings/referral" element={<Referral />} />
+          <Route path="settings/delete-account" element={<DriverDeleteAccount />} />
+          <Route path="settings/sos" element={<SecuritySOS />} />
+          <Route path="settings/support" element={<DriverSupport />} />
+          <Route path="settings/support-options" element={<DriverHelpSupportOptions />} />
+          <Route path="settings/support-chat" element={<DriverSupportChat />} />
+          <Route path="settings/vehicles" element={<VehicleFleet />} />
+          <Route path="settings/owner-vehicles" element={<OwnerVehicleFleet />} />
+          <Route path="settings/vehicles/add" element={<AddVehicle />} />
+          <Route path="settings/drivers" element={<ManageDrivers />} />
+          <Route path="settings/drivers/add" element={<AddDriver />} />
+          <Route path="owner/bus-service" element={<OwnerBusServicePage />} />
+          <Route path="owner/bus-bookings" element={<OwnerBusBookingsPage />} />
+          <Route path="owner/pooling-vehicle" element={<OwnerPoolingVehicleForm />} />
+        </Route>
+
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/food/delivery" replace />} />
       </Routes>
@@ -81,4 +250,3 @@ const DeliveryV2Router = () => {
 };
 
 export default DeliveryV2Router;
-
