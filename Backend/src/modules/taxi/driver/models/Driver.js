@@ -50,9 +50,21 @@ const driverSchema = new mongoose.Schema(
       default: '',
       trim: true,
     },
+    deliveryPartnerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'FoodDeliveryPartner',
+      default: null,
+      index: true,
+    },
     owner_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'TaxiOwner',
+      default: null,
+      index: true,
+    },
+    deliveryPartnerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Delivery',
       default: null,
       index: true,
     },

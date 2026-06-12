@@ -6,6 +6,7 @@ import { DeliveryBonusTransaction } from '../../admin/models/deliveryBonusTransa
 import { validateDeliveryRegisterDto, validateDeliveryProfileUpdateDto, validateDeliveryBankDetailsDto } from '../validators/delivery.validator.js';
 import { sendResponse } from '../../../../utils/response.js';
 import { getDeliveryReferralStats } from '../services/deliveryReferral.service.js';
+import { createDeliveryTaxiProfile } from '../services/deliveryTaxiProfile.service.js';
 
 export const registerDeliveryPartnerController = async (req, res, next) => {
     try {
@@ -272,6 +273,20 @@ export const getDeliveryReferralStatsController = async (req, res, next) => {
         const deliveryPartnerId = req.user?.userId;
         const stats = await getDeliveryReferralStats(deliveryPartnerId);
         return sendResponse(res, 200, 'Referral stats fetched successfully', { stats });
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const createDeliveryTaxiProfileController = async (req, res, next) => {
+    try {
+        console.log("CREATE_PROFILE_USER", req.user);
+        const userId = req.user?.userId;
+        const result = await createDeliveryTaxiProfile(userId);
+        return sendResponse(res, 200, 'Taxi driver profile ready', {
+            token: result.token,
+            created: result.created,
+        });
     } catch (error) {
         next(error);
     }

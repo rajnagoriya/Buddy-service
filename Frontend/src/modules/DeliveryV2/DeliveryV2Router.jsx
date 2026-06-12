@@ -1,7 +1,8 @@
-import React, { Suspense, lazy, useEffect } from 'react';
-import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute';
 import Loader from "@food/components/Loader";
+import { deliveryAPI } from '@food/api';
 
 // Import Taxi Providers & Components
 import { SettingsProvider } from '../taxi/shared_core/context/SettingsContext';
@@ -99,13 +100,79 @@ const getAuthenticatedDriverRole = () => {
   console.log("localStorage driverRole", localStorage.getItem("driverRole"));
   return 'driver';
 };
+const getTaxiDashboardPath = (role) => {
+  if (role === 'owner') return '/food/delivery/taxi/owner-dashboard';
+  if (role === 'service_center' || role === 'service_center_staff') {
+    return '/food/delivery/taxi/service-center';
+  }
+  if (role === 'bus_driver') return '/food/delivery/taxi/bus-home';
+  if (role === 'pooling_driver') return '/food/delivery/taxi/pooling';
+  return '/food/delivery/taxi/home';
+};
+
 const DriverEntryRedirect = () => {
-  const token = getLocalDriverToken();
+  const [driverToken, setDriverToken] = useState(() => getLocalDriverToken());
+  const [isBootstrapping, setIsBootstrapping] = useState(() => {
+    const deliveryAccessToken = localStorage.getItem('delivery_accessToken');
+    return Boolean(deliveryAccessToken) && !getLocalDriverToken();
+  });
+  const [bootstrapError, setBootstrapError] = useState(false);
   const role = String(getAuthenticatedDriverRole() || 'driver').toLowerCase();
 
   useEffect(() => {
+    const deliveryAccessToken = localStorage.getItem('delivery_accessToken');
+    const existingDriverToken = getLocalDriverToken();
+
+    if (existingDriverToken) {
+      setDriverToken(existingDriverToken);
+      setIsBootstrapping(false);
+      return;
+    }
+
+    if (!deliveryAccessToken) {
+      setIsBootstrapping(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    const checkOrCreateTaxiProfile = () => {
+      deliveryAPI.createTaxiProfile()
+        .then((response) => {
+          if (cancelled) return;
+
+          const token =
+            response?.data?.data?.token ||
+            response?.data?.token ||
+            null;
+
+          if (!token) {
+            setBootstrapError(true);
+            setIsBootstrapping(false);
+            return;
+          }
+
+          localStorage.setItem('driverToken', token);
+          setDriverToken(token);
+          setIsBootstrapping(false);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setBootstrapError(true);
+          setIsBootstrapping(false);
+        });
+    };
+
+    checkOrCreateTaxiProfile();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  React.useEffect(() => {
     console.log("ENTRY_ROLE", role);
-    if (token) {
+    if (driverToken) {
       import('../taxi/driver/services/registrationService').then(({ getCurrentDriver }) => {
         getCurrentDriver()
           .then((response) => {
@@ -117,9 +184,13 @@ const DriverEntryRedirect = () => {
           });
       });
     }
-  }, [token, role]);
+  }, [driverToken, role]);
 
-  if (!token) {
+  if (isBootstrapping) {
+    return <div className="min-h-screen flex items-center justify-center bg-white">Loading Taxi Session...</div>;
+  }
+
+  if (!driverToken) {
     return <Navigate to="/food/delivery/taxi/login" replace />;
   }
 
@@ -140,8 +211,6 @@ const DriverEntryRedirect = () => {
     />
   );
 };
-
-
 
 const DeliveryV2Router = () => {
   return (

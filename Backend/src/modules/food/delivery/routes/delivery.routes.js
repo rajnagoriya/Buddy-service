@@ -3,7 +3,7 @@ import { upload } from '../../../../middleware/upload.js';
 import { authMiddleware } from '../../../../core/auth/auth.middleware.js';
 import { requireRoles } from '../../../../core/roles/role.middleware.js';
 import * as orderController from '../../orders/controllers/order.controller.js';
-import { registerDeliveryPartnerController, updateDeliveryPartnerProfileController, updateDeliveryPartnerBankDetailsController, listSupportTicketsController, createSupportTicketController, getSupportTicketByIdController, updateDeliveryPartnerDetailsController, updateDeliveryPartnerProfilePhotoBase64Controller, updateAvailabilityController, getWalletController, createWithdrawalRequestController, createCashDepositOrderController, verifyCashDepositPaymentController, getEarningsController, getTripHistoryController, getPocketDetailsController, getEmergencyHelpController, getCashLimitController, getDeliveryReferralStatsController, getActiveEarningAddonsController } from '../controllers/delivery.controller.js';
+import { registerDeliveryPartnerController, updateDeliveryPartnerProfileController, updateDeliveryPartnerBankDetailsController, listSupportTicketsController, createSupportTicketController, getSupportTicketByIdController, updateDeliveryPartnerDetailsController, updateDeliveryPartnerProfilePhotoBase64Controller, updateAvailabilityController, getWalletController, createWithdrawalRequestController, createCashDepositOrderController, verifyCashDepositPaymentController, getEarningsController, getTripHistoryController, getPocketDetailsController, getEmergencyHelpController, getCashLimitController, getDeliveryReferralStatsController, getActiveEarningAddonsController, createDeliveryTaxiProfileController } from '../controllers/delivery.controller.js';
 import { deleteDeliveryAccountController } from '../controllers/deleteAccount.controller.js';
 
 const router = express.Router();
@@ -72,5 +72,8 @@ router.get('/referrals/stats', authMiddleware, requireRoles('DELIVERY_PARTNER'),
 
 // Delete account (Bearer DELIVERY_PARTNER)
 router.delete('/account', authMiddleware, requireRoles('DELIVERY_PARTNER'), deleteDeliveryAccountController);
+
+// Taxi driver profile bridge for delivery partners
+router.post('/taxi/create-profile', authMiddleware, createDeliveryTaxiProfileController);
 
 export default router;

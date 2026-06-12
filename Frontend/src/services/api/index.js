@@ -2058,6 +2058,11 @@ export const deliveryAPI = {
     apiClient.post(`/food/delivery/orders/${String(orderId)}/delay`, { reason }, {
       contextModule: "delivery",
     }),
+  /** POST /food/delivery/taxi/create-profile - bridge delivery partner to taxi driver token */
+  createTaxiProfile: () =>
+    apiClient.post("/food/delivery/taxi/create-profile", {}, {
+      contextModule: "delivery",
+    }),
 };
 
 export const userAPI = {

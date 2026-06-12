@@ -367,7 +367,7 @@ const clearUserSession = () => {
 
 const UserProtectedRoute = () => {
   if (!getLocalUserToken()) {
-    return <Navigate to="/taxi/user/login" replace />;
+    return <Navigate to="/user/auth/login" replace />;
   }
   return <Outlet />;
 };
@@ -375,7 +375,7 @@ const UserProtectedRoute = () => {
 const UserHomeRoute = ({ taxiPrefixed = false }) => (
   getLocalUserToken()
     ? <UserHome />
-    : <Navigate to={taxiPrefixed ? '/taxi/user/login' : '/login'} replace />
+    : <Navigate to="/user/auth/login" replace />
 );
 
 const UserAccountInvalidationListener = () => {
@@ -395,7 +395,7 @@ const UserAccountInvalidationListener = () => {
     const handleLogout = (loginState = null) => {
       clearUserSession();
       socketService.disconnect();
-      navigate('/taxi/user/login', { replace: true, state: loginState });
+      navigate('/user/auth/login', { replace: true, state: loginState });
     };
 
     const handleAuthStale = (event) => {
