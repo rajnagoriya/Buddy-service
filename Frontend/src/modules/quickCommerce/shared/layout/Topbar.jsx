@@ -164,7 +164,7 @@ const Topbar = ({ onMenuClick }) => {
                 ? "px-4 md:px-6"
                 : "px-6"
         )}>
-            <div className="flex items-center justify-between py-3">
+            <div className="flex items-center justify-between py-2">
                 <div className="flex items-center gap-3">
                     <button
                         onClick={onMenuClick}
@@ -195,7 +195,7 @@ const Topbar = ({ onMenuClick }) => {
                 {/* Center: Search Bar */}
                 <div className="hidden md:flex flex-1 justify-center max-w-md mx-8">
                     <form onSubmit={handleSearchSubmit} className="relative w-full group flex items-center">
-                        <button type="button" className="flex items-center gap-2 px-4 py-2 rounded-full bg-neutral-100 text-neutral-600 cursor-text w-full border border-neutral-200" onClick={(e) => e.currentTarget.nextElementSibling.focus()}>
+                        <button type="button" className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-neutral-100 text-neutral-600 cursor-text w-full border border-neutral-200" onClick={(e) => e.currentTarget.nextElementSibling.focus()}>
                             <HiOutlineSearch className="w-4 h-4 text-neutral-700" />
                             <input
                                 type="text"
@@ -217,7 +217,7 @@ const Topbar = ({ onMenuClick }) => {
                 <div className="relative" ref={notificationRef}>
                     <button
                         onClick={() => setShowNotifications(!showNotifications)}
-                        className="relative h-10 w-10 rounded-full border border-neutral-200 bg-neutral-50 text-neutral-700 flex items-center justify-center hover:bg-neutral-100 transition-colors"
+                        className="relative h-8 w-8 rounded-md border border-neutral-200 bg-neutral-50 text-neutral-700 flex items-center justify-center hover:bg-neutral-100 transition-colors"
                         aria-label="Notifications"
                     >
                         <HiOutlineBell className="w-5 h-5" />
