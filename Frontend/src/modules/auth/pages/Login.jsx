@@ -1,8 +1,21 @@
-import React, { useEffect, useState, useRef } from "react"
+import { useEffect, useState, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Link, useNavigate } from "react-router-dom"
-import { ArrowRight, Loader2, Utensils, ShoppingBag, Car, ChevronDown, ShieldCheck, Zap, BadgeCheck, User } from "lucide-react"
+import {
+  ArrowRight,
+  Loader2,
+  Utensils,
+  ShoppingBag,
+  Car,
+  ChevronDown,
+  ShieldCheck,
+  Zap,
+  BadgeCheck,
+  User,
+} from "lucide-react"
 import { toast } from "sonner"
+import { setAuthData } from "@food/utils/auth"
+import logoImage from "@/assets/logo.png"
 import { userAPI, identityAPI, persistUserIdentitySession } from "@food/api"
 import heroImage from "@/assets/login_hero_3d.png" 
 import {
@@ -11,7 +24,6 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@food/components/ui/dialog"
-import { Button } from "@food/components/ui/button"
 import { Input } from "@food/components/ui/input"
 import { Label } from "@food/components/ui/label"
 
@@ -116,23 +128,25 @@ export default function UnifiedOTPFastLogin() {
       try {
         if (typeof window !== "undefined") {
           if (window.flutter_inappwebview) {
-            platform = "mobile";
-            const handlerNames = ["getFcmToken", "getFCMToken", "getPushToken", "getFirebaseToken"];
+            platform = "mobile"
+            const handlerNames = ["getFcmToken", "getFCMToken", "getPushToken", "getFirebaseToken"]
             for (const handlerName of handlerNames) {
               try {
-                const t = await window.flutter_inappwebview.callHandler(handlerName, { module: "user" });
+                const t = await window.flutter_inappwebview.callHandler(handlerName, { module: "user" })
                 if (t && typeof t === "string" && t.length > 20) {
-                  fcmToken = t.trim();
-                  break;
+                  fcmToken = t.trim()
+                  break
                 }
-              } catch (e) { }
+              } catch {
+                /* try next handler */
+              }
             }
           } else {
-            fcmToken = localStorage.getItem("fcm_web_registered_token_user") || null;
+            fcmToken = localStorage.getItem("fcm_web_registered_token_user") || null
           }
         }
       } catch (e) {
-        console.warn("Failed to get FCM token during login", e);
+        console.warn("Failed to get FCM token during login", e)
       }
 
       const response = await identityAPI.verifyOtp(phoneNumber, "USER", otpDigits, { fcmToken, platform })
@@ -157,8 +171,14 @@ export default function UnifiedOTPFastLogin() {
       }
     } catch (err) {
       const status = err?.response?.status
-      let msg = err?.response?.data?.message || err?.response?.data?.error || err?.message || "Invalid OTP. Please try again."
-      const nameRequired = /name\s+is\s+required.*first[- ]?time|first[- ]?time.*name\s+is\s+required|first[- ]?time\s*sign\s*up/i.test(String(msg))
+      let msg =
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        err?.message ||
+        "Invalid OTP. Please try again."
+      const nameRequired = /name\s+is\s+required.*first[- ]?time|first[- ]?time.*name\s+is\s+required|first[- ]?time\s*sign\s*up/i.test(
+        String(msg),
+      )
       if (nameRequired) {
         setPendingVerify({ phone: phoneNumber, otp: otpDigits, fcmToken, platform })
         setShowNameModal(true)
@@ -229,7 +249,7 @@ export default function UnifiedOTPFastLogin() {
       toast.success(`Welcome, ${newName.trim()}!`)
       setShowNameModal(false)
       navigate("/user/auth/portal", { replace: true })
-    } catch (err) {
+    } catch {
       toast.error("Failed to update name. You can skip this for now or try again.")
     } finally {
       setIsUpdatingName(false)
@@ -251,79 +271,78 @@ export default function UnifiedOTPFastLogin() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col font-['Poppins'] sm:justify-center sm:items-center">
-      
-      <div className="sm:w-[420px] sm:bg-white sm:rounded-[2.5rem] sm:shadow-2xl sm:overflow-hidden sm:relative flex flex-col h-full w-full max-w-full">
-        
-        {/* Top Banner Section */}
-        <div className="relative w-full overflow-hidden bg-[#78B45A] pt-4 pb-[3.5rem] flex-shrink-0">
-          
-          {/* Abstract wavy background layer (Light top area) */}
-          <div className="absolute top-[-30%] left-[-20%] w-[140%] h-[120%] bg-gradient-to-br from-[#F5F9F3] via-[#E7F3E2] to-[#CCE3C4] rounded-br-[50%] z-0"></div>
+    <div className="min-h-screen min-h-dvh bg-gray-50 flex flex-col font-[family-name:var(--font-poppins)] sm:justify-center sm:items-center sm:p-4 md:p-6">
+      <div className="w-full h-full min-h-screen min-h-dvh sm:min-h-0 sm:h-auto sm:max-w-[420px] md:max-w-[440px] sm:bg-white sm:rounded-[2.5rem] sm:shadow-2xl sm:overflow-hidden sm:relative flex flex-col max-w-full">
+        {/* Hero banner */}
+        <div className="relative w-full overflow-hidden bg-gradient-to-br from-primary via-[#15803d] to-[#166534] pt-4 pb-14 sm:pb-16 flex-shrink-0 min-h-[320px] sm:min-h-[340px]">
+          <div className="absolute top-[-30%] left-[-20%] w-[140%] h-[120%] bg-gradient-to-br from-white/25 via-white/10 to-transparent rounded-br-[50%] z-0" />
 
-          <div className="px-6 pt-4 pb-2 relative z-10 flex flex-col justify-between h-full">
-            
-            <div>
-              {/* Logo */}
-              <div className="mb-6 flex items-center gap-2">
-                <div className="w-9 h-9 rounded-xl bg-[#00923F] flex items-center justify-center shadow-md">
-                   {/* Fallback to image if B logo isn't perfect, but we mimic the green B icon */}
-                   <span className="text-white font-black text-xl leading-none">B</span>
-                </div>
-                <span className="font-black text-[#13491E] text-lg tracking-tight">Buddy Service</span>
+          <div className="px-5 sm:px-6 pt-4 pb-2 relative z-10 flex flex-col justify-between h-full">
+            <div className="max-w-[58%] sm:max-w-[55%]">
+              <div className="mb-5 sm:mb-6 flex items-center gap-2">
+                <img
+                  src={logoImage}
+                  alt="Buddy Service"
+                  className="w-9 h-9 rounded-xl object-contain bg-white shadow-md p-0.5"
+                />
+                <span className="font-black text-white text-base sm:text-lg tracking-tight">
+                  Buddy Service
+                </span>
               </div>
 
-              <h1 className="text-[34px] md:text-4xl font-extrabold text-[#113B17] leading-[1.15] mb-2 tracking-tight">
-                One App.<br />Everything<br />You Need.
+              <h1 className="text-[30px] sm:text-[34px] md:text-4xl font-extrabold text-white leading-[1.15] mb-2 tracking-tight">
+                One App.
+                <br />
+                Everything
+                <br />
+                You Need.
               </h1>
-              <div className="h-1 w-14 bg-[#4C883A] my-4 rounded-full"></div>
-              <p className="text-[#647C5E] font-medium text-[15px] leading-snug mb-20 max-w-[200px]">
-                Food, Quick Commerce<br />and Taxi – all in one app.
-              </p>
             </div>
-            
-          </div>
-          
-          {/* Right side illustration */}
-          <div className="absolute top-8 -right-[30%] w-[90%] max-w-[340px] z-[5] sm:-right-8">
-            <img src={heroImage} alt="Services Illustration" className="w-full h-full object-contain drop-shadow-2xl scale-[1.1] origin-top-right" />
           </div>
 
-          {/* Glassmorphism Icon Container */}
-          <div className="absolute bottom-6 left-6 right-6 z-10 bg-[#5A8C41]/30 backdrop-blur-md rounded-[24px] p-4 flex items-center shadow-lg border border-white/10">
-            <div className="flex-1 flex flex-col items-center gap-2">
-              <div className="w-[50px] h-[50px] bg-white rounded-[16px] flex items-center justify-center shadow-sm">
-                <Utensils className="w-6 h-6 text-[#113B17]" strokeWidth={2} />
+          
+
+          {/* Service pills */}
+          <div className="absolute bottom-5 sm:bottom-6 left-4 right-4 sm:left-6 sm:right-6 z-10 bg-white/15 backdrop-blur-md rounded-3xl p-3 sm:p-4 flex items-center shadow-lg border border-white/20">
+            <div className="flex-1 flex flex-col items-center gap-1.5 sm:gap-2">
+              <div className="w-11 h-11 sm:w-[50px] sm:h-[50px] bg-white rounded-2xl flex items-center justify-center shadow-sm">
+                <Utensils className="w-5 h-5 sm:w-6 sm:h-6 text-primary" strokeWidth={2} />
               </div>
-              <span className="text-white text-[11px] font-semibold">Food</span>
+              <span className="text-white text-[10px] sm:text-[11px] font-semibold">Food</span>
             </div>
-            
-            <div className="w-px h-8 bg-white/20"></div>
-            
-            <div className="flex-1 flex flex-col items-center gap-2">
-              <div className="w-[50px] h-[50px] bg-white rounded-[16px] flex items-center justify-center shadow-sm">
-                <ShoppingBag className="w-6 h-6 text-[#113B17]" strokeWidth={2} />
+
+            <div className="w-px h-7 sm:h-8 bg-white/20" />
+
+            <div className="flex-1 flex flex-col items-center gap-1.5 sm:gap-2">
+              <div className="w-11 h-11 sm:w-[50px] sm:h-[50px] bg-white rounded-2xl flex items-center justify-center shadow-sm">
+                <ShoppingBag className="w-5 h-5 sm:w-6 sm:h-6 text-primary" strokeWidth={2} />
               </div>
-              <span className="text-white text-[11px] font-semibold text-center leading-tight">Quick<br/>Commerce</span>
+              <span className="text-white text-[10px] sm:text-[11px] font-semibold text-center leading-tight">
+                Quick
+                <br />
+                Commerce
+              </span>
             </div>
-            
-            <div className="w-px h-8 bg-white/20"></div>
-            
-            <div className="flex-1 flex flex-col items-center gap-2">
-              <div className="w-[50px] h-[50px] bg-white rounded-[16px] flex items-center justify-center shadow-sm">
-                <Car className="w-6 h-6 text-[#113B17]" strokeWidth={2} />
+
+            <div className="w-px h-7 sm:h-8 bg-white/20" />
+
+            <div className="flex-1 flex flex-col items-center gap-1.5 sm:gap-2">
+              <div className="w-11 h-11 sm:w-[50px] sm:h-[50px] bg-white rounded-2xl flex items-center justify-center shadow-sm">
+                <Car className="w-5 h-5 sm:w-6 sm:h-6 text-primary" strokeWidth={2} />
               </div>
-              <span className="text-white text-[11px] font-semibold">Taxi</span>
+              <span className="text-white text-[10px] sm:text-[11px] font-semibold">Taxi</span>
             </div>
           </div>
         </div>
 
-        {/* Bottom Sheet Form & Footer */}
-        <div className="flex-1 bg-white rounded-t-[2.5rem] mt-[-1.5rem] relative z-20 flex flex-col">
-          <div className="p-8 pb-4">
-            <h2 className="text-[32px] font-black text-[#13491E] mb-1">Welcome!</h2>
-            <p className="text-gray-500 font-medium text-[15px] mb-8">Login to continue</p>
-            
+        {/* Form sheet */}
+        <div className="flex-1 bg-white rounded-t-[2.5rem] -mt-6 relative z-20 flex flex-col">
+          <div className="p-6 sm:p-8 pb-4">
+            <h2 className="text-[28px] sm:text-[32px] font-black text-foreground mb-1">Welcome!</h2>
+            <p className="text-gray-500 font-medium text-sm sm:text-[15px] mb-6 sm:mb-8">
+              {step === 1 ? "Login to continue" : `Enter OTP sent to +91 ${phoneNumber}`}
+            </p>
+
             <AnimatePresence mode="wait">
               {step === 1 ? (
                 <motion.form
@@ -335,21 +354,26 @@ export default function UnifiedOTPFastLogin() {
                   className="space-y-6"
                 >
                   <div>
-                    <Label className="text-[#354839] text-[13px] font-bold mb-2 block ml-1">Mobile Number</Label>
-                    <div className="flex items-center border border-[#4C883A] rounded-[14px] focus-within:ring-2 focus-within:ring-[#4C883A]/20 transition-all bg-white overflow-hidden shadow-sm h-14">
-                      <div className="flex items-center gap-1.5 px-4 h-full text-gray-800">
-                        <span className="font-bold text-[15px]">+91</span>
-                        <ChevronDown className="w-4 h-4 text-gray-400" strokeWidth={3} />
+                    <Label className="text-foreground text-[13px] font-bold mb-2 block ml-1">
+                      Mobile Number
+                    </Label>
+                    <div className="flex items-center border border-primary/40 rounded-[14px] focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-all bg-white overflow-hidden shadow-sm h-12 sm:h-14">
+                      <div className="flex items-center gap-1.5 px-3 sm:px-4 h-full text-gray-800 shrink-0">
+                        <span className="font-bold text-sm sm:text-[15px]">+91</span>
+                        <ChevronDown className="w-4 h-4 text-gray-400 hidden sm:block" strokeWidth={3} />
                       </div>
-                      <div className="w-px h-6 bg-gray-200"></div>
+                      <div className="w-px h-6 bg-gray-200" />
                       <input
                         type="tel"
                         required
                         autoFocus
                         value={phoneNumber}
-                        onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                        onChange={(e) =>
+                          setPhoneNumber(e.target.value.replace(/\D/g, "").slice(0, 10))
+                        }
                         maxLength={10}
-                        className="flex-1 px-4 h-full outline-none text-gray-900 font-bold placeholder:text-gray-400 text-[15px]"
+                        inputMode="numeric"
+                        className="flex-1 min-w-0 px-3 sm:px-4 h-full outline-none text-gray-900 font-bold placeholder:text-gray-400 text-sm sm:text-[15px]"
                         placeholder="Enter mobile number"
                       />
                     </div>
@@ -358,14 +382,14 @@ export default function UnifiedOTPFastLogin() {
                   <button
                     type="submit"
                     disabled={loading || phoneNumber.length < 10}
-                    className="w-full h-14 bg-[#569143] hover:bg-[#467A34] disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-[14px] font-bold text-[16px] shadow-lg shadow-[#569143]/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2 relative overflow-hidden mt-2"
+                    className="w-full h-12 sm:h-14 bg-primary hover:bg-primary/90 disabled:bg-gray-200 disabled:text-gray-400 text-primary-foreground rounded-[14px] font-bold text-base shadow-lg shadow-primary/25 transition-all active:scale-[0.98] flex items-center justify-center gap-2 relative overflow-hidden"
                   >
                     {loading ? (
                       <Loader2 className="w-5 h-5 animate-spin" />
                     ) : (
                       <>
                         <span>Get OTP</span>
-                        <ArrowRight className="w-[22px] h-[22px] absolute right-5" strokeWidth={2.5} />
+                        <ArrowRight className="w-5 h-5 sm:w-[22px] sm:h-[22px] absolute right-4 sm:right-5" strokeWidth={2.5} />
                       </>
                     )}
                   </button>
@@ -380,8 +404,10 @@ export default function UnifiedOTPFastLogin() {
                   className="space-y-6"
                 >
                   <div>
-                    <Label className="text-[#354839] text-[13px] font-bold mb-2 block ml-1">Enter OTP Code</Label>
-                    <div className="flex justify-between gap-3">
+                    <Label className="text-foreground text-[13px] font-bold mb-2 block ml-1">
+                      Enter OTP Code
+                    </Label>
+                    <div className="grid grid-cols-4 gap-2 sm:gap-3">
                       {[0, 1, 2, 3].map((index) => (
                         <input
                           key={index}
@@ -392,45 +418,49 @@ export default function UnifiedOTPFastLogin() {
                           autoFocus={index === 0}
                           value={otp[index] || ""}
                           onChange={(e) => {
-                            const val = e.target.value.replace(/\D/g, "").slice(-1);
-                            if (!val) return;
-                            const newOtp = otp.split("");
-                            newOtp[index] = val;
-                            const combined = newOtp.join("").slice(0, 4);
-                            setOtp(combined);
+                            const val = e.target.value.replace(/\D/g, "").slice(-1)
+                            if (!val) return
+                            const newOtp = otp.split("")
+                            newOtp[index] = val
+                            const combined = newOtp.join("").slice(0, 4)
+                            setOtp(combined)
                             if (index < 3 && val) {
-                              document.getElementById(`otp-${index + 1}`)?.focus();
+                              document.getElementById(`otp-${index + 1}`)?.focus()
                             }
                           }}
                           onKeyDown={(e) => {
                             if (e.key === "Backspace") {
                               if (!otp[index] && index > 0) {
-                                document.getElementById(`otp-${index - 1}`)?.focus();
+                                document.getElementById(`otp-${index - 1}`)?.focus()
                               } else {
-                                const newOtp = otp.split("");
-                                newOtp[index] = "";
-                                setOtp(newOtp.join(""));
+                                const newOtp = otp.split("")
+                                newOtp[index] = ""
+                                setOtp(newOtp.join(""))
                               }
                             }
                           }}
-                          className="w-full h-14 text-center text-2xl font-bold bg-white border border-[#4C883A] focus:ring-2 focus:ring-[#4C883A]/20 rounded-[14px] outline-none transition-all text-gray-900 shadow-sm"
+                          className="w-full h-12 sm:h-14 text-center text-xl sm:text-2xl font-bold bg-white border border-primary/40 focus:ring-2 focus:ring-primary/20 focus:border-primary rounded-[14px] outline-none transition-all text-gray-900 shadow-sm"
                           placeholder="•"
+                          aria-label={`OTP digit ${index + 1}`}
                         />
                       ))}
                     </div>
                   </div>
 
-                  <div className="flex flex-col items-center gap-3 mt-4">
+                  <div className="flex flex-col items-center gap-3">
                     <div className="flex items-center gap-2 text-[13px] font-semibold">
                       {resendTimer > 0 ? (
-                        <span className="text-gray-400">Resend code in <span className="text-[#4C883A]">{formatResendTimer(resendTimer)}</span></span>
+                        <span className="text-gray-400">
+                          Resend code in{" "}
+                          <span className="text-primary">{formatResendTimer(resendTimer)}</span>
+                        </span>
                       ) : (
                         <button
                           type="button"
                           onClick={handleResendOTP}
-                          className="text-[#4C883A] hover:underline"
+                          className="text-primary hover:underline"
                         >
-                          Didn't receive code? Resend
+                          Didn&apos;t receive code? Resend
                         </button>
                       )}
                     </div>
@@ -438,7 +468,7 @@ export default function UnifiedOTPFastLogin() {
                     <button
                       type="button"
                       onClick={handleEditNumber}
-                      className="text-[13px] text-gray-400 hover:text-[#4C883A] transition-colors"
+                      className="text-[13px] text-gray-400 hover:text-primary transition-colors"
                     >
                       Edit phone number
                     </button>
@@ -447,12 +477,17 @@ export default function UnifiedOTPFastLogin() {
                   <button
                     type="submit"
                     disabled={loading || otp.length < 4}
-                    className="w-full h-14 bg-[#569143] hover:bg-[#467A34] disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-[14px] font-bold text-[16px] shadow-lg shadow-[#569143]/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2 relative overflow-hidden"
+                    className="w-full h-12 sm:h-14 bg-primary hover:bg-primary/90 disabled:bg-gray-200 disabled:text-gray-400 text-primary-foreground rounded-[14px] font-bold text-base shadow-lg shadow-primary/25 transition-all active:scale-[0.98] flex items-center justify-center gap-2 relative overflow-hidden"
                   >
-                    {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : (
+                    {loading ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
                       <>
                         <span>Verify & Continue</span>
-                        <ArrowRight className="w-[22px] h-[22px] absolute right-5" strokeWidth={2.5} />
+                        <ArrowRight
+                          className="w-5 h-5 sm:w-[22px] sm:h-[22px] absolute right-4 sm:right-5"
+                          strokeWidth={2.5}
+                        />
                       </>
                     )}
                   </button>
@@ -461,81 +496,96 @@ export default function UnifiedOTPFastLogin() {
             </AnimatePresence>
           </div>
 
-          {/* Footer Section */}
-          <div className="mt-auto bg-[#F6F8F5] px-6 py-8 rounded-t-[2rem] flex flex-col items-center">
-            <div className="flex justify-between w-full max-w-sm mb-6">
+          {/* Footer */}
+          <div className="mt-auto bg-secondary px-5 sm:px-6 py-6 sm:py-8 rounded-t-[2rem] flex flex-col items-center">
+            <div className="flex justify-between w-full max-w-sm mb-5 sm:mb-6 gap-2">
               <div className="flex gap-2 items-center">
-                <ShieldCheck className="w-[22px] h-[22px] text-[#2E7D32]" strokeWidth={1.5} />
-                <span className="text-[10px] font-semibold text-gray-600 leading-tight">Secure<br/>& Safe</span>
+                <ShieldCheck className="w-5 h-5 sm:w-[22px] sm:h-[22px] text-primary" strokeWidth={1.5} />
+                <span className="text-[10px] font-semibold text-gray-600 leading-tight">
+                  Secure
+                  <br />
+                  & Safe
+                </span>
               </div>
               <div className="flex gap-2 items-center">
-                <Zap className="w-[22px] h-[22px] text-[#2E7D32]" strokeWidth={1.5} />
-                <span className="text-[10px] font-semibold text-gray-600 leading-tight">Fast<br/>Delivery</span>
+                <Zap className="w-5 h-5 sm:w-[22px] sm:h-[22px] text-primary" strokeWidth={1.5} />
+                <span className="text-[10px] font-semibold text-gray-600 leading-tight">
+                  Fast
+                  <br />
+                  Delivery
+                </span>
               </div>
               <div className="flex gap-2 items-center">
-                <BadgeCheck className="w-[22px] h-[22px] text-[#2E7D32]" strokeWidth={1.5} />
-                <span className="text-[10px] font-semibold text-gray-600 leading-tight">Trusted by<br/>Millions</span>
+                <BadgeCheck className="w-5 h-5 sm:w-[22px] sm:h-[22px] text-primary" strokeWidth={1.5} />
+                <span className="text-[10px] font-semibold text-gray-600 leading-tight">
+                  Trusted by
+                  <br />
+                  Millions
+                </span>
               </div>
             </div>
-            
+
             <p className="text-center text-[10px] text-gray-500 font-medium max-w-[280px]">
-              By continuing, you agree to our <Link to="/terms" className="text-[#2E7D32] font-semibold hover:underline">Terms & Conditions</Link> and <Link to="/privacy" className="text-[#2E7D32] font-semibold hover:underline">Privacy Policy</Link>.
+              By continuing, you agree to our{" "}
+              <Link to="/terms" className="text-primary font-semibold hover:underline">
+                Terms & Conditions
+              </Link>{" "}
+              and{" "}
+              <Link to="/privacy" className="text-primary font-semibold hover:underline">
+                Privacy Policy
+              </Link>
+              .
             </p>
           </div>
         </div>
-
       </div>
 
-      {/* Name Collection Modal */}
+      {/* Name modal */}
       <Dialog open={showNameModal} onOpenChange={setShowNameModal}>
         <DialogContent
-          className="sm:max-w-[425px] rounded-3xl border-none p-0 overflow-hidden bg-white"
+          className="sm:max-w-[425px] rounded-3xl border-none p-0 overflow-hidden bg-white mx-4"
           showCloseButton={false}
         >
-          <div className="bg-[#4C883A] p-8 text-center relative">
+          <div className="bg-primary p-6 sm:p-8 text-center relative">
             <div className="absolute top-[-20%] right-[-10%] w-32 h-32 bg-white/10 rounded-full blur-2xl" />
-            <motion.div 
+            <motion.div
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
-              className="w-20 h-20 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30"
+              className="w-16 h-16 sm:w-20 sm:h-20 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30"
             >
-              <User className="w-10 h-10 text-white" />
+              <User className="w-8 h-8 sm:w-10 sm:h-10 text-white" />
             </motion.div>
-            <DialogTitle className="text-2xl font-bold text-white mb-2">Almost there!</DialogTitle>
-            <DialogDescription className="text-white/80">
-              We'd love to know your name to personalize your experience.
+            <DialogTitle className="text-xl sm:text-2xl font-bold text-white mb-2">
+              Almost there!
+            </DialogTitle>
+            <DialogDescription className="text-white/80 text-sm sm:text-base">
+              We&apos;d love to know your name to personalize your experience.
             </DialogDescription>
           </div>
-          
-          <form onSubmit={handleNameSubmit} className="p-8 pt-6 space-y-6">
+
+          <form onSubmit={handleNameSubmit} className="p-6 sm:p-8 pt-5 sm:pt-6 space-y-6">
             <div className="space-y-4">
               <Label htmlFor="name" className="text-sm font-medium text-gray-700 ml-1">
                 Full Name
               </Label>
-              <div className="relative group">
-                <Input
-                  id="name"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  placeholder="Enter your name"
-                  className="pl-4 h-14 bg-gray-50 border-gray-200 rounded-[14px] focus:ring-2 focus:ring-[#4C883A] transition-all group-hover:border-[#4C883A]/30"
-                  autoFocus
-                />
-              </div>
+              <Input
+                id="name"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="Enter your name"
+                className="pl-4 h-12 sm:h-14 bg-gray-50 border-gray-200 rounded-[14px] focus:ring-2 focus:ring-primary transition-all"
+                autoFocus
+              />
             </div>
 
             <div className="flex flex-col gap-3">
-              <Button 
-                type="submit" 
+              <button
+                type="submit"
                 disabled={isUpdatingName}
-                className="w-full h-14 bg-[#569143] hover:bg-[#467A34] text-white rounded-[14px] font-bold text-lg shadow-lg shadow-[#569143]/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                className="w-full h-12 sm:h-14 bg-primary hover:bg-primary/90 disabled:opacity-60 text-primary-foreground rounded-[14px] font-bold text-base sm:text-lg shadow-lg shadow-primary/25 transition-all active:scale-[0.98] flex items-center justify-center"
               >
-                {isUpdatingName ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : (
-                  "Complete Profile"
-                )}
-              </Button>
+                {isUpdatingName ? <Loader2 className="h-5 w-5 animate-spin" /> : "Complete Profile"}
+              </button>
               {!pendingVerify ? (
                 <button
                   type="button"
@@ -548,7 +598,9 @@ export default function UnifiedOTPFastLogin() {
                   Skip for now
                 </button>
               ) : (
-                <p className="text-xs text-gray-400 text-center">Name is required to complete signup.</p>
+                <p className="text-xs text-gray-400 text-center">
+                  Name is required to complete signup.
+                </p>
               )}
             </div>
           </form>

@@ -44,7 +44,7 @@ const BottomNavbar = () => {
     // Bus tab hidden — re-enable when bus service is ready
     // ...(showBusService ? [{ imageIcon: dynamicBusIcon, label: 'Bus', path: '/taxi/user/bus' }] : []),
     { icon: Map, label: 'Support', path: '/taxi/user/support' },
-    { icon: User, label: 'Profile', path: '/food/user/profile' },
+    { icon: User, label: 'Profile', path: '/food/user/profile?service=taxi' },
   ];
 
   if (showNavSkeleton) {

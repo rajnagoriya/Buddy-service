@@ -15,23 +15,21 @@ export const useCompanyName = () => {
   useEffect(() => {
     const loadCompanyName = async () => {
       try {
+        const cached = getCachedSettings();
+        if (cached?.companyName) {
+          setCompanyName(cached.companyName);
+          return;
+        }
         const settings = await loadBusinessSettings();
         if (settings?.companyName) {
           setCompanyName(settings.companyName);
         }
       } catch (error) {
-        // Keep default value on error
         console.warn('Failed to load company name:', error);
       }
     };
 
-    // Load if not cached
-    const cached = getCachedSettings();
-    if (!cached?.companyName) {
-      loadCompanyName();
-    } else {
-      setCompanyName(cached.companyName);
-    }
+    loadCompanyName();
 
     // Listen for business settings updates
     const handleSettingsUpdate = () => {

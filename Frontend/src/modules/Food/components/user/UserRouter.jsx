@@ -54,8 +54,10 @@ const CollectionDetail = lazy(() => import("@food/pages/user/CollectionDetail"))
 
 
 
-// Profile
-const Profile = lazy(() => import("@food/pages/user/profile/Profile"))
+// Profile — unified across Food, Taxi & QC (see src/shared/profile/UnifiedProfile.jsx)
+const UnifiedProfile = lazy(() => import("@/shared/profile/UnifiedProfile"))
+// Legacy Food-only profile (kept for reference; route now uses UnifiedProfile)
+// const Profile = lazy(() => import("@food/pages/user/profile/Profile"))
 const EditProfile = lazy(() => import("@food/pages/user/profile/EditProfile"))
 const Payments = lazy(() => import("@food/pages/user/profile/Payments"))
 const AddPayment = lazy(() => import("@food/pages/user/profile/AddPayment"))
@@ -185,10 +187,11 @@ export default function UserRouter() {
             path="profile"
             element={
               <ProtectedRoute requiredRole="user" loginPath="/user/auth/login">
-                <Profile />
+                <UnifiedProfile />
               </ProtectedRoute>
             }
           />
+          {/* Legacy: <Profile /> — replaced by UnifiedProfile */}
           <Route
             path="profile/edit"
             element={

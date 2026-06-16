@@ -7,7 +7,7 @@ const navItems = [
     { label: 'Home', icon: Home, path: '/qc' },
     { label: 'Category', icon: LayoutGrid, path: '/qc/categories' },
     { label: 'Orders', icon: ShoppingBag, path: '/qc/orders' },
-    { label: 'Profile', icon: User, path: '/food/user/profile' },
+    { label: 'Profile', icon: User, path: '/food/user/profile?service=qc' },
 ];
 
 const BottomNav = () => {
@@ -16,8 +16,10 @@ const BottomNav = () => {
     return (
         <div className="fixed bottom-0 left-0 right-0 z-[500] bg-white border-t border-gray-100 flex items-center justify-around h-[70px] md:hidden shadow-[0_-8px_30px_rgba(0,0,0,0.06)] px-4 pb-[env(safe-area-inset-bottom)]">
             {navItems.map((item) => {
-                const isActive = location.pathname === item.path ||
-                    (item.path !== '/qc' && location.pathname.startsWith(item.path));
+                const isActive =
+                    (item.path.includes('profile') && location.pathname.startsWith('/food/user/profile')) ||
+                    location.pathname === item.path ||
+                    (item.path !== '/qc' && !item.path.includes('?') && location.pathname.startsWith(item.path.split('?')[0]));
 
                 return (
                     <Link

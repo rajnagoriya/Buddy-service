@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+// Legacy Food-only profile — replaced by src/shared/profile/UnifiedProfile.jsx
+// Route now points to UnifiedProfile via UserRouter.
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {

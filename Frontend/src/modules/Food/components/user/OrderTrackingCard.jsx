@@ -158,13 +158,24 @@ const getTimeRemaining = (order) => {
   return Math.max(0, Math.floor((deliveryTime - new Date()) / 60000));
 };
 
-/** Cheap fingerprint so we skip setState when list content is unchanged (fewer re-renders). */
 function ordersFingerprint(orders) {
   if (!Array.isArray(orders) || orders.length === 0) return "";
   return orders
     .map((o) => `${getOrderKey(o)}:${getOrderStatus(o)}`)
     .join("|");
 }
+
+function isUserAuthenticated() {
+  if (typeof window === "undefined") return false;
+  return Boolean(
+    localStorage.getItem("user_accessToken") ||
+      localStorage.getItem("accessToken") ||
+      localStorage.getItem("user_authenticated") === "true",
+  );
+}
+
+const ACTIVE_ORDER_POLL_MS = 30000;
+const RECENTLY_PLACED_GRACE_MS = 3 * 60 * 1000;
 
 function OrderTrackingCardInner({ hasBottomNav = true }) {
   const navigate = useNavigate();
@@ -177,11 +188,50 @@ function OrderTrackingCardInner({ hasBottomNav = true }) {
   const lastApiFingerprintRef = useRef("");
   const activeOrderKeyRef = useRef("");
   const activeOrderSnapshotRef = useRef(null);
+  const pollIntervalRef = useRef(null);
+  const recentlyPlacedKeysRef = useRef(new Map());
   const [invalidOrderIds, setInvalidOrderIds] = useState(new Set());
 
-  const fetchOrders = useCallback(async () => {
+  const stopPolling = useCallback(() => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+  }, []);
+
+  const syncPolling = useCallback(
+    (ordersList) => {
+      const hasActive = Array.isArray(ordersList) && ordersList.some(isActiveOrder);
+      if (!hasActive) {
+        stopPolling();
+        return;
+      }
+      if (pollIntervalRef.current) return;
+      pollIntervalRef.current = setInterval(() => {
+        fetchOrdersRef.current?.();
+      }, ACTIVE_ORDER_POLL_MS);
+    },
+    [stopPolling],
+  );
+
+  const fetchOrdersRef = useRef(null);
+
+  const fetchOrders = useCallback(async (options = {}) => {
+    if (!isUserAuthenticated()) {
+      if (lastApiFingerprintRef.current !== "") {
+        lastApiFingerprintRef.current = "";
+        setApiOrders([]);
+      }
+      setHasFetchedApi(true);
+      stopPolling();
+      return [];
+    }
+
     try {
-      const response = await orderAPI.getOrders({ limit: 10, page: 1 });
+      const response = await orderAPI.getOrders(
+        { limit: 10, page: 1 },
+        { force: options.force === true },
+      );
       let nextOrders = [];
 
       if (response?.data?.success && response?.data?.data?.orders) {
@@ -202,28 +252,42 @@ function OrderTrackingCardInner({ hasBottomNav = true }) {
         lastApiFingerprintRef.current = fp;
         setApiOrders(list);
       }
+      syncPolling(list);
+      return list;
     } catch (error) {
       if (error?.response?.status === 401) {
         localStorage.removeItem("user_accessToken");
         localStorage.removeItem("accessToken");
+        stopPolling();
       }
       if (lastApiFingerprintRef.current !== "") {
         lastApiFingerprintRef.current = "";
         setApiOrders([]);
       }
+      stopPolling();
+      return [];
     } finally {
       setHasFetchedApi(true);
     }
-  }, []);
+  }, [stopPolling, syncPolling]);
+
+  fetchOrdersRef.current = fetchOrders;
 
   useEffect(() => {
+    if (!isUserAuthenticated()) {
+      setHasFetchedApi(true);
+      return undefined;
+    }
+
     fetchOrders();
-    const interval = setInterval(fetchOrders, 30000);
-    return () => clearInterval(interval);
-  }, [fetchOrders]);
+
+    return () => {
+      stopPolling();
+    };
+  }, [fetchOrders, stopPolling]);
 
   const uniqueOrders = useMemo(() => {
-    const isMongoObjectId = (value) => /^[a-f0-9]{24}$/i.test(String(value || ""));
+    const now = Date.now();
     const serverKeys = new Set(
       (apiOrders || []).map((o) => String(getOrderKey(o) || "")).filter(Boolean),
     );
@@ -237,15 +301,16 @@ function OrderTrackingCardInner({ hasBottomNav = true }) {
       if (invalidOrderIds.has(key)) {
         return false;
       }
-      // After first API sync, ignore stale local Mongo-like ids that are absent server-side.
-      // This prevents repeated verification calls for already-deleted orders.
-      if (
-        hasFetchedApi &&
-        isMongoObjectId(key) &&
-        !serverKeys.has(String(key))
-      ) {
+
+      if (hasFetchedApi && !serverKeys.has(String(key))) {
+        const placedAt = recentlyPlacedKeysRef.current.get(String(key));
+        if (placedAt && now - placedAt < RECENTLY_PLACED_GRACE_MS) {
+          seen.add(key);
+          return true;
+        }
         return false;
       }
+
       seen.add(key);
       return true;
     });
@@ -304,8 +369,15 @@ function OrderTrackingCardInner({ hasBottomNav = true }) {
       }
     };
 
-    const handleOrderPlaced = () => {
-      fetchOrders();
+    const handleOrderPlaced = (event) => {
+      const detail = event?.detail || {};
+      const placedKey = String(
+        detail?.order?._id || detail?.order?.id || detail?.orderId || "",
+      ).trim();
+      if (placedKey) {
+        recentlyPlacedKeysRef.current.set(placedKey, Date.now());
+      }
+      fetchOrders({ force: true });
     };
 
     window.addEventListener("orderStatusNotification", handleOrderStatusNotification);
@@ -316,6 +388,10 @@ function OrderTrackingCardInner({ hasBottomNav = true }) {
       window.removeEventListener("order-placed", handleOrderPlaced);
     };
   }, [fetchOrders]);
+
+  useEffect(() => {
+    syncPolling(uniqueOrders);
+  }, [uniqueOrders, syncPolling]);
 
   useEffect(() => {
     if (!activeOrder) {

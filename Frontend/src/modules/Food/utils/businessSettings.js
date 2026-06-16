@@ -28,16 +28,31 @@ if (cachedSettings) {
 }
 
 let inFlightSettingsPromise = null;
+let lastFetchedAt = 0;
+
+// Reuse cached settings across mounts (React StrictMode) and layout components.
+const SETTINGS_TTL_MS = 5 * 60 * 1000;
 
 /**
  * Load business settings from backend (public endpoint - no auth required)
+ * @param {{ forceRefresh?: boolean }} [options]
  */
-export const loadBusinessSettings = async () => {
+export const loadBusinessSettings = async (options = {}) => {
+  const { forceRefresh = false } = options;
+
   try {
-    // If we have no cached settings, we MUST fetch
-    // If we have cached settings, we still try to fetch in background to ensure they are fresh
     const endpoint = API_ENDPOINTS.ADMIN.BUSINESS_SETTINGS_PUBLIC;
     if (!endpoint || (typeof endpoint === "string" && !endpoint.trim())) {
+      return cachedSettings;
+    }
+
+    const isFresh =
+      !forceRefresh &&
+      cachedSettings &&
+      lastFetchedAt > 0 &&
+      Date.now() - lastFetchedAt < SETTINGS_TTL_MS;
+
+    if (isFresh) {
       return cachedSettings;
     }
 
@@ -46,17 +61,16 @@ export const loadBusinessSettings = async () => {
     }
 
     inFlightSettingsPromise = (async () => {
-      // Use public endpoint that doesn't require authentication
-      // Use noCache to ensure we get fresh data from server this time
-      const response = await publicGetOnce(endpoint, { noCache: true });
+      const response = await publicGetOnce(endpoint);
       const settings = response?.data?.data || response?.data;
 
       if (settings) {
         cachedSettings = settings;
+        lastFetchedAt = Date.now();
         try {
           localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
         } catch (e) {}
-        
+
         updateFavicon(settings.favicon?.url);
         updateTitle(settings.companyName);
         return settings;
@@ -66,7 +80,6 @@ export const loadBusinessSettings = async () => {
 
     return await inFlightSettingsPromise;
   } catch (error) {
-    // Return cached if failed
     return cachedSettings;
   } finally {
     inFlightSettingsPromise = null;
@@ -108,10 +121,11 @@ export const updateTitle = (companyName) => {
 export const setCachedSettings = (settings) => {
   if (settings) {
     cachedSettings = settings;
+    lastFetchedAt = Date.now();
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
     } catch (e) {}
-    
+
     updateFavicon(settings.favicon?.url);
     updateTitle(settings.companyName);
   }
@@ -122,6 +136,7 @@ export const setCachedSettings = (settings) => {
  */
 export const clearCache = () => {
   cachedSettings = null;
+  lastFetchedAt = 0;
   try {
     localStorage.removeItem(SETTINGS_KEY);
   } catch (e) {}

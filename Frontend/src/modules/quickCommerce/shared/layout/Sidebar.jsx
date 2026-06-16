@@ -6,8 +6,7 @@ import { cn } from "@qc/lib/utils";
 import { HiChevronDown, HiChevronRight } from "react-icons/hi2";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, UtensilsCrossed, Car, Zap } from "lucide-react";
-import quickSpicyLogo from "@food/assets/quicky-spicy-logo.png";
-import { getCachedSettings, loadBusinessSettings } from '@food/utils/businessSettings';
+import BusinessLogo from '@food/components/BusinessLogo';
 
 const colorMap = {
   indigo:
@@ -223,28 +222,6 @@ const SidebarItem = ({
 const SidebarContent = ({ items, title, onClose, openMenu, handleToggle, hoveredIdx, setHoveredIdx }) => {
   const { settings } = useSettings();
   const appName = settings?.appName || 'App';
-  
-  const [foodLogoUrl, setFoodLogoUrl] = React.useState(() => getCachedSettings()?.logo?.url || null);
-  
-  React.useEffect(() => {
-      const loadLogo = async () => {
-          try {
-              let cached = getCachedSettings();
-              if (cached?.logo?.url) setFoodLogoUrl(cached.logo.url);
-              
-              const bizSettings = await loadBusinessSettings();
-              if (bizSettings?.logo?.url) setFoodLogoUrl(bizSettings.logo.url);
-          } catch (error) {}
-      };
-      loadLogo();
-      
-      const handleSettingsUpdate = () => {
-          const cached = getCachedSettings();
-          if (cached?.logo?.url) setFoodLogoUrl(cached.logo.url);
-      };
-      window.addEventListener('businessSettingsUpdated', handleSettingsUpdate);
-      return () => window.removeEventListener('businessSettingsUpdated', handleSettingsUpdate);
-  }, []);
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -252,11 +229,11 @@ const SidebarContent = ({ items, title, onClose, openMenu, handleToggle, hovered
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <div className="w-24 h-12 rounded-lg flex items-center justify-center shadow-black/20">
-              {foodLogoUrl || settings?.logoUrl ? (
-                <img src={foodLogoUrl || settings.logoUrl} alt={appName} className="w-24 h-10 object-contain" loading="lazy" onError={(e) => { e.target.src = quickSpicyLogo; }} />
-              ) : (
-                <img src={quickSpicyLogo} alt="Buddy Services" className="w-24 h-10 object-contain" loading="lazy" />
-              )}
+              <BusinessLogo
+                src={settings?.logoUrl || undefined}
+                alt={appName}
+                className="w-24 h-10 object-contain"
+              />
             </div>
           </div>
           {/* Mobile Close Button */}

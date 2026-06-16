@@ -10,14 +10,14 @@ import { useLocationSelector } from "@food/components/user/UserLayout"
 import { useLocation } from "@food/hooks/useLocation"
 import { useZone } from "@food/hooks/useZone"
 import { useCart } from "@food/context/CartContext"
-import PageNavbar from "@food/components/user/PageNavbar"
 import offerImage from "@food/assets/offerimage.png"
 import AddToCartAnimation from "@food/components/user/AddToCartAnimation"
 import OptimizedImage from "@food/components/OptimizedImage"
 import api from "@food/api"
 import { restaurantAPI, adminAPI } from "@food/api"
 import { isModuleAuthenticated } from "@food/utils/auth"
-import { flattenMenuItems, getMenuFromResponse } from "@food/utils/menuItems"
+import { flattenMenuItems } from "@food/utils/menuItems"
+import { fetchRestaurantMenuCached, getPrimaryRestaurantMenuLookupId } from "@food/utils/restaurantMenuCache"
 import { calculateDistance, formatDistance } from "@food/utils/common"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
@@ -91,10 +91,8 @@ export default function Under250() {
   const [currentBannerIndex, setCurrentBannerIndex] = useState(0)
   const [under250Restaurants, setUnder250Restaurants] = useState([])
   const [loadingRestaurants, setLoadingRestaurants] = useState(true)
-  const [hasScrolledPastBanner, setHasScrolledPastBanner] = useState(false)
   const [under250PriceLimit, setUnder250PriceLimit] = useState(250)
   const bannerShellRef = useRef(null)
-  const stickyHeaderRef = useRef(null)
   const autoSlideIntervalRef = useRef(null)
   const touchStartXRef = useRef(0)
   const touchStartYRef = useRef(0)
@@ -371,8 +369,10 @@ export default function Under250() {
             if (!restaurantId) return null
 
             try {
-              const menuResponse = await restaurantAPI.getMenuByRestaurantId(restaurantId)
-              const menu = getMenuFromResponse(menuResponse)
+              const menu = await fetchRestaurantMenuCached(
+                getPrimaryRestaurantMenuLookupId(restaurant) || restaurantId,
+                { aliasIds: [restaurantId] },
+              )
               const menuItems = flattenMenuItems(menu)
                 .filter((item) => Number(item?.price || 0) <= under250PriceLimit && item?.isAvailable !== false)
                 .map((item) => {
@@ -596,31 +596,6 @@ export default function Under250() {
 
     window.addEventListener("scroll", handleScroll, { passive: true })
     return () => window.removeEventListener("scroll", handleScroll)
-  }, [])
-
-  useEffect(() => {
-    const handleBannerScroll = () => {
-      const bannerShell = bannerShellRef.current
-      const stickyHeader = stickyHeaderRef.current
-
-      if (!bannerShell) {
-        setHasScrolledPastBanner(false)
-        return
-      }
-
-      const bannerRect = bannerShell.getBoundingClientRect()
-      const stickyHeight = stickyHeader?.getBoundingClientRect().height || 0
-      setHasScrolledPastBanner(bannerRect.bottom <= stickyHeight)
-    }
-
-    handleBannerScroll()
-    window.addEventListener("scroll", handleBannerScroll, { passive: true })
-    window.addEventListener("resize", handleBannerScroll)
-
-    return () => {
-      window.removeEventListener("scroll", handleBannerScroll)
-      window.removeEventListener("resize", handleBannerScroll)
-    }
   }, [])
 
   // Helper function to update item quantity in bothlocal state and cart
@@ -852,24 +827,12 @@ export default function Under250() {
 
   return (
 
-    <div className={`relative min-h-screen bg-white dark:bg-[#0a0a0a] ${shouldShowGrayscale ? 'grayscale opacity-75' : ''}`}>
-      <div
-        ref={stickyHeaderRef}
-        className={`fixed top-0 left-0 right-0 z-40 w-full md:hidden transition-all duration-300 ${hasScrolledPastBanner
-          ? "bg-white/95 backdrop-blur-sm shadow-sm border-b border-gray-200"
-          : "bg-transparent"
-          }`}
-      >
-        <div className="relative z-50 pt-2 sm:pt-3 pb-2">
-          <PageNavbar textColor="black" zIndex={20} showProfile={true} showLogo={false} />
-        </div>
-      </div>
-
+    <div className={`relative min-h-dvh bg-white dark:bg-[#0a0a0a] ${shouldShowGrayscale ? 'grayscale opacity-75' : ''}`}>
       {/* Banner Section */}
       <div
         ref={bannerShellRef}
         data-banner-shell="true"
-        className="relative w-full overflow-hidden h-[clamp(240px,42vw,520px)] md:-mt-40"
+        className="relative w-full overflow-hidden h-[clamp(200px,46vw,440px)] sm:h-[clamp(240px,42vw,520px)] md:-mt-24 lg:-mt-32"
       >
         {/* Banner Image */}
         {bannerImages.length > 0 && (
@@ -936,9 +899,9 @@ export default function Under250() {
             }}
           >
             {/* All Button */}
-            <div className="flex-shrink-0 cursor-pointer" onClick={() => setActiveCategory(null)}>
+            <div className="shrink-0 cursor-pointer" onClick={() => setActiveCategory(null)}>
               <motion.div
-                className="flex flex-col items-center gap-2 w-[62px] sm:w-24 md:w-28"
+                className="flex w-[56px] flex-col items-center gap-2 xs:w-[62px] sm:w-24 md:w-28"
                 whileHover={{ scale: 1.1, y: -4 }}
                 whileTap={{ scale: 0.95 }}
                 transition={{ type: "spring", stiffness: 300, damping: 20 }}
@@ -948,7 +911,7 @@ export default function Under250() {
                       <UtensilsCrossed className="w-6 h-6 sm:w-10 sm:h-10 md:w-12 md:h-12" />
                    </div>
                 </div>
-                <span className={`text-xs sm:text-sm md:text-base font-semibold text-gray-800 dark:text-gray-200 text-center pb-1 ${!activeCategory ? 'text-[#23361A]' : ''}`}>
+                <span className={`pb-1 text-[11px] font-semibold text-gray-800 dark:text-gray-200 text-center sm:text-sm md:text-base ${!activeCategory ? 'text-[#23361A]' : ''}`}>
                   All
                 </span>
               </motion.div>
@@ -956,9 +919,9 @@ export default function Under250() {
             {categories.map((category, index) => {
               const isActive = activeCategory === category.id
               return (
-                <div key={category.id} className="flex-shrink-0 cursor-pointer" onClick={() => setActiveCategory(isActive ? null : category.id)}>
+                <div key={category.id} className="shrink-0 cursor-pointer" onClick={() => setActiveCategory(isActive ? null : category.id)}>
                     <motion.div
-                      className="flex flex-col items-center gap-2 w-[62px] sm:w-24 md:w-28"
+                      className="flex w-[56px] flex-col items-center gap-2 xs:w-[62px] sm:w-24 md:w-28"
                       whileHover={{ scale: 1.1, y: -4 }}
                       whileTap={{ scale: 0.95 }}
                       transition={{ type: "spring", stiffness: 300, damping: 20 }}
@@ -973,7 +936,7 @@ export default function Under250() {
                           placeholder="blur"
                         />
                       </div>
-                      <span className={`text-xs sm:text-sm md:text-base font-semibold text-gray-800 dark:text-gray-200 text-center pb-1 ${isActive ? 'text-[#23361A]' : ''}`}>
+                      <span className={`pb-1 text-[11px] font-semibold text-gray-800 dark:text-gray-200 text-center sm:text-sm md:text-base ${isActive ? 'text-[#23361A]' : ''}`}>
                         {category.name.length > 7 ? `${category.name.slice(0, 7)}...` : category.name}
                       </span>
                     </motion.div>
@@ -1074,7 +1037,7 @@ export default function Under250() {
                         return (
                           <motion.div
                             key={item.id}
-                            className="flex-shrink-0 w-[200px] sm:w-[220px] md:w-full bg-white dark:bg-[#1a1a1a] rounded-lg md:rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden cursor-pointer"
+                            className="flex-shrink-0 w-[78vw] max-w-[240px] sm:w-[220px] md:w-full bg-white dark:bg-[#1a1a1a] rounded-lg md:rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden cursor-pointer"
                             onClick={() => handleItemClick(item, restaurant)}
                             initial={{ opacity: 0, y: 20 }}
                             whileInView={{ opacity: 1, y: 0 }}

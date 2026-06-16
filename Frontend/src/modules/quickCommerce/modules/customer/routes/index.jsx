@@ -1,12 +1,13 @@
 import React from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import Home from '../pages/Home';
 import CategoriesPage from '../pages/CategoriesPage';
 import CategoryProductsPage from '../pages/CategoryProductsPage';
 import WishlistPage from '../pages/WishlistPage';
 import CartPage from '../pages/CartPage';
 import OffersPage from '../pages/OffersPage';
-import ProfilePage from '../pages/ProfilePage';
+// Legacy QC profile — unified at /food/user/profile (see src/shared/profile/UnifiedProfile.jsx)
+// import ProfilePage from '../pages/ProfilePage';
 import OrdersPage from '../pages/OrdersPage';
 import OrderTransactionsPage from '../pages/OrderTransactionsPage';
 import AddressesPage from '../pages/AddressesPage';
@@ -57,7 +58,9 @@ const CustomerRoutes = () => {
                             <Route path="chat" element={<ProtectedRoute><ChatPage /></ProtectedRoute>} />
                             <Route path="checkout" element={<ProtectedRoute><CheckoutPage /></ProtectedRoute>} />
                             <Route path="payment-status" element={<ProtectedRoute><PaymentStatusPage /></ProtectedRoute>} />
-                            <Route path="profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+                            {/* Unified profile — switch service via ?service=qc */}
+                            <Route path="profile" element={<Navigate to="/food/user/profile?service=qc" replace />} />
+                            {/* Legacy: <Route path="profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} /> */}
                             <Route path="profile/edit" element={<ProtectedRoute><EditProfilePage /></ProtectedRoute>} />
                         </Routes>
                     </CartAnimationProvider>

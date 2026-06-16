@@ -51,8 +51,7 @@ import {
 import { cn } from "@food/utils/utils"
 import { Input } from "@food/components/ui/input"
 import { adminSidebarMenu } from "@food/utils/adminSidebarMenu"
-import { getCachedSettings, loadBusinessSettings } from "@food/utils/businessSettings"
-import quickSpicyLogo from "@food/assets/quicky-spicy-logo.png"
+import BusinessLogo from "@food/components/BusinessLogo"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -145,66 +144,6 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
     if (l.includes("support tickets")) return badges.supportTickets || (l.includes("delivery") ? badges.deliverySupportTickets : badges.userSupportTickets)
     return 0
   }
-  const [logoUrl, setLogoUrl] = useState(() => getCachedSettings()?.logo?.url || null)
-  const [companyName, setCompanyName] = useState(() => getCachedSettings()?.companyName || null)
-
-  // Load business settings logo
-  useEffect(() => {
-    const loadLogo = async () => {
-      try {
-        // First check cache
-        let cached = getCachedSettings()
-        if (cached) {
-          if (cached.logo?.url) {
-            setLogoUrl(cached.logo.url)
-          }
-          if (cached.companyName) {
-            setCompanyName(cached.companyName)
-          }
-        }
-
-        // Always try to load fresh data to ensure we have the latest
-        const settings = await loadBusinessSettings()
-        if (settings) {
-          if (settings.logo?.url) {
-            setLogoUrl(settings.logo.url)
-          }
-          if (settings.companyName) {
-            setCompanyName(settings.companyName)
-          }
-        }
-      } catch (error) {
-        debugError('Error loading logo:', error)
-      }
-    }
-
-    // Load immediately
-    loadLogo()
-
-    // Also try after a small delay to ensure DOM is ready
-    const timeoutId = setTimeout(() => {
-      loadLogo()
-    }, 100)
-
-    // Listen for business settings updates
-    const handleSettingsUpdate = () => {
-      const cached = getCachedSettings()
-      if (cached) {
-        if (cached.logo?.url) {
-          setLogoUrl(cached.logo.url)
-        }
-        if (cached.companyName) {
-          setCompanyName(cached.companyName)
-        }
-      }
-    }
-    window.addEventListener('businessSettingsUpdated', handleSettingsUpdate)
-
-    return () => {
-      clearTimeout(timeoutId)
-      window.removeEventListener('businessSettingsUpdated', handleSettingsUpdate)
-    }
-  }, [])
 
   // Get initial states from consolidated admin_sidebar_state
   const getInitialStates = () => {
@@ -629,46 +568,20 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
             {!isCollapsed && (
               <div className="flex items-center gap-2 animate-[slideIn_0.3s_ease-out]">
                 <div className="w-24 h-12 rounded-lg flex items-center justify-center shadow-black/20">
-                  {logoUrl ? (
-                    <img
-                      src={logoUrl || quickSpicyLogo}
-                      alt={companyName || "Company"}
-                      className="w-24 h-10 object-contain"
-                      loading="lazy"
-                      onError={(e) => {
-                        if (e.target.src !== quickSpicyLogo) {
-                          e.target.src = quickSpicyLogo
-                        }
-                      }}
-                    />
-                  ) : companyName ? (
-                    <span className="text-xs font-semibold text-white px-2 truncate">
-                      {companyName}
-                    </span>
-                  ) : (
-                    <img src={quickSpicyLogo} alt="Company" className="w-24 h-10 object-contain" loading="lazy" />
-                  )}
+                  <BusinessLogo
+                    className="w-24 h-10 object-contain text-xs font-semibold text-white px-2 truncate"
+                    fallback="name"
+                  />
                 </div>
               </div>
             )}
             {isCollapsed && (
               <div className="w-full flex items-center justify-center">
                 <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center shadow-lg shadow-black/20 ring-1 ring-white/10">
-                  {logoUrl || companyName ? (
-                    <img
-                      src={logoUrl || quickSpicyLogo}
-                      alt={companyName || "Company"}
-                      className="w-10 h-10 object-contain"
-                      loading="lazy"
-                      onError={(e) => {
-                        if (e.target.src !== quickSpicyLogo) {
-                          e.target.src = quickSpicyLogo
-                        }
-                      }}
-                    />
-                  ) : (
-                    <img src={quickSpicyLogo} alt="Company" className="w-10 h-10 object-contain" loading="lazy" />
-                  )}
+                  <BusinessLogo
+                    className="w-10 h-10 object-contain"
+                    fallback="logo"
+                  />
                 </div>
               </div>
             )}

@@ -55,8 +55,10 @@ export default function UnifiedHeader({
 
   const isLight = tone === "light";
   const currentIndex = placeholderIndex ?? internalPlaceholderIndex;
-  
-  const glowColor = theme?.icon || (isLight ? "bg-[#1A2517]/30" : "bg-[#0F172A]/10");
+
+  const textPrimary = theme?.text || (isLight ? "text-foreground" : "text-white");
+  const textSecondary = theme?.sub || (isLight ? "text-muted-foreground" : "text-white/70");
+  const textOnMuted = isLight ? "text-muted-foreground" : "text-white/50";
 
   const [notifications, setNotifications] = useState(() => {
     const saved = localStorage.getItem('food_user_notifications');
@@ -120,6 +122,7 @@ export default function UnifiedHeader({
     <div className={cn(
       "relative pt-2 px-4 transition-all duration-500 overflow-hidden",
       embedded ? "pb-1" : "pb-4",
+      tone === "dark" && embedded ? "food-header-mobile-dark" : "",
       theme?.section || (
         activeTab === 'food' 
           ? 'bg-gradient-to-b from-[#1A2517]/10 to-transparent' 
@@ -138,18 +141,18 @@ export default function UnifiedHeader({
             >
               <div className={cn(
                 "p-2 rounded-[20px] group-active:scale-95 transition-all shadow-sm",
-                isLight ? "bg-gray-100" : "bg-white/10"
+                isLight ? "bg-white/80 border border-black/5" : "bg-white/10"
               )}>
-                <MapPin className={cn("h-4 w-4", isLight ? "text-gray-700" : "text-white")} />
+                <MapPin className={cn("h-4 w-4", textPrimary)} />
               </div>
               <div className="flex flex-col min-w-0">
                 <div className="flex items-center gap-0.5">
-                  <span className={cn("text-[13px] font-black truncate", isLight ? "text-gray-900" : "text-white")}>
+                  <span className={cn("text-[13px] font-bold truncate", textPrimary)}>
                     {location?.area || location?.city || "Indore"}
                   </span>
-                  <ChevronDown className={cn("h-3 w-3 shrink-0", isLight ? "text-gray-400" : "text-white/50")} />
+                  <ChevronDown className={cn("h-3 w-3 shrink-0", textOnMuted)} />
                 </div>
-                <span className={cn("text-[10px] font-bold truncate uppercase tracking-widest", isLight ? "text-gray-400" : "text-white/40")}>
+                <span className={cn("text-[10px] font-semibold truncate uppercase tracking-wider", textSecondary)}>
                   {location?.city || "Indore"}
                 </span>
               </div>
@@ -165,8 +168,8 @@ export default function UnifiedHeader({
                   className={cn(
                     "flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all",
                     vegMode 
-                      ? "bg-[#1A2517] border-[#1A2517] text-white shadow-md shadow-[#1A2517]/20" 
-                      : (isLight ? "bg-white border-gray-100" : "bg-white/5 border-white/10") + " text-gray-400"
+                      ? "bg-primary border-primary text-primary-foreground shadow-md shadow-primary/20" 
+                      : (isLight ? "bg-white border-border" : "bg-white/5 border-white/10") + " text-muted-foreground"
                   )}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -177,9 +180,9 @@ export default function UnifiedHeader({
                     "w-3 h-3 rounded-[3px] border flex items-center justify-center transition-colors",
                     vegMode ? "border-white bg-white" : "border-gray-300 bg-transparent"
                   )}>
-                    {vegMode && <div className="w-1.5 h-1.5 rounded-full bg-[#1A2517]" />}
+                    {vegMode && <div className="w-1.5 h-1.5 rounded-full bg-primary" />}
                   </div>
-                  <span className="text-[10px] font-black uppercase tracking-tight">Veg</span>
+                  <span className="text-[10px] font-semibold uppercase tracking-tight">Veg</span>
                 </button>
               )}
 
@@ -264,13 +267,14 @@ export default function UnifiedHeader({
         {/* Row 3: Service Grid */}
         {!hideServiceGrid && (
           <div className="pt-2 pb-2">
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-3 gap-3">
               {services.map((service) => {
                 const isActive = activeTab === service.id;
                 const Icon = service.icon;
+                const isDarkHero = tone === "dark";
                 
                 return (
-                  <div key={service.id} className="flex flex-col items-center gap-2">
+                  <div key={service.id} className="flex flex-col items-center gap-1.5">
                     <motion.button
                       whileTap={{ scale: 0.95 }}
                       onClick={() => {
@@ -278,10 +282,10 @@ export default function UnifiedHeader({
                         navigate(service.path);
                       }}
                       className={cn(
-                        "relative w-[85px] h-[85px] rounded-[30px] flex items-center justify-center transition-all duration-300 border-2",
+                        "relative w-[4.75rem] h-[4.75rem] rounded-[1.35rem] flex items-center justify-center transition-all duration-300 border-2",
                         isActive 
-                          ? (service.activeBg || "bg-[#1A2517]") + " border-black/5 shadow-lg" 
-                          : (isLight ? (service.color || "bg-white") : "bg-white/5") + " border-transparent"
+                          ? (isDarkHero ? "bg-white/95 border-white/30 shadow-lg shadow-black/20" : (service.activeBg || "bg-[#1A2517]") + " border-black/5 shadow-lg")
+                          : (isDarkHero ? "bg-white/10 border-white/10 backdrop-blur-sm" : (isLight ? (service.color || "bg-white") : "bg-white/5") + " border-transparent")
                       )}
                     >
                       {service.isImage ? (
@@ -300,8 +304,10 @@ export default function UnifiedHeader({
                       )}
                     </motion.button>
                     <span className={cn(
-                      "text-[12px] font-bold tracking-wide capitalize",
-                      isActive ? "text-[#1A2517]" : "text-gray-500"
+                      "text-[11px] font-bold tracking-wide capitalize",
+                      isActive
+                        ? (isDarkHero ? "text-white" : "text-primary")
+                        : (isDarkHero ? "text-white/65" : "text-muted-foreground")
                     )}>
                       {service.label}
                     </span>

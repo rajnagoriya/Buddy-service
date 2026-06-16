@@ -1463,7 +1463,7 @@ function createInFlightCache({ ttlMs }) {
 // Public user-app endpoints can be called by multiple components/effects on refresh (and React StrictMode in dev).
 // A small in-flight + short TTL cache collapses duplicate requests without changing functionality.
 const publicRestaurantsCache = createInFlightCache({ ttlMs: 3000 });
-const publicRestaurantMenuCache = createInFlightCache({ ttlMs: 3000 });
+const publicRestaurantMenuCache = createInFlightCache({ ttlMs: 5 * 60 * 1000 });
 const publicRestaurantOutletTimingsCache = createInFlightCache({ ttlMs: 3000 });
 const publicGenericGetCache = createInFlightCache({ ttlMs: 3000 });
 
@@ -2309,47 +2309,75 @@ export const orderAPI = {
     apiClient.post("/food/orders/verify-payment", body ?? {}, {
       contextModule: "user",
     }),
-  getOrders: (params = {}) =>
-    apiClient
-      .get("/food/orders", {
-        params: { limit: 20, page: 1, ...params },
-        contextModule: "user",
-      })
-      .then((res) => {
-        const payload = res?.data?.data;
+  getOrders: (() => {
+    const inFlight = new Map();
+    const cache = new Map();
+    const CACHE_MS = 5000;
 
-        // Normalize backend paginated shape:
-        // { data: { data: [...], meta: { total, page, limit, totalPages } } }
-        // into UI-friendly:
-        // { data: { orders: [...], pagination: { total, page, limit, pages } } }
-        if (
-          payload &&
-          typeof payload === "object" &&
-          Array.isArray(payload.data) &&
-          payload.meta &&
-          typeof payload.meta === "object"
-        ) {
-          const meta = payload.meta;
-          return {
-            ...res,
+    const normalizeOrdersResponse = (res, params) => {
+      const payload = res?.data?.data;
+
+      if (
+        payload &&
+        typeof payload === "object" &&
+        Array.isArray(payload.data) &&
+        payload.meta &&
+        typeof payload.meta === "object"
+      ) {
+        const meta = payload.meta;
+        return {
+          ...res,
+          data: {
+            ...res.data,
             data: {
-              ...res.data,
-              data: {
-                ...payload,
-                orders: payload.data,
-                pagination: {
-                  total: Number(meta.total || 0),
-                  page: Number(meta.page || 1),
-                  limit: Number(meta.limit || params.limit || 20),
-                  pages: Number(meta.totalPages || 1),
-                },
+              ...payload,
+              orders: payload.data,
+              pagination: {
+                total: Number(meta.total || 0),
+                page: Number(meta.page || 1),
+                limit: Number(meta.limit || params.limit || 20),
+                pages: Number(meta.totalPages || 1),
               },
             },
-          };
-        }
+          },
+        };
+      }
 
-        return res;
-      }),
+      return res;
+    };
+
+    return (params = {}, options = {}) => {
+      const force = options.force === true;
+      const key = stableStringify({ limit: 20, page: 1, ...params });
+      const now = Date.now();
+
+      if (!force) {
+        const hit = cache.get(key);
+        if (hit && now - hit.at < CACHE_MS) {
+          return Promise.resolve(hit.res);
+        }
+        const pending = inFlight.get(key);
+        if (pending) return pending;
+      }
+
+      const request = apiClient
+        .get("/food/orders", {
+          params: { limit: 20, page: 1, ...params },
+          contextModule: "user",
+        })
+        .then((res) => normalizeOrdersResponse(res, params))
+        .then((res) => {
+          cache.set(key, { at: Date.now(), res });
+          return res;
+        })
+        .finally(() => {
+          inFlight.delete(key);
+        });
+
+      inFlight.set(key, request);
+      return request;
+    };
+  })(),
   getOrderDetails: (() => {
     const inFlight = new Map();
     const cache = new Map();

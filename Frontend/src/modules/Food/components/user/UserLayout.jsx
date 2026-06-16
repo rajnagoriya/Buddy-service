@@ -11,6 +11,7 @@ const debugError = (...args) => {}
 import SearchOverlay from "./SearchOverlay"
 import BottomNavigation from "./BottomNavigation"
 import DesktopNavbar from "./DesktopNavbar"
+import FoodUserHeader from "./FoodUserHeader"
 import { useUserNotifications } from "../../hooks/useUserNotifications"
 
 // Create SearchOverlay context with default value
@@ -135,6 +136,18 @@ export default function UserLayout() {
 
   const isUnder250 = normalizedPath === "/under-250" || normalizedPath === "/user/under-250"
 
+  const hideFoodHeader =
+    normalizedPath.includes("/address-selector") ||
+    normalizedPath.includes("/cart") ||
+    normalizedPath.includes("/checkout")
+
+  const isFoodHome =
+    normalizedPath === "/" ||
+    normalizedPath === "/user" ||
+    normalizedPath === ""
+
+  const showFoodMobileHeader = showBottomNav && !hideFoodHeader
+
   return (
     <div className="min-h-screen bg-[var(--background)] dark:bg-[#0a0a0a] transition-colors duration-200">
       <CartProvider>
@@ -147,8 +160,19 @@ export default function UserLayout() {
                 <div className="hidden md:block">
                   {showBottomNav && <DesktopNavbar showLogo={!isUnder250} />}
                 </div>
+                {showFoodMobileHeader && (
+                  <div
+                    className={`md:hidden z-[100] ${
+                      isFoodHome ? "fixed top-0 left-0 right-0 pointer-events-none" : "sticky top-0"
+                    }`}
+                  >
+                    <div className="pointer-events-auto">
+                      <FoodUserHeader variant={isFoodHome ? "home" : undefined} />
+                    </div>
+                  </div>
+                )}
                 <LocationPrompt />
-                <main className={showBottomNav ? "md:pt-40" : ""}>
+                <main className={showBottomNav ? "md:pt-[8.5rem]" : ""}>
                   <Outlet />
                 </main>
                 {showBottomNav && <BottomNavigation />}

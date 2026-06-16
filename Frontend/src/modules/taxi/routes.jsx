@@ -38,7 +38,8 @@ const SenderReceiverDetails = lazy(() => import('./user/pages/parcel/SenderRecei
 
 // Profile & History
 const Activity = lazy(() => import('./user/pages/Activity'));
-const Profile = lazy(() => import('./user/pages/Profile'));
+// Legacy taxi profile page — route redirects to unified profile
+// const Profile = lazy(() => import('./user/pages/Profile'));
 const Wallet = lazy(() => import('./user/pages/Wallet'));
 
 // Coming Soon placeholder (for /tours and any unbuilt routes)
@@ -662,7 +663,7 @@ export default function TaxiApp() {
               <Route path="user/tours" element={<ComingSoon />} />
 
               <Route path="user/activity" element={<Activity />} />
-              <Route path="user/profile" element={<Navigate to="/food/user/profile" replace />} />
+              <Route path="user/profile" element={<Navigate to="/food/user/profile?service=taxi" replace />} />
               <Route path="user/wallet" element={<Wallet />} />
               <Route path="user/notifications" element={<UserNotifications />} />
               <Route path="user/promo" element={<PromoCodes />} />

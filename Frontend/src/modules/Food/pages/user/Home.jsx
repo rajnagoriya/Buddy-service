@@ -70,7 +70,6 @@ import {
   useSearchOverlay,
   useLocationSelector,
 } from "@food/components/user/UserLayout";
-import PageNavbar from "@food/components/user/PageNavbar";
 
 const debugLog = (...args) => { };
 const debugWarn = (...args) => { };
@@ -88,15 +87,20 @@ import {
 } from "@food/components/ui/dropdown-menu";
 import { useLocation } from "@food/hooks/useLocation";
 import { useZone } from "@food/hooks/useZone";
-import quickSpicyLogo from "@food/assets/quicky-spicy-logo.png";
 import offerImage from "@food/assets/offerimage.png";
 import api, { publicGetOnce, restaurantAPI, adminAPI } from "@food/api";
+import { fetchRestaurantMenuCached } from "@food/utils/restaurantMenuCache";
 import { API_BASE_URL } from "@food/api/config";
 import OptimizedImage from "@food/components/OptimizedImage";
 import { getRestaurantAvailabilityStatus } from "@food/utils/restaurantAvailability";
 import HomeHeader from "@food/components/user/home/HomeHeader";
-import QuickSection from "@food/components/user/home/QuickSection";
+import HomeDesktopShell from "@food/components/user/home/HomeDesktopShell";
+import HomeMobileHero from "@food/components/user/home/HomeMobileHero";
+import HomeMobileCategories from "@food/components/user/home/HomeMobileCategories";
+import HomeMobileStickyBar from "@food/components/user/home/HomeMobileStickyBar";
 import PromoRow from "@food/components/user/home/PromoRow";
+import QuickSection from "@food/components/user/home/QuickSection";
+import "@food/styles/landing.css";
 
 
 // Banner images for hero carousel - will be fetched from API
@@ -461,6 +465,7 @@ export default function Home() {
   const [isSwitchingOffVegMode, setIsSwitchingOffVegMode] = useState(false);
   const [popupPosition, setPopupPosition] = useState({ top: 0, left: 0, triangleLeft: 0 });
   const vegModeToggleRef = useRef(null);
+  const vegModePopupAnchorRef = useRef(null);
   const [isStickyHeaderVisible, setIsStickyHeaderVisible] = useState(false);
   const [showStickySearch, setShowStickySearch] = useState(false);
   const [showStickyCategories, setShowStickyCategories] = useState(false);
@@ -813,7 +818,7 @@ export default function Home() {
   }, []);
 
   // Handle vegMode toggle - show popup when turned ON or OFF
-  const handleVegModeChange = (newValue) => {
+  const handleVegModeChange = (newValue, options) => {
     // Skip if we're handling switch off confirmation
     if (isHandlingSwitchOff.current) {
       return;
@@ -822,8 +827,10 @@ export default function Home() {
     if (newValue && !prevVegMode) {
       // Veg mode was just turned ON
       // Calculate popup position relative to toggle
-      if (vegModeToggleRef.current) {
-        const rect = vegModeToggleRef.current.getBoundingClientRect();
+      const anchorEl = options?.anchorEl || vegModeToggleRef.current;
+      vegModePopupAnchorRef.current = anchorEl || null;
+      if (anchorEl) {
+        const rect = anchorEl.getBoundingClientRect();
         const screenWidth = window.innerWidth;
         const popupWidth = Math.min(screenWidth - 32, 320); // 320 is max-w-xs
 
@@ -857,8 +864,9 @@ export default function Home() {
     if (!showVegModePopup) return;
 
     const updatePosition = () => {
-      if (vegModeToggleRef.current) {
-        const rect = vegModeToggleRef.current.getBoundingClientRect();
+      const anchorEl = vegModePopupAnchorRef.current || vegModeToggleRef.current;
+      if (anchorEl) {
+        const rect = anchorEl.getBoundingClientRect();
         const screenWidth = window.innerWidth;
         const popupWidth = Math.min(screenWidth - 32, 320);
 
@@ -1389,7 +1397,6 @@ export default function Home() {
   const rightContentRef = useRef(null);
   const restaurantsRequestSeqRef = useRef(0);
   const menuUnionRequestSeqRef = useRef(0);
-  const menuUnionCacheRef = useRef(new Map());
 
   // Scroll tracking effect
   useEffect(() => {
@@ -1987,7 +1994,6 @@ export default function Home() {
       setLoadingMenuCategories(true);
       try {
         const categoryMap = new Map();
-        const menuCache = menuUnionCacheRef.current;
         const menuResponses = [];
 
         for (let index = 0; index < restaurantIds.length; index += 4) {
@@ -1996,17 +2002,10 @@ export default function Home() {
             batchIds.map(async (id) => {
               if (!id) return { id: null, menu: null };
 
-              if (menuCache.has(id)) {
-                return { id, menu: menuCache.get(id) };
-              }
-
               try {
-                const response = await restaurantAPI.getMenuByRestaurantId(id);
-                const menu = response?.data?.data?.menu || null;
-                menuCache.set(id, menu);
+                const menu = await fetchRestaurantMenuCached(id);
                 return { id, menu };
               } catch {
-                menuCache.set(id, null);
                 return { id, menu: null };
               }
             }),
@@ -2470,7 +2469,7 @@ export default function Home() {
 
   return (
 
-    <div className="relative min-h-screen bg-white dark:bg-[#0a0a0a] pb-16 md:pb-6 overflow-x-clip">
+    <div className="food-landing-page relative min-h-screen bg-background dark:bg-[#0a0a0a] pb-20 md:pb-8 overflow-x-clip">
       {shouldShowOutOfZoneHome && (
         <div className="fixed inset-0 z-[90] pointer-events-none">
           <div className="absolute inset-0 bg-slate-300/35 backdrop-blur-[1px]" />
@@ -2613,166 +2612,47 @@ export default function Home() {
         `}</style>
         </div>
 
-        <div className="md:hidden relative overflow-x-clip bg-white dark:bg-[#0a0a0a]">
-          {/* Brand Top Section (Dark) */}
-          {/* Two-Stage Sticky Header Container */}
+        <div className="md:hidden relative overflow-x-clip food-mobile-page">
           <div className="relative">
-            {/* Primary Header Background */}
-            <div className={`relative overflow-hidden min-h-[310px] ${activeHeroSlide.section} hero-banner-pan rounded-b-[2rem] shadow-sm transition-colors duration-500`}>
-              <div className="relative z-10">
-                <HomeHeader
-                  activeTab={activeTab}
-                  setActiveTab={setActiveTab}
-                  location={effectiveLocation}
-                  handleLocationClick={handleLocationClick}
-                  handleSearchFocus={handleSearchFocus}
-                  placeholderIndex={placeholderIndex}
-                  placeholders={placeholders}
-                  vegMode={vegMode}
-                  handleVegModeChange={handleVegModeChange}
-                  tone="light"
-                  embedded
-                  theme={activeHeroSlide.theme}
-                  hideSearch={false} // Restore search in initial header
-                >
-                  {activeTab === "food" && (
-                    <div className="relative min-h-[140px] pt-2">
-                      <AnimatePresence mode="wait" initial={false}>
-                        {HERO_TEXT_SLIDES.map((slide, index) =>
-                          index === festSlideIndex % HERO_TEXT_SLIDES.length ? (
-                            <motion.div
-                              key={slide.id}
-                              initial={{ opacity: 0, y: 16 }}
-                              animate={{ opacity: 1, y: 0 }}
-                              exit={{ opacity: 0, y: -16 }}
-                              transition={{ duration: 0.35 }}
-                              className="relative"
-                            >
-                              <div className="max-w-[75%]">
-                                <div className="flex items-center gap-2">
-                                  <span className={`text-2xl font-black tracking-tight ${slide.theme.text}`}>
-                                    {slide.heading}
-                                  </span>
-                                  <span className={`text-[11px] font-bold rounded-full px-2 py-0.5 ${slide.theme.badge}`}>
-                                    {slide.badge}
-                                  </span>
-                                </div>
-                                <p className={`mt-1 text-sm font-semibold ${slide.theme.sub}`}>
-                                  {slide.sub}
-                                </p>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (slide.id === 'store') {
-                                      navigate('/qc');
-                                    }
-                                  }}
-                                  className={`mt-3 inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-black shadow-sm ${slide.theme.button}`}
-                                >
-                                  {slide.cta}
-                                  <ArrowRight className="h-4 w-4" />
-                                </button>
-                              </div>
+            <HomeMobileHero
+              activeTab={activeTab}
+              festSlideIndex={festSlideIndex}
+              setFestSlideIndex={setFestSlideIndex}
+              headerProps={{
+                setActiveTab,
+                location: effectiveLocation,
+                savedAddressText: savedAddressText,
+                handleLocationClick,
+                handleSearchFocus,
+                placeholderIndex,
+                placeholders,
+                vegMode,
+                handleVegModeChange,
+                hideLocation: true,
+                hideActions: true,
+              }}
+            />
 
-                              <div className={`absolute right-1 top-1/2 -translate-y-1/2 h-16 w-16 rounded-[20px] border-2 ${slide.theme.iconBorder} ${slide.theme.icon} flex items-center justify-center`}>
-                                <Sparkles className="h-7 w-7" />
-                                <div className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-current" />
-                                <div className="absolute right-4 bottom-2 h-2 w-2 rounded-full border border-current" />
-                              </div>
-                            </motion.div>
-                          ) : null,
-                        )}
-                      </AnimatePresence>
-
-                      <div className="mt-4 flex items-center justify-center gap-2">
-                        {HERO_TEXT_SLIDES.map((slide, index) => (
-                          <button
-                            key={slide.id}
-                            type="button"
-                            onClick={() => setFestSlideIndex(index)}
-                            className={`h-1.5 rounded-full transition-all ${index === festSlideIndex % HERO_TEXT_SLIDES.length
-                                ? `w-6 ${activeHeroSlide.theme.dotActive}`
-                                : `w-2.5 ${activeHeroSlide.theme.dotInactive}`
-                              }`}
-                            aria-label={`Show banner ${index + 1}`}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </HomeHeader>
-              </div>
-            </div>
-
-            {/* Two-Stage Scroll-Up Sticky Header */}
-            <AnimatePresence>
-              {showStickySearch && (
-                <motion.div 
-                  initial={{ y: -200 }}
-                  animate={{ y: 0 }}
-                  exit={{ y: -200 }}
-                  transition={{ duration: 0.3, ease: "easeOut" }}
-                  className="fixed top-0 inset-x-0 z-[100] bg-white/70 backdrop-blur-xl shadow-[0_8px_32px_rgba(0,0,0,0.08)] border-b border-white/40"
-                >
-                  {/* Stage 1: Search Bar & Veg Toggle */}
-                  <div className="px-4 py-3 flex items-center gap-3">
-                    <div
-                      className="flex-1 relative rounded-2xl flex items-center px-4 py-3 cursor-pointer bg-white/60 border border-white/50 shadow-sm active:scale-[0.98] transition-all"
-                      onClick={handleSearchFocus}
-                    >
-                      <Search className="h-4.5 w-4.5 text-gray-900 mr-2 shrink-0" strokeWidth={3} />
-                      <div className="flex-1 overflow-hidden relative h-5">
-                        <span className="text-sm font-bold text-gray-400">Search "thali", "pizza"...</span>
-                      </div>
-                      <Mic className="h-4.5 w-4.5 text-gray-900 ml-2" />
-                    </div>
-
-                    <div 
-                      className={`flex items-center gap-2 px-3 py-2.5 rounded-2xl border transition-all duration-300 cursor-pointer shadow-sm active:scale-95 ${vegMode ? "border-[#0F172A] bg-[#0F172A]/10" : "border-white/50 bg-white/60"}`}
-                      onClick={() => handleVegModeChange(!vegMode)}
-                    >
-                      <div className={`w-4 h-4 rounded-md border-2 flex items-center justify-center transition-colors ${vegMode ? "border-[#0F172A] bg-white" : "border-gray-300 bg-white"}`}>
-                        {vegMode && <div className="w-2 h-2 rounded-full bg-[#00b09b]" />}
-                      </div>
-                      <span className={`text-[11px] font-black uppercase tracking-tight ${vegMode ? "text-[#0F172A]" : "text-gray-500"}`}>Veg</span>
-                    </div>
-                  </div>
-
-                  {/* Stage 2: "What's on your mind" Categories */}
-                  <AnimatePresence>
-                    {showStickyCategories && (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        className="overflow-hidden bg-white/30 border-t border-white/20"
-                      >
-                        <div className="flex overflow-x-auto gap-4 py-3 pb-4 scrollbar-hide px-4 mask-edge-fade">
-                          {displayCategories.map((category, index) => (
-                            <Link
-                              key={`sticky-cat-${category.id || index}`}
-                              to={`/food/user/category/${category.slug}`}
-                              className="flex-shrink-0 flex flex-col items-center gap-1.5 group w-[64px]"
-                            >
-                              <div className="w-14 h-14 rounded-full overflow-hidden border-2 border-white/60 shadow-sm bg-white/80 backdrop-blur-sm transition-transform group-active:scale-95">
-                                <OptimizedImage
-                                  src={category.image}
-                                  alt={category.name}
-                                  className="w-full h-full object-cover"
-                                />
-                              </div>
-                              <span className="text-[9px] font-black text-gray-500 text-center truncate w-full uppercase tracking-tight">
-                                {category.name}
-                              </span>
-                            </Link>
-                          ))}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </motion.div>
-              )}
-            </AnimatePresence>
+            <HomeMobileStickyBar
+              visible={showStickySearch}
+              showCategories={showStickyCategories}
+              onSearchFocus={handleSearchFocus}
+              vegMode={vegMode}
+              onVegModeChange={handleVegModeChange}
+              categories={displayCategories}
+              activeFilters={activeFilters}
+              onOpenFilters={() => setIsFilterOpen(true)}
+              onToggleFilter={(filterId) => {
+                const nextFilters = new Set(activeFilters);
+                if (nextFilters.has(filterId)) {
+                  nextFilters.delete(filterId);
+                } else {
+                  nextFilters.add(filterId);
+                }
+                setActiveFilters(nextFilters);
+                void applyFiltersAndRefetch(nextFilters, sortBy, selectedCuisine);
+              }}
+            />
           </div>
 
           {activeTab !== "food" && (
@@ -2781,7 +2661,7 @@ export default function Home() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.3 }}
-              className="px-4 pb-6"
+              className="px-4 pb-6 food-mobile-content"
             >
               <div className="rounded-[28px] bg-gradient-to-br from-[#efe7ff] via-[#ffe0ef] to-[#dff6e7] px-6 py-10 text-center shadow-[0_12px_26px_rgba(0,0,0,0.08)]">
                 <div className="text-sm font-black uppercase tracking-[0.3em] text-[#6b5bb5]">Coming Soon</div>
@@ -2803,129 +2683,77 @@ export default function Home() {
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.3 }}
-                className="bg-transparent dark:bg-transparent"
+                className="food-mobile-content"
               >
-                {/* "What's on your mind today?" Section - Now with Sticky Logic */}
-                <div
-                  id="categories-section"
-                  className="px-4 py-2.5 space-y-3 bg-white dark:bg-[#0a0a0a]"
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <h2 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white min-w-0 flex-shrink leading-tight">What's on your mind today?</h2>
-                    <div className="h-[1px] bg-gray-100 dark:bg-gray-800 flex-1"></div>
-                    <Link to="/food/user/categories" className="text-sm font-bold text-gray-400 dark:text-gray-500 flex items-center gap-0.5 whitespace-nowrap shrink-0">
-                      View All <ArrowDownUp className="h-3 w-3 rotate-90" />
-                    </Link>
-                  </div>
-
-                  {/* Categories Horizontal Slider */}
-                  <div className="flex overflow-x-auto gap-1.5 pb-2 scrollbar-hide -mx-4 px-4 mask-edge-fade">
-                    {displayCategories.map((category, index) => (
-                      <Link
-                        key={category.id || index}
-                        to={`/food/user/category/${category.slug}`}
-                        className="flex-shrink-0 flex flex-col items-center gap-2.5 group w-[92px]"
-                      >
-                        <div className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-full overflow-hidden shadow-md border-2 border-gray-100 dark:border-gray-800 bg-white dark:bg-[#1a1a1a] group-active:scale-95 transition-all duration-300">
-                          {/* Shining Glint Effect */}
-                          <div className="absolute inset-0 z-10 pointer-events-none overflow-hidden">
-                            <motion.div
-                              animate={{
-                                x: ['-200%', '200%'],
-                              }}
-                              transition={{
-                                duration: 2,
-                                repeat: Infinity,
-                                repeatDelay: 3 + index * 0.5,
-                                ease: "easeInOut"
-                              }}
-                              className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent skew-x-[-20deg] w-[150%] h-full"
-                            />
-                          </div>
-
-                          <OptimizedImage
-                            src={category.image}
-                            alt={category.name}
-                            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
-                          />
-                        </div>
-                        <span className="text-[10px] font-bold text-gray-600 dark:text-gray-300 text-center leading-tight line-clamp-1 w-full px-0.5">
-                          {category.name}
-                        </span>
-                      </Link>
-                    ))}
-                  </div>
+                <div id="categories-section">
+                  <HomeMobileCategories categories={displayCategories} />
                 </div>
 
+                <PromoRow
+                  variant="mobile"
+                  handleVegModeChange={handleVegModeChange}
+                  navigate={navigate}
+                  isVegMode={vegMode}
+                  under250PriceLimit={under250PriceLimit}
+                />
 
-                {/* Admin Hero Banners Section - Now below categories */}
                 {HeroBannerSection}
 
-                  {/* Stage 3: Filters Row (Always show when sticky) */}
-                  <div className="py-2 px-4 border-t border-gray-50 flex items-center gap-2 overflow-x-auto scrollbar-hide">
-                    {/* Veg Mode Toggle Integrated */}
-                    <div className="flex items-center bg-gray-50 rounded-full px-3 py-1.5 border border-gray-200 shrink-0">
-                      <span className="text-[10px] font-black mr-2 uppercase text-gray-400">Veg</span>
-                      <Switch
-                        checked={vegMode}
-                        onCheckedChange={handleVegModeChange}
-                        className="scale-75"
-                      />
-                    </div>
-
-                    <div className="h-6 w-[1px] bg-gray-200 mx-1 shrink-0" />
-
-                    <button
-                      type="button"
-                      onClick={() => setIsFilterOpen(true)}
-                      className="h-9 px-4 rounded-full flex items-center gap-1.5 whitespace-nowrap flex-shrink-0 font-bold transition-all bg-white border border-gray-200 shadow-sm active:scale-95"
-                    >
-                      <SlidersHorizontal className="h-4 w-4 text-black" />
-                      <span className="text-xs font-bold text-black uppercase tracking-tight">
-                        Filters
-                      </span>
-                    </button>
-
-                    {[
-                      { id: "delivery-under-30", label: "Under 30 mins" },
-                      { id: "delivery-under-45", label: "Under 45 mins" },
-                      { id: "distance-under-1km", label: "Under 1km", icon: MapPin },
-                    ].map((filter) => {
-                      const Icon = filter.icon;
-                      const isActive = activeFilters.has(filter.id);
-                      return (
-                        <button
-                          key={filter.id}
-                          type="button"
-                          onClick={() => {
-                            const nextFilters = new Set(activeFilters);
-                            if (nextFilters.has(filter.id)) {
-                              nextFilters.delete(filter.id);
-                            } else {
-                              nextFilters.add(filter.id);
-                            }
-                            setActiveFilters(nextFilters);
-                            void applyFiltersAndRefetch(nextFilters, sortBy, selectedCuisine);
-                          }}
-                          className={`h-9 px-4 rounded-full flex items-center gap-2 whitespace-nowrap flex-shrink-0 transition-all font-bold shadow-sm active:scale-95 ${isActive
-                            ? "bg-[#0F172A] text-white border border-[#0F172A]"
-                            : "bg-white border border-gray-100 text-gray-700"
-                            }`}
-                        >
-                          {Icon && <Icon className={`h-3.5 w-3.5 ${isActive ? "fill-white" : ""}`} />}
-                          <span className="text-xs font-bold tracking-tight">{filter.label}</span>
-                        </button>
-                      );
-                    })}
+                <div className="food-mobile-filters-row">
+                  <div className="food-mobile-filter-chip food-mobile-filter-chip--toggle">
+                    <span>Veg</span>
+                    <Switch
+                      checked={vegMode}
+                      onCheckedChange={handleVegModeChange}
+                      className="scale-[0.72]"
+                    />
                   </div>
-                </motion.div>
-              ) : (
+                  <button
+                    type="button"
+                    onClick={() => setIsFilterOpen(true)}
+                    className="food-mobile-filter-chip"
+                  >
+                    <SlidersHorizontal className="h-3.5 w-3.5" />
+                    Filters
+                  </button>
+                  {[
+                    { id: "delivery-under-30", label: "Under 30 mins" },
+                    { id: "delivery-under-45", label: "Under 45 mins" },
+                    { id: "distance-under-1km", label: "Under 1 km", icon: MapPin },
+                  ].map((filter) => {
+                    const Icon = filter.icon;
+                    const isActive = activeFilters.has(filter.id);
+                    return (
+                      <button
+                        key={filter.id}
+                        type="button"
+                        onClick={() => {
+                          const nextFilters = new Set(activeFilters);
+                          if (nextFilters.has(filter.id)) {
+                            nextFilters.delete(filter.id);
+                          } else {
+                            nextFilters.add(filter.id);
+                          }
+                          setActiveFilters(nextFilters);
+                          void applyFiltersAndRefetch(nextFilters, sortBy, selectedCuisine);
+                        }}
+                        className={`food-mobile-filter-chip${isActive ? " is-active" : ""}`}
+                      >
+                        {Icon && <Icon className="h-3.5 w-3.5" />}
+                        {filter.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </motion.div>
+            ) : (
               <motion.div
                 key="quick-content"
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.3 }}
+                className="food-mobile-content"
               >
                 <QuickSection />
               </motion.div>
@@ -2933,16 +2761,35 @@ export default function Home() {
           </AnimatePresence>
         </div>
 
+        <div className="hidden md:block relative z-[1]">
+          <HomeDesktopShell
+            displayCategories={displayCategories}
+            heroBanner={HeroBannerSection}
+            handleSearchFocus={handleSearchFocus}
+            vegMode={vegMode}
+            handleVegModeChange={handleVegModeChange}
+            under250PriceLimit={under250PriceLimit}
+            navigate={navigate}
+            activeFilters={activeFilters}
+            setActiveFilters={setActiveFilters}
+            applyFiltersAndRefetch={applyFiltersAndRefetch}
+            sortBy={sortBy}
+            selectedCuisine={selectedCuisine}
+            setIsFilterOpen={setIsFilterOpen}
+          />
+        </div>
+
+        <div className="relative z-[1] max-w-7xl mx-auto w-full">
         {recommendedForYouRestaurants.length > 0 && (
           <motion.section
             className="content-auto pt-1 sm:pt-2"
             initial={false}
             animate={{ opacity: 1, y: 0 }}>
-            <h2 className="text-xs sm:text-sm lg:text-base font-semibold text-gray-400 dark:text-gray-500 tracking-widest uppercase mb-2 sm:mb-3 px-4">
-              Recommended For You
-            </h2>
+            <div className="food-landing-section pt-2 sm:pt-3">
+            <p className="food-landing-eyebrow mb-1">Curated for you</p>
+            <h2 className="food-landing-title mb-3 sm:mb-4">Recommended</h2>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 px-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
               {recommendedForYouRestaurants.map((restaurant, index) => {
                 const restaurantSlug =
                   restaurant.slug ||
@@ -2969,12 +2816,12 @@ export default function Home() {
                         </div>
                       </div>
                       <div className="p-2.5">
-                        <p className="text-sm font-semibold text-gray-900 dark:text-white truncate tracking-tight">
+                        <p className="text-sm font-semibold text-foreground truncate">
                           {restaurant.name}
                         </p>
-                        <p className="text-[10px] text-[#0F172A] font-bold mt-1 flex items-center gap-1 uppercase tracking-wider">
-                          <Flame className="w-3.5 h-3.5 fill-[#0F172A]" />
-                          Near & Fast
+                        <p className="text-[11px] text-primary font-semibold mt-1 flex items-center gap-1">
+                          <Flame className="w-3.5 h-3.5 fill-primary text-primary" />
+                          Near & fast
                         </p>
                       </div>
                     </Link>
@@ -2982,25 +2829,20 @@ export default function Home() {
                 );
               })}
             </div>
+            </div>
           </motion.section>
         )}
 
-        {/* Featured Foods - Horizontal Scroll */}
-
         {/* Restaurants - Enhanced with Animations */}
         <motion.section
-          className="content-auto space-y-0 pt-3 sm:pt-4 lg:pt-6 pb-8 md:pb-10"
+          className="content-auto space-y-0 pt-4 sm:pt-5 lg:pt-6 pb-8 md:pb-10"
           initial={false}
           animate={{ opacity: 1 }}>
-          <div className="px-4 mb-3 lg:mb-4">
-            <div className="flex flex-col gap-0.5 lg:gap-1">
-              <h2 className="text-xs sm:text-sm lg:text-base font-semibold text-gray-400 tracking-widest uppercase">
-                {filteredRestaurants.length} Restaurants Delivering to You
-              </h2>
-              <span className="text-base sm:text-lg lg:text-2xl text-gray-500 font-normal">
-                Featured
-              </span>
-            </div>
+          <div className="food-landing-section mb-3 lg:mb-4">
+            <p className="food-landing-eyebrow mb-1">
+              {filteredRestaurants.length} restaurants delivering to you
+            </p>
+            <h2 className="food-landing-title">All restaurants</h2>
           </div>
           <div
             className={`relative ${showRestaurantSkeleton ? "min-h-[360px] sm:min-h-[420px]" : ""}`}>
@@ -3024,7 +2866,7 @@ export default function Home() {
               )}
             </AnimatePresence>
             <div
-              className={`grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5 sm:gap-4 lg:gap-5 xl:gap-6 px-4 pt-1 sm:pt-1.5 lg:pt-2 items-stretch ${isLoadingFilterResults || loadingRestaurants ? "opacity-50" : "opacity-100"} transition-opacity duration-300`}>
+              className={`grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5 lg:gap-6 food-landing-section pt-1 items-stretch ${isLoadingFilterResults || loadingRestaurants ? "opacity-50" : "opacity-100"} transition-opacity duration-300`}>
               {visibleRestaurants.map((restaurant, index) => {
                 const nameStr =
                   typeof restaurant?.name === "string"
@@ -3162,12 +3004,12 @@ export default function Home() {
                               {/* Restaurant Name & Rating */}
                               <div className="flex items-start justify-between gap-2 mb-2 lg:mb-3">
                                 <div className="flex-1 min-w-0">
-                                  <h3 className="text-base sm:text-lg lg:text-2xl font-bold text-gray-950 dark:text-white line-clamp-1 leading-tight tracking-tight transition-colors duration-300 group-hover:text-[#0F172A]">
+                                  <h3 className="text-base sm:text-lg font-bold text-foreground line-clamp-1 leading-tight group-hover:text-primary transition-colors">
                                     {restaurant.name}
                                   </h3>
                                   <div className="flex flex-wrap items-center gap-2 mt-2 min-h-[24px]">
                                     <span
-                                      className={`inline-flex rounded-full px-2.5 py-1 text-[9px] sm:text-[10px] font-black uppercase tracking-widest shadow-sm ${availability.isOpen ? "bg-[#0F172A] text-white" : "bg-gray-400 text-white"}`}>
+                                      className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${availability.isOpen ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
                                       {availability.isOpen
                                         ? "Open now"
                                         : "Offline"}
@@ -3182,8 +3024,8 @@ export default function Home() {
                                     )}
                                   </div>
                                 </div>
-                                <div className={`flex-shrink-0 min-w-[52px] justify-center ${Number(restaurant.rating) > 0 ? "bg-[#0F172A]" : "bg-gray-400"} text-white px-2.5 sm:px-3 py-1 rounded-2xl flex items-center gap-1 shadow-md transform transition-transform duration-300 group-hover:scale-110`}>
-                                  <span className="text-xs sm:text-sm lg:text-lg font-black tracking-tight uppercase">
+                                <div className={`flex-shrink-0 min-w-[52px] justify-center ${Number(restaurant.rating) > 0 ? "bg-primary" : "bg-muted"} text-primary-foreground px-2.5 sm:px-3 py-1 rounded-2xl flex items-center gap-1 shadow-sm`}>
+                                  <span className="text-xs sm:text-sm font-bold">
                                     {Number(restaurant.rating) > 0 ? Number(restaurant.rating).toFixed(1) : "NEW"}
                                   </span>
                                   {Number(restaurant.rating) > 0 && <Star className="h-3 w-3 sm:h-3.5 sm:w-3.5 lg:h-4.5 lg:w-4.5 fill-white text-white" strokeWidth={0} />}
@@ -3191,28 +3033,28 @@ export default function Home() {
                               </div>
 
                               {/* Delivery Time & Distance */}
-                              <div className="flex items-center gap-1 text-xs sm:text-sm lg:text-base text-gray-500 mb-2 lg:mb-3 transition-opacity duration-300 opacity-70 group-hover:opacity-100">
+                              <div className="flex items-center gap-1 text-xs sm:text-sm text-muted-foreground mb-2 lg:mb-3">
                                 <Clock
-                                  className="h-3.5 w-3.5 sm:h-4 sm:w-4 lg:h-5 lg:w-5 text-gray-500 dark:text-gray-400"
+                                  className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground"
                                   strokeWidth={1.5}
                                 />
-                                <span className="font-medium dark:text-gray-300 text-gray-700">
+                                <span className="font-medium text-foreground/80">
                                   {restaurant.deliveryTime}
                                 </span>
-                                <span className="mx-1">|</span>
-                                <span className="font-medium dark:text-gray-300 text-gray-700">
+                                <span className="mx-1 text-border">|</span>
+                                <span className="font-medium text-foreground/80">
                                   {restaurant.distance}
                                 </span>
                               </div>
 
                               {/* Offer Badge */}
                               {restaurant.offer && (
-                                <div className="flex items-center gap-2 text-xs sm:text-sm lg:text-base mt-auto transform transition-transform duration-300 group-hover:translate-x-1">
+                                <div className="flex items-center gap-2 text-xs sm:text-sm mt-auto">
                                   <BadgePercent
-                                    className="h-3.5 w-3.5 sm:h-4 sm:w-4 lg:h-5 lg:w-5 text-[#0F172A]"
-                                    strokeWidth={3}
+                                    className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-primary"
+                                    strokeWidth={2.5}
                                   />
-                                  <span className="text-[#0F172A] dark:text-[#a05485] font-black uppercase text-[9px] sm:text-[10px] tracking-wider">
+                                  <span className="text-primary font-semibold text-[11px] sm:text-xs">
                                     {restaurant.offer}
                                   </span>
                                 </div>
@@ -3230,7 +3072,7 @@ export default function Home() {
               })}
             </div>
           </div>
-          <div className="flex flex-col items-center pt-2 sm:pt-3 gap-2 px-4">
+          <div className="flex flex-col items-center pt-2 sm:pt-3 gap-2 food-landing-section">
             {hasMoreRestaurants && (
               <Button
                 variant="outline"
@@ -3246,6 +3088,7 @@ export default function Home() {
             />
           </div>
         </motion.section>
+        </div>
       </div>
 
       {/* Filter Modal - Bottom Sheet */}

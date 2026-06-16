@@ -1,9 +1,19 @@
-import { useState, useEffect, useRef } from "react"
+import { useState, useRef } from "react"
 import { useNavigate, Link } from "react-router-dom"
-import { motion, AnimatePresence } from "framer-motion"
+import { motion } from "framer-motion"
 import { adminAPI } from "@food/api"
 import { setAuthData } from "@food/utils/auth"
-import { ShieldCheck, UserCog, Star, Heart, ArrowRight, Loader2, Mail, Lock, Eye, EyeOff } from "lucide-react"
+import {
+  ShieldCheck,
+  ArrowRight,
+  Loader2,
+  Mail,
+  Lock,
+  Eye,
+  EyeOff,
+  Heart,
+  UserCog,
+} from "lucide-react"
 import logoImage from "@/assets/logo.png"
 import { toast } from "sonner"
 
@@ -41,7 +51,8 @@ export default function AdminLogin() {
       toast.success("Welcome, Administrator")
       navigate("/admin/food", { replace: true })
     } catch (err) {
-      const msg = err?.response?.data?.message || err?.message || "Login failed. Check your credentials."
+      const msg =
+        err?.response?.data?.message || err?.message || "Login failed. Check your credentials."
       toast.error(msg)
     } finally {
       setLoading(false)
@@ -50,137 +61,156 @@ export default function AdminLogin() {
   }
 
   return (
-    <div className="min-h-screen bg-white dark:bg-[#0a0a0a] flex flex-col relative overflow-hidden font-['Poppins']">
-      {/* Decorative Background Elements */}
-      <div className="absolute top-0 left-0 w-full h-[600px] bg-gradient-to-b from-[#23361A]/10 via-[#23361A]/5 to-transparent pointer-events-none" />
-      <div className="absolute top-[-100px] right-[-100px] w-[500px] h-[500px] bg-[#23361A]/5 rounded-full blur-[120px] pointer-events-none animate-pulse" />
-      <div className="absolute bottom-[-100px] left-[-100px] w-[400px] h-[400px] bg-[#23361A]/5 rounded-full blur-[120px] pointer-events-none" />
+    <div className="min-h-screen min-h-dvh bg-gray-50 font-[family-name:var(--font-poppins)] lg:grid lg:grid-cols-2">
+      {/* Brand panel — desktop */}
+      <div className="hidden lg:flex relative overflow-hidden bg-gradient-to-br from-primary via-[#15803d] to-[#0f172a] text-white p-10 xl:p-14 flex-col justify-center">
+        <div className="absolute top-0 right-0 w-72 h-72 bg-white/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3" />
+        <div className="absolute bottom-0 left-0 w-64 h-64 bg-white/5 rounded-full blur-3xl translate-y-1/3 -translate-x-1/4" />
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col items-center justify-center px-6 py-12 relative z-10">
-        <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8, ease: "easeOut" }}
-          className="w-full max-w-[440px]"
-        >
-          {/* Logo & Header */}
-          <div className="text-center mb-8">
-            <motion.div
-              initial={{ scale: 0, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ type: "spring", stiffness: 200, damping: 20 }}
-              className="relative inline-block mb-4"
-            >
-              {/* Modern Logo Background Glow */}
-              <div className="absolute inset-0 bg-gradient-to-br from-[#23361A]/20 to-[#6B8A2F]/10 rounded-full blur-2xl scale-110" />
-              <div className="absolute inset-0 border-2 border-[#23361A]/10 rounded-full scale-105" />
-              
-              <img 
-                src={logoImage} 
-                alt="Buddy Service Logo" 
-                className="w-32 h-32 md:w-36 md:h-36 object-contain mx-auto relative z-10 drop-shadow-xl"
-              />
-            </motion.div>
-
-            <motion.p
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.5 }}
-              className="text-gray-400 dark:text-gray-500 font-bold text-xs uppercase tracking-[0.3em]"
-            >
-              ADMIN PANEL
-            </motion.p>
+        <div className="relative z-10">
+          <div className="flex items-center gap-3 mb-10">
+            <img
+              src={logoImage}
+              alt="Buddy Service"
+              className="w-11 h-11 rounded-xl bg-white p-1 object-contain shadow-lg"
+            />
+            <span className="text-lg font-bold tracking-tight">Buddy Service</span>
           </div>
 
-          {/* Login Card */}
-          <div className="bg-white/80 dark:bg-[#1a1a1a]/80 backdrop-blur-2xl rounded-[3rem] p-8 sm:p-12 shadow-[0_40px_80px_-20px_rgba(126,56,102,0.2)] dark:shadow-none border border-white/20 dark:border-gray-800 relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-transparent via-[#23361A]/20 to-transparent" />
+          <h1 className="text-4xl xl:text-5xl font-bold leading-tight tracking-tight mb-4 max-w-md">
+            Admin dashboard access
+          </h1>
+          <p className="text-white/80 text-base leading-relaxed max-w-md mb-10">
+            Manage orders, menus, riders, and business settings from one secure workspace.
+          </p>
 
-            <div className="mb-10 text-center sm:text-left">
-              <h2 className="text-3xl font-black text-gray-900 dark:text-white mb-2 font-['Outfit'] tracking-tight">
-                Admin Entry
-              </h2>
-              <div className="h-1 w-10 bg-[#23361A] rounded-full mb-3 hidden sm:block" />
-              <p className="text-base text-gray-500 dark:text-gray-400 font-medium">
-                Authorized access only. Please sign in to continue.
-              </p>
-            </div>
+          <ul className="space-y-4">
+            {[
+              { icon: ShieldCheck, label: "Secure admin access" },
+              { icon: UserCog, label: "Manage food operations" },
+              { icon: Lock, label: "Role-based permissions" },
+            ].map(({ icon: Icon, label }) => (
+              <li key={label} className="flex items-center gap-3 text-sm font-medium text-white/90">
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/15 border border-white/10">
+                  <Icon className="h-4 w-4" />
+                </span>
+                {label}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
 
-            <form onSubmit={handleLogin} className="space-y-6">
-              <div className="space-y-4">
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-black text-[#23361A] uppercase tracking-[0.2em] ml-1">Email Address</label>
-                  <div className="relative">
-                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                    <input
-                      type="email"
-                      required
-                      autoFocus
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="block w-full pl-12 pr-6 py-4 bg-gray-50 dark:bg-gray-900/50 text-gray-900 dark:text-white border-2 border-transparent focus:border-[#23361A]/50 rounded-2xl outline-none transition-all placeholder:text-gray-300 font-bold"
-                      placeholder="admin@foodelo.com"
-                    />
-                  </div>
+      {/* Form panel */}
+      <div className="flex flex-col items-center justify-center px-5 py-10 sm:px-8 lg:px-12 xl:px-16">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          className="w-full max-w-md"
+        >
+          {/* Mobile brand */}
+          <div className="lg:hidden text-center mb-8">
+            <img
+              src={logoImage}
+              alt="Buddy Service"
+              className="w-24 h-24 sm:w-28 sm:h-28 object-contain mx-auto mb-3 drop-shadow-lg"
+            />
+            <p className="text-xs font-bold uppercase tracking-[0.25em] text-muted-foreground">
+              Admin Panel
+            </p>
+          </div>
+
+          <div className="bg-white rounded-3xl border border-border shadow-xl shadow-slate-200/60 p-6 sm:p-8 lg:p-10">
+            <p className="text-xs font-semibold uppercase tracking-widest text-primary mb-2 hidden lg:block">
+              Admin panel
+            </p>
+            <h2 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight mb-1">
+              Sign in
+            </h2>
+            <p className="text-sm text-muted-foreground mb-8">
+              Authorized access only. Use your admin credentials.
+            </p>
+
+            <form onSubmit={handleLogin} className="space-y-5">
+              <div className="space-y-2">
+                <label htmlFor="admin-email" className="text-sm font-semibold text-foreground">
+                  Email address
+                </label>
+                <div className="relative flex items-center h-12 sm:h-14 rounded-xl border border-border bg-white focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary/40 transition-all">
+                  <Mail className="absolute left-4 h-5 w-5 text-muted-foreground pointer-events-none" />
+                  <input
+                    id="admin-email"
+                    type="email"
+                    required
+                    autoFocus
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="admin@example.com"
+                    className="w-full h-full pl-12 pr-4 bg-transparent text-sm sm:text-base font-medium text-foreground outline-none placeholder:text-muted-foreground/70"
+                  />
                 </div>
+              </div>
 
-                <div className="space-y-1.5">
-                  <div className="flex justify-between items-center px-1">
-                    <label className="text-[10px] font-black text-[#23361A] uppercase tracking-[0.2em]">Password</label>
-                    <Link to="/admin/forgot-password" size="sm" className="text-[10px] font-bold text-gray-400 hover:text-[#23361A] uppercase tracking-wider transition-colors">Forgot?</Link>
-                  </div>
-                  <div className="relative">
-                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      required
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="block w-full pl-12 pr-12 py-4 bg-gray-50 dark:bg-gray-900/50 text-gray-900 dark:text-white border-2 border-transparent focus:border-[#23361A]/50 rounded-2xl outline-none transition-all placeholder:text-gray-300 font-bold"
-                      placeholder="••••••••"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
-                    >
-                      {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                    </button>
-                  </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <label htmlFor="admin-password" className="text-sm font-semibold text-foreground">
+                    Password
+                  </label>
+                  <Link
+                    to="/admin/forgot-password"
+                    className="text-xs font-semibold text-primary hover:underline"
+                  >
+                    Forgot password?
+                  </Link>
+                </div>
+                <div className="relative flex items-center h-12 sm:h-14 rounded-xl border border-border bg-white focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary/40 transition-all">
+                  <Lock className="absolute left-4 h-5 w-5 text-muted-foreground pointer-events-none" />
+                  <input
+                    id="admin-password"
+                    type={showPassword ? "text" : "password"}
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Enter your password"
+                    className="w-full h-full pl-12 pr-12 bg-transparent text-sm sm:text-base font-medium text-foreground outline-none placeholder:text-muted-foreground/70"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 p-1 text-muted-foreground hover:text-foreground"
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  </button>
                 </div>
               </div>
 
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-4.5 bg-[#23361A] hover:bg-[#1a2614] disabled:bg-gray-200 dark:disabled:bg-gray-800 disabled:text-gray-400 text-white rounded-2xl font-bold text-lg shadow-xl shadow-[#23361A]/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2 group overflow-hidden relative"
+                className="w-full h-12 sm:h-14 flex items-center justify-center gap-2 rounded-xl bg-primary hover:bg-primary/90 disabled:opacity-60 text-primary-foreground font-semibold text-base shadow-lg shadow-primary/25 transition-all active:scale-[0.99]"
               >
                 {loading ? (
-                  <Loader2 className="w-6 h-6 animate-spin" />
+                  <Loader2 className="h-5 w-5 animate-spin" />
                 ) : (
                   <>
-                    <span>Enter Dashboard</span>
-                    <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                    <span>Enter dashboard</span>
+                    <ArrowRight className="h-5 w-5" />
                   </>
                 )}
-                <motion.div
-                  className="absolute inset-0 bg-white/20 translate-x-[-100%]"
-                  whileHover={{ translateX: "100%" }}
-                  transition={{ duration: 0.6 }}
-                />
               </button>
             </form>
-          </div>
 
-          <div className="mt-12 flex justify-center items-center gap-6 opacity-30 grayscale hover:opacity-60 transition-opacity">
-            <div className="flex items-center gap-1.5">
-              <ShieldCheck className="w-4 h-4" />
-              <span className="text-[10px] font-black uppercase tracking-widest">Secure Access</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Heart className="w-4 h-4" />
-              <span className="text-[10px] font-black uppercase tracking-widest">Admin Control</span>
+            <div className="mt-8 pt-6 border-t border-border flex flex-wrap justify-center gap-4 sm:gap-6">
+              <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <ShieldCheck className="h-4 w-4" />
+                Secure access
+              </span>
+              <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <Heart className="h-4 w-4" />
+                Admin control
+              </span>
             </div>
           </div>
         </motion.div>
@@ -188,6 +218,3 @@ export default function AdminLogin() {
     </div>
   )
 }
-
-
-

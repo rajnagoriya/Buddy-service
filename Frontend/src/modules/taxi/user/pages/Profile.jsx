@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+// Legacy Taxi profile — main route redirects to /food/user/profile
+// Taxi-specific sub-pages (settings, addresses, etc.) remain active.
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 

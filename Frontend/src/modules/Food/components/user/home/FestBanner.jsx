@@ -124,7 +124,7 @@ export default function FestBanner({ activeIndex, onChange, embedded = false }) 
                 transition={{ duration: 0.4 }}
                 className={`relative w-full px-5 sm:px-6 py-5 sm:py-6 overflow-hidden ${
                   embedded
-                    ? "rounded-none bg-transparent shadow-none"
+                    ? `rounded-[1.25rem] shadow-[0_8px_28px_rgba(0,0,0,0.22)] bg-gradient-to-br ${slide.theme.card}`
                     : `rounded-[24px] shadow-[0_10px_22px_rgba(0,0,0,0.08)] bg-gradient-to-br ${slide.theme.card}`
                 }`}
               >

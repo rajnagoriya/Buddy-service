@@ -16,7 +16,7 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@food/components/ui/dropdown-menu";
-import quickSpicyLogo from "@food/assets/quicky-spicy-logo.png";
+import BusinessLogo from "@food/components/BusinessLogo";
 import { useNavigate, useLocation } from 'react-router-dom';
 import { cn } from '@qc/lib/utils';
 import { sellerApi } from '@modules/seller/services/sellerApi';
@@ -26,7 +26,6 @@ import NotificationPopup from './NotificationPopup';
 import { toast } from 'sonner';
 
 import { useSettings } from '@core/context/SettingsContext';
-import { getCachedSettings, loadBusinessSettings } from '@food/utils/businessSettings';
 
 const Topbar = ({ onMenuClick }) => {
     const { user, logout, role } = useAuth();
@@ -43,7 +42,6 @@ const Topbar = ({ onMenuClick }) => {
     const [showNotifications, setShowNotifications] = React.useState(false);
     const notificationRef = React.useRef(null);
 
-    const [foodLogoUrl, setFoodLogoUrl] = React.useState(() => getCachedSettings()?.logo?.url || null);
     const [adminData, setAdminData] = React.useState(null);
 
     // Load admin data from localStorage (same source as Food AdminNavbar)
@@ -66,26 +64,6 @@ const Topbar = ({ onMenuClick }) => {
         };
     }, []);
     
-    React.useEffect(() => {
-        const loadLogo = async () => {
-            try {
-                let cached = getCachedSettings();
-                if (cached?.logo?.url) setFoodLogoUrl(cached.logo.url);
-                
-                const settings = await loadBusinessSettings();
-                if (settings?.logo?.url) setFoodLogoUrl(settings.logo.url);
-            } catch (error) {}
-        };
-        loadLogo();
-        
-        const handleSettingsUpdate = () => {
-            const cached = getCachedSettings();
-            if (cached?.logo?.url) setFoodLogoUrl(cached.logo.url);
-        };
-        window.addEventListener('businessSettingsUpdated', handleSettingsUpdate);
-        return () => window.removeEventListener('businessSettingsUpdated', handleSettingsUpdate);
-    }, []);
-
     const isSeller = location.pathname.startsWith('/qc/seller') || location.pathname.startsWith('/seller');
     const isAdmin = location.pathname.startsWith('/qc/admin');
 
@@ -175,19 +153,11 @@ const Topbar = ({ onMenuClick }) => {
                     {/* Logo block mirroring Food */}
                     <div className="flex items-center gap-2">
                       <div className="w-24 h-12 rounded-lg bg-white flex items-center justify-center ring-neutral-200">
-                        {foodLogoUrl || logoUrl ? (
-                          <img
-                            src={foodLogoUrl || logoUrl}
-                            alt={appName}
-                            className="w-24 h-10 object-contain"
-                            loading="lazy"
-                            onError={(e) => {
-                              e.target.src = quickSpicyLogo;
-                            }}
-                          />
-                        ) : (
-                          <img src={quickSpicyLogo} alt="Buddy Services" className="w-24 h-10 object-contain" loading="lazy" />
-                        )}
+                        <BusinessLogo
+                          src={logoUrl || undefined}
+                          alt={appName}
+                          className="w-24 h-10 object-contain"
+                        />
                       </div>
                     </div>
                 </div>

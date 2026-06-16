@@ -1,29 +1,11 @@
 import { Link, useLocation } from "react-router-dom"
 import { Tag, User, Truck, UtensilsCrossed } from "lucide-react"
-import { useState, useEffect } from "react"
-import api from "@food/api"
+import useLandingSettings from "@food/hooks/useLandingSettings"
 
 export default function BottomNavigation() {
   const location = useLocation()
   const pathname = location.pathname
-  const [under250PriceLimit, setUnder250PriceLimit] = useState(250)
-
-  // Fetch landing settings to get dynamic price limit
-  useEffect(() => {
-    let cancelled = false
-    api.get('/food/landing/settings/public')
-      .then((res) => {
-        if (cancelled) return
-        const settings = res?.data?.data
-        if (settings && typeof settings.under250PriceLimit === 'number') {
-          setUnder250PriceLimit(settings.under250PriceLimit)
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setUnder250PriceLimit(250)
-      })
-    return () => { cancelled = true }
-  }, [])
+  const { under250PriceLimit } = useLandingSettings()
 
   // Check active routes - support both /user/* and /* paths
   const isDining = pathname === "/food/dining" || pathname.startsWith("/food/user/dining")
@@ -52,12 +34,12 @@ export default function BottomNavigation() {
         <Link
           to="/"
           className={`flex-1 flex flex-col items-center gap-1 py-2.5 rounded-full transition-all duration-300 relative ${isDelivery
-              ? "bg-[#F0FDF4] text-[#0F172A] shadow-sm"
-              : "text-gray-500 dark:text-gray-400 hover:bg-gray-50/50 dark:hover:bg-gray-800/50"
+              ? "bg-secondary text-primary shadow-sm"
+              : "text-muted-foreground hover:bg-muted/60"
             }`}
         >
-          <Truck className={`h-4.5 w-4.5 ${isDelivery ? "text-[#0F172A] fill-[#0F172A]/10" : "text-gray-500"}`} strokeWidth={isDelivery ? 2.5 : 2} />
-          <span className={`text-[10px] sm:text-xs font-bold uppercase tracking-wider ${isDelivery ? "text-[#0F172A]" : "text-gray-500"}`}>
+          <Truck className={`h-4.5 w-4.5 ${isDelivery ? "text-primary" : "text-muted-foreground"}`} strokeWidth={isDelivery ? 2.5 : 2} />
+          <span className={`text-[10px] sm:text-xs font-semibold ${isDelivery ? "text-primary" : "text-muted-foreground"}`}>
             Delivery
           </span>
         </Link>
@@ -66,12 +48,12 @@ export default function BottomNavigation() {
         <Link
           to="/food/user/dining"
           className={`flex-1 flex flex-col items-center gap-1 py-2.5 rounded-full transition-all duration-300 relative ${isDining
-              ? "bg-[#F0FDF4] text-[#0F172A] shadow-sm"
-              : "text-gray-500 dark:text-gray-400 hover:bg-gray-50/50 dark:hover:bg-gray-800/50"
+              ? "bg-secondary text-primary shadow-sm"
+              : "text-muted-foreground hover:bg-muted/60"
             }`}
         >
-          <UtensilsCrossed className={`h-4.5 w-4.5 ${isDining ? "text-[#0F172A]" : "text-gray-500"}`} strokeWidth={isDining ? 2.5 : 2} />
-          <span className={`text-[10px] sm:text-xs font-bold uppercase tracking-wider ${isDining ? "text-[#0F172A]" : "text-gray-500"}`}>
+          <UtensilsCrossed className={`h-4.5 w-4.5 ${isDining ? "text-primary" : "text-muted-foreground"}`} strokeWidth={isDining ? 2.5 : 2} />
+          <span className={`text-[10px] sm:text-xs font-semibold ${isDining ? "text-primary" : "text-muted-foreground"}`}>
             Dining
           </span>
         </Link>
@@ -80,26 +62,26 @@ export default function BottomNavigation() {
         <Link
           to="/food/user/under-250"
           className={`flex-1 flex flex-col items-center gap-1 py-2.5 rounded-full transition-all duration-300 relative ${isUnder250
-              ? "bg-[#F0FDF4] text-[#0F172A] shadow-sm"
-              : "text-gray-500 dark:text-gray-400 hover:bg-gray-50/50 dark:hover:bg-gray-800/50"
+              ? "bg-secondary text-primary shadow-sm"
+              : "text-muted-foreground hover:bg-muted/60"
             }`}
         >
-          <Tag className={`h-4.5 w-4.5 ${isUnder250 ? "text-[#0F172A] fill-[#0F172A]/10" : "text-gray-500"}`} strokeWidth={isUnder250 ? 2.5 : 2} />
-          <span className={`text-[10px] sm:text-xs font-bold uppercase tracking-wider ${isUnder250 ? "text-[#0F172A]" : "text-gray-500"}`}>
+          <Tag className={`h-4.5 w-4.5 ${isUnder250 ? "text-primary" : "text-muted-foreground"}`} strokeWidth={isUnder250 ? 2.5 : 2} />
+          <span className={`text-[10px] sm:text-xs font-semibold ${isUnder250 ? "text-primary" : "text-muted-foreground"}`}>
             ₹{under250PriceLimit}
           </span>
         </Link>
 
         {/* Profile Tab */}
         <Link
-          to="/food/user/profile"
+          to="/food/user/profile?service=food"
           className={`flex-1 flex flex-col items-center gap-1 py-2.5 rounded-full transition-all duration-300 relative ${isProfile
-              ? "bg-[#F0FDF4] text-[#0F172A] shadow-sm"
-              : "text-gray-500 dark:text-gray-400 hover:bg-gray-50/50 dark:hover:bg-gray-800/50"
+              ? "bg-secondary text-primary shadow-sm"
+              : "text-muted-foreground hover:bg-muted/60"
             }`}
         >
-          <User className={`h-4.5 w-4.5 ${isProfile ? "text-[#0F172A] fill-[#0F172A]/10" : "text-gray-500"}`} strokeWidth={isProfile ? 2.5 : 2} />
-          <span className={`text-[10px] sm:text-xs font-bold uppercase tracking-wider ${isProfile ? "text-[#0F172A]" : "text-gray-500"}`}>
+          <User className={`h-4.5 w-4.5 ${isProfile ? "text-primary" : "text-muted-foreground"}`} strokeWidth={isProfile ? 2.5 : 2} />
+          <span className={`text-[10px] sm:text-xs font-semibold ${isProfile ? "text-primary" : "text-muted-foreground"}`}>
             Profile
           </span>
         </Link>

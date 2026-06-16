@@ -98,6 +98,10 @@ const AppRoutes = () => {
 
   return (
     <Routes>
+      {/* Global unified user profile */}
+      <Route path="/user/profile" element={<Navigate to="/food/user/profile" replace />} />
+      <Route path="/user/profile/*" element={<Navigate to="/food/user/profile" replace />} />
+
       {/* Auth Module */}
       <Route path="/user/auth/*" element={<AuthApp />} />
 

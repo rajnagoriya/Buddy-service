@@ -10,9 +10,9 @@ import { useLocationSelector, useSearchOverlay } from "./UserLayout"
 import { useProfile } from "@food/context/ProfileContext"
 import { FaLocationDot } from "react-icons/fa6"
 import { AnimatePresence, motion } from "framer-motion"
-import quickSpicyLogo from "@food/assets/quicky-spicy-logo.png"
-import { getCachedSettings, loadBusinessSettings } from "@food/utils/businessSettings"
-import api from "@food/api"
+import BusinessLogo from "@food/components/BusinessLogo"
+import useLandingSettings from "@food/hooks/useLandingSettings"
+import "@food/styles/landing.css"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -27,10 +27,8 @@ export default function DesktopNavbar({ showLogo = true }) {
     const { setSearchValue } = useSearchOverlay()
     const { vegMode, setVegMode } = useProfile()
     const [heroSearch, setHeroSearch] = useState("")
-    const [logoUrl, setLogoUrl] = useState(null)
-    const [companyName, setCompanyName] = useState(null)
-    const [hasScrolledPastBanner, setHasScrolledPastBanner] = useState(false)
-    const [under250PriceLimit, setUnder250PriceLimit] = useState(250)
+    const [hasScrolledPastBanner, setHasScrolledPastBanner] = useState(true)
+    const { under250PriceLimit } = useLandingSettings()
     const navRef = useRef(null)
     const cartCount = getCartCount()
 
@@ -83,54 +81,6 @@ export default function DesktopNavbar({ showLogo = true }) {
         location.pathname === "/food/user/under-250" ||
         location.pathname === "/food/under-250"
 
-    // Load business settings logo
-    useEffect(() => {
-        const loadLogo = async () => {
-            try {
-                const cached = getCachedSettings()
-                if (cached) {
-                    if (cached.logo?.url) {
-                        setLogoUrl(cached.logo.url)
-                    }
-                    if (cached.companyName) {
-                        setCompanyName(cached.companyName)
-                    }
-                } else {
-                    const settings = await loadBusinessSettings()
-                    if (settings) {
-                        if (settings.logo?.url) {
-                            setLogoUrl(settings.logo.url)
-                        }
-                        if (settings.companyName) {
-                            setCompanyName(settings.companyName)
-                        }
-                    }
-                }
-            } catch (error) {
-                debugError('Error loading logo:', error)
-            }
-        }
-        loadLogo()
-
-        // Listen for business settings updates
-        const handleSettingsUpdate = () => {
-            const cached = getCachedSettings()
-            if (cached) {
-                if (cached.logo?.url) {
-                    setLogoUrl(cached.logo.url)
-                }
-                if (cached.companyName) {
-                    setCompanyName(cached.companyName)
-                }
-            }
-        }
-        window.addEventListener('businessSettingsUpdated', handleSettingsUpdate)
-
-        return () => {
-            window.removeEventListener('businessSettingsUpdated', handleSettingsUpdate)
-        }
-    }, [])
-
     useEffect(() => {
         if (!isBannerRoute) {
             setHasScrolledPastBanner(true)
@@ -143,8 +93,13 @@ export default function DesktopNavbar({ showLogo = true }) {
                 document.querySelector('[data-banner-shell="true"]')
             const navElement = navRef.current
 
-            if (!heroShell || !navElement) {
-                setHasScrolledPastBanner(false)
+            if (!navElement) {
+                return
+            }
+
+            // Desktop home has no hero shell in the DOM — keep a solid navbar.
+            if (!heroShell) {
+                setHasScrolledPastBanner(true)
                 return
             }
 
@@ -163,29 +118,13 @@ export default function DesktopNavbar({ showLogo = true }) {
         }
     }, [isBannerRoute])
 
-    // Fetch landing settings to get dynamic price limit
-    useEffect(() => {
-        let cancelled = false
-        api.get('/food/landing/settings/public')
-            .then((res) => {
-                if (cancelled) return
-                const settings = res?.data?.data
-                if (settings && typeof settings.under250PriceLimit === 'number') {
-                    setUnder250PriceLimit(settings.under250PriceLimit)
-                }
-            })
-            .catch(() => {
-                if (!cancelled) setUnder250PriceLimit(250)
-            })
-        return () => { cancelled = true }
-    }, [])
-
     return (
         <nav
             ref={navRef}
-            className={`hidden md:flex flex-col fixed top-0 left-0 right-0 z-50 py-2 transition-all duration-300 ${(isBannerRoute && !hasScrolledPastBanner)
-                ? "bg-transparent !bg-transparent border-0 shadow-none"
-                : "bg-white dark:bg-[#1a1a1a] border-b border-gray-200 dark:border-gray-800 shadow-sm"
+            className={`hidden md:flex flex-col fixed top-0 left-0 right-0 z-50 border-b transition-all duration-300 ${
+                (isBannerRoute && !hasScrolledPastBanner)
+                ? "bg-transparent border-transparent shadow-none"
+                : "bg-white/95 dark:bg-[#1a1a1a]/95 backdrop-blur-md border-border shadow-sm"
                 }`}
         >
             {/* Top Row: Location - Search - Icons */}
@@ -197,20 +136,10 @@ export default function DesktopNavbar({ showLogo = true }) {
                             {/* Logo */}
                             {showLogo && (
                                 <Link to="/" className="flex items-center justify-center flex-shrink-0">
-                                    {logoUrl || companyName ? (
-                                        <img
-                                            src={logoUrl || quickSpicyLogo}
-                                            alt={companyName || "Company Logo"}
-                                            className="h-10 w-auto md:h-14 lg:h-16 object-contain"
-                                            onError={(e) => {
-                                                if (e.target.src !== quickSpicyLogo) {
-                                                    e.target.src = quickSpicyLogo
-                                                }
-                                            }}
-                                        />
-                                    ) : (
-                                        <img src={quickSpicyLogo} alt={companyName || "Logo"} className="h-10 w-auto md:h-14 lg:h-16 object-contain" />
-                                    )}
+                                    <BusinessLogo
+                                        className="h-10 w-auto md:h-14 lg:h-16 object-contain"
+                                        fallback="logo"
+                                    />
                                 </Link>
                             )}
 
@@ -222,28 +151,27 @@ export default function DesktopNavbar({ showLogo = true }) {
                                 className="h-auto px-0 py-0 hover:bg-transparent transition-colors flex-shrink-0"
                             >
                                 {locationLoading ? (
-                                    <span className="text-sm font-bold text-black dark:text-white">
+                                    <span className="text-sm font-semibold text-foreground">
                                         Loading...
                                     </span>
                                 ) : (
-                                    <div className="flex flex-col items-start min-w-0">
-                                        <div className="flex items-center gap-1.5 lg:gap-2">
+                                    <div className="flex flex-col items-start min-w-0 max-w-[220px] lg:max-w-[280px]">
+                                        <div className="flex items-center gap-1.5 lg:gap-2 min-w-0">
                                             <FaLocationDot
-                                                className="h-5 w-5 lg:h-6 lg:w-6 text-black dark:text-white flex-shrink-0"
+                                                className="h-4 w-4 lg:h-5 lg:w-5 text-primary shrink-0"
                                                 fill="currentColor"
-                                                strokeWidth={2}
                                             />
-                                            <span className="text-sm lg:text-base font-bold text-black dark:text-white whitespace-nowrap">
+                                            <span className="text-sm lg:text-base font-semibold text-foreground truncate">
                                                 {mainLocationName}
                                             </span>
-                                            <ChevronDown className="h-4 w-4 lg:h-5 lg:w-5 text-black dark:text-white flex-shrink-0" strokeWidth={2.5} />
+                                            <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" strokeWidth={2.5} />
                                         </div>
                                         {baseAddress && (
-                                            <span className="text-[10px] lg:text-xs font-medium text-gray-500 dark:text-gray-400 truncate max-w-[200px]">
+                                            <span className="text-[11px] lg:text-xs font-medium text-muted-foreground truncate w-full">
                                                 {baseAddress}
                                             </span>
                                         )}
-                                        <span className="text-[9px] lg:text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest leading-none">
+                                        <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide leading-none">
                                             {bottomCity}
                                         </span>
                                     </div>
@@ -255,7 +183,7 @@ export default function DesktopNavbar({ showLogo = true }) {
                         <div className="flex-1 max-w-3xl mx-4 flex items-center gap-4">
                             {/* Search Bar */}
                             <div className="relative flex-1">
-                                <div className="relative bg-gray-100 dark:bg-[#2a2a2a] rounded-lg transition-all duration-300 focus-within:ring-2 focus-within:ring-[#16A34A] focus-within:bg-white dark:focus-within:bg-[#1a1a1a] border border-transparent focus-within:border-[#16A34A]/20">
+                                <div className="relative bg-muted/60 dark:bg-[#2a2a2a] rounded-xl transition-all duration-300 focus-within:ring-2 focus-within:ring-primary/30 focus-within:bg-card border border-transparent focus-within:border-primary/20">
                                     <div className="flex items-center px-3 py-2">
                                         <Search className="h-4 w-4 text-gray-500 flex-shrink-0 mr-3" />
                                         <Input
@@ -270,7 +198,7 @@ export default function DesktopNavbar({ showLogo = true }) {
                                                     navigate(`/food/search?q=${encodeURIComponent(heroSearch.trim())}`)
                                                 }
                                             }}
-                                            className="h-6 p-0 border-0 bg-transparent text-sm font-medium placeholder:text-gray-500 focus-visible:ring-0 focus-visible:ring-offset-0"
+                                            className="h-6 p-0 border-0 bg-transparent text-sm font-medium text-foreground placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0"
                                             placeholder="Search for restaurants, food..."
                                         />
                                         {heroSearch && (
@@ -297,7 +225,7 @@ export default function DesktopNavbar({ showLogo = true }) {
                                 <Switch
                                     checked={vegMode}
                                     onCheckedChange={setVegMode}
-                                    className="data-[state=checked]:bg-green-600 data-[state=unchecked]:bg-gray-300 dark:data-[state=unchecked]:bg-gray-600 h-5 w-9"
+                                    className="data-[state=checked]:bg-primary data-[state=unchecked]:bg-muted h-5 w-9"
                                 />
                             </div>
                         </div>
@@ -340,20 +268,17 @@ export default function DesktopNavbar({ showLogo = true }) {
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="flex items-center justify-center h-12">
                         {/* Navigation Tabs - Centered with spacing */}
-                        <div className="flex items-center space-x-24">
+                        <div className="flex items-center justify-center gap-4 sm:gap-8 lg:gap-12 xl:gap-16 flex-wrap px-2">
                             {/* Delivery Tab */}
                             <Link
                                 to="/"
-                                className={`flex flex-col items-center gap-1 px-2 py-1 transition-colors relative group ${isDelivery
-                                    ? "text-[#16A34A]"
-                                    : "text-gray-600 dark:text-gray-400 hover:text-[#16A34A]"
-                                    }`}
+                                className={`food-landing-nav-tab flex flex-col items-center gap-1 px-2 py-1 relative ${isDelivery ? "food-landing-nav-tab--active" : ""}`}
                             >
-                                <span className="text-sm font-bold tracking-wide uppercase">Delivery</span>
+                                <span>Delivery</span>
                                 {isDelivery && (
                                     <motion.div
                                         layoutId="navIndicator"
-                                        className="absolute -bottom-3 left-0 right-0 h-0.5 bg-[#16A34A]"
+                                        className="absolute -bottom-3 left-0 right-0 h-0.5 bg-primary rounded-full"
                                         initial={{ opacity: 0 }}
                                         animate={{ opacity: 1 }}
                                         transition={{ duration: 0.3 }}
@@ -364,16 +289,13 @@ export default function DesktopNavbar({ showLogo = true }) {
                             {/* Under 250 Tab */}
                             <Link
                                 to="/food/user/under-250"
-                                className={`flex flex-col items-center gap-1 px-2 py-1 transition-colors relative group ${isUnder250
-                                    ? "text-[#16A34A]"
-                                    : "text-gray-600 dark:text-gray-400 hover:text-[#16A34A]"
-                                    }`}
+                                className={`food-landing-nav-tab flex flex-col items-center gap-1 px-2 py-1 relative ${isUnder250 ? "food-landing-nav-tab--active" : ""}`}
                             >
-                                <span className="text-sm font-bold tracking-wide uppercase">Under ₹{under250PriceLimit}</span>
+                                <span className="whitespace-nowrap">Under ₹{under250PriceLimit}</span>
                                 {isUnder250 && (
                                     <motion.div
                                         layoutId="navIndicator"
-                                        className="absolute -bottom-3 left-0 right-0 h-0.5 bg-[#16A34A]"
+                                        className="absolute -bottom-3 left-0 right-0 h-0.5 bg-primary rounded-full"
                                         initial={{ opacity: 0 }}
                                         animate={{ opacity: 1 }}
                                         transition={{ duration: 0.3 }}
@@ -384,16 +306,13 @@ export default function DesktopNavbar({ showLogo = true }) {
                             {/* Dining Tab */}
                             <Link
                                 to="/food/user/dining"
-                                className={`flex flex-col items-center gap-1 px-2 py-1 transition-colors relative group ${isDining
-                                    ? "text-[#16A34A]"
-                                    : "text-gray-600 dark:text-gray-400 hover:text-[#16A34A]"
-                                    }`}
+                                className={`food-landing-nav-tab flex flex-col items-center gap-1 px-2 py-1 relative ${isDining ? "food-landing-nav-tab--active" : ""}`}
                             >
-                                <span className="text-sm font-bold tracking-wide uppercase">Dining</span>
+                                <span>Dining</span>
                                 {isDining && (
                                     <motion.div
                                         layoutId="navIndicator"
-                                        className="absolute -bottom-3 left-0 right-0 h-0.5 bg-[#16A34A]"
+                                        className="absolute -bottom-3 left-0 right-0 h-0.5 bg-primary rounded-full"
                                         initial={{ opacity: 0 }}
                                         animate={{ opacity: 1 }}
                                         transition={{ duration: 0.3 }}
@@ -403,17 +322,14 @@ export default function DesktopNavbar({ showLogo = true }) {
 
                             {/* Profile Tab */}
                             <Link
-                                to="/food/user/profile"
-                                className={`flex flex-col items-center gap-1 px-2 py-1 transition-colors relative group ${isProfile
-                                    ? "text-[#16A34A]"
-                                    : "text-gray-600 dark:text-gray-400 hover:text-[#16A34A]"
-                                    }`}
+                                to="/food/user/profile?service=food"
+                                className={`food-landing-nav-tab flex flex-col items-center gap-1 px-2 py-1 relative ${isProfile ? "food-landing-nav-tab--active" : ""}`}
                             >
-                                <span className="text-sm font-bold tracking-wide uppercase">Profile</span>
+                                <span>Profile</span>
                                 {isProfile && (
                                     <motion.div
                                         layoutId="navIndicator"
-                                        className="absolute -bottom-3 left-0 right-0 h-0.5 bg-[#16A34A]"
+                                        className="absolute -bottom-3 left-0 right-0 h-0.5 bg-primary rounded-full"
                                         initial={{ opacity: 0 }}
                                         animate={{ opacity: 1 }}
                                         transition={{ duration: 0.3 }}

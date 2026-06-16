@@ -1,4 +1,6 @@
 import React from 'react';
+// Legacy QC profile — replaced by src/shared/profile/UnifiedProfile.jsx
+// Route redirects to /food/user/profile?service=qc
 import { Link, useNavigate } from 'react-router-dom';
 import {
     User, MapPin, Package, CreditCard, Wallet, ChevronRight,
