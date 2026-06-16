@@ -131,9 +131,9 @@ export default function BottomNavigation() {
           {TabLabel(isActive("/food/delivery/history"), "History")}
         </button>
 
-        {/* Profile */}
+        {/* Profile — unified driver profile (shared with taxi side) */}
         <button
-          onClick={() => navigate("/food/delivery/profile")}
+          onClick={() => navigate("/driver/profile")}
           className="flex flex-col items-center gap-1.5 p-2.5"
         >
           {profileImage && !imageError ? (
@@ -141,21 +141,21 @@ export default function BottomNavigation() {
               src={profileImage}
               alt="Profile"
               className={`w-7 h-7 rounded-full border-2 object-cover ${
-                isActive("/food/delivery/profile") ? "" : "border-gray-300"
+                isActive("/driver/profile") ? "" : "border-gray-300"
               }`}
-              style={isActive("/food/delivery/profile") ? { borderColor: "var(--dv-primary)" } : undefined}
+              style={isActive("/driver/profile") ? { borderColor: "var(--dv-primary)" } : undefined}
               onError={() => {
                 setImageError(true)
               }}
             />
           ) : (
             <div className={`w-7 h-7 rounded-full border-2 flex items-center justify-center bg-gray-200 ${
-              isActive("/food/delivery/profile") ? "" : "border-gray-300"
-            }`} style={isActive("/food/delivery/profile") ? { borderColor: "var(--dv-primary)" } : undefined}>
+              isActive("/driver/profile") ? "" : "border-gray-300"
+            }`} style={isActive("/driver/profile") ? { borderColor: "var(--dv-primary)" } : undefined}>
               <User className="w-4 h-4 text-gray-500" />
             </div>
           )}
-          {TabLabel(isActive("/food/delivery/profile"), "Profile")}
+          {TabLabel(isActive("/driver/profile"), "Profile")}
         </button>
       </div>
     </div>

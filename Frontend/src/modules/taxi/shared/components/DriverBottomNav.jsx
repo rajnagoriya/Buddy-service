@@ -87,7 +87,9 @@ const DriverBottomNav = () => {
         {
           icon: <User size={22} />,
           label: "Accounts",
-          path: `${routePrefix}/profile`,
+          // Use the unified driver profile so both taxi and food share one
+          // settings/profile surface.
+          path: "/driver/profile",
         },
       ];
 

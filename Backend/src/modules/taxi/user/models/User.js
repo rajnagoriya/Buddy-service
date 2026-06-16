@@ -68,6 +68,13 @@ const userAddressSchema = new mongoose.Schema(
 
 const userSchema = new mongoose.Schema(
   {
+    identityId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'BuddyIdentity',
+      default: null,
+      index: true,
+      sparse: true,
+    },
     phone: {
       type: String,
       required: true,

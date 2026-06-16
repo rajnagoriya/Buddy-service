@@ -149,7 +149,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
     
     // 2. Alert user and redirect
     toast.error("Session Expired", { description: "Please log in again." });
-    navigate("/food/delivery/login", { replace: true });
+    navigate("/driver/login", { replace: true });
 
     // Optional: Full refresh after delay ONLY if we're not already on login
     setTimeout(() => {
@@ -784,7 +784,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
         <div className="flex items-center justify-between px-3 py-1.5">
           <div className="flex items-center gap-2">
              <div 
-                onClick={() => navigate('/food/delivery/profile')}
+                onClick={() => navigate('/driver/profile')}
                 className="w-10 h-10 rounded-full border border-gray-100 p-0.5 shadow-sm overflow-hidden bg-gray-50 cursor-pointer active:scale-95 transition-all"
              >
                 <img src={profileImage || "https://i.ibb.co/3m2Yh7r/Appzeto-Brand-Image.png"} alt="Profile" className="w-full h-full object-cover rounded-full" />

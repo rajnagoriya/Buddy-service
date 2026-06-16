@@ -8,12 +8,9 @@ import { deliveryAPI } from '@food/api';
 import { SettingsProvider } from '../taxi/shared_core/context/SettingsContext';
 import DriverLayout from '../taxi/driver/components/DriverLayout';
 
-// Auth Pages (Lazy loaded)
-const Welcome = lazy(() => import("./pages/auth/Welcome"))
-const SignIn = lazy(() => import("./pages/auth/SignIn"))
-const OTP = lazy(() => import("./pages/auth/OTP"))
-const SignupStep1 = lazy(() => import("./pages/auth/SignupStep1"))
-const SignupStep2 = lazy(() => import("./pages/auth/SignupStep2"))
+// Auth Pages — replaced by the unified /driver flow. Kept as redirects
+// so any in-app deep links to the old /food/delivery/login or
+// /food/delivery/otp routes don't break.
 
 // V2 Pages
 import DeliveryHomeV2 from './pages/DeliveryHomeV2';
@@ -35,9 +32,9 @@ import TermsAndConditionsV2 from './pages/TermsAndConditionsV2';
 import PrivacyPolicyV2 from './pages/PrivacyPolicyV2';
 import NotificationsV2 from './pages/NotificationsV2';
 
-// Taxi Driver Pages (Lazy loaded to avoid duplication)
-const PhoneRegistration = lazy(() => import("../taxi/driver/pages/registration/PhoneRegistration"));
-const OTPVerification = lazy(() => import("../taxi/driver/pages/registration/OTPVerification"));
+// Taxi Driver Pages (Lazy loaded to avoid duplication).
+// PhoneRegistration / OTPVerification are no longer mounted as routes —
+// the unified /driver/login + /driver/onboarding handle both portals.
 const RoleSelection = lazy(() => import("../taxi/driver/pages/registration/RoleSelection"));
 const RegistrationStatus = lazy(() => import("../taxi/driver/pages/registration/RegistrationStatus"));
 const StepPersonal = lazy(() => import("../taxi/driver/pages/registration/StepPersonal"));
@@ -191,7 +188,7 @@ const DriverEntryRedirect = () => {
   }
 
   if (!driverToken) {
-    return <Navigate to="/food/delivery/taxi/login" replace />;
+    return <Navigate to="/driver/login" replace />;
   }
 
   return (
@@ -216,13 +213,13 @@ const DeliveryV2Router = () => {
   return (
     <Suspense fallback={<Loader />}>
       <Routes>
-        {/* Auth routes */}
-        <Route path="welcome" element={<Welcome />} />
-        <Route path="login" element={<SignIn />} />
-        <Route path="otp" element={<OTP />} />
-        <Route path="signup" element={<Navigate to="/food/delivery/login" replace />} />
-        <Route path="signup/details" element={<SignupStep1 />} />
-        <Route path="signup/documents" element={<SignupStep2 />} />
+        {/* Auth — unified into /driver. Existing deep links keep working. */}
+        <Route path="welcome" element={<Navigate to="/driver/login" replace />} />
+        <Route path="login" element={<Navigate to="/driver/login" replace />} />
+        <Route path="otp" element={<Navigate to="/driver/login" replace />} />
+        <Route path="signup" element={<Navigate to="/driver/login" replace />} />
+        <Route path="signup/details" element={<Navigate to="/driver/onboarding" replace />} />
+        <Route path="signup/documents" element={<Navigate to="/driver/onboarding" replace />} />
         <Route path="terms" element={<TermsAndConditionsV2 />} />
 
         {/* Protected Core Routes */}
@@ -261,10 +258,10 @@ const DeliveryV2Router = () => {
           </ProtectedRoute>
         }>
           <Route index element={<DriverEntryRedirect />} />
-          <Route path="login" element={<PhoneRegistration />} />
+          <Route path="login" element={<Navigate to="/driver/login" replace />} />
           <Route path="terms" element={<LegalPage />} />
           <Route path="privacy" element={<LegalPage />} />
-          <Route path="otp-verify" element={<OTPVerification />} />
+          <Route path="otp-verify" element={<Navigate to="/driver/login" replace />} />
           <Route path="select-role" element={<RoleSelection />} />
           <Route path="step-personal" element={<StepPersonal />} />
           <Route path="role-signup" element={<RoleSpecificOnboarding />} />

@@ -4,6 +4,7 @@ import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
 import { FoodDeliveryPartner } from '../../delivery/models/deliveryPartner.model.js';
 import { FoodDeliveryCashDeposit } from '../../delivery/models/foodDeliveryCashDeposit.model.js';
 import { FoodDeliveryCashLimit } from '../../admin/models/deliveryCashLimit.model.js';
+import { BuddyIdentity } from '../../../../core/identity/buddyIdentity.model.js';
 import { ValidationError, NotFoundError } from '../../../../core/auth/errors.js';
 import { logger } from '../../../../utils/logger.js';
 import { config } from '../../../../config/env.js';
@@ -41,6 +42,41 @@ function tryInitSocketBridge() {
   }
 }
 tryInitSocketBridge();
+
+/**
+ * Symmetric check to the taxi side: drop any delivery partner whose linked
+ * BuddyIdentity says they're currently in taxi mode. Legacy partners without
+ * an identityId are passed through unchanged.
+ */
+async function excludeTaxiModePartners(partners = []) {
+  if (!partners.length) return partners;
+  const partnerIds = partners.map((p) => p.partnerId || p._id).filter(Boolean);
+  if (!partnerIds.length) return partners;
+
+  const partnerDocs = await FoodDeliveryPartner.find({ _id: { $in: partnerIds } })
+    .select('_id identityId')
+    .lean();
+  const identityByPartner = new Map(
+    partnerDocs.map((d) => [String(d._id), d.identityId ? String(d.identityId) : null]),
+  );
+
+  const identityIds = [...new Set(partnerDocs.map((d) => d.identityId).filter(Boolean))];
+  if (!identityIds.length) return partners;
+
+  const taxiModeIds = await BuddyIdentity.find({
+    _id: { $in: identityIds },
+    activeService: 'taxi',
+  })
+    .select('_id')
+    .lean();
+  if (!taxiModeIds.length) return partners;
+  const blocked = new Set(taxiModeIds.map((d) => String(d._id)));
+
+  return partners.filter((p) => {
+    const identityId = identityByPartner.get(String(p.partnerId || p._id));
+    return !identityId || !blocked.has(identityId);
+  });
+}
 
 async function filterPartnersByCashLimit(partners = [], options = {}) {
   if (!Array.isArray(partners) || partners.length === 0) return [];
@@ -176,10 +212,11 @@ async function listNearbyOnlineDeliveryPartners(
       partners.map((p) => ({ partnerId: p._id, ...p })),
       { requiredAmount, allowOverLimitFallback },
     );
+    const modeEligible = await excludeTaxiModePartners(cashEligiblePartners);
 
     return {
       restaurant: null,
-      partners: cashEligiblePartners.map((p) => ({ partnerId: p.partnerId || p._id, distanceKm: null })),
+      partners: modeEligible.map((p) => ({ partnerId: p.partnerId || p._id, distanceKm: null })),
     };
   }
 
@@ -217,13 +254,17 @@ async function listNearbyOnlineDeliveryPartners(
       status: { $in: allowedStatuses },
       availabilityStatus: "online",
     })
-      .select("_id status name")
+      .select("_id status name identityId")
       .limit(Math.max(1, limit))
       .lean();
 
+    const eligible = await excludeTaxiModePartners(
+      anyOnline.map((p) => ({ partnerId: p._id, ...p })),
+    );
+
     return {
-      partners: anyOnline.map((p) => ({
-        partnerId: p._id,
+      partners: eligible.map((p) => ({
+        partnerId: p.partnerId || p._id,
         distanceKm: null,
         status: p.status,
       })),
@@ -238,8 +279,9 @@ async function listNearbyOnlineDeliveryPartners(
     requiredAmount,
     allowOverLimitFallback,
   });
+  const modeEligibleFinal = await excludeTaxiModePartners(cashEligibleFinal);
 
-  return { partners: cashEligibleFinal };
+  return { partners: modeEligibleFinal };
 }
 
 export async function getDispatchSettings() {

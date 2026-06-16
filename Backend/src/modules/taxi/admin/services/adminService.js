@@ -5077,7 +5077,60 @@ export const updateDriver = async (id, payload, currentAdmin = null) => {
 
   const driver = await Driver.findByIdAndUpdate(id, update, { returnDocument: 'after' });
   if (!driver) throw new ApiError(404, 'Driver not found');
+
+  // Single human ↔ multiple capability docs. When an admin approves (or
+  // rejects) the taxi side here, mirror that decision onto the linked
+  // FoodDeliveryPartner so the driver doesn't need to be approved twice for
+  // food delivery + quick-commerce.
+  if ('approve' in payload || payload.status !== undefined) {
+    await syncFoodPartnerApproval(driver, update);
+  }
+
   return serializeDriver(driver);
+};
+
+/**
+ * Mirror taxi `Driver` approval state to the linked `FoodDeliveryPartner`.
+ * Looked up by identityId (preferred) or phone — never blocks the main flow if
+ * no link exists or the food module isn't loaded.
+ */
+const syncFoodPartnerApproval = async (driver, update) => {
+  try {
+    const { FoodDeliveryPartner } = await import(
+      '../../../food/delivery/models/deliveryPartner.model.js'
+    );
+    const lookup = driver.identityId
+      ? { identityId: driver.identityId }
+      : driver.phone
+        ? { phone: driver.phone }
+        : null;
+    if (!lookup) return;
+
+    const partner = await FoodDeliveryPartner.findOne(lookup).select('_id status');
+    if (!partner) return;
+
+    const next = {};
+    const status = (update.status || '').toLowerCase();
+    if ('approve' in update) {
+      if (update.approve === true) {
+        next.status = 'approved';
+        next.approvedAt = new Date();
+        next.rejectedAt = undefined;
+        next.rejectionReason = undefined;
+      } else if (update.approve === false && partner.status !== 'rejected') {
+        next.status = 'pending';
+      }
+    }
+    if (status === 'rejected') {
+      next.status = 'rejected';
+      next.rejectedAt = new Date();
+    }
+    if (Object.keys(next).length) {
+      await FoodDeliveryPartner.updateOne({ _id: partner._id }, { $set: next });
+    }
+  } catch (err) {
+    console.warn('[admin.updateDriver] could not sync food delivery partner:', err?.message || err);
+  }
 };
 
 export const updateDriverPassword = async (id, password) => {

@@ -74,9 +74,9 @@ const Accessibility = lazy(() => import("@food/pages/user/profile/Accessibility"
 const Logout = lazy(() => import("@food/pages/user/profile/Logout"))
 const ReferEarn = lazy(() => import("@food/pages/user/profile/ReferEarn"))
 
-// Auth
-const SignIn = lazy(() => import("@food/pages/user/auth/SignIn"))
-const OTP = lazy(() => import("@food/pages/user/auth/OTP"))
+// Auth — login + OTP are now centralized in `modules/auth/pages/Login`.
+// We keep the AuthCallback (used by 3rd-party OAuth flows) and redirect
+// the rest into the unified `/user/auth/login`.
 const AuthCallback = lazy(() => import("@food/pages/user/auth/AuthCallback"))
 
 // Help
@@ -305,7 +305,7 @@ export default function UserRouter() {
           {/* Auth - User login is centralized at /user/auth/login */}
           <Route path="auth/login" element={<Navigate to="/user/auth/login" replace />} />
           <Route path="auth/sign-in" element={<Navigate to="/user/auth/login" replace />} />
-          <Route path="auth/otp" element={<OTP />} />
+          <Route path="auth/otp" element={<Navigate to="/user/auth/login" replace />} />
           <Route path="auth/callback" element={<AuthCallback />} />
 
           {/* Help */}

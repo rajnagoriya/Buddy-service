@@ -305,7 +305,38 @@ export const updateDeliveryAvailability = async (userId, payload) => {
     let validStatus = 'offline';
     if (status === 'online' || status === true) validStatus = 'online';
     else if (status === 'offline' || status === false) validStatus = 'offline';
-    
+
+    // Mutual exclusion with taxi mode. Going online for food while the unified
+    // identity is in taxi mode is refused; going offline clears `activeService`.
+    if (partner.identityId) {
+        const { BuddyIdentity } = await import('../../../../core/identity/buddyIdentity.model.js');
+        const { Driver } = await import('../../../taxi/driver/models/Driver.js');
+        const identity = await BuddyIdentity.findById(partner.identityId).select(
+            '_id activeService',
+        );
+        if (validStatus === 'online' && identity?.activeService === 'taxi') {
+            throw new ValidationError(
+                'You are currently online for taxi rides. Switch off taxi mode before going online for food.',
+            );
+        }
+        if (identity) {
+            await BuddyIdentity.updateOne(
+                { _id: identity._id },
+                {
+                    $set: {
+                        activeService: validStatus === 'online' ? 'food' : 'off',
+                    },
+                },
+            );
+            if (validStatus === 'online') {
+                await Driver.updateOne(
+                    { identityId: identity._id },
+                    { $set: { isOnline: false } },
+                );
+            }
+        }
+    }
+
     partner.availabilityStatus = validStatus;
     if (typeof latitude === 'number' && typeof longitude === 'number') {
         partner.lastLocation = {

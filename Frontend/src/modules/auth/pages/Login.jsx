@@ -3,9 +3,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import { Link, useNavigate } from "react-router-dom"
 import { ArrowRight, Loader2, Utensils, ShoppingBag, Car, ChevronDown, ShieldCheck, Zap, BadgeCheck, User } from "lucide-react"
 import { toast } from "sonner"
-import { authAPI, userAPI } from "@food/api"
-import { setAuthData } from "@food/utils/auth"
-import logoImage from "@/assets/logo.png"
+import { userAPI, identityAPI, persistUserIdentitySession } from "@food/api"
 import heroImage from "@/assets/login_hero_3d.png" 
 import {
   Dialog,
@@ -48,7 +46,7 @@ export default function UnifiedOTPFastLogin() {
     submitting.current = true
     setLoading(true)
     try {
-      await authAPI.sendOTP(phoneNumber, "login", null)
+      await identityAPI.requestOtp(phoneNumber, "USER")
       setOtp("")
       setStep(2)
       setResendTimer(RESEND_COOLDOWN_SECONDS)
@@ -76,7 +74,7 @@ export default function UnifiedOTPFastLogin() {
     submitting.current = true
     setLoading(true)
     try {
-      await authAPI.sendOTP(phoneNumber, "login", null)
+      await identityAPI.requestOtp(phoneNumber, "USER")
       setOtp("")
       setResendTimer(RESEND_COOLDOWN_SECONDS)
       toast.success("OTP resent successfully.")
@@ -137,16 +135,21 @@ export default function UnifiedOTPFastLogin() {
         console.warn("Failed to get FCM token during login", e);
       }
 
-      const response = await authAPI.verifyOTP(phoneNumber, otpDigits, "login", null, null, "user", null, null, fcmToken, platform)
+      const response = await identityAPI.verifyOtp(phoneNumber, "USER", otpDigits, { fcmToken, platform })
       const data = response?.data?.data || response?.data || {}
       const accessToken = data.accessToken
       const refreshToken = data.refreshToken || null
-      const user = data.user
+      const user = data.user || data.identity || {}
 
-      setAuthData("user", accessToken, user, refreshToken)
-      
-      if (!user.name || user.name.trim() === "") {
-        setTempAuth({ accessToken, user, refreshToken })
+      persistUserIdentitySession({
+        accessToken,
+        refreshToken,
+        user,
+        identity: data.identity,
+      })
+
+      if (!user?.name || String(user.name).trim() === "") {
+        setTempAuth({ accessToken, user, refreshToken, identity: data.identity })
         setShowNameModal(true)
       } else {
         toast.success("Welcome back!")
@@ -185,24 +188,27 @@ export default function UnifiedOTPFastLogin() {
     try {
       setIsUpdatingName(true)
       if (pendingVerify) {
-        const response = await authAPI.verifyOTP(
+        const response = await identityAPI.verifyOtp(
           pendingVerify.phone,
+          "USER",
           pendingVerify.otp,
-          "login",
-          newName.trim(),
-          null,
-          "user",
-          null,
-          null,
-          pendingVerify.fcmToken,
-          pendingVerify.platform,
+          {
+            name: newName.trim(),
+            fcmToken: pendingVerify.fcmToken,
+            platform: pendingVerify.platform,
+          },
         )
         const data = response?.data?.data || response?.data || {}
         const accessToken = data.accessToken
         const refreshToken = data.refreshToken || null
-        const user = data.user
+        const user = data.user || data.identity || {}
 
-        setAuthData("user", accessToken, user, refreshToken)
+        persistUserIdentitySession({
+          accessToken,
+          refreshToken,
+          user,
+          identity: data.identity,
+        })
         setPendingVerify(null)
         toast.success(`Welcome, ${newName.trim()}!`)
         setShowNameModal(false)
@@ -213,7 +219,12 @@ export default function UnifiedOTPFastLogin() {
       await userAPI.updateProfile({ name: newName.trim() })
 
       const updatedUser = { ...tempAuth.user, name: newName.trim() }
-      setAuthData("user", tempAuth.accessToken, updatedUser, tempAuth.refreshToken)
+      persistUserIdentitySession({
+        accessToken: tempAuth.accessToken,
+        refreshToken: tempAuth.refreshToken,
+        user: updatedUser,
+        identity: tempAuth.identity,
+      })
 
       toast.success(`Welcome, ${newName.trim()}!`)
       setShowNameModal(false)

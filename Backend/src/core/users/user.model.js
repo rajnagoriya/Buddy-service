@@ -67,6 +67,13 @@ const userAddressSchema = new mongoose.Schema(
 
 const userSchema = new mongoose.Schema(
     {
+        identityId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'BuddyIdentity',
+            default: null,
+            index: true,
+            sparse: true
+        },
         phone: {
             type: String,
             required: true,
@@ -147,10 +154,6 @@ const userSchema = new mongoose.Schema(
         walletBalance: {
             type: Number,
             default: 0
-        },
-        isVerified: {
-            type: Boolean,
-            default: true
         }
     },
     {

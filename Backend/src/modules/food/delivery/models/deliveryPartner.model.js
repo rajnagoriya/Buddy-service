@@ -8,6 +8,13 @@ const normalizeRatingValue = (value) => {
 
 const deliveryPartnerSchema = new mongoose.Schema(
     {
+        identityId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'BuddyIdentity',
+            default: null,
+            index: true,
+            sparse: true
+        },
         name: {
             type: String,
             required: true,

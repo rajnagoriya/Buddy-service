@@ -2761,6 +2761,33 @@ export const goOnline = async (req, res) => {
     throw new ApiError(404, "Driver not found");
   }
 
+  // Mutual exclusion with food mode. The new /v1/driver/mode endpoint is the
+  // recommended way to flip mode, but the legacy goOnline endpoint still has
+  // to refuse if the driver is currently doing food deliveries.
+  if (existingDriver.identityId) {
+    const { BuddyIdentity } = await import("../../../../core/identity/buddyIdentity.model.js");
+    const { FoodDeliveryPartner } = await import("../../../food/delivery/models/deliveryPartner.model.js");
+    const identity = await BuddyIdentity.findById(existingDriver.identityId).select(
+      "_id activeService",
+    );
+    if (identity?.activeService === "food") {
+      throw new ApiError(
+        409,
+        "You are currently online for food deliveries. Switch off food mode before going online for taxi.",
+      );
+    }
+    if (identity) {
+      await BuddyIdentity.updateOne(
+        { _id: identity._id },
+        { $set: { activeService: "taxi" } },
+      );
+      await FoodDeliveryPartner.updateOne(
+        { identityId: identity._id },
+        { $set: { availabilityStatus: "offline" } },
+      );
+    }
+  }
+
   const todayKey = new Date().toISOString().slice(0, 10);
   const hasTodaySelfie =
     String(existingDriver.onlineSelfie?.forDate || "") === todayKey &&
@@ -8768,6 +8795,16 @@ export const goOffline = async (req, res) => {
 
   if (!driver) {
     throw new ApiError(404, "Driver not found");
+  }
+
+  // Clear the unified activeService flag when the driver goes offline from
+  // taxi — keeps BuddyIdentity in sync with the legacy isOnline field.
+  if (driver.identityId) {
+    const { BuddyIdentity } = await import("../../../../core/identity/buddyIdentity.model.js");
+    await BuddyIdentity.updateOne(
+      { _id: driver.identityId, activeService: "taxi" },
+      { $set: { activeService: "off" } },
+    );
   }
 
   res.json({

@@ -6,6 +6,16 @@ import apiClient from "./axios.js";
 import { API_ENDPOINTS } from "./config.js";
 import * as authService from "./auth.js";
 
+// Unified BuddyIdentity helpers (single login + driver onboarding/mode).
+export {
+  identityAPI,
+  driverOnboardingAPI,
+  driverModeAPI,
+  persistUserIdentitySession,
+  persistDriverIdentitySession,
+  clearIdentitySession,
+} from "./identity.js";
+
 const stub = () =>
   Promise.resolve({
     data: { success: false, message: "Backend not connected", data: null },

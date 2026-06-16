@@ -19,6 +19,13 @@ const geoPointSchema = new mongoose.Schema(
 
 const driverSchema = new mongoose.Schema(
   {
+    identityId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'BuddyIdentity',
+      default: null,
+      index: true,
+      sparse: true,
+    },
     name: {
       type: String,
       required: true,
@@ -50,6 +57,10 @@ const driverSchema = new mongoose.Schema(
       default: '',
       trim: true,
     },
+    // Single canonical link to the food/QC delivery profile. The previous
+    // schema declared this field twice (once correctly with ref
+    // 'FoodDeliveryPartner', once shadowed with ref 'Delivery') which silently
+    // broke the link. Kept as one field now.
     deliveryPartnerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'FoodDeliveryPartner',
@@ -59,12 +70,6 @@ const driverSchema = new mongoose.Schema(
     owner_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'TaxiOwner',
-      default: null,
-      index: true,
-    },
-    deliveryPartnerId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Delivery',
       default: null,
       index: true,
     },

@@ -216,7 +216,7 @@ export const PocketV2 = () => {
         <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-16 -mt-16" />
         <div className="relative z-10 flex items-center justify-between">
           <div className="flex items-center gap-3">
-             <div onClick={() => navigate('/food/delivery/profile')} className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center text-white border border-white/20 cursor-pointer active:scale-95 transition-all">
+             <div onClick={() => navigate('/driver/profile')} className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center text-white border border-white/20 cursor-pointer active:scale-95 transition-all">
                 <User className="w-5 h-5" />
              </div>
              <div className="text-left">

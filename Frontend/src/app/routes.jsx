@@ -9,6 +9,7 @@ const NATIVE_LAST_ROUTE_KEY = 'native_last_route'
 const FoodApp = lazy(() => import('../modules/Food/routes'))
 const AuthApp = lazy(() => import('../modules/auth/routes'))
 const TaxiApp = lazy(() => import('../modules/taxi/routes'))
+const DriverApp = lazy(() => import('../modules/driver/routes'))
 import ProtectedRoute from '@food/components/ProtectedRoute'
 
 const PageLoader = () => <AppShellSkeleton />
@@ -99,6 +100,9 @@ const AppRoutes = () => {
     <Routes>
       {/* Auth Module */}
       <Route path="/user/auth/*" element={<AuthApp />} />
+
+      {/* Unified Driver app — single login + onboarding + mode selector. */}
+      <Route path="/driver/*" element={<Suspense fallback={<PageLoader />}><DriverApp /></Suspense>} />
 
       {/* Food Module - Handle both /food and root / for the user app */}
       <Route path="/food/*" element={<FoodAppWrapper />} />

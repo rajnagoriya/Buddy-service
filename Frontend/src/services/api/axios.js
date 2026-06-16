@@ -35,7 +35,17 @@ function getModuleFromUrl(url = "") {
     normalized.includes("/auth/admin") || 
     normalized.includes("admin/login")
   ) return "admin";
-  
+
+  // Unified driver endpoints (onboarding + mode selector) issued under
+  // /api/v1/driver/* by the new BuddyIdentity layer. Must come before the
+  // legacy /food/delivery match below so DRIVER tokens are used.
+  if (
+    normalized.startsWith("/driver/") ||
+    normalized === "/driver" ||
+    normalized.includes("/driver/onboarding") ||
+    normalized.includes("/driver/mode")
+  ) return "driver";
+
   // Delivery detection - Catch all delivery-specific functional and auth routes
   if (
     normalized.includes("/food/delivery") || 

@@ -104,6 +104,42 @@ export const authenticate = (allowedRoles = [], options = {}) => async (req, _re
       }
     }
 
+    // Bridge: Unified BuddyIdentity tokens carry sub = identity._id whenever
+    // a Driver doc didn't exist at token-issue time (e.g. driver onboarded
+    // for food only first, then admin approved them for taxi later). Map
+    // identity._id → driver._id so /drivers/me & friends resolve correctly.
+    if (normalizedRole === 'driver') {
+      const candidateId = payload.sub || payload.userId || payload.id;
+      if (candidateId && mongoose.isValidObjectId(candidateId)) {
+        const directDriver = await Driver.findById(candidateId).select('_id');
+        if (!directDriver) {
+          try {
+            const { BuddyIdentity } = await import(
+              '../../../core/identity/buddyIdentity.model.js'
+            );
+            const identity = await BuddyIdentity.findById(candidateId).select(
+              '_id phone identityRefs',
+            );
+            if (identity) {
+              let linkedDriver = null;
+              if (identity.identityRefs?.driverId) {
+                linkedDriver = await Driver.findById(identity.identityRefs.driverId).select('_id');
+              }
+              if (!linkedDriver && identity.phone) {
+                linkedDriver = await Driver.findOne({ phone: identity.phone }).select('_id');
+              }
+              if (linkedDriver) {
+                payload = { ...payload, sub: String(linkedDriver._id) };
+              }
+            }
+          } catch (bridgeErr) {
+            // If the identity model can't load for any reason, fall through
+            // to the regular Model.findById path which will 401 cleanly.
+          }
+        }
+      }
+    }
+
     const normalizedAllowedRoles = allowedRoles.map(normalizeRole);
 
     if (normalizedAllowedRoles.length > 0 && !normalizedAllowedRoles.includes(normalizedRole)) {

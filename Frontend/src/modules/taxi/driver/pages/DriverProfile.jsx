@@ -13,6 +13,7 @@ import {
     HelpCircle,
     LogOut,
     ArrowRight,
+    ArrowLeftRight,
     Star,
     Route,
     ChevronRight,
@@ -308,6 +309,18 @@ Processing Time: Refunds are typically credited back to the original payment met
                 { id: 'fleet', label: 'Manage Fleet', icon: <Car size={20} />, path: `${routePrefix}/vehicle-fleet` },
                 { id: 'drivers', label: 'Manage Drivers', icon: <UserPlus size={20} />, path: `${routePrefix}/manage-drivers` },
             ]
+        }] : []),
+        ...(!isOwner ? [{
+            title: 'Services',
+            items: [
+                {
+                    id: 'switchService',
+                    label: 'Switch Service',
+                    sub: 'Move to Food & Quick Commerce or go offline',
+                    icon: <ArrowLeftRight size={20} />,
+                    path: '/driver/home',
+                },
+            ],
         }] : []),
         {
             title: 'Your Account',

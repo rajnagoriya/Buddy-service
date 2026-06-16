@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import {
   User,
   ArrowRight,
+  ArrowLeftRight,
   Bike,
   Ticket,
   ChevronRight,
@@ -90,7 +91,7 @@ export const ProfileV2 = () => {
     clearModuleAuth("delivery")
     localStorage.removeItem("app:isOnline")
     toast.success("Logged out successfully")
-    navigate("/food/delivery/login", { replace: true })
+    navigate("/driver/login", { replace: true })
     setLogoutSubmitting(false)
   }
 
@@ -165,6 +166,23 @@ export const ProfileV2 = () => {
 
         {/* Sections */}
         <div className="space-y-6">
+          {/* Switch Service */}
+          <button
+            onClick={() => navigate("/driver/home")}
+            className="w-full bg-white rounded-[1.5rem] p-5 flex items-center justify-between gap-4 shadow-sm border border-gray-100 active:scale-[0.99] transition-all"
+          >
+            <div className="flex items-center gap-3 min-w-0 text-left">
+              <div className="w-11 h-11 rounded-2xl bg-[#0F172A] text-white flex items-center justify-center shrink-0">
+                <ArrowLeftRight className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-sm font-black text-[#0F172A] uppercase tracking-tight">Switch Service</h3>
+                <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400 mt-0.5">Go to Taxi mode or take a break</p>
+              </div>
+            </div>
+            <ChevronRight className="w-5 h-5 text-gray-300 shrink-0" />
+          </button>
+
           {/* Share & Earn */}
           <div className="bg-[#16A34A] rounded-[1.5rem] p-5 flex items-center justify-between gap-4 shadow-xl shadow-green-600/20 border border-white/20">
             <div className="min-w-0 text-left">
@@ -348,7 +366,7 @@ export const ProfileV2 = () => {
                           toast.success("Account deleted");
                           clearModuleAuth("delivery");
                           localStorage.removeItem("app:isOnline");
-                          navigate("/food/delivery/login", { replace: true });
+                          navigate("/driver/login", { replace: true });
                         } catch (err) {
                           toast.error(err?.response?.data?.message || "Failed");
                         } finally {

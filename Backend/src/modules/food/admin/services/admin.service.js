@@ -4484,6 +4484,24 @@ export async function approveDeliveryPartner(id) {
     partner.rejectionReason = undefined;
     await partner.save();
 
+    // Mirror approval to the linked taxi Driver so the same human is approved
+    // for both pipelines after a single admin action.
+    try {
+        const { Driver } = await import('../../../taxi/driver/models/Driver.js');
+        const lookup = partner.identityId
+            ? { identityId: partner.identityId }
+            : partner.phone
+                ? { phone: partner.phone }
+                : null;
+        if (lookup) {
+            await Driver.updateOne(lookup, {
+                $set: { approve: true, status: 'approved' },
+            });
+        }
+    } catch (err) {
+        console.warn('[admin.approveDeliveryPartner] could not sync taxi driver:', err?.message || err);
+    }
+
     try {
         const { notifyOwnerSafely } = await import('../../../../core/notifications/firebase.service.js');
         await notifyOwnerSafely(

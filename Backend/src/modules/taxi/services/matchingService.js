@@ -5,6 +5,7 @@ import { Vehicle } from '../admin/models/Vehicle.js';
 import { Driver } from '../driver/models/Driver.js';
 import { Zone } from '../driver/models/Zone.js';
 import { getDriverIdsBlockedByUpcomingScheduledRides } from './rideService.js';
+import { BuddyIdentity } from '../../../core/identity/buddyIdentity.model.js';
 
 const EARTH_RADIUS_METERS = 6371000;
 
@@ -59,6 +60,27 @@ const buildDriverMatchFilters = ({ zoneId, serviceLocationId, vehicleTypeId, veh
     ...(serviceLocationId ? { service_location_id: serviceLocationId } : {}),
     ...vehicleTypeFilter,
   };
+};
+
+/**
+ * Removes drivers whose linked BuddyIdentity has activeService === 'food'.
+ * Drivers without an identityId (legacy rows that haven't been backfilled)
+ * are kept — the field is only consulted for newly-linked drivers, so the
+ * filter is safe to ship before the backfill is done.
+ */
+const excludeFoodModeDrivers = async (drivers) => {
+  if (!drivers.length) return drivers;
+  const identityIds = drivers.map((d) => d.identityId).filter(Boolean);
+  if (!identityIds.length) return drivers;
+  const foodModeIdentities = await BuddyIdentity.find({
+    _id: { $in: identityIds },
+    activeService: 'food',
+  })
+    .select('_id')
+    .lean();
+  if (!foodModeIdentities.length) return drivers;
+  const blocked = new Set(foodModeIdentities.map((d) => String(d._id)));
+  return drivers.filter((d) => !d.identityId || !blocked.has(String(d.identityId)));
 };
 
 const buildZoneIntersectionQuery = (coordinates) => ({
@@ -296,7 +318,7 @@ const findDriversForZone = async ({
     vehicleTypeKeys,
   });
   const selectedFields =
-    'name phone socketId vehicleTypeId vehicleType vehicleIconType vehicleNumber vehicleColor vehicleMake vehicleModel rating location zoneId service_location_id isOnline isOnRide routeBooking';
+    'name phone socketId vehicleTypeId vehicleType vehicleIconType vehicleNumber vehicleColor vehicleMake vehicleModel rating location zoneId service_location_id isOnline isOnRide routeBooking identityId';
 
   const [liveLocationDrivers, routeBookingDrivers] = await Promise.all([
     Driver.find({
@@ -370,6 +392,12 @@ export const matchDrivers = async (pickupCoords, options = {}) => {
   );
   drivers = drivers.filter((driver) => !blockedDriverIds.has(String(driver?._id || '')));
 
+  // Exclude drivers whose unified identity says they're currently doing food.
+  // Belt-and-suspenders: the mode endpoint already flips Driver.isOnline=false
+  // when switching to food, but we re-check here so a stale isOnline cannot
+  // leak a food-mode driver into a taxi dispatch.
+  drivers = await excludeFoodModeDrivers(drivers);
+
   if (allowCrossZoneFallback && drivers.length === 0 && zone?._id) {
     drivers = await findDriversForZone({
       zoneId: null,
@@ -392,6 +420,8 @@ export const matchDrivers = async (pickupCoords, options = {}) => {
       drivers.map((driver) => String(driver?._id || '')),
     );
     drivers = drivers.filter((driver) => !fallbackBlockedDriverIds.has(String(driver?._id || '')));
+
+    drivers = await excludeFoodModeDrivers(drivers);
   }
 
   return {

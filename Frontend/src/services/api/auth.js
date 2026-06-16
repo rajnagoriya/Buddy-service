@@ -17,6 +17,9 @@ const AUTH = {
   REFRESH_TOKEN: "/food/auth/refresh-token",
   LOGOUT: "/food/auth/logout",
   ME: "/food/auth/me",
+  // Unified BuddyIdentity endpoints — one pair for USER and DRIVER.
+  IDENTITY_REQUEST_OTP: "/auth/request-otp",
+  IDENTITY_VERIFY_OTP: "/auth/verify-otp",
 };
 
 /**
@@ -283,4 +286,85 @@ export function verifyDeliveryOtp(phone, otp, fcmToken = null, platform = "web")
     otp: otpStr,
     ...(fcmToken ? { fcmToken, platform } : {}),
   });
+}
+
+/* ---------------------------------------------------------------------- *
+ *  Unified BuddyIdentity auth (the new single login)
+ *  These power both customer and driver apps. The same phone+OTP works
+ *  for whichever `role` the caller verifies with.
+ *
+ *  Endpoints (mounted under /api/v1):
+ *    POST /auth/request-otp   { phone, role? }
+ *    POST /auth/verify-otp    { phone, role, otp, name?, fcmToken?, platform? }
+ * ---------------------------------------------------------------------- */
+
+const IDENTITY_ROLES = new Set(["USER", "DRIVER"]);
+
+function normalizeIdentityRole(role) {
+  const upper = String(role || "USER").toUpperCase();
+  return IDENTITY_ROLES.has(upper) ? upper : "USER";
+}
+
+/**
+ * Request OTP for the unified identity login.
+ * Server enforces a 10-digit phone; we mirror that validation client-side.
+ */
+export function requestIdentityOtp(phone, role = "USER") {
+  const digits = normalizePhone(phone);
+  if (!digits) return Promise.reject(new Error("Phone number is required"));
+  const last10 = digits.slice(-10);
+  if (last10.length !== 10) {
+    return Promise.reject(new Error("Phone number must be exactly 10 digits"));
+  }
+  return apiClient.post(
+    AUTH.IDENTITY_REQUEST_OTP,
+    { phone: last10, role: normalizeIdentityRole(role) },
+    // The identity routes don't follow the food/taxi naming convention used
+    // by getModuleFromUrl, so we must hint the axios module manually.
+    { contextModule: normalizeIdentityRole(role) === "DRIVER" ? "driver" : "user" },
+  );
+}
+
+/**
+ * Verify OTP, log in, and (for first-time USER signups) capture the name.
+ * Response shape: { accessToken, refreshToken, role, identity, capabilities,
+ *   services, needsOnboarding, isNewUser, user?, activeService? }
+ */
+export function verifyIdentityOtp(
+  phone,
+  role,
+  otp,
+  {
+    name = null,
+    fcmToken = null,
+    platform = "web",
+    ref = null,
+  } = {},
+) {
+  const digits = normalizePhone(phone);
+  if (!digits) return Promise.reject(new Error("Phone number is required"));
+  const last10 = digits.slice(-10);
+  if (last10.length !== 10) {
+    return Promise.reject(new Error("Phone number must be exactly 10 digits"));
+  }
+  const otpStr = String(otp ?? "").replace(/\D/g, "").slice(0, 4);
+  if (otpStr.length !== 4) {
+    return Promise.reject(new Error("OTP must be exactly 4 digits"));
+  }
+
+  const normalizedRole = normalizeIdentityRole(role);
+  const refValue = typeof ref === "string" ? ref.trim() : "";
+
+  return apiClient.post(
+    AUTH.IDENTITY_VERIFY_OTP,
+    {
+      phone: last10,
+      role: normalizedRole,
+      otp: otpStr,
+      ...(name ? { name: String(name).trim() } : {}),
+      ...(fcmToken ? { fcmToken, platform } : {}),
+      ...(refValue ? { ref: refValue } : {}),
+    },
+    { contextModule: normalizedRole === "DRIVER" ? "driver" : "user" },
+  );
 }

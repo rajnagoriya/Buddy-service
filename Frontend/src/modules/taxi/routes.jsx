@@ -17,9 +17,9 @@ import { getAuthenticatedDriverRole, getLocalDriverToken, getCurrentDriver } fro
 
 // Lazy loading pages for performance
 const UserHome = lazy(() => import('./user/pages/Home'));
-const Login = lazy(() => import('./user/pages/auth/Login'));
-const VerifyOTP = lazy(() => import('./user/pages/auth/VerifyOTP'));
-const Signup = lazy(() => import('./user/pages/auth/Signup'));
+// Taxi user login/verify-otp/signup have been replaced by the unified
+// `/user/auth/login` (modules/auth/pages/Login.jsx). The routes below
+// redirect deep links to keep marketing pages working.
 
 // Ride Module Pages
 const SelectLocation = lazy(() => import('./user/pages/ride/SelectLocation'));
@@ -93,8 +93,8 @@ const BusPreview = lazy(() => import('./user/pages/bus/BusPreview'));
 const BusDetails = lazy(() => import('./user/pages/bus/BusDetails'));
 const BusConfirm = lazy(() => import('./user/pages/bus/BusConfirm'));
 
-// Phase 5 — Onboarding
-const Onboarding = lazy(() => import('./user/pages/auth/Onboarding'));
+// Phase 5 — Onboarding (legacy taxi-specific onboarding — superseded by
+// the unified user login). Route kept as a redirect.
 
 // New Feature Pages
 const BikeRentalHome = lazy(() => import('./user/pages/rental/BikeRentalHome'));
@@ -124,8 +124,9 @@ const UserSubscriptions = lazy(() => import('./user/pages/profile/Subscriptions'
 import DriverLayout from './driver/components/DriverLayout';
 
 // Driver Module - Registration
-const PhoneRegistration = lazy(() => import('./driver/pages/registration/PhoneRegistration'));
-const OTPVerification = lazy(() => import('./driver/pages/registration/OTPVerification'));
+// PhoneRegistration / OTPVerification are no longer rendered as routes —
+// /taxi/driver/login and /taxi/owner/login redirect to the unified
+// /driver/login below.
 const RoleSelection = lazy(() => import('./driver/pages/registration/RoleSelection'));
 const RegistrationStatus = lazy(() => import('./driver/pages/registration/RegistrationStatus'));
 const StepPersonal = lazy(() => import('./driver/pages/registration/StepPersonal'));
@@ -372,6 +373,8 @@ const UserProtectedRoute = () => {
   return <Outlet />;
 };
 
+const REDIRECT_TO_USER_LOGIN = () => <Navigate to="/user/auth/login" replace />;
+
 const UserHomeRoute = ({ taxiPrefixed = false }) => (
   getLocalUserToken()
     ? <UserHome />
@@ -541,7 +544,7 @@ const DriverEntryRedirect = () => {
   }, [token, role]);
 
   if (!token) {
-    return <Navigate to="/taxi/driver/login" replace />;
+    return <Navigate to="/driver/login" replace />;
   }
 
   return (
@@ -596,11 +599,12 @@ export default function TaxiApp() {
             <Route path="razorpay/launch" element={<RazorpayLaunchPage />} />
             <Route path="razorpay/status" element={<RazorpayStatusPage />} />
 
-            {/* Core User Pages */}
-            <Route path="user/onboarding" element={<Onboarding />} />
-            <Route path="user/login" element={<Login />} />
-            <Route path="user/verify-otp" element={<VerifyOTP />} />
-            <Route path="user/signup" element={<Signup />} />
+            {/* Core User Pages — login/signup/onboarding redirect to the
+                centralized unified login (`/user/auth/login`). */}
+            <Route path="user/onboarding" element={<REDIRECT_TO_USER_LOGIN />} />
+            <Route path="user/login" element={<REDIRECT_TO_USER_LOGIN />} />
+            <Route path="user/verify-otp" element={<REDIRECT_TO_USER_LOGIN />} />
+            <Route path="user/signup" element={<REDIRECT_TO_USER_LOGIN />} />
             <Route path="user" element={<UserHomeRoute taxiPrefixed />} />
 
             <Route element={<UserProtectedRoute />}>
@@ -687,10 +691,10 @@ export default function TaxiApp() {
             {/* Driver Routes */}
             <Route path="driver" element={<DriverLayout />}>
               <Route index element={<DriverEntryRedirect />} />
-              <Route path="login" element={<PhoneRegistration />} />
+              <Route path="login" element={<Navigate to="/driver/login" replace />} />
               <Route path="terms" element={<LegalPage />} />
               <Route path="privacy" element={<LegalPage />} />
-              <Route path="otp-verify" element={<OTPVerification />} />
+              <Route path="otp-verify" element={<Navigate to="/driver/login" replace />} />
               <Route path="select-role" element={<RoleSelection />} />
               <Route path="step-personal" element={<StepPersonal />} />
               <Route path="role-signup" element={<RoleSpecificOnboarding />} />
@@ -740,10 +744,10 @@ export default function TaxiApp() {
             {/* Fleet Owner Routes */}
             <Route path="owner" element={<DriverLayout />}>
               <Route index element={<DriverEntryRedirect />} />
-              <Route path="login" element={<PhoneRegistration />} />
+              <Route path="login" element={<Navigate to="/driver/login" replace />} />
               <Route path="terms" element={<LegalPage />} />
               <Route path="privacy" element={<LegalPage />} />
-              <Route path="otp-verify" element={<OTPVerification />} />
+              <Route path="otp-verify" element={<Navigate to="/driver/login" replace />} />
               <Route path="select-role" element={<RoleSelection />} />
               <Route path="step-personal" element={<StepPersonal />} />
               <Route path="role-signup" element={<RoleSpecificOnboarding />} />
