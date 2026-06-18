@@ -1,0 +1,20 @@
+---
+description: Minimal coding standards for Buddy-service
+alwaysApply: true
+---
+
+# Coding
+
+## Stack
+- Backend: `Backend/src/` — Node/Express, Mongoose models in `core/` and `modules/`.
+- Frontend: `Frontend/src/` — React, API clients in `services/api/`.
+
+## Rules
+- Extend existing functions/components; copy local patterns (imports, naming, error shape).
+- Backend errors: use existing error classes/handlers in `core/auth/errors.js` and `middleware/errorHandler.js`.
+- Frontend API: add methods to the matching file under `services/api/`, export from `index.js` if needed.
+- Identity/driver flows: `Backend/src/core/identity/`, `Frontend/src/services/api/identity.js`.
+
+## Avoid
+- New helpers for one use, verbose comments, speculative error handling.
+- Touching unrelated modules in the same change.

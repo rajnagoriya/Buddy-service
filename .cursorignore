@@ -1,0 +1,21 @@
+node_modules/
+dist/
+build/
+.next/
+coverage/
+.git/
+
+package-lock.json
+yarn.lock
+
+android/
+ios/
+
+uploads/
+
+package-lock.json
+swagger.json
+openapi.json
+large seed files
+cities.json
+translations.json
