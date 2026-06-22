@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react"
 import { CheckCircle, Mail } from "lucide-react"
 import RestaurantSubPageShell from "@food/components/restaurant/panel/RestaurantSubPageShell"
+import RestaurantPanelModal from "@food/components/restaurant/panel/RestaurantPanelModal"
 import { PanelSurface } from "@food/components/restaurant/panel/panelUi"
 import { RESTAURANT_BASE } from "@food/utils/restaurantNavConfig"
 
@@ -128,19 +129,20 @@ export default function DownloadReport() {
         Send an email
       </button>
 
-      {showSuccess && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center pb-8 px-6 pointer-events-none">
-          <div className="bg-white w-full max-w-md rounded-2xl shadow-lg border border-gray-200 px-4 py-4 pointer-events-auto">
-            <div className="flex items-center gap-3">
-              <CheckCircle className="w-6 h-6 text-green-600" />
-              <div>
-                <p className="text-sm font-semibold text-gray-900">Report queued</p>
-                <p className="text-xs text-gray-600">We’ll email it to you shortly.</p>
-              </div>
-            </div>
-          </div>
+      <RestaurantPanelModal
+        open={showSuccess}
+        onClose={() => setShowSuccess(false)}
+        title="Report queued"
+        description="We'll email it to you shortly."
+        size="sm"
+        mobileMaxHeight="auto"
+        showDragHandle={false}
+        bodyClassName="px-4 py-3 lg:px-5 lg:py-4"
+      >
+        <div className="flex items-center gap-3">
+          <CheckCircle className="h-6 w-6 shrink-0 text-green-600" />
         </div>
-      )}
+      </RestaurantPanelModal>
     </RestaurantSubPageShell>
   )
 }

@@ -11,7 +11,7 @@ export default function ManageOutlets() {
   const [showToast, setShowToast] = useState(false)
 
   const options = [
-    { label: "Timings", route: `${RESTAURANT_BASE}/outlet-timings` },
+    { label: "Hours & status", route: `${RESTAURANT_BASE}/outlet-timings` },
     { label: "Contacts", route: `${RESTAURANT_BASE}/phone` },
     { label: "FSSAI Food License", route: `${RESTAURANT_BASE}/fssai` },
     { label: "Bank account details", route: `${RESTAURANT_BASE}/update-bank-details` },

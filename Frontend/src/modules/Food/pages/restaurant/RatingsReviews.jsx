@@ -12,7 +12,7 @@ import {
   ThumbsUp,
   ThumbsDown,
 } from "lucide-react"
-import BottomPopup from "@delivery/components/BottomPopup"
+import RestaurantPanelModal from "@food/components/restaurant/panel/RestaurantPanelModal"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -231,48 +231,44 @@ export default function RatingsReviews() {
         </div>
       )}
 
-      {/* Thank You Popup */}
-      <BottomPopup
-        isOpen={showThankYouPopup}
+      <RestaurantPanelModal
+        open={showThankYouPopup}
         onClose={handleThankYouPopupClose}
-        showHandle={true}
+        title="Thank you!"
+        description="We're glad we could help resolve your query."
+        size="sm"
+        mobileMaxHeight="auto"
+        bodyClassName="px-6 py-4 text-center lg:px-6 lg:py-5"
       >
-        <div className="text-center py-6">
-          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <ThumbsUp className="w-8 h-8 text-green-600" />
-          </div>
-          <h3 className="text-xl font-bold text-gray-900 mb-2">Thank you!</h3>
-          <p className="text-sm text-gray-600">
-            We're glad we could help resolve your query.
-          </p>
+        <div className="mx-auto mb-2 flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
+          <ThumbsUp className="h-8 w-8 text-green-600" />
         </div>
-      </BottomPopup>
+      </RestaurantPanelModal>
 
-      {/* Not Helpful Popup */}
-      <BottomPopup
-        isOpen={showNotHelpfulPopup}
+      <RestaurantPanelModal
+        open={showNotHelpfulPopup}
         onClose={handleNotHelpfulPopupClose}
-        showHandle={true}
-      >
-        <div className="text-center py-6">
-          <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <ThumbsDown className="w-8 h-8 text-gray-600" />
-          </div>
-          <h3 className="text-xl font-bold text-gray-900 mb-2">We're sorry</h3>
-          <p className="text-sm text-gray-600 mb-4">
-            We're sorry this wasn't helpful. Please contact our support team for further assistance.
-          </p>
+        title="We're sorry"
+        description="We're sorry this wasn't helpful. Please contact our support team for further assistance."
+        size="sm"
+        mobileMaxHeight="auto"
+        bodyClassName="px-6 py-4 text-center lg:px-6 lg:py-5"
+        footer={
           <button
             onClick={() => {
               setShowNotHelpfulPopup(false)
               debugLog("Contact support")
             }}
-            className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg font-semibold hover:bg-blue-700 transition-colors"
+            className="w-full rounded-lg bg-blue-600 px-4 py-3 font-semibold text-white transition-colors hover:bg-blue-700"
           >
             Contact Support
           </button>
+        }
+      >
+        <div className="mx-auto mb-2 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100">
+          <ThumbsDown className="h-8 w-8 text-gray-600" />
         </div>
-      </BottomPopup>
+      </RestaurantPanelModal>
     </div>
   )
 }

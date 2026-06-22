@@ -1,8 +1,8 @@
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import useRestaurantBackNavigation from "@food/hooks/useRestaurantBackNavigation"
-import { motion, AnimatePresence } from "framer-motion"
-import { ArrowLeft, Edit, Phone, Users, ChevronDown, X } from "lucide-react"
+import RestaurantPanelModal from "@food/components/restaurant/panel/RestaurantPanelModal"
+import { ArrowLeft, Edit, Phone, Users, ChevronDown } from "lucide-react"
 
 export default function PhoneNumbersPage() {
   const navigate = useNavigate()
@@ -222,240 +222,164 @@ export default function PhoneNumbersPage() {
       </div>
 
       {/* Edit Phone Number Popup */}
-      <AnimatePresence>
-        {editingNumber && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+      <RestaurantPanelModal
+        open={!!editingNumber}
+        onClose={handleCancelEdit}
+        title="Edit phone number"
+        mobileMaxHeight="medium"
+        footer={
+          <div className="flex gap-3">
+            <button
               onClick={handleCancelEdit}
-              className="fixed inset-0 bg-black/50 z-50"
-            />
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 30, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl z-50 max-h-[70vh] flex flex-col"
-              onClick={(e) => e.stopPropagation()}
+              className="flex-1 py-3 px-4 border border-gray-300 rounded-lg text-sm font-semibold text-gray-900 bg-white hover:bg-gray-50 transition-colors"
             >
-              <div className="flex items-center justify-between px-4 py-4 border-b border-gray-200">
-                <h2 className="text-lg font-bold text-gray-900">Edit phone number</h2>
-                <button
-                  onClick={handleCancelEdit}
-                  className="p-1 rounded-full hover:bg-gray-100"
-                >
-                  <X className="w-5 h-5 text-gray-600" />
-                </button>
+              Cancel
+            </button>
+            <button
+              onClick={handleSaveEdit}
+              disabled={!phoneNumber.trim()}
+              className={`flex-1 py-3 px-4 rounded-lg text-sm font-semibold transition-colors ${
+                phoneNumber.trim()
+                  ? "bg-black text-white hover:bg-gray-800"
+                  : "bg-gray-300 text-gray-500 cursor-not-allowed"
+              }`}
+            >
+              Save
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-900 mb-2">
+              Country code
+            </label>
+            <button
+              onClick={() => setIsCountryCodeOpen(true)}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg text-left flex items-center justify-between bg-white hover:bg-gray-50 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-lg">
+                  {countryCodes.find(c => c.code === countryCode)?.flag || "🇮🇳"}
+                </span>
+                <span className="text-sm text-gray-900">{countryCode}</span>
               </div>
-              <div className="flex-1 overflow-y-auto px-4 py-4">
-                <div className="space-y-4">
-                  {/* Country Code Selector */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-900 mb-2">
-                      Country code
-                    </label>
-                    <button
-                      onClick={() => setIsCountryCodeOpen(true)}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg text-left flex items-center justify-between bg-white hover:bg-gray-50 transition-colors"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="text-lg">
-                          {countryCodes.find(c => c.code === countryCode)?.flag || "🇮🇳"}
-                        </span>
-                        <span className="text-sm text-gray-900">{countryCode}</span>
-                      </div>
-                      <ChevronDown className="w-5 h-5 text-gray-500" />
-                    </button>
-                  </div>
+              <ChevronDown className="w-5 h-5 text-gray-500" />
+            </button>
+          </div>
 
-                  {/* Phone Number Input */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-900 mb-2">
-                      Phone number
-                    </label>
-                    <input
-                      type="tel"
-                      value={phoneNumber}
-                      onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, ''))}
-                      placeholder="Enter phone number"
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
-                  </div>
-                </div>
-              </div>
-              <div className="px-4 py-4 border-t border-gray-200 flex gap-3">
-                <button
-                  onClick={handleCancelEdit}
-                  className="flex-1 py-3 px-4 border border-gray-300 rounded-lg text-sm font-semibold text-gray-900 bg-white hover:bg-gray-50 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSaveEdit}
-                  disabled={!phoneNumber.trim()}
-                  className={`flex-1 py-3 px-4 rounded-lg text-sm font-semibold transition-colors ${
-                    phoneNumber.trim()
-                      ? "bg-black text-white hover:bg-gray-800"
-                      : "bg-gray-300 text-gray-500 cursor-not-allowed"
-                  }`}
-                >
-                  Save
-                </button>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+          <div>
+            <label className="block text-sm font-medium text-gray-900 mb-2">
+              Phone number
+            </label>
+            <input
+              type="tel"
+              value={phoneNumber}
+              onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, ''))}
+              placeholder="Enter phone number"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+        </div>
+      </RestaurantPanelModal>
 
       {/* Country Code Selection Popup */}
-      <AnimatePresence>
-        {isCountryCodeOpen && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsCountryCodeOpen(false)}
-              className="fixed inset-0 bg-black/50 z-[60]"
-            />
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 30, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl z-[60] max-h-[60vh] flex flex-col"
-              onClick={(e) => e.stopPropagation()}
+      <RestaurantPanelModal
+        open={isCountryCodeOpen}
+        onClose={() => setIsCountryCodeOpen(false)}
+        title="Select country code"
+        mobileMaxHeight="medium"
+        zIndex={60}
+      >
+        <div className="space-y-2">
+          {countryCodes.map((country) => (
+            <button
+              key={country.code}
+              onClick={() => {
+                setCountryCode(country.code)
+                setIsCountryCodeOpen(false)
+              }}
+              className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors flex items-center gap-3 ${
+                countryCode === country.code
+                  ? "bg-gray-900 text-white"
+                  : "bg-gray-50 text-gray-900 hover:bg-gray-100"
+              }`}
             >
-              <div className="flex items-center justify-between px-4 py-4 border-b border-gray-200">
-                <h2 className="text-lg font-bold text-gray-900">Select country code</h2>
-                <button
-                  onClick={() => setIsCountryCodeOpen(false)}
-                  className="p-1 rounded-full hover:bg-gray-100"
-                >
-                  <X className="w-5 h-5 text-gray-600" />
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto px-4 py-4">
-                <div className="space-y-2">
-                  {countryCodes.map((country) => (
-                    <button
-                      key={country.code}
-                      onClick={() => {
-                        setCountryCode(country.code)
-                        setIsCountryCodeOpen(false)
-                      }}
-                      className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors flex items-center gap-3 ${
-                        countryCode === country.code
-                          ? "bg-gray-900 text-white"
-                          : "bg-gray-50 text-gray-900 hover:bg-gray-100"
-                      }`}
-                    >
-                      <span className="text-xl">{country.flag}</span>
-                      <span className="flex-1">{country.country}</span>
-                      <span className={countryCode === country.code ? "text-white" : "text-gray-600"}>
-                        {country.code}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+              <span className="text-xl">{country.flag}</span>
+              <span className="flex-1">{country.country}</span>
+              <span className={countryCode === country.code ? "text-white" : "text-gray-600"}>
+                {country.code}
+              </span>
+            </button>
+          ))}
+        </div>
+      </RestaurantPanelModal>
 
       {/* OTP Verification Popup */}
-      <AnimatePresence>
-        {showOtpPopup && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+      <RestaurantPanelModal
+        open={showOtpPopup}
+        onClose={handleCancelOtp}
+        title="Verify OTP"
+        mobileMaxHeight="medium"
+        footer={
+          <div className="flex gap-3">
+            <button
               onClick={handleCancelOtp}
-              className="fixed inset-0 bg-black/50 z-50"
-            />
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 30, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl z-50 max-h-[70vh] flex flex-col"
-              onClick={(e) => e.stopPropagation()}
+              className="flex-1 py-3 px-4 border border-gray-300 rounded-lg text-sm font-semibold text-gray-900 bg-white hover:bg-gray-50 transition-colors"
             >
-              <div className="flex items-center justify-between px-4 py-4 border-b border-gray-200">
-                <h2 className="text-lg font-bold text-gray-900">Verify OTP</h2>
-                <button
-                  onClick={handleCancelOtp}
-                  className="p-1 rounded-full hover:bg-gray-100"
-                >
-                  <X className="w-5 h-5 text-gray-600" />
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto px-4 py-6">
-                <div className="space-y-6">
-                  <div className="text-center">
-                    <p className="text-sm text-gray-600 mb-2">
-                      We've sent a 6-digit OTP to
-                    </p>
-                    <p className="text-base font-semibold text-gray-900">
-                      {pendingPhoneData ? `${pendingPhoneData.countryCode}-${pendingPhoneData.phoneNumber}` : ""}
-                    </p>
-                  </div>
+              Cancel
+            </button>
+            <button
+              onClick={handleVerifyOtp}
+              disabled={otp.join("").length !== 6}
+              className={`flex-1 py-3 px-4 rounded-lg text-sm font-semibold transition-colors ${
+                otp.join("").length === 6
+                  ? "bg-black text-white hover:bg-gray-800"
+                  : "bg-gray-300 text-gray-500 cursor-not-allowed"
+              }`}
+            >
+              Verify
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-6 py-2">
+          <div className="text-center">
+            <p className="text-sm text-gray-600 mb-2">
+              We've sent a 6-digit OTP to
+            </p>
+            <p className="text-base font-semibold text-gray-900">
+              {pendingPhoneData ? `${pendingPhoneData.countryCode}-${pendingPhoneData.phoneNumber}` : ""}
+            </p>
+          </div>
 
-                  {/* OTP Input Fields */}
-                  <div className="flex items-center justify-center gap-2">
-                    {otp.map((digit, index) => (
-                      <input
-                        key={index}
-                        id={`otp-${index}`}
-                        type="text"
-                        inputMode="numeric"
-                        maxLength={1}
-                        value={digit}
-                        onChange={(e) => handleOtpChange(index, e.target.value)}
-                        onKeyDown={(e) => handleOtpKeyDown(index, e)}
-                        className="w-12 h-12 text-center text-lg font-semibold border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        autoFocus={index === 0}
-                      />
-                    ))}
-                  </div>
+          <div className="flex items-center justify-center gap-2">
+            {otp.map((digit, index) => (
+              <input
+                key={index}
+                id={`otp-${index}`}
+                type="text"
+                inputMode="numeric"
+                maxLength={1}
+                value={digit}
+                onChange={(e) => handleOtpChange(index, e.target.value)}
+                onKeyDown={(e) => handleOtpKeyDown(index, e)}
+                className="w-12 h-12 text-center text-lg font-semibold border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                autoFocus={index === 0}
+              />
+            ))}
+          </div>
 
-                  <div className="text-center">
-                    <button
-                      onClick={handleResendOtp}
-                      className="text-sm text-blue-600 hover:text-blue-700 font-medium"
-                    >
-                      Resend OTP
-                    </button>
-                  </div>
-                </div>
-              </div>
-              <div className="px-4 py-4 border-t border-gray-200 flex gap-3">
-                <button
-                  onClick={handleCancelOtp}
-                  className="flex-1 py-3 px-4 border border-gray-300 rounded-lg text-sm font-semibold text-gray-900 bg-white hover:bg-gray-50 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleVerifyOtp}
-                  disabled={otp.join("").length !== 6}
-                  className={`flex-1 py-3 px-4 rounded-lg text-sm font-semibold transition-colors ${
-                    otp.join("").length === 6
-                      ? "bg-black text-white hover:bg-gray-800"
-                      : "bg-gray-300 text-gray-500 cursor-not-allowed"
-                  }`}
-                >
-                  Verify
-                </button>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+          <div className="text-center">
+            <button
+              onClick={handleResendOtp}
+              className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+            >
+              Resend OTP
+            </button>
+          </div>
+        </div>
+      </RestaurantPanelModal>
     </div>
   )
 }

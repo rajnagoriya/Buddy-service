@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
-import useRestaurantBackNavigation from "@food/hooks/useRestaurantBackNavigation"
-import { AnimatePresence, motion } from "framer-motion"
+import { motion } from "framer-motion"
+import RestaurantSubPageShell from "@food/components/restaurant/panel/RestaurantSubPageShell"
+import RestaurantPanelModal from "@food/components/restaurant/panel/RestaurantPanelModal"
+import { RESTAURANT_BASE } from "@food/utils/restaurantNavConfig"
 import {
-  ArrowLeft,
   BadgeCheck,
   Clock3,
   Edit2,
@@ -14,7 +15,6 @@ import {
   Plus,
   Trash2,
   Upload,
-  X,
 } from "lucide-react"
 import { restaurantAPI, uploadAPI } from "@food/api"
 import { toast } from "sonner"
@@ -46,7 +46,6 @@ const scopePillClass = (scope) => {
 export default function MenuCategoriesPage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const goBack = useRestaurantBackNavigation()
   const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -226,20 +225,12 @@ export default function MenuCategoriesPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-24">
-      <div className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
-        <div className="px-4 py-3 flex items-center gap-3">
-          <button onClick={goBack} className="rounded-full p-1 hover:bg-slate-100">
-            <ArrowLeft className="h-5 w-5 text-slate-700" />
-          </button>
-          <div>
-            <h1 className="text-xl font-bold text-slate-900">Menu Categories</h1>
-            <p className="text-xs text-slate-500">Create categories, track approvals, and resubmit edits safely.</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="p-4 space-y-4">
+    <RestaurantSubPageShell
+      title="Menu Categories"
+      subtitle="Create categories, track approvals, and resubmit edits safely."
+      backTo={`${RESTAURANT_BASE}/explore`}
+      contentClassName="space-y-4"
+    >
         <div className="rounded-2xl border border-slate-200 bg-white p-4">
           <p className="text-sm font-semibold text-slate-900">How this works</p>
           <p className="mt-2 text-sm text-slate-600">
@@ -354,127 +345,108 @@ export default function MenuCategoriesPage() {
             })}
           </div>
         )}
-      </div>
 
-      <AnimatePresence>
-        {showModal && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+      <RestaurantPanelModal
+        open={showModal}
+        onClose={resetModal}
+        title={editingCategory ? "Edit Category" : "Create Category"}
+        description={
+          editingCategory
+            ? "Any edit sends this category back for admin approval."
+            : "Choose the diet scope carefully before sending it for approval."
+        }
+        size="md"
+        mobileMaxHeight="tall"
+        bodyClassName="px-4 py-4 lg:px-5"
+        footer={
+          <div className="flex gap-3">
+            <button
               onClick={resetModal}
-              className="fixed inset-0 z-50 bg-black/50"
-            />
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              className="fixed bottom-0 left-0 right-0 z-50 max-h-[90vh] overflow-y-auto rounded-t-3xl bg-white p-4 shadow-2xl"
+              className="flex-1 rounded-xl border border-slate-300 py-3 font-medium text-slate-700"
             >
-              <div className="mb-4 flex items-center justify-between">
-                <div>
-                  <h2 className="text-lg font-bold text-slate-900">
-                    {editingCategory ? "Edit Category" : "Create Category"}
-                  </h2>
-                  <p className="text-xs text-slate-500">
-                    {editingCategory
-                      ? "Any edit sends this category back for admin approval."
-                      : "Choose the diet scope carefully before sending it for approval."}
-                  </p>
-                </div>
-                <button onClick={resetModal}>
-                  <X className="h-5 w-5 text-slate-600" />
-                </button>
-              </div>
+              Cancel
+            </button>
+            <button
+              onClick={handleSaveCategory}
+              disabled={uploadingImage}
+              className="flex-1 rounded-xl bg-slate-900 py-3 font-medium text-white disabled:opacity-60"
+            >
+              {uploadingImage ? "Uploading..." : editingCategory ? "Save & Resubmit" : "Create"}
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="mb-2 block text-sm font-medium text-slate-700">Category Name</label>
+            <input
+              type="text"
+              value={formData.name}
+              onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
+              placeholder="Enter category name"
+              className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900"
+            />
+          </div>
 
-              <div className="space-y-4">
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-700">Category Name</label>
-                  <input
-                    type="text"
-                    value={formData.name}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
-                    placeholder="Enter category name"
-                    className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900"
-                  />
-                </div>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-slate-700">Diet Scope</label>
+            <select
+              value={formData.foodTypeScope}
+              onChange={(e) => setFormData((prev) => ({ ...prev, foodTypeScope: e.target.value }))}
+              className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900"
+            >
+              <option value="Veg">Veg</option>
+              <option value="Non-Veg">Non-Veg</option>
+              <option value="Both">Both</option>
+            </select>
+          </div>
 
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-700">Diet Scope</label>
-                  <select
-                    value={formData.foodTypeScope}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, foodTypeScope: e.target.value }))}
-                    className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900"
-                  >
-                    <option value="Veg">Veg</option>
-                    <option value="Non-Veg">Non-Veg</option>
-                    <option value="Both">Both</option>
-                  </select>
-                </div>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-slate-700">Optional Type Label</label>
+            <input
+              type="text"
+              value={formData.type}
+              onChange={(e) => setFormData((prev) => ({ ...prev, type: e.target.value }))}
+              placeholder="Examples: Starters, Desserts, Drinks"
+              className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900"
+            />
+          </div>
 
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-700">Optional Type Label</label>
-                  <input
-                    type="text"
-                    value={formData.type}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, type: e.target.value }))}
-                    placeholder="Examples: Starters, Desserts, Drinks"
-                    className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900"
-                  />
-                </div>
+          <div className="flex items-center gap-3">
+            {(imagePreview || formData.image) && (
+              <img
+                src={imagePreview || formData.image}
+                alt="Category preview"
+                className="h-16 w-16 rounded-2xl object-cover"
+              />
+            )}
+            <button
+              type="button"
+              onClick={handleImageClick}
+              className="flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700"
+            >
+              <Upload className="h-4 w-4" />
+              Upload Image
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              accept="image/*"
+              onChange={(e) => handleImageFileChange(e.target.files?.[0])}
+            />
+          </div>
 
-                <div className="flex items-center gap-3">
-                  {(imagePreview || formData.image) && (
-                    <img
-                      src={imagePreview || formData.image}
-                      alt="Category preview"
-                      className="h-16 w-16 rounded-2xl object-cover"
-                    />
-                  )}
-                  <button
-                    type="button"
-                    onClick={handleImageClick}
-                    className="flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700"
-                  >
-                    <Upload className="h-4 w-4" />
-                    Upload Image
-                  </button>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    className="hidden"
-                    accept="image/*"
-                    onChange={(e) => handleImageFileChange(e.target.files?.[0])}
-                  />
-                </div>
-
-                <label className="flex items-center gap-2 text-sm text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={formData.isActive}
-                    onChange={() => setFormData((prev) => ({ ...prev, isActive: !prev.isActive }))}
-                  />
-                  Keep category active
-                </label>
-              </div>
-
-              <div className="mt-6 flex gap-3">
-                <button onClick={resetModal} className="flex-1 rounded-xl border border-slate-300 py-3 font-medium text-slate-700">
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSaveCategory}
-                  disabled={uploadingImage}
-                  className="flex-1 rounded-xl bg-slate-900 py-3 font-medium text-white disabled:opacity-60"
-                >
-                  {uploadingImage ? "Uploading..." : editingCategory ? "Save & Resubmit" : "Create"}
-                </button>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={formData.isActive}
+              onChange={() => setFormData((prev) => ({ ...prev, isActive: !prev.isActive }))}
+            />
+            Keep category active
+          </label>
+        </div>
+      </RestaurantPanelModal>
 
       <ImageSourcePicker
         isOpen={isPhotoPickerOpen}
@@ -485,7 +457,7 @@ export default function MenuCategoriesPage() {
         fileNamePrefix="category-photo"
         galleryInputRef={fileInputRef}
       />
-    </div>
+    </RestaurantSubPageShell>
   )
 }
 

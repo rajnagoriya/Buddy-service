@@ -22,6 +22,7 @@ import api from "@food/api"
 import { restaurantAPI, uploadAPI } from "@food/api"
 import { toast } from "sonner"
 import { ImageSourcePicker } from "@food/components/ImageSourcePicker"
+import RestaurantPanelModal from "@food/components/restaurant/panel/RestaurantPanelModal"
 import { isFlutterBridgeAvailable } from "@food/utils/imageUploadUtils"
 import { getFoodVariants } from "@food/utils/foodVariants"
 const debugLog = (...args) => {}
@@ -29,6 +30,7 @@ const debugWarn = (...args) => {}
 const debugError = (...args) => {}
 
 const INVENTORY_RECOMMENDED_KEY = "restaurant_inventory_recommended_map"
+const GST_OPTIONS = ["0.0", "5.0", "12.0", "18.0"]
 
 
 const getUploadErrorMessage = (error, fileName = "image") => {
@@ -1169,148 +1171,99 @@ export default function ItemDetailsPage() {
         </div>
       </div>
 
-      {/* Category Selection Popup */}
-      <AnimatePresence>
-        {isCategoryPopupOpen && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsCategoryPopupOpen(false)}
-              className="fixed inset-0 bg-black/50 z-50"
-            />
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 30, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl z-50 max-h-[85vh] flex flex-col"
-              onClick={(e) => e.stopPropagation()}
+      <RestaurantPanelModal
+        open={isCategoryPopupOpen}
+        onClose={() => setIsCategoryPopupOpen(false)}
+        title="Select category"
+        mobileMaxHeight="tall"
+        bodyClassName="flex-1 overflow-y-auto overscroll-contain p-2 lg:p-3"
+        headerRight={
+          <button
+            type="button"
+            onClick={() => {
+              setIsCategoryPopupOpen(false)
+              navigate('/restaurant/menu-categories')
+            }}
+            className="flex items-center gap-1.5 rounded-lg bg-black p-2 text-white transition-colors hover:bg-gray-800"
+            title="Add Category"
+          >
+            <Plus className="h-4 w-4" />
+            <span className="text-sm font-medium">Add</span>
+          </button>
+        }
+      >
+        {loadingCategories ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-6 w-6 animate-spin text-gray-600" />
+          </div>
+        ) : categories.length === 0 ? (
+          <div className="space-y-4 py-12 text-center">
+            <p className="text-sm text-gray-500">No categories available</p>
+            <button
+              type="button"
+              onClick={() => {
+                setIsCategoryPopupOpen(false)
+                navigate('/restaurant/menu-categories')
+              }}
+              className="inline-flex items-center gap-2 rounded-lg bg-black px-4 py-2 font-semibold text-white transition-colors hover:bg-gray-800"
             >
-              <div className="flex items-center justify-between px-4 py-4 border-b border-gray-200">
-                <h2 className="text-lg font-bold text-gray-900">Select category</h2>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => {
-                      setIsCategoryPopupOpen(false)
-                      navigate('/restaurant/menu-categories')
-                    }}
-                    className="p-2 rounded-lg bg-black text-white hover:bg-gray-800 transition-colors flex items-center gap-1.5"
-                    title="Add Category"
-                  >
-                    <Plus className="w-4 h-4" />
-                    <span className="text-sm font-medium">Add</span>
-                  </button>
-                  <button
-                    onClick={() => setIsCategoryPopupOpen(false)}
-                    className="p-1 rounded-full hover:bg-gray-100"
-                  >
-                    <X className="w-5 h-5 text-gray-600" />
-                  </button>
+              <Plus className="h-5 w-5" />
+              Add Category
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {categories.map((cat) => (
+              <button
+                key={cat.id}
+                type="button"
+                onClick={() => handleCategorySelect(cat.id, cat.name)}
+                className={`w-full rounded-lg px-4 py-3 text-left transition-colors ${String(selectedCategoryId || "") === String(cat.id)
+                  ? "bg-gray-900 text-white"
+                  : "bg-gray-50 text-gray-900 hover:bg-gray-100"
+                  }`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm font-medium">{cat.name}</span>
+                  <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${cat.foodTypeScope === "Veg"
+                    ? "border-green-200 bg-green-50 text-green-700"
+                    : cat.foodTypeScope === "Non-Veg"
+                      ? "border-red-200 bg-red-50 text-red-700"
+                      : "border-slate-200 bg-slate-100 text-slate-700"
+                    }`}>
+                    {cat.foodTypeScope || "Both"}
+                  </span>
                 </div>
-              </div>
-              <div className="flex-1 overflow-y-auto p-2">
-                {loadingCategories ? (
-                  <div className="flex items-center justify-center py-12">
-                    <Loader2 className="w-6 h-6 animate-spin text-gray-600" />
-                  </div>
-                ) : categories.length === 0 ? (
-                  <div className="text-center py-12 space-y-4">
-                    <p className="text-sm text-gray-500">No categories available</p>
-                    <button
-                      onClick={() => {
-                        setIsCategoryPopupOpen(false)
-                        navigate('/restaurant/menu-categories')
-                      }}
-                      className="inline-flex items-center gap-2 px-4 py-2 bg-black text-white rounded-lg font-semibold hover:bg-gray-800 transition-colors"
-                    >
-                      <Plus className="w-5 h-5" />
-                      Add Category
-                    </button>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {categories.map((cat) => (
-                      <button
-                        key={cat.id}
-                        onClick={() => handleCategorySelect(cat.id, cat.name)}
-                        className={`w-full rounded-lg px-4 py-3 text-left transition-colors ${String(selectedCategoryId || "") === String(cat.id)
-                          ? "bg-gray-900 text-white"
-                          : "bg-gray-50 text-gray-900 hover:bg-gray-100"
-                          }`}
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="text-sm font-medium">{cat.name}</span>
-                          <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${cat.foodTypeScope === "Veg"
-                            ? "border-green-200 bg-green-50 text-green-700"
-                            : cat.foodTypeScope === "Non-Veg"
-                              ? "border-red-200 bg-red-50 text-red-700"
-                              : "border-slate-200 bg-slate-100 text-slate-700"
-                            }`}>
-                            {cat.foodTypeScope || "Both"}
-                          </span>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          </>
+              </button>
+            ))}
+          </div>
         )}
-      </AnimatePresence>
+      </RestaurantPanelModal>
 
-
-      {/* GST Popup */}
-      {/* <AnimatePresence>
-        {isGstPopupOpen && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsGstPopupOpen(false)}
-              className="fixed inset-0 bg-black/50 z-50"
-            />
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 30, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl z-50 max-h-[60vh] flex flex-col"
-              onClick={(e) => e.stopPropagation()}
+      <RestaurantPanelModal
+        open={isGstPopupOpen}
+        onClose={() => setIsGstPopupOpen(false)}
+        title="Select GST"
+        mobileMaxHeight="medium"
+        bodyClassName="flex-1 overflow-y-auto overscroll-contain px-4 py-4 lg:px-5"
+      >
+        <div className="space-y-2">
+          {GST_OPTIONS.map((gstValue) => (
+            <button
+              key={gstValue}
+              type="button"
+              onClick={() => handleGstSelect(gstValue)}
+              className={`w-full rounded-lg px-4 py-3 text-left text-sm font-medium transition-colors ${
+                gst === gstValue
+                  ? "bg-gray-900 text-white"
+                  : "bg-gray-50 text-gray-900 hover:bg-gray-100"
+              }`}
             >
-              <div className="flex items-center justify-between px-4 py-4 border-b border-gray-200">
-                <h2 className="text-lg font-bold text-gray-900">Select GST</h2>
-                <button
-                  onClick={() => setIsGstPopupOpen(false)}
-                  className="p-1 rounded-full hover:bg-gray-100"
-                >
-                  <X className="w-5 h-5 text-gray-600" />
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto px-4 py-4">
-                <div className="space-y-2">
-                  {gstOptions.map((gstValue) => (
-                    <button
-                      key={gstValue}
-                      onClick={() => handleGstSelect(gstValue)}
-                      className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
-                        gst === gstValue
-                          ? "bg-gray-900 text-white"
-                          : "bg-gray-50 text-gray-900 hover:bg-gray-100"
-                      }`}
-                    >
-                      {gstValue}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence> */}
+              {gstValue}%
+            </button>
+          ))}
+        </div>
+      </RestaurantPanelModal>
 
 
       {/* Bottom Sticky Buttons */}

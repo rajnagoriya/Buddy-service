@@ -20,6 +20,7 @@ import {
   Loader2
 } from "lucide-react"
 import BottomNavOrders from "@food/components/restaurant/BottomNavOrders"
+import RestaurantPanelModal from "@food/components/restaurant/panel/RestaurantPanelModal"
 // Removed foodManagement - now using backend API directly
 import { useNavigate } from "react-router-dom"
 import { restaurantAPI, uploadAPI } from "@food/api"
@@ -1448,118 +1449,77 @@ export default function HubMenu() {
         )}
       </div>
 
-      {/* Filter Popup */}
-      <AnimatePresence>
-        {isFilterOpen && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+      <RestaurantPanelModal
+        open={isFilterOpen}
+        onClose={() => setIsFilterOpen(false)}
+        title="Filters"
+        mobileMaxHeight="tall"
+        footer={
+          <div className="space-y-2">
+            {activeFilter && (
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveFilter(null)
+                  setSelectedFilter(null)
+                  setIsFilterOpen(false)
+                }}
+                className="w-full rounded-lg bg-gray-100 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200"
+              >
+                Clear filter
+              </button>
+            )}
+            <button
+              type="button"
               onClick={() => setIsFilterOpen(false)}
-              className="fixed inset-0 bg-black/50 z-50"
-            />
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 30, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl z-50 max-h-[85vh] flex flex-col"
-              onClick={(e) => e.stopPropagation()}
+              className="w-full rounded-lg bg-gray-900 py-3 text-sm font-semibold text-white transition-colors hover:bg-gray-800"
             >
-              <div className="flex items-center justify-between px-4 py-4 border-b border-gray-200">
-                <h2 className="text-lg font-bold text-gray-900">Filters</h2>
-                <button
-                  onClick={() => setIsFilterOpen(false)}
-                  className="p-1 rounded-full hover:bg-gray-100"
-                >
-                  <X className="w-5 h-5 text-gray-600" />
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto px-4 py-4">
-                <div className="space-y-1">
-                  {filterOptions.map((filter, index) => (
-                    <label
-                      key={filter.id}
-                      className="flex items-center justify-between py-3 cursor-pointer border-b border-gray-100 last:border-0"
-                    >
-                      <span className="text-sm font-medium text-gray-900">
-                        {filter.label} ({filter.count})
-                      </span>
-                      <input
-                        type="radio"
-                        name="filter"
-                        value={filter.id}
-                        checked={activeFilter === filter.id}
-                        onChange={() => handleFilterSelect(filter.id)}
-                        className="w-5 h-5 text-black border-gray-400 focus:ring-black"
-                        style={{ accentColor: "#000000" }}
-                      />
-                    </label>
-                  ))}
-                </div>
-              </div>
-              <div className="px-4 py-4 border-t border-gray-200 space-y-2">
-                {activeFilter && (
-                  <button
-                    onClick={() => {
-                      setActiveFilter(null)
-                      setSelectedFilter(null)
-                      setIsFilterOpen(false)
-                    }}
-                    className="w-full py-2 rounded-lg font-medium text-sm bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
-                  >
-                    Clear filter
-                  </button>
-                )}
-                <button
-                  onClick={() => setIsFilterOpen(false)}
-                  className="w-full py-3 rounded-lg font-semibold text-sm bg-gray-900 text-white hover:bg-gray-800 transition-colors"
-                >
-                  Confirm
-                </button>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+              Confirm
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-1">
+          {filterOptions.map((filter) => (
+            <label
+              key={filter.id}
+              className="flex cursor-pointer items-center justify-between border-b border-gray-100 py-3 last:border-0"
+            >
+              <span className="text-sm font-medium text-gray-900">
+                {filter.label} ({filter.count})
+              </span>
+              <input
+                type="radio"
+                name="filter"
+                value={filter.id}
+                checked={activeFilter === filter.id}
+                onChange={() => handleFilterSelect(filter.id)}
+                className="h-5 w-5 border-gray-400 text-black focus:ring-black"
+                style={{ accentColor: "#000000" }}
+              />
+            </label>
+          ))}
+        </div>
+      </RestaurantPanelModal>
 
-      {/* Add Popup */}
-      <AnimatePresence>
-        {isAddPopupOpen && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsAddPopupOpen(false)}
-              className="fixed inset-0 bg-black/50 z-50"
-            />
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 30, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl z-50"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="px-4 py-4 border-b border-gray-200">
-                <h2 className="text-lg font-bold text-gray-900 text-center">Add item</h2>
-              </div>
-              <div className="px-4 py-4 space-y-2">
-                <button
-                  onClick={() => {
-                    navigate(`/restaurant/hub-menu/item/new`)
-                  }}
-                  className="w-full py-3 px-4 text-left rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  <span className="text-sm font-medium text-gray-900">Add item</span>
-                </button>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+      <RestaurantPanelModal
+        open={isAddPopupOpen}
+        onClose={() => setIsAddPopupOpen(false)}
+        title="Add item"
+        titleCentered
+        mobileMaxHeight="auto"
+        bodyClassName="px-4 py-4 lg:px-5"
+      >
+        <button
+          type="button"
+          onClick={() => {
+            navigate(`/restaurant/hub-menu/item/new`)
+          }}
+          className="w-full rounded-lg px-4 py-3 text-left transition-colors hover:bg-gray-50"
+        >
+          <span className="text-sm font-medium text-gray-900">Add item</span>
+        </button>
+      </RestaurantPanelModal>
 
       {/* Availability Popup */}
       <div>
@@ -1770,345 +1730,214 @@ export default function HubMenu() {
         )}
       </div>
 
-      {/* Category Options Popup */}
-      <AnimatePresence>
-        {isCategoryOptionsOpen && selectedCategory && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsCategoryOptionsOpen(false)}
-              className="fixed inset-0 bg-black/50 z-50"
-            />
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 30, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl z-50 max-h-[50vh] flex flex-col"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between px-4 py-4 border-b border-gray-200">
-                <h2 className="text-lg font-bold text-gray-900">{selectedCategory.name}</h2>
-                <button
-                  onClick={() => setIsCategoryOptionsOpen(false)}
-                  className="p-1 rounded-full hover:bg-gray-100"
-                >
-                  <X className="w-5 h-5 text-gray-600" />
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto px-4 py-4">
-                <div className="space-y-2">
-                  <button
-                    onClick={handleEditCategory}
-                    className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left text-sm font-medium text-gray-900 bg-gray-50 hover:bg-gray-100 transition-colors"
-                  >
-                    <Edit className="w-5 h-5 text-gray-600" />
-                    <span>Edit category name</span>
-                  </button>
-                  <button
-                    onClick={handleDeleteCategory}
-                    className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left text-sm font-medium text-red-600 bg-gray-50 hover:bg-red-50 transition-colors"
-                  >
-                    <Trash2 className="w-5 h-5 text-red-600" />
-                    <span>Delete category</span>
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+      <RestaurantPanelModal
+        open={isCategoryOptionsOpen && !!selectedCategory}
+        onClose={() => setIsCategoryOptionsOpen(false)}
+        title={selectedCategory?.name}
+        mobileMaxHeight="medium"
+      >
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={handleEditCategory}
+            className="flex w-full items-center gap-3 rounded-lg bg-gray-50 px-4 py-3 text-left text-sm font-medium text-gray-900 transition-colors hover:bg-gray-100"
+          >
+            <Edit className="h-5 w-5 text-gray-600" />
+            <span>Edit category name</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleDeleteCategory}
+            className="flex w-full items-center gap-3 rounded-lg bg-gray-50 px-4 py-3 text-left text-sm font-medium text-red-600 transition-colors hover:bg-red-50"
+          >
+            <Trash2 className="h-5 w-5 text-red-600" />
+            <span>Delete category</span>
+          </button>
+        </div>
+      </RestaurantPanelModal>
 
-      {/* Edit Category Name Popup */}
-      <AnimatePresence>
-        {isEditCategoryOpen && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+      <RestaurantPanelModal
+        open={isEditCategoryOpen}
+        onClose={() => {
+          setIsEditCategoryOpen(false)
+          setEditCategoryName("")
+          setSelectedCategory(null)
+        }}
+        title="Edit category name"
+        mobileMaxHeight="auto"
+        footer={
+          <div className="flex gap-3">
+            <button
+              type="button"
               onClick={() => {
                 setIsEditCategoryOpen(false)
                 setEditCategoryName("")
                 setSelectedCategory(null)
               }}
-              className="fixed inset-0 bg-black/50 z-50"
-            />
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 30, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl z-50 max-h-[40vh] flex flex-col"
-              onClick={(e) => e.stopPropagation()}
+              className="flex-1 rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm font-semibold text-gray-900 transition-colors hover:bg-gray-50"
             >
-              <div className="flex items-center justify-between px-4 py-4 border-b border-gray-200">
-                <h2 className="text-lg font-bold text-gray-900">Edit category name</h2>
-                <button
-                  onClick={() => {
-                    setIsEditCategoryOpen(false)
-                    setEditCategoryName("")
-                    setSelectedCategory(null)
-                  }}
-                  className="p-1 rounded-full hover:bg-gray-100"
-                >
-                  <X className="w-5 h-5 text-gray-600" />
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto px-4 py-4">
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-900 mb-2">
-                      Category name
-                    </label>
-                    <input
-                      type="text"
-                      value={editCategoryName}
-                      onChange={(e) => setEditCategoryName(e.target.value)}
-                      placeholder="Enter category name"
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      autoFocus
-                    />
-                  </div>
-                  <div className="flex gap-3 pt-2">
-                    <button
-                      onClick={() => {
-                        setIsEditCategoryOpen(false)
-                        setEditCategoryName("")
-                        setSelectedCategory(null)
-                      }}
-                      className="flex-1 py-3 px-4 border border-gray-300 rounded-lg text-sm font-semibold text-gray-900 bg-white hover:bg-gray-50 transition-colors"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleSaveCategoryName}
-                      disabled={!editCategoryName.trim()}
-                      className={`flex-1 py-3 px-4 rounded-lg text-sm font-semibold transition-colors ${
-                        editCategoryName.trim()
-                          ? "bg-black text-white hover:bg-gray-800"
-                          : "bg-gray-300 text-gray-500 cursor-not-allowed"
-                      }`}
-                    >
-                      Save
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveCategoryName}
+              disabled={!editCategoryName.trim()}
+              className={`flex-1 rounded-lg px-4 py-3 text-sm font-semibold transition-colors ${
+                editCategoryName.trim()
+                  ? "bg-black text-white hover:bg-gray-800"
+                  : "cursor-not-allowed bg-gray-300 text-gray-500"
+              }`}
+            >
+              Save
+            </button>
+          </div>
+        }
+      >
+        <label className="mb-2 block text-sm font-medium text-gray-900">
+          Category name
+        </label>
+        <input
+          type="text"
+          value={editCategoryName}
+          onChange={(e) => setEditCategoryName(e.target.value)}
+          placeholder="Enter category name"
+          className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm text-gray-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+          autoFocus
+        />
+      </RestaurantPanelModal>
 
-      {/* Add Sub-Category Popup */}
-      <AnimatePresence>
-        {isAddSubCategoryOpen && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => {
-                setIsAddSubCategoryOpen(false)
-                setSubCategoryName("")
-                setSelectedGroupForSubCategory(null)
-              }}
-              className="fixed inset-0 bg-black/50 z-50"
-            />
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 30, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl z-50 max-h-[40vh] flex flex-col"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between px-4 py-4 border-b border-gray-200">
-                <h2 className="text-lg font-bold text-gray-900">Add sub-category</h2>
-                <button
-                  onClick={() => {
-                    setIsAddSubCategoryOpen(false)
-                    setSubCategoryName("")
-                    setSelectedGroupForSubCategory(null)
-                  }}
-                  className="p-1 rounded-full hover:bg-gray-100"
-                >
-                  <X className="w-5 h-5 text-gray-600" />
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto px-4 py-4">
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-900 mb-2">
-                      Sub-category name
-                    </label>
-                    <input
-                      type="text"
-                      value={subCategoryName}
-                      onChange={(e) => setSubCategoryName(e.target.value)}
-                      onKeyPress={(e) => {
-                        if (e.key === 'Enter' && subCategoryName.trim()) {
-                          handleContinueSubCategory()
-                        }
-                      }}
-                      placeholder="Enter sub-category name"
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      autoFocus
-                    />
-                    {selectedGroupForSubCategory && (
-                      <p className="text-xs text-gray-500 mt-2">
-                        Category: <span className="font-medium">{selectedGroupForSubCategory.name}</span>
-                      </p>
-                    )}
-                  </div>
-                  <button
-                    onClick={handleContinueSubCategory}
-                    disabled={!subCategoryName.trim()}
-                    className={`w-full py-3 px-4 rounded-lg text-sm font-semibold transition-colors ${
-                      subCategoryName.trim()
-                        ? "bg-black text-white hover:bg-gray-800"
-                        : "bg-gray-300 text-gray-500 cursor-not-allowed"
-                    }`}
-                  >
-                    Continue
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </>
+      <RestaurantPanelModal
+        open={isAddSubCategoryOpen}
+        onClose={() => {
+          setIsAddSubCategoryOpen(false)
+          setSubCategoryName("")
+          setSelectedGroupForSubCategory(null)
+        }}
+        title="Add sub-category"
+        mobileMaxHeight="auto"
+        footer={
+          <button
+            type="button"
+            onClick={handleContinueSubCategory}
+            disabled={!subCategoryName.trim()}
+            className={`w-full rounded-lg px-4 py-3 text-sm font-semibold transition-colors ${
+              subCategoryName.trim()
+                ? "bg-black text-white hover:bg-gray-800"
+                : "cursor-not-allowed bg-gray-300 text-gray-500"
+            }`}
+          >
+            Continue
+          </button>
+        }
+      >
+        <label className="mb-2 block text-sm font-medium text-gray-900">
+          Sub-category name
+        </label>
+        <input
+          type="text"
+          value={subCategoryName}
+          onChange={(e) => setSubCategoryName(e.target.value)}
+          onKeyPress={(e) => {
+            if (e.key === 'Enter' && subCategoryName.trim()) {
+              handleContinueSubCategory()
+            }
+          }}
+          placeholder="Enter sub-category name"
+          className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm text-gray-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+          autoFocus
+        />
+        {selectedGroupForSubCategory && (
+          <p className="mt-2 text-xs text-gray-500">
+            Category: <span className="font-medium">{selectedGroupForSubCategory.name}</span>
+          </p>
         )}
-      </AnimatePresence>
+      </RestaurantPanelModal>
 
-      {/* Add Category Popup */}
-      <AnimatePresence>
-        {isAddCategoryPopupOpen && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => {
-                setIsAddCategoryPopupOpen(false)
-                setNewCategoryName("")
-              }}
-              className="fixed inset-0 bg-black/50 z-50"
-            />
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 30, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl z-50 max-h-[40vh] flex flex-col"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between px-4 py-4 border-b border-gray-200">
-                <h2 className="text-lg font-bold text-gray-900">Add category</h2>
-                <button
-                  onClick={() => {
-                    setIsAddCategoryPopupOpen(false)
-                    setNewCategoryName("")
-                  }}
-                  className="p-1 rounded-full hover:bg-gray-100"
-                >
-                  <X className="w-5 h-5 text-gray-600" />
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto px-4 py-4">
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-900 mb-2">
-                      Category name
-                    </label>
-                    <input
-                      type="text"
-                      value={newCategoryName}
-                      onChange={(e) => setNewCategoryName(e.target.value)}
-                      onKeyPress={(e) => {
-                        if (e.key === 'Enter' && newCategoryName.trim()) {
-                          handleContinueAddCategory()
-                        }
-                      }}
-                      placeholder="Enter category name"
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      autoFocus
-                    />
-                  </div>
-                  <button
-                    onClick={handleContinueAddCategory}
-                    disabled={!newCategoryName.trim()}
-                    className={`w-full py-3 px-4 rounded-lg text-sm font-semibold transition-colors ${
-                      newCategoryName.trim()
-                        ? "bg-black text-white hover:bg-gray-800"
-                        : "bg-gray-300 text-gray-500 cursor-not-allowed"
-                    }`}
-                  >
-                    Continue
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+      <RestaurantPanelModal
+        open={isAddCategoryPopupOpen}
+        onClose={() => {
+          setIsAddCategoryPopupOpen(false)
+          setNewCategoryName("")
+        }}
+        title="Add category"
+        mobileMaxHeight="auto"
+        footer={
+          <button
+            type="button"
+            onClick={handleContinueAddCategory}
+            disabled={!newCategoryName.trim()}
+            className={`w-full rounded-lg px-4 py-3 text-sm font-semibold transition-colors ${
+              newCategoryName.trim()
+                ? "bg-black text-white hover:bg-gray-800"
+                : "cursor-not-allowed bg-gray-300 text-gray-500"
+            }`}
+          >
+            Continue
+          </button>
+        }
+      >
+        <label className="mb-2 block text-sm font-medium text-gray-900">
+          Category name
+        </label>
+        <input
+          type="text"
+          value={newCategoryName}
+          onChange={(e) => setNewCategoryName(e.target.value)}
+          onKeyPress={(e) => {
+            if (e.key === 'Enter' && newCategoryName.trim()) {
+              handleContinueAddCategory()
+            }
+          }}
+          placeholder="Enter category name"
+          className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm text-gray-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+          autoFocus
+        />
+      </RestaurantPanelModal>
 
-      {/* Search Popup */}
-      <AnimatePresence>
-        {isSearchOpen && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => {
-                setIsSearchOpen(false)
-                setSearchQuery("")
-              }}
-              className="fixed inset-0 bg-black/50 z-50"
-            />
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 30, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl z-50 max-h-[90vh] flex flex-col"
-              onClick={(e) => e.stopPropagation()}
+      <RestaurantPanelModal
+        open={isSearchOpen}
+        onClose={() => {
+          setIsSearchOpen(false)
+          setSearchQuery("")
+        }}
+        title="Search Menu"
+        mobileMaxHeight="full"
+        bodyClassName="flex-1 overflow-y-auto overscroll-contain px-0 py-0 lg:px-0 lg:py-0"
+        footer={
+          searchQuery.trim() && filteredMenuGroups.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setIsSearchOpen(false)}
+              className="w-full rounded-lg bg-gray-900 py-3 text-sm font-semibold text-white transition-colors hover:bg-gray-800"
             >
-              <div className="flex items-center justify-between px-4 py-4 border-b border-gray-200">
-                <h2 className="text-lg font-bold text-gray-900">Search Menu</h2>
-                <button
-                  onClick={() => {
-                    setIsSearchOpen(false)
-                    setSearchQuery("")
-                  }}
-                  className="p-1 rounded-full hover:bg-gray-100"
-                >
-                  <X className="w-5 h-5 text-gray-600" />
-                </button>
-              </div>
-              <div className="px-4 py-4 border-b border-gray-200">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search for food items..."
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    autoFocus
-                  />
-                  {searchQuery && (
-                    <button
-                      onClick={() => setSearchQuery("")}
-                      className="absolute right-3 top-1/2 transform -translate-y-1/2 p-1 rounded-full hover:bg-gray-100"
-                    >
-                      <X className="w-4 h-4 text-gray-600" />
-                    </button>
-                  )}
-                </div>
-              </div>
-              <div className="flex-1 overflow-y-auto px-4 py-4">
+              View Results ({filteredMenuGroups.reduce((acc, group) => acc + group.items.length, 0)} items)
+            </button>
+          ) : null
+        }
+      >
+        <div className="border-b border-gray-200 px-4 py-4 lg:px-5">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 transform text-gray-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search for food items..."
+              className="w-full rounded-lg border border-gray-300 bg-white py-3 pl-10 pr-4 text-sm text-gray-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+              autoFocus
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 transform rounded-full p-1 hover:bg-gray-100"
+              >
+                <X className="h-4 w-4 text-gray-600" />
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="px-4 py-4 lg:px-5">
                 {searchQuery.trim() ? (
                   filteredMenuGroups.length > 0 ? (
                     <div className="space-y-4">
@@ -2196,57 +2025,45 @@ export default function HubMenu() {
                     </div>
                   </div>
                 )}
-              </div>
-              {searchQuery.trim() && filteredMenuGroups.length > 0 && (
-                <div className="px-4 py-3 border-t border-gray-200">
-                  <button
-                    onClick={() => setIsSearchOpen(false)}
-                    className="w-full py-3 rounded-lg font-semibold text-sm bg-gray-900 text-white hover:bg-gray-800 transition-colors"
-                  >
-                    View Results ({filteredMenuGroups.reduce((acc, group) => acc + group.items.length, 0)} items)
-                  </button>
-                </div>
-              )}
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+        </div>
+      </RestaurantPanelModal>
 
-      {/* Add Add-on Modal */}
-      <AnimatePresence>
-        {isAddAddonModalOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
-            onClick={() => setIsAddAddonModalOpen(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto"
-              onClick={(e) => e.stopPropagation()}
+      <RestaurantPanelModal
+        open={isAddAddonModalOpen}
+        onClose={() => setIsAddAddonModalOpen(false)}
+        title={editingAddon ? 'Edit Add-on' : 'Add New Add-on'}
+        size="md"
+        mobileMaxHeight="full"
+        footer={
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setIsAddAddonModalOpen(false)}
+              className="flex-1 rounded-lg border border-gray-300 px-4 py-2 font-medium text-gray-700 transition-colors hover:bg-gray-50"
             >
-              {/* Modal Header */}
-              <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between z-10">
-                <h2 className="text-xl font-bold text-gray-900">
-                  {editingAddon ? 'Edit Add-on' : 'Add New Add-on'}
-                </h2>
-                <button
-                  onClick={() => setIsAddAddonModalOpen(false)}
-                  className="p-2 hover:bg-gray-100 rounded-full transition-colors"
-                >
-                  <X className="h-5 w-5 text-gray-600" />
-                </button>
-              </div>
-
-              {/* Modal Content */}
-              <div className="p-6 space-y-4">
-                {/* Name Field */}
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveAddon}
+              disabled={!addonName.trim() || !addonPrice || uploadingAddonImages}
+              className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-green-600 px-4 py-2 font-medium text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+            >
+              {uploadingAddonImages ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Uploading...</span>
+                </>
+              ) : (
+                <span>{editingAddon ? 'Update Add-on' : 'Add Add-on'}</span>
+              )}
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="mb-2 block text-sm font-medium text-gray-700">
                     Add-on Name <span className="text-red-500">*</span>
                   </label>
                   <input
@@ -2254,13 +2071,12 @@ export default function HubMenu() {
                     value={addonName}
                     onChange={(e) => setAddonName(e.target.value)}
                     placeholder="e.g., Coke, Chips, Sauce"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-transparent focus:ring-2 focus:ring-green-500"
                   />
                 </div>
 
-                {/* Description Field */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="mb-2 block text-sm font-medium text-gray-700">
                     Description
                   </label>
                   <textarea
@@ -2268,13 +2084,12 @@ export default function HubMenu() {
                     onChange={(e) => setAddonDescription(e.target.value)}
                     placeholder="Describe the add-on..."
                     rows={3}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none"
+                    className="w-full resize-none rounded-lg border border-gray-300 px-4 py-2 focus:border-transparent focus:ring-2 focus:ring-green-500"
                   />
                 </div>
 
-                {/* Price Field */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="mb-2 block text-sm font-medium text-gray-700">
                     Price (₹) <span className="text-red-500">*</span>
                   </label>
                   <input
@@ -2284,34 +2099,33 @@ export default function HubMenu() {
                     placeholder="0.00"
                     min="0"
                     step="0.01"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-transparent focus:ring-2 focus:ring-green-500"
                   />
                 </div>
 
-                {/* Images Section */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="mb-2 block text-sm font-medium text-gray-700">
                     Images
                   </label>
-                  
-                  {/* Image Preview Grid */}
+
                   {addonImages.length > 0 && (
-                    <div className="grid grid-cols-3 gap-3 mb-3">
+                    <div className="mb-3 grid grid-cols-3 gap-3">
                       {addonImages.map((img, index) => (
-                        <div key={index} className="relative group">
+                        <div key={index} className="group relative">
                           {img && (
                             <img
                               src={img}
                               alt={`Add-on ${index + 1}`}
-                              className="w-full h-24 object-cover rounded-lg border border-gray-200"
+                              className="h-24 w-full rounded-lg border border-gray-200 object-cover"
                               onError={(e) => {
                                 e.target.style.display = 'none'
                               }}
                             />
                           )}
                           <button
+                            type="button"
                             onClick={() => handleAddonImageDelete(index)}
-                            className="absolute top-1 right-1 p-1 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                            className="absolute right-1 top-1 rounded-full bg-red-500 p-1 text-white opacity-0 transition-opacity group-hover:opacity-100"
                           >
                             <X className="h-4 w-4" />
                           </button>
@@ -2320,7 +2134,6 @@ export default function HubMenu() {
                     </div>
                   )}
 
-                  {/* Add Image Button */}
                   <input
                     ref={addonFileInputRef}
                     type="file"
@@ -2332,42 +2145,15 @@ export default function HubMenu() {
                   />
                   <label
                     htmlFor="addon-image-upload"
-                    className="flex items-center justify-center gap-2 px-4 py-2 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-green-500 hover:bg-green-50 transition-colors"
+                    className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 transition-colors hover:border-green-500 hover:bg-green-50"
                   >
                     <Camera className="h-5 w-5 text-gray-500" />
                     <span className="text-sm font-medium text-gray-700">Add Images</span>
                   </label>
-                  <p className="text-xs text-gray-500 mt-1">Add multiple images (PNG, JPG, WEBP - max 5MB each)</p>
+                  <p className="mt-1 text-xs text-gray-500">Add multiple images (PNG, JPG, WEBP - max 5MB each)</p>
                 </div>
-              </div>
-
-              {/* Modal Footer */}
-              <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex items-center gap-3">
-                <button
-                  onClick={() => setIsAddAddonModalOpen(false)}
-                  className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSaveAddon}
-                  disabled={!addonName.trim() || !addonPrice || uploadingAddonImages}
-                  className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors font-medium flex items-center justify-center gap-2"
-                >
-                  {uploadingAddonImages ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      <span>Uploading...</span>
-                    </>
-                  ) : (
-                    <span>{editingAddon ? 'Update Add-on' : 'Add Add-on'}</span>
-                  )}
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+        </div>
+      </RestaurantPanelModal>
 
       <BottomNavOrders />
     </div>

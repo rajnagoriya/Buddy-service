@@ -11,9 +11,9 @@ import {
   Copy,
   ChevronRight,
   HelpCircle,
-  X,
 } from "lucide-react"
 import { DateRangeCalendar } from "@food/components/ui/date-range-calendar"
+import RestaurantPanelModal from "@food/components/restaurant/panel/RestaurantPanelModal"
 import { restaurantAPI } from "@food/api"
 import { useRestaurantNotifications } from "@food/hooks/useRestaurantNotifications"
 const debugLog = (...args) => {}
@@ -701,84 +701,47 @@ export default function AllOrdersPage() {
         )}
       </div>
 
-      {/* Date Range Popup */}
-      <AnimatePresence>
-        {showDateRangePopup && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="fixed inset-0 bg-black/50 z-50"
-              onClick={() => setShowDateRangePopup(false)}
-            />
+      <RestaurantPanelModal
+        open={showDateRangePopup}
+        onClose={() => setShowDateRangePopup(false)}
+        title="Select date range"
+        size="md"
+        mobileMaxHeight="auto"
+        bodyClassName="px-4 py-3 pb-2 space-y-2"
+      >
+        {dateRangeOptions.map((option) => {
+          const isSelected =
+            selectedDateRange?.label?.toLowerCase() === option.label.toLowerCase()
 
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{
-                type: "spring",
-                damping: 30,
-                stiffness: 300
-              }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl z-50"
-              onClick={(e) => e.stopPropagation()}
+          return (
+            <button
+              key={option.label}
+              type="button"
+              onClick={() => handleDateRangeSelect(option)}
+              className={`w-full flex items-center justify-between rounded-xl border px-4 py-3 text-left transition-colors ${
+                isSelected
+                  ? "border-blue-500 bg-blue-50"
+                  : "border-gray-200 bg-white hover:bg-gray-50"
+              }`}
             >
-              <div className="flex justify-center pt-2 pb-1">
-                <div className="w-10 h-1 bg-gray-300 rounded-full"></div>
+              <div>
+                <p className="text-sm font-semibold text-gray-900 capitalize">{option.label}</p>
+                {!option.custom && (
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {(() => {
+                      const dates = option.getDates()
+                      const start = dates.start.toLocaleDateString("en-US", { day: "numeric", month: "short" })
+                      const end = dates.end.toLocaleDateString("en-US", { day: "numeric", month: "short" })
+                      return `${start} - ${end}`
+                    })()}
+                  </p>
+                )}
               </div>
-
-              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
-                <h2 className="text-lg font-bold text-gray-900">Select date range</h2>
-                <button
-                  onClick={() => setShowDateRangePopup(false)}
-                  className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
-                  aria-label="Close"
-                >
-                  <X className="w-5 h-5 text-gray-900" />
-                </button>
-              </div>
-
-              <div className="px-4 py-3 pb-6 space-y-2">
-                {dateRangeOptions.map((option) => {
-                  const isSelected =
-                    selectedDateRange?.label?.toLowerCase() === option.label.toLowerCase()
-
-                  return (
-                    <button
-                      key={option.label}
-                      type="button"
-                      onClick={() => handleDateRangeSelect(option)}
-                      className={`w-full flex items-center justify-between rounded-xl border px-4 py-3 text-left transition-colors ${
-                        isSelected
-                          ? "border-blue-500 bg-blue-50"
-                          : "border-gray-200 bg-white hover:bg-gray-50"
-                      }`}
-                    >
-                      <div>
-                        <p className="text-sm font-semibold text-gray-900 capitalize">{option.label}</p>
-                        {!option.custom && (
-                          <p className="text-xs text-gray-500 mt-0.5">
-                            {(() => {
-                              const dates = option.getDates()
-                              const start = dates.start.toLocaleDateString("en-US", { day: "numeric", month: "short" })
-                              const end = dates.end.toLocaleDateString("en-US", { day: "numeric", month: "short" })
-                              return `${start} - ${end}`
-                            })()}
-                          </p>
-                        )}
-                      </div>
-                      {isSelected && <span className="text-xs font-semibold text-blue-600">Selected</span>}
-                    </button>
-                  )
-                })}
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+              {isSelected && <span className="text-xs font-semibold text-blue-600">Selected</span>}
+            </button>
+          )
+        })}
+      </RestaurantPanelModal>
 
       {/* Calendar Popup */}
       <AnimatePresence>
@@ -813,173 +776,134 @@ export default function AllOrdersPage() {
         )}
       </AnimatePresence>
 
-      {/* Filter Popup */}
-      <AnimatePresence>
-        {showFilterPopup && (
-          <>
-            {/* Backdrop */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="fixed inset-0 bg-black/50 z-50"
-              onClick={() => setShowFilterPopup(false)}
-            />
-            
-            {/* Filter Sheet */}
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ 
-                type: "spring",
-                damping: 30,
-                stiffness: 300
-              }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl z-50 flex flex-col"
-              style={{ height: '65vh' }}
-              onClick={(e) => e.stopPropagation()}
+      <RestaurantPanelModal
+        open={showFilterPopup}
+        onClose={() => setShowFilterPopup(false)}
+        title="Filters"
+        size="lg"
+        mobileMaxHeight="medium"
+        className="h-[65vh] lg:h-auto"
+        bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden p-0"
+        footer={
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleClearFilters}
+              className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-900 hover:bg-gray-50 transition-colors"
             >
-              {/* Drag Handle */}
-              <div className="flex justify-center pt-2 pb-1">
-                <div className="w-10 h-1 bg-gray-300 rounded-full"></div>
-              </div>
+              Clear all
+            </button>
+            <button
+              type="button"
+              onClick={handleApplyFilters}
+              disabled={isApplyingFilters}
+              className="flex-1 px-4 py-2.5 bg-black rounded-lg text-sm font-medium text-white hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {isApplyingFilters ? (
+                <>
+                  <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Applying...
+                </>
+              ) : (
+                "Apply"
+              )}
+            </button>
+          </div>
+        }
+      >
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+          <div className="w-28 bg-gray-50 border-r border-gray-200 overflow-y-auto">
+            {filterCategories.map((category) => (
+              <button
+                key={category.id}
+                type="button"
+                onClick={() => {
+                  setActiveFilterCategory(category.id)
+                  setFilterSearch("")
+                }}
+                className={`w-full px-2 py-3 text-left text-xs transition-colors border-b border-gray-200 ${
+                  activeFilterCategory === category.id
+                    ? "bg-white text-gray-900 font-semibold border-2 border-l-black"
+                    : "text-gray-600 hover:bg-gray-100"
+                }`}
+              >
+                {category.label}
+              </button>
+            ))}
+          </div>
 
-              {/* Header */}
-              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
-                <h2 className="text-lg font-bold text-gray-900">Filters</h2>
-                <button
-                  onClick={() => setShowFilterPopup(false)}
-                  className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
-                  aria-label="Close"
-                >
-                  <X className="w-5 h-5 text-gray-900" />
-                </button>
+          <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+            <div className="p-3 border-b border-gray-200">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search"
+                  value={filterSearch}
+                  onChange={(e) => setFilterSearch(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
               </div>
+            </div>
 
-              {/* Main Content */}
-              <div className="flex flex-1 overflow-hidden">
-                {/* Sidebar Categories */}
-                <div className="w-28 bg-gray-50 border-r border-gray-200 overflow-y-auto">
-                  {filterCategories.map((category) => (
-                    <button
-                      key={category.id}
-                      onClick={() => {
-                        setActiveFilterCategory(category.id)
-                        setFilterSearch("")
-                      }}
-                      className={`w-full px-2 py-3 text-left text-xs transition-colors border-b border-gray-200 ${
-                        activeFilterCategory === category.id
-                          ? 'bg-white text-gray-900 font-semibold border-2 border-l-black'
-                          : 'text-gray-600 hover:bg-gray-100'
-                      }`}
+            <div className="flex-1 overflow-y-auto px-3 py-2">
+              {filterOptions[activeFilterCategory]
+                ?.filter((option) =>
+                  option.label.toLowerCase().includes(filterSearch.toLowerCase())
+                )
+                .map((option) => {
+                  const isChecked = isFilterChecked(option)
+                  const isRadio = activeFilterCategory === "Ratings"
+
+                  return (
+                    <label
+                      key={option.id}
+                      className="flex items-center py-2.5 cursor-pointer hover:bg-gray-50 rounded-lg px-2 transition-colors"
                     >
-                      {category.label}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Filter Options */}
-                <div className="flex-1 flex flex-col overflow-hidden">
-                  {/* Search Bar */}
-                  <div className="p-3 border-b border-gray-200">
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                      <input
-                        type="text"
-                        placeholder="Search"
-                        value={filterSearch}
-                        onChange={(e) => setFilterSearch(e.target.value)}
-                        className="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Options List */}
-                  <div className="flex-1 overflow-y-auto px-3 py-2">
-                    {filterOptions[activeFilterCategory]
-                      ?.filter(option => 
-                        option.label.toLowerCase().includes(filterSearch.toLowerCase())
-                      )
-                      .map((option) => {
-                        const isChecked = isFilterChecked(option)
-                        const isRadio = activeFilterCategory === "Ratings"
-                        
-                        return (
-                          <label
-                            key={option.id}
-                            className="flex items-center py-2.5 cursor-pointer hover:bg-gray-50 rounded-lg px-2 transition-colors"
+                      <div className="relative flex items-center justify-center">
+                        {isRadio ? (
+                          <div
+                            onClick={() => handleFilterToggle(option)}
+                            className={`w-5 h-5 rounded-full border-2 cursor-pointer transition-all ${
+                              isChecked
+                                ? "border-blue-600 bg-white"
+                                : "border-gray-300 bg-white"
+                            }`}
                           >
-                            <div className="relative flex items-center justify-center">
-                              {isRadio ? (
-                                <div
-                                  onClick={() => handleFilterToggle(option)}
-                                  className={`w-5 h-5 rounded-full border-2 cursor-pointer transition-all ${
-                                    isChecked 
-                                      ? 'border-blue-600 bg-white' 
-                                      : 'border-gray-300 bg-white'
-                                  }`}
-                                >
-                                  {isChecked && (
-                                    <div className="w-full h-full rounded-full flex items-center justify-center">
-                                      <div className="w-3 h-3 rounded-full bg-blue-600"></div>
-                                    </div>
-                                  )}
-                                </div>
-                              ) : (
-                                <input
-                                  type="checkbox"
-                                  checked={isChecked}
-                                  onChange={() => handleFilterToggle(option)}
-                                  className="w-5 h-5 border-2 border-gray-300 rounded cursor-pointer transition-all appearance-none checked:bg-blue-600 checked:border-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 relative"
-                                  style={{
-                                    backgroundImage: isChecked ? `url("data:image/svg+xml,%3csvg viewBox='0 0 16 16' fill='white' xmlns='http://www.w3.org/2000/svg'%3e%3cpath d='M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z'/%3e%3c/svg%3e")` : 'none',
-                                    backgroundSize: '100% 100%',
-                                    backgroundPosition: '50%',
-                                    backgroundRepeat: 'no-repeat'
-                                  }}
-                                />
-                              )}
-                            </div>
-                            <span className="ml-3 text-sm text-gray-900">{option.label}</span>
-                          </label>
-                        )
-                      })}
-                  </div>
-                </div>
-              </div>
-
-              {/* Footer Actions */}
-              <div className="flex items-center gap-3 px-4 py-3 border-t border-gray-200 bg-white">
-                <button
-                  onClick={handleClearFilters}
-                  className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-900 hover:bg-gray-50 transition-colors"
-                >
-                  Clear all
-                </button>
-                <button
-                  onClick={handleApplyFilters}
-                  disabled={isApplyingFilters}
-                  className="flex-1 px-4 py-2.5 bg-black rounded-lg text-sm font-medium text-white hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                >
-                  {isApplyingFilters ? (
-                    <>
-                      <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                      Applying...
-                    </>
-                  ) : (
-                    'Apply'
-                  )}
-                </button>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+                            {isChecked && (
+                              <div className="w-full h-full rounded-full flex items-center justify-center">
+                                <div className="w-3 h-3 rounded-full bg-blue-600"></div>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => handleFilterToggle(option)}
+                            className="w-5 h-5 border-2 border-gray-300 rounded cursor-pointer transition-all appearance-none checked:bg-blue-600 checked:border-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 relative"
+                            style={{
+                              backgroundImage: isChecked
+                                ? `url("data:image/svg+xml,%3csvg viewBox='0 0 16 16' fill='white' xmlns='http://www.w3.org/2000/svg'%3e%3cpath d='M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z'/%3e%3c/svg%3e")`
+                                : "none",
+                              backgroundSize: "100% 100%",
+                              backgroundPosition: "50%",
+                              backgroundRepeat: "no-repeat",
+                            }}
+                          />
+                        )}
+                      </div>
+                      <span className="ml-3 text-sm text-gray-900">{option.label}</span>
+                    </label>
+                  )
+                })}
+            </div>
+          </div>
+        </div>
+      </RestaurantPanelModal>
 
       {/* Loading Overlay */}
       <AnimatePresence>

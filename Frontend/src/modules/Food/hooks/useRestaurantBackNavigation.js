@@ -72,6 +72,7 @@ const resolveRestaurantBackPath = ({ pathname, state }) => {
     normalizedPath === "/fssai/update" ||
     normalizedPath === "/outlet-info" ||
     normalizedPath === "/outlet-timings" ||
+    normalizedPath === "/status" ||
     /^\/outlet-timings\/[^/]+$/.test(normalizedPath) ||
     normalizedPath === "/zone-setup"
   ) {
@@ -82,7 +83,6 @@ const resolveRestaurantBackPath = ({ pathname, state }) => {
     normalizedPath === "/settings" ||
     normalizedPath === "/delivery-settings" ||
     normalizedPath === "/rush-hour" ||
-    normalizedPath === "/status" ||
     normalizedPath === "/business-plan" ||
     normalizedPath === "/config" ||
     normalizedPath === "/categories" ||

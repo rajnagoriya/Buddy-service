@@ -34,8 +34,6 @@ import {
 
   Building2,
 
-  Power,
-
   Bell,
 
   Shield,
@@ -84,6 +82,8 @@ export const SIDEBAR_NAV_ITEMS = [
 
   { id: "inventory", label: "Menu", icon: Package, route: `${RESTAURANT_BASE}/inventory` },
 
+  { id: "menu-categories", label: "Categories", icon: Grid3x3, route: `${RESTAURANT_BASE}/menu-categories` },
+
   { id: "reservations", label: "Reservations", icon: Calendar, route: `${RESTAURANT_BASE}/reservations` },
 
   { id: "delivery", label: "Delivery", icon: Truck, route: `${RESTAURANT_BASE}/delivery-settings` },
@@ -120,11 +120,25 @@ export const SIDEBAR_SECTIONS = [
 
       { id: "orders", label: "Live orders", icon: FileText, route: `${RESTAURANT_BASE}/orders/live` },
 
-      { id: "inventory", label: "Menu", icon: Package, route: `${RESTAURANT_BASE}/inventory` },
-
       { id: "reservations", label: "Reservations", icon: Calendar, route: `${RESTAURANT_BASE}/reservations` },
 
       { id: "order-history", label: "Order history", icon: FileText, route: `${RESTAURANT_BASE}/orders/all` },
+
+    ],
+
+  },
+
+  {
+
+    key: "menu",
+
+    label: "Menu",
+
+    items: [
+
+      { id: "inventory", label: "Menu inventory", icon: Package, route: `${RESTAURANT_BASE}/inventory` },
+
+      { id: "menu-categories", label: "Categories", icon: Grid3x3, route: `${RESTAURANT_BASE}/menu-categories` },
 
     ],
 
@@ -158,9 +172,7 @@ export const SIDEBAR_SECTIONS = [
 
       { id: "outlet-info", label: "Outlet info", icon: Info, route: `${RESTAURANT_BASE}/outlet-info` },
 
-      { id: "status", label: "Online status", icon: Power, route: `${RESTAURANT_BASE}/status` },
-
-      { id: "timings", label: "Outlet timings", icon: Clock, route: `${RESTAURANT_BASE}/outlet-timings` },
+      { id: "hours-status", label: "Hours & status", icon: Clock, route: `${RESTAURANT_BASE}/outlet-timings` },
 
       { id: "zone", label: "Zone setup", icon: MapPin, route: `${RESTAURANT_BASE}/zone-setup` },
 
@@ -204,9 +216,7 @@ export const EXPLORE_SECTIONS = [
 
       { id: "outlet-info", label: "Outlet info", icon: Info, route: `${RESTAURANT_BASE}/outlet-info` },
 
-      { id: "outlet-timings", label: "Outlet timings", icon: Clock, route: `${RESTAURANT_BASE}/outlet-timings` },
-
-      { id: "status", label: "Online status", icon: Power, route: `${RESTAURANT_BASE}/status` },
+      { id: "hours-status", label: "Hours & status", icon: Clock, route: `${RESTAURANT_BASE}/outlet-timings` },
 
       { id: "phone", label: "Phone numbers", icon: Phone, route: `${RESTAURANT_BASE}/phone` },
 

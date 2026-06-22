@@ -2,7 +2,8 @@ import { useState, useRef, useEffect } from "react"
 import { useNavigate, useLocation } from "react-router-dom"
 import useRestaurantBackNavigation from "@food/hooks/useRestaurantBackNavigation"
 import { motion, AnimatePresence } from "framer-motion"
-import { ArrowLeft, ChevronDown, ChevronUp, Download, Mail, X, Info } from "lucide-react"
+import { ArrowLeft, ChevronDown, ChevronUp, Download, Mail, Info } from "lucide-react"
+import RestaurantPanelModal from "@food/components/restaurant/panel/RestaurantPanelModal"
 
 export default function FinanceDetailsPage() {
   const navigate = useNavigate()
@@ -550,87 +551,47 @@ export default function FinanceDetailsPage() {
         </AnimatePresence>
       </div>
 
-      {/* Download Popup */}
-      <AnimatePresence>
-        {showDownloadPopup && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowDownloadPopup(false)}
-              className="fixed inset-0 bg-black/50 z-50"
-            />
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 30, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl z-50 p-6"
-            >
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-bold text-gray-900">Download Report</h2>
-                <button
-                  onClick={() => setShowDownloadPopup(false)}
-                  className="p-1 rounded-full hover:bg-gray-100"
-                >
-                  <X className="w-5 h-5 text-gray-600" />
-                </button>
-              </div>
-              <p className="text-sm text-gray-600 mb-4">
-                Your settlement report is being downloaded as PDF...
-              </p>
-              <button
-                onClick={() => setShowDownloadPopup(false)}
-                className="w-full py-3 bg-black text-white rounded-lg font-medium hover:bg-gray-800 transition-colors"
-              >
-                Close
-              </button>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+      <RestaurantPanelModal
+        open={showDownloadPopup}
+        onClose={() => setShowDownloadPopup(false)}
+        title="Download Report"
+        size="sm"
+        mobileMaxHeight="auto"
+        footer={
+          <button
+            type="button"
+            onClick={() => setShowDownloadPopup(false)}
+            className="w-full rounded-lg bg-black py-3 font-medium text-white transition-colors hover:bg-gray-800"
+          >
+            Close
+          </button>
+        }
+      >
+        <p className="text-sm text-gray-600">
+          Your settlement report is being downloaded as PDF...
+        </p>
+      </RestaurantPanelModal>
 
-      {/* Email Popup */}
-      <AnimatePresence>
-        {showEmailPopup && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowEmailPopup(false)}
-              className="fixed inset-0 bg-black/50 z-50"
-            />
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 30, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl z-50 p-6"
-            >
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-bold text-gray-900">Email Report</h2>
-                <button
-                  onClick={() => setShowEmailPopup(false)}
-                  className="p-1 rounded-full hover:bg-gray-100"
-                >
-                  <X className="w-5 h-5 text-gray-600" />
-                </button>
-              </div>
-              <p className="text-sm text-gray-600 mb-4">
-                Your settlement report has been sent to your registered email address.
-              </p>
-              <button
-                onClick={() => setShowEmailPopup(false)}
-                className="w-full py-3 bg-black text-white rounded-lg font-medium hover:bg-gray-800 transition-colors"
-              >
-                Close
-              </button>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+      <RestaurantPanelModal
+        open={showEmailPopup}
+        onClose={() => setShowEmailPopup(false)}
+        title="Email Report"
+        size="sm"
+        mobileMaxHeight="auto"
+        footer={
+          <button
+            type="button"
+            onClick={() => setShowEmailPopup(false)}
+            className="w-full rounded-lg bg-black py-3 font-medium text-white transition-colors hover:bg-gray-800"
+          >
+            Close
+          </button>
+        }
+      >
+        <p className="text-sm text-gray-600">
+          Your settlement report has been sent to your registered email address.
+        </p>
+      </RestaurantPanelModal>
     </div>
   )
 }

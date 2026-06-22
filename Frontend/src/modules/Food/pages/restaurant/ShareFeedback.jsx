@@ -1,8 +1,9 @@
 import { useState } from "react"
 import useRestaurantBackNavigation from "@food/hooks/useRestaurantBackNavigation"
-import { motion, AnimatePresence } from "framer-motion"
+import { motion } from "framer-motion"
 import { CheckCircle2 } from "lucide-react"
 import RestaurantSubPageShell from "@food/components/restaurant/panel/RestaurantSubPageShell"
+import RestaurantPanelModal from "@food/components/restaurant/panel/RestaurantPanelModal"
 import { PanelSurface } from "@food/components/restaurant/panel/panelUi"
 import { RESTAURANT_BASE } from "@food/utils/restaurantNavConfig"
 import { API_ENDPOINTS } from "@food/api/config"
@@ -134,52 +135,37 @@ export default function ShareFeedback() {
         {isSubmitting ? "Submitting..." : "Continue"}
       </motion.button>
 
-      {/* Thank you popup */}
-      <AnimatePresence>
-        {showThanks && (
-          <motion.div
-            className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center px-6"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+      <RestaurantPanelModal
+        open={showThanks}
+        onClose={() => {
+          setShowThanks(false)
+          goBack()
+        }}
+        title="Thanks for your feedback"
+        description={`It helps us improve your experience with ${companyName.toLowerCase()}.`}
+        size="sm"
+        mobileMaxHeight="auto"
+        showDragHandle={false}
+        bodyClassName="px-5 py-4 lg:px-6 lg:py-5"
+        footer={
+          <button
+            type="button"
+            className="w-full rounded-full bg-black py-2.5 text-sm font-medium text-white"
             onClick={() => {
               setShowThanks(false)
               goBack()
             }}
           >
-            <motion.div
-              initial={{ scale: 0.9, y: 10, opacity: 0 }}
-              animate={{ scale: 1, y: 0, opacity: 1 }}
-              exit={{ scale: 0.9, y: 10, opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="w-full max-w-sm rounded-3xl bg-white px-5 pt-5 pb-6 shadow-xl"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex flex-col items-center text-center">
-                <div className="mb-3 h-12 w-12 rounded-full bg-green-100 flex items-center justify-center">
-                  <CheckCircle2 className="w-7 h-7 text-green-600" />
-                </div>
-                <h2 className="text-base font-semibold text-gray-900 mb-1">
-                  Thanks for your feedback
-                </h2>
-                <p className="text-xs text-gray-600 mb-4">
-                  It helps us improve your experience with {companyName.toLowerCase()}.
-                </p>
-                <button
-                  type="button"
-                  className="w-full py-2.5 rounded-full bg-black text-white text-sm font-medium"
-                  onClick={() => {
-                    setShowThanks(false)
-                    goBack()
-                  }}
-                >
-                  Done
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            Done
+          </button>
+        }
+      >
+        <div className="flex justify-center">
+          <div className="mb-1 flex h-12 w-12 items-center justify-center rounded-full bg-green-100">
+            <CheckCircle2 className="h-7 w-7 text-green-600" />
+          </div>
+        </div>
+      </RestaurantPanelModal>
     </RestaurantSubPageShell>
   )
 }

@@ -1,9 +1,10 @@
 import { useState, useMemo, useRef, useEffect } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { motion, AnimatePresence } from "framer-motion"
-import { Bell, Menu, ChevronDown, Calendar, Download, ArrowRight, FileText, Wallet, X } from "lucide-react"
+import { Bell, Menu, ChevronDown, Calendar, Download, ArrowRight, FileText, Wallet } from "lucide-react"
 import BottomNavOrders from "@food/components/restaurant/BottomNavOrders"
 import RestaurantPanelHeader from "@food/components/restaurant/panel/RestaurantPanelHeader"
+import RestaurantPanelModal from "@food/components/restaurant/panel/RestaurantPanelModal"
 import { PanelPill, PanelSurface } from "@food/components/restaurant/panel/panelUi"
 import { RESTAURANT_BASE } from "@food/utils/restaurantNavConfig"
 import { restaurantAPI } from "@food/api"
@@ -1168,123 +1169,100 @@ export default function HubFinance() {
         )}
       </div>
 
-      {/* Withdrawal Modal */}
-      <AnimatePresence>
-        {showWithdrawalModal && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/50 z-50"
-              onClick={() => setShowWithdrawalModal(false)}
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="fixed inset-0 z-50 flex items-center justify-center p-4"
-              onClick={(e) => e.stopPropagation()}
+      <RestaurantPanelModal
+        open={showWithdrawalModal}
+        onClose={() => {
+          setShowWithdrawalModal(false)
+          setWithdrawalAmount('')
+        }}
+        title="Withdraw Amount"
+        size="md"
+        mobileMaxHeight="auto"
+        footer={
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setShowWithdrawalModal(false)
+                setWithdrawalAmount('')
+              }}
+              className="flex-1 rounded-lg border border-gray-300 px-4 py-3 font-medium text-gray-700 transition-colors hover:bg-gray-50"
             >
-              <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-xl font-bold text-gray-900">Withdraw Amount</h2>
-                  <button
-                    onClick={() => {
-                      setShowWithdrawalModal(false)
-                      setWithdrawalAmount('')
-                    }}
-                    className="p-1 hover:bg-gray-100 rounded-full transition-colors"
-                  >
-                    <X className="w-5 h-5 text-gray-600" />
-                  </button>
-                </div>
-                
-                <div className="mb-4">
-                  <p className="text-sm text-gray-600 mb-2">
-                    Available Balance: <span className="font-semibold text-gray-900">₹{(financeData?.currentCycle?.estimatedPayout || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                  </p>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Enter Amount to Withdraw
-                  </label>
-                  <input
-                    type="number"
-                    min="0.01"
-                    max={financeData?.currentCycle?.estimatedPayout || 0}
-                    step="0.01"
-                    value={withdrawalAmount}
-                    onChange={(e) => setWithdrawalAmount(e.target.value)}
-                    placeholder="0.00"
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-black focus:border-transparent outline-none"
-                  />
-                  {withdrawalAmount && parseFloat(withdrawalAmount) > (financeData?.currentCycle?.estimatedPayout || 0) && (
-                    <p className="text-sm text-red-600 mt-1">Amount cannot exceed available balance</p>
-                  )}
-                </div>
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                const amount = parseFloat(withdrawalAmount)
+                if (!amount || amount <= 0) {
+                  alert('Please enter a valid amount')
+                  return
+                }
+                if (amount > (financeData?.currentCycle?.estimatedPayout || 0)) {
+                  alert('Amount cannot exceed available balance')
+                  return
+                }
 
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => {
-                      setShowWithdrawalModal(false)
-                      setWithdrawalAmount('')
-                    }}
-                    className="flex-1 px-4 py-3 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={async () => {
-                      const amount = parseFloat(withdrawalAmount)
-                      if (!amount || amount <= 0) {
-                        alert('Please enter a valid amount')
-                        return
-                      }
-                      if (amount > (financeData?.currentCycle?.estimatedPayout || 0)) {
-                        alert('Amount cannot exceed available balance')
-                        return
-                      }
-                      
-                      try {
-                        setSubmittingWithdrawal(true)
-                        const response = await restaurantAPI.createWithdrawalRequest(amount)
-                        if (response.data?.success) {
-                          alert('Withdrawal request submitted successfully!')
-                          setShowWithdrawalModal(false)
-                          setWithdrawalAmount('')
-                          // Refresh finance data
-                          const financeResponse = await restaurantAPI.getFinance()
-                          if (financeResponse.data?.success && financeResponse.data?.data) {
-                            setFinanceData(financeResponse.data.data)
-                          }
-                          const withdrawalResponse = await restaurantAPI.getWithdrawalHistory()
-                          const withdrawalPayload = withdrawalResponse?.data?.data
-                          const withdrawalList = Array.isArray(withdrawalPayload)
-                            ? withdrawalPayload
-                            : Array.isArray(withdrawalPayload?.withdrawals)
-                              ? withdrawalPayload.withdrawals
-                              : []
-                          setWithdrawalRequests(withdrawalList)
-                        } else {
-                          alert(response.data?.message || 'Failed to submit withdrawal request')
-                        }
-                      } catch (error) {
-                        debugError('Error submitting withdrawal request:', error)
-                        alert(error.response?.data?.message || 'Failed to submit withdrawal request. Please try again.')
-                      } finally {
-                        setSubmittingWithdrawal(false)
-                      }
-                    }}
-                    disabled={submittingWithdrawal || !withdrawalAmount || parseFloat(withdrawalAmount) <= 0 || parseFloat(withdrawalAmount) > (financeData?.currentCycle?.estimatedPayout || 0)}
-                    className="flex-1 px-4 py-3 bg-black text-white rounded-lg font-medium hover:bg-gray-800 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
-                  >
-                    {submittingWithdrawal ? 'Submitting...' : 'Submit Request'}
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </>
+                try {
+                  setSubmittingWithdrawal(true)
+                  const response = await restaurantAPI.createWithdrawalRequest(amount)
+                  if (response.data?.success) {
+                    alert('Withdrawal request submitted successfully!')
+                    setShowWithdrawalModal(false)
+                    setWithdrawalAmount('')
+                    const financeResponse = await restaurantAPI.getFinance()
+                    if (financeResponse.data?.success && financeResponse.data?.data) {
+                      setFinanceData(financeResponse.data.data)
+                    }
+                    const withdrawalResponse = await restaurantAPI.getWithdrawalHistory()
+                    const withdrawalPayload = withdrawalResponse?.data?.data
+                    const withdrawalList = Array.isArray(withdrawalPayload)
+                      ? withdrawalPayload
+                      : Array.isArray(withdrawalPayload?.withdrawals)
+                        ? withdrawalPayload.withdrawals
+                        : []
+                    setWithdrawalRequests(withdrawalList)
+                  } else {
+                    alert(response.data?.message || 'Failed to submit withdrawal request')
+                  }
+                } catch (error) {
+                  debugError('Error submitting withdrawal request:', error)
+                  alert(error.response?.data?.message || 'Failed to submit withdrawal request. Please try again.')
+                } finally {
+                  setSubmittingWithdrawal(false)
+                }
+              }}
+              disabled={submittingWithdrawal || !withdrawalAmount || parseFloat(withdrawalAmount) <= 0 || parseFloat(withdrawalAmount) > (financeData?.currentCycle?.estimatedPayout || 0)}
+              className="flex-1 rounded-lg bg-black px-4 py-3 font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-300"
+            >
+              {submittingWithdrawal ? 'Submitting...' : 'Submit Request'}
+            </button>
+          </div>
+        }
+      >
+        <p className="mb-4 text-sm text-gray-600">
+          Available Balance:{' '}
+          <span className="font-semibold text-gray-900">
+            ₹{(financeData?.currentCycle?.estimatedPayout || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </span>
+        </p>
+        <label className="mb-2 block text-sm font-medium text-gray-700">
+          Enter Amount to Withdraw
+        </label>
+        <input
+          type="number"
+          min="0.01"
+          max={financeData?.currentCycle?.estimatedPayout || 0}
+          step="0.01"
+          value={withdrawalAmount}
+          onChange={(e) => setWithdrawalAmount(e.target.value)}
+          placeholder="0.00"
+          className="w-full rounded-lg border border-gray-300 px-4 py-3 outline-none focus:border-transparent focus:ring-2 focus:ring-black"
+        />
+        {withdrawalAmount && parseFloat(withdrawalAmount) > (financeData?.currentCycle?.estimatedPayout || 0) && (
+          <p className="mt-1 text-sm text-red-600">Amount cannot exceed available balance</p>
         )}
-      </AnimatePresence>
+      </RestaurantPanelModal>
 
       <BottomNavOrders />
     </div>

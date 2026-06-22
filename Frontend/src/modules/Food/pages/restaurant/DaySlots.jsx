@@ -1,19 +1,12 @@
 import { useState, useRef, useEffect } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { RESTAURANT_BASE } from "@food/utils/restaurantNavConfig"
-import { motion, AnimatePresence } from "framer-motion"
+import { motion } from "framer-motion"
 import Lenis from "lenis"
 import { ArrowLeft, Clock, Edit2, Trash2, ChevronDown, AlertTriangle, X } from "lucide-react"
 import { Button } from "@food/components/ui/button"
 import { Checkbox } from "@food/components/ui/checkbox"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@food/components/ui/dialog"
+import RestaurantPanelModal, { RestaurantConfirmModal } from "@food/components/restaurant/panel/RestaurantPanelModal"
 import {
   Select,
   SelectContent,
@@ -217,27 +210,26 @@ function TimePickerWheel({
     onClose()
   }
 
-  if (!isOpen) return null
-
   return (
-    <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-4"
-        onClick={onClose}
-      >
-        <motion.div
-          initial={{ scale: 0.9, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0.9, opacity: 0 }}
-          transition={{ type: "spring", damping: 25, stiffness: 300 }}
-          className="bg-white rounded-lg shadow-2xl w-full max-w-xs overflow-hidden"
-          onClick={(e) => e.stopPropagation()}
+    <RestaurantPanelModal
+      open={isOpen}
+      onClose={onClose}
+      hideHeader
+      showDragHandle={false}
+      size="sm"
+      mobileMaxHeight="auto"
+      zIndex={9999}
+      bodyClassName="p-0"
+      footer={
+        <button
+          onClick={handleConfirm}
+          className="w-full text-center text-base font-medium text-blue-600 transition-colors hover:text-blue-700"
         >
-          {/* Time Picker Content */}
-          <div className="flex items-center justify-center py-8 px-4 relative">
+          Okay
+        </button>
+      }
+    >
+      <div className="relative flex items-center justify-center px-4 py-8">
             <style>{`
               .time-picker-scroll::-webkit-scrollbar {
                 display: none;
@@ -362,21 +354,9 @@ function TimePickerWheel({
             <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 pointer-events-none">
               <div className="border-t border-gray-300 mx-4"></div>
               <div className="border-b border-gray-300 mx-4 mt-10"></div>
-            </div>
           </div>
-
-          {/* Okay Button */}
-          <div className="border-t border-gray-200 px-4 py-4 flex justify-center">
-            <button
-              onClick={handleConfirm}
-              className="text-blue-600 hover:text-blue-700 font-medium text-base transition-colors"
-            >
-              Okay
-            </button>
-          </div>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>
+      </div>
+    </RestaurantPanelModal>
   )
 }
 
@@ -800,40 +780,26 @@ export default function DaySlots() {
         )
       })()}
 
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent className="sm:max-w-[425px] p-4">
-          <DialogHeader>
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center shrink-0">
-                <AlertTriangle className="w-6 h-6 text-red-600" />
-              </div>
-              <DialogTitle className="text-left">Delete Time Slot</DialogTitle>
-            </div>
-            <DialogDescription className="text-left text-gray-600 pt-2">
-              Are you sure you want to delete this time slot? This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setDeleteDialogOpen(false)  
-                setSlotToDelete(null)
-              }}
-              className="w-full sm:w-auto"
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={confirmDelete}
-              className="w-full sm:w-auto bg-red-600 hover:bg-red-700 text-white"
-            >
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <RestaurantConfirmModal
+        open={deleteDialogOpen}
+        onClose={() => {
+          setDeleteDialogOpen(false)
+          setSlotToDelete(null)
+        }}
+        onConfirm={confirmDelete}
+        title="Delete Time Slot"
+        confirmLabel="Delete"
+        confirmVariant="danger"
+        icon={
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-100">
+            <AlertTriangle className="h-6 w-6 text-red-600" />
+          </div>
+        }
+      >
+        <p className="text-center text-sm text-gray-600">
+          Are you sure you want to delete this time slot? This action cannot be undone.
+        </p>
+      </RestaurantConfirmModal>
     </div>
   )
 }

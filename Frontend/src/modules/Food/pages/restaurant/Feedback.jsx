@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import { motion, AnimatePresence } from "framer-motion"
-import { Bell, HelpCircle, Menu, Search, SlidersHorizontal, Calendar, ChevronLeft, X, Loader2, ChevronRight, Star } from "lucide-react"
+import { AnimatePresence } from "framer-motion"
+import { HelpCircle, Search, SlidersHorizontal, Calendar, Loader2, Star } from "lucide-react"
 import { DateRangeCalendar } from "@food/components/ui/date-range-calendar"
 import BottomNavOrders from "@food/components/restaurant/BottomNavOrders"
 import RestaurantPanelHeader from "@food/components/restaurant/panel/RestaurantPanelHeader"
+import RestaurantPanelModal from "@food/components/restaurant/panel/RestaurantPanelModal"
 import { PanelPill, PanelSurface } from "@food/components/restaurant/panel/panelUi"
 import useMediaQuery from "@food/hooks/useMediaQuery"
 import { restaurantAPI } from "@food/api"
@@ -700,158 +701,108 @@ export default function Feedback() {
         )}
       </div>
 
-      {/* Date Selector Popup */}
-      <AnimatePresence>
-        {isDateSelectorOpen && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/50 z-50"
-              onClick={() => setIsDateSelectorOpen(false)}
-            />
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 30, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 bg-white dark:bg-[#1a1a1a] rounded-t-3xl shadow-2xl z-50 p-4"
+      <RestaurantPanelModal
+        open={isDateSelectorOpen}
+        onClose={() => setIsDateSelectorOpen(false)}
+        title="Select Date Range"
+        size="md"
+        mobileMaxHeight="auto"
+        bodyClassName="px-4 py-4 lg:px-5 lg:py-5"
+      >
+        <div className="grid grid-cols-2 gap-3">
+          {["today", "yesterday", "thisWeek", "lastWeek", "thisMonth", "lastMonth", "last5days", "custom"].map((range) => (
+            <button
+              key={range}
+              onClick={() => handleDateRangeSelect(range)}
+              className={`rounded-xl border-2 py-3 text-sm font-bold capitalize transition-all ${
+                selectedDateRange === range
+                  ? "border-black bg-black text-white"
+                  : "border-gray-100 bg-white text-gray-600"
+              }`}
             >
-              <div className="flex justify-center mb-4">
-                <div className="h-1 w-10 rounded-full bg-gray-300 dark:bg-gray-700" />
-              </div>
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-bold dark:text-white">Select Date Range</h3>
-                <button onClick={() => setIsDateSelectorOpen(false)}><X className="w-5 h-5 dark:text-white" /></button>
-              </div>
-              <div className="grid grid-cols-2 gap-3 mb-6">
-                {["today", "yesterday", "thisWeek", "lastWeek", "thisMonth", "lastMonth", "last5days", "custom"].map((range) => (
-                  <button
-                    key={range}
-                    onClick={() => handleDateRangeSelect(range)}
-                    className={`py-3 rounded-xl border-2 text-sm font-bold capitalize transition-all ${
-                      selectedDateRange === range ? "border-black dark:border-white bg-black dark:bg-white text-white dark:text-black" : "border-gray-100 dark:border-gray-800 bg-white dark:bg-[#0a0a0a] text-gray-600 dark:text-gray-400"
-                    }`}
-                  >
-                    {range === "last5days" ? "Last 5 Days" : range.replace(/([A-Z])/g, ' $1').trim()}
-                  </button>
-                ))}
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+              {range === "last5days" ? "Last 5 Days" : range.replace(/([A-Z])/g, " $1").trim()}
+            </button>
+          ))}
+        </div>
+      </RestaurantPanelModal>
 
-      {/* Custom Date Range Picker */}
-      <AnimatePresence>
-        {isCustomDateOpen && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/50 z-[60]"
-              onClick={() => setIsCustomDateOpen(false)}
-            />
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="fixed inset-0 m-auto w-[90%] max-w-sm h-fit bg-white dark:bg-[#1a1a1a] rounded-3xl shadow-2xl z-[60] p-6"
+      <RestaurantPanelModal
+        open={isCustomDateOpen}
+        onClose={() => setIsCustomDateOpen(false)}
+        size="sm"
+        mobileMaxHeight="auto"
+        showDragHandle={false}
+        hideHeader
+        zIndex={60}
+        bodyClassName="px-6 py-6 lg:px-6 lg:py-6"
+        footer={
+          <button
+            onClick={handleCustomDateApply}
+            className="w-full rounded-2xl bg-black py-4 font-bold text-white shadow-xl transition-all active:scale-[0.98]"
+          >
+            Apply Custom Range
+          </button>
+        }
+      >
+        <DateRangeCalendar
+          startDate={customDateRange.start}
+          endDate={customDateRange.end}
+          onDateRangeChange={(start, end) => {
+            setCustomDateRange({ start, end })
+          }}
+          onClose={() => setIsCustomDateOpen(false)}
+        />
+      </RestaurantPanelModal>
+
+      <RestaurantPanelModal
+        open={isComplaintsFilterOpen}
+        onClose={() => setIsComplaintsFilterOpen(false)}
+        title="Filters"
+        size="lg"
+        mobileMaxHeight="tall"
+        bodyClassName="space-y-6 px-6 py-4 lg:px-5 lg:py-5"
+        footer={
+          <div className="flex gap-3">
+            <button
+              onClick={handleComplaintsFilterReset}
+              className="flex-1 rounded-2xl py-4 font-bold text-slate-400 transition-colors hover:text-slate-900"
             >
-              <DateRangeCalendar
-                startDate={customDateRange.start}
-                endDate={customDateRange.end}
-                onDateRangeChange={(start, end) => {
-                  setCustomDateRange({ start, end });
-                }}
-                onClose={() => setIsCustomDateOpen(false)}
-              />
+              Reset
+            </button>
+            <button
+              onClick={handleComplaintsFilterApply}
+              className="flex-[2] rounded-2xl bg-slate-900 py-4 font-bold text-white shadow-xl shadow-slate-200 transition-all active:scale-[0.98]"
+            >
+              Apply Filters
+            </button>
+          </div>
+        }
+      >
+        <div>
+          <h4 className="mb-4 text-xs font-bold uppercase tracking-widest text-slate-400">Issue Type</h4>
+          <div className="flex flex-wrap gap-2">
+            {["Missing Item", "Wrong Item", "Quality Issue", "Delivery Delay", "Other"].map((type) => (
               <button
-                onClick={handleCustomDateApply}
-                className="w-full bg-black dark:bg-white text-white dark:text-black py-4 rounded-2xl font-bold mt-4 shadow-xl active:scale-[0.98] transition-all"
+                key={type}
+                onClick={() => {
+                  const current = complaintsFilterValues.issueType || []
+                  setComplaintsFilterValues({
+                    ...complaintsFilterValues,
+                    issueType: current.includes(type) ? [] : [type],
+                  })
+                }}
+                className={`rounded-xl px-4 py-2.5 text-sm font-bold transition-all ${
+                  complaintsFilterValues.issueType?.includes(type)
+                    ? "bg-slate-900 text-white shadow-lg shadow-slate-200"
+                    : "bg-slate-50 text-slate-600 hover:bg-slate-100"
+                }`}
               >
-                Apply Custom Range
+                {type}
               </button>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-
-      {/* Complaints Filter Popup */}
-      <AnimatePresence>
-        {isComplaintsFilterOpen && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/40 z-50 backdrop-blur-sm"
-              onClick={() => setIsComplaintsFilterOpen(false)}
-            />
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 25, stiffness: 200 }}
-              className="fixed bottom-0 left-0 right-0 bg-white dark:bg-[#1a1a1a] rounded-t-[32px] shadow-2xl z-50 overflow-hidden"
-              style={{ maxHeight: "80vh" }}
-            >
-              <div className="p-6 flex flex-col h-full">
-                <div className="flex justify-between items-center mb-6">
-                  <h3 className="text-xl font-bold font-primary text-slate-900 dark:text-white">Filters</h3>
-                  <button onClick={() => setIsComplaintsFilterOpen(false)} className="p-2 hover:bg-slate-50 dark:hover:bg-gray-800 rounded-full transition-colors">
-                    <X className="w-5 h-5 text-slate-400" />
-                  </button>
-                </div>
-
-                <div className="flex-1 overflow-y-auto pr-2 -mr-2 space-y-6 mb-6">
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Issue Type</h4>
-                    <div className="flex flex-wrap gap-2">
-                      {["Missing Item", "Wrong Item", "Quality Issue", "Delivery Delay", "Other"].map((type) => (
-                        <button
-                          key={type}
-                          onClick={() => {
-                            const current = complaintsFilterValues.issueType || [];
-                            setComplaintsFilterValues({
-                              ...complaintsFilterValues,
-                              issueType: current.includes(type) ? [] : [type]
-                            });
-                          }}
-                          className={`px-4 py-2.5 rounded-xl text-sm font-bold transition-all ${
-                            complaintsFilterValues.issueType?.includes(type)
-                              ? "bg-slate-900 dark:bg-white text-white dark:text-black shadow-lg shadow-slate-200 dark:shadow-none"
-                              : "bg-slate-50 dark:bg-gray-800 text-slate-600 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700"
-                          }`}
-                        >
-                          {type}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex gap-3 mt-auto">
-                  <button
-                    onClick={handleComplaintsFilterReset}
-                    className="flex-1 py-4 rounded-2xl font-bold text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors"
-                  >
-                    Reset
-                  </button>
-                  <button
-                    onClick={handleComplaintsFilterApply}
-                    className="flex-[2] bg-slate-900 dark:bg-white text-white dark:text-black py-4 rounded-2xl font-bold shadow-xl shadow-slate-200 dark:shadow-none active:scale-[0.98] transition-all"
-                  >
-                    Apply Filters
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+            ))}
+          </div>
+        </div>
+      </RestaurantPanelModal>
       <BottomNavOrders />
     </div>
   )

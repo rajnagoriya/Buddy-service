@@ -226,7 +226,7 @@ export default function Dashboard() {
                   icon={Power}
                   title="Online status"
                   subtitle="Go online or schedule off time"
-                  onClick={() => navigate(`${RESTAURANT_BASE}/status`)}
+                  onClick={() => navigate(`${RESTAURANT_BASE}/outlet-timings`)}
                 />
                 <QuickTile
                   icon={MessageSquare}

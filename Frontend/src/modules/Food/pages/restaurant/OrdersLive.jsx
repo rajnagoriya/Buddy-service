@@ -27,6 +27,7 @@ import { toast } from "sonner";
 import BottomNavOrders from "@food/components/restaurant/BottomNavOrders";
 import RestaurantNavbar from "@food/components/restaurant/RestaurantNavbar";
 import RestaurantPanelHeader from "@food/components/restaurant/panel/RestaurantPanelHeader";
+import RestaurantPanelModal from "@food/components/restaurant/panel/RestaurantPanelModal";
 import OrderDetailPanel from "@food/components/restaurant/panel/OrderDetailPanel";
 import useMediaQuery from "@food/hooks/useMediaQuery";
 import useOrderFilters from "@food/hooks/useOrderFilters";
@@ -2641,54 +2642,130 @@ export default function OrdersLive() {
         playsInline
       />
 
-      {/* New Order Popup */}
-      <AnimatePresence>
-        {showNewOrderPopup && (
+      <RestaurantPanelModal
+        open={showNewOrderPopup}
+        onClose={() => {}}
+        closeOnOverlay={false}
+        showCloseButton={false}
+        title={(popupOrder || newOrder)?.orderId || "#Order"}
+        description={(popupOrder || newOrder)?.restaurantName || "Restaurant"}
+        size="md"
+        mobileMaxHeight="full"
+        zIndex={60}
+        className="rounded-[2rem] p-1"
+        bodyClassName="min-h-0 flex-1 overflow-y-auto px-4 pt-4 pb-4"
+        headerRight={
           <>
-            <motion.div
-              className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}>
-              <motion.div
-                className="w-[95%] max-w-md max-h-[calc(100vh-2rem)] bg-white rounded-[2rem] shadow-2xl overflow-hidden p-1 flex flex-col"
-                initial={{ scale: 0.9, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.9, opacity: 0 }}
-                transition={{ type: "spring", damping: 25, stiffness: 300 }}
-                onClick={(e) => e.stopPropagation()}>
-                {/* Header */}
-                <div className="px-4 py-3 bg-white border-b border-gray-200 flex items-center justify-between">
-                  <div className="flex-1">
-                    <h3 className="text-base font-bold text-gray-900">
-                      {(popupOrder || newOrder)?.orderId || "#Order"}
-                    </h3>
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      {(popupOrder || newOrder)?.restaurantName || "Restaurant"}
-                    </p>
+            <button
+              onClick={handlePrint}
+              className="rounded-lg p-2 transition-colors hover:bg-gray-100"
+              aria-label="Print"
+            >
+              <Printer className="h-5 w-5 text-gray-700" />
+            </button>
+            <button
+              onClick={toggleMute}
+              className="rounded-lg p-2 transition-colors hover:bg-gray-100"
+              aria-label={isMuted ? "Unmute" : "Mute"}
+            >
+              {isMuted ? (
+                <VolumeX className="h-5 w-5 text-gray-700" />
+              ) : (
+                <Volume2 className="h-5 w-5 text-gray-700" />
+              )}
+            </button>
+          </>
+        }
+        footer={
+          (() => {
+            const activePopupOrder = popupOrder || newOrder;
+            const popupStatus =
+              activePopupOrder?.orderStatus || activePopupOrder?.status;
+            const userCancelled = isUserCancelledStatus(popupStatus);
+            const anyCancelled = isAnyCancelledStatus(popupStatus);
+
+            if (anyCancelled) {
+              return (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+                  <p className="text-sm font-semibold text-red-700">
+                    {userCancelled
+                      ? "Order canceled by user"
+                      : "Order cancelled"}
+                  </p>
+                  <p className="mt-1 text-xs text-red-600">
+                    This order is no longer available for acceptance.
+                  </p>
+                </div>
+              );
+            }
+
+            return (
+              <div className="space-y-3">
+                <div
+                  ref={acceptSliderRef}
+                  className="relative h-14 select-none overflow-hidden rounded-2xl bg-gray-900 touch-pan-y"
+                >
+                  <motion.div
+                    className="absolute inset-y-0 left-0 bg-blue-600"
+                    initial={{ width: "100%" }}
+                    animate={{ width: `${(countdown / 180) * 100}%` }}
+                    transition={{ duration: 1, ease: "linear" }}
+                  />
+                  <div className="absolute inset-0 flex items-center justify-center px-16">
+                    <span className="relative z-10 text-center text-sm font-semibold text-white">
+                      {isAcceptingOrder
+                        ? "Accepting order..."
+                        : `Slide to accept (${formatTime(countdown)})`}
+                    </span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={handlePrint}
-                      className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                      aria-label="Print">
-                      <Printer className="w-5 h-5 text-gray-700" />
-                    </button>
-                    <button
-                      onClick={toggleMute}
-                      className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                      aria-label={isMuted ? "Unmute" : "Mute"}>
-                      {isMuted ? (
-                        <VolumeX className="w-5 h-5 text-gray-700" />
-                      ) : (
-                        <Volume2 className="w-5 h-5 text-gray-700" />
-                      )}
-                    </button>
-                  </div>
+                  <motion.button
+                    type="button"
+                    className="absolute left-2 top-1/2 z-20 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-xl bg-white text-gray-900 shadow-md disabled:cursor-not-allowed"
+                    style={{
+                      x: (() => {
+                        const sliderWidth =
+                          acceptSliderRef.current?.offsetWidth || 320;
+                        const handleWidth = 40;
+                        const maxTravel = Math.max(
+                          sliderWidth - handleWidth - 16,
+                          0,
+                        );
+                        return acceptSwipeProgress * maxTravel;
+                      })(),
+                    }}
+                    onMouseDown={(e) => handleAcceptSwipeStart(e.clientX)}
+                    onTouchStart={(e) =>
+                      handleAcceptSwipeStart(e.touches[0].clientX)
+                    }
+                    onMouseMove={(e) => {
+                      if (acceptSwipeActiveRef.current)
+                        handleAcceptSwipeMove(e.clientX);
+                    }}
+                    onTouchMove={(e) =>
+                      handleAcceptSwipeMove(e.touches[0].clientX)
+                    }
+                    onMouseUp={handleAcceptSwipeEnd}
+                    onTouchEnd={handleAcceptSwipeEnd}
+                    onTouchCancel={handleAcceptSwipeEnd}
+                    onClick={triggerSwipeAccept}
+                    disabled={isAcceptingOrder}
+                  >
+                    <span className="text-lg font-bold">›</span>
+                  </motion.button>
                 </div>
 
-                {/* Content */}
-                <div className="px-4 pt-4 pb-4 flex-1 overflow-y-auto min-h-0">
+                <button
+                  onClick={handleRejectClick}
+                  disabled={isAcceptingOrder}
+                  className="w-full rounded-lg border-2 border-red-500 bg-white py-3 text-sm font-semibold text-red-600 transition-colors hover:bg-red-50 disabled:opacity-60"
+                >
+                  Reject Order
+                </button>
+              </div>
+            );
+          })()
+        }
+      >
                   {/* Scheduled Indicator */}
                   {(popupOrder || newOrder)?.scheduledAt && (
                     <div className="mb-4 bg-green-50 border border-green-200 rounded-lg p-3 flex items-center gap-3">
@@ -2922,322 +2999,146 @@ export default function OrdersLive() {
                       </div>
                     </div>
                   </div>
+      </RestaurantPanelModal>
+
+      <RestaurantPanelModal
+        open={showRejectPopup}
+        onClose={handleRejectCancel}
+        title={`Reject Order ${(popupOrder || newOrder)?.orderId || "#Order"}`}
+        description="Please select a reason for rejecting this order"
+        size="md"
+        mobileMaxHeight="tall"
+        zIndex={70}
+        bodyClassName="max-h-[60vh] space-y-2 overflow-y-auto px-4 py-4 lg:px-5 lg:py-5"
+        footer={
+          <div className="flex gap-3">
+            <button
+              onClick={handleRejectCancel}
+              className="flex-1 rounded-lg border-2 border-gray-300 bg-white py-3 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleRejectConfirm}
+              disabled={!rejectReason}
+              className={`flex-1 rounded-lg py-3 text-sm font-semibold transition-colors ${
+                rejectReason
+                  ? "!bg-primary-orange !text-white hover:!bg-primary-orange/90"
+                  : "cursor-not-allowed bg-gray-200 text-gray-400"
+              }`}
+            >
+              Confirm Rejection
+            </button>
+          </div>
+        }
+      >
+        {rejectReasons.map((reason) => (
+          <button
+            key={reason}
+            onClick={() => setRejectReason(reason)}
+            className={`w-full rounded-lg border-2 p-4 text-left transition-all ${
+              rejectReason === reason
+                ? "border-primary-orange bg-primary-orange/10"
+                : "border-gray-200 bg-white hover:border-gray-300"
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <span
+                className={`text-sm font-medium ${
+                  rejectReason === reason ? "text-primary-orange" : "text-gray-900"
+                }`}
+              >
+                {reason}
+              </span>
+              {rejectReason === reason && (
+                <div className="flex h-5 w-5 items-center justify-center rounded-full bg-primary-orange">
+                  <svg className="h-3 w-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                  </svg>
                 </div>
+              )}
+            </div>
+          </button>
+        ))}
+      </RestaurantPanelModal>
 
-                <div className="px-4 pb-4 pt-3 border-t border-gray-200 bg-white">
-                  {(() => {
-                    const activePopupOrder = popupOrder || newOrder;
-                    const popupStatus =
-                      activePopupOrder?.orderStatus || activePopupOrder?.status;
-                    const userCancelled = isUserCancelledStatus(popupStatus);
-                    const anyCancelled = isAnyCancelledStatus(popupStatus);
-
-                    if (anyCancelled) {
-                      return (
-                        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3">
-                          <p className="text-sm font-semibold text-red-700">
-                            {userCancelled
-                              ? "Order canceled by user"
-                              : "Order cancelled"}
-                          </p>
-                          <p className="mt-1 text-xs text-red-600">
-                            This order is no longer available for acceptance.
-                          </p>
-                        </div>
-                      );
-                    }
-
-                    return (
-                      <div className="space-y-3">
-                        <div
-                          ref={acceptSliderRef}
-                          className="relative h-14 rounded-2xl bg-gray-900 overflow-hidden select-none touch-pan-y">
-                          <motion.div
-                            className="absolute inset-y-0 left-0 bg-blue-600"
-                            initial={{ width: "100%" }}
-                            animate={{ width: `${(countdown / 180) * 100}%` }}
-                            transition={{ duration: 1, ease: "linear" }}
-                          />
-                          <div className="absolute inset-0 flex items-center justify-center px-16">
-                            <span className="relative z-10 text-sm font-semibold text-white text-center">
-                              {isAcceptingOrder
-                                ? "Accepting order..."
-                                : `Slide to accept (${formatTime(countdown)})`}
-                            </span>
-                          </div>
-                          <motion.button
-                            type="button"
-                            className="absolute left-2 top-1/2 z-20 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-xl bg-white text-gray-900 shadow-md disabled:cursor-not-allowed"
-                            style={{
-                              x: (() => {
-                                const sliderWidth =
-                                  acceptSliderRef.current?.offsetWidth || 320;
-                                const handleWidth = 40;
-                                const maxTravel = Math.max(
-                                  sliderWidth - handleWidth - 16,
-                                  0,
-                                );
-                                return acceptSwipeProgress * maxTravel;
-                              })(),
-                            }}
-                            onMouseDown={(e) => handleAcceptSwipeStart(e.clientX)}
-                            onTouchStart={(e) =>
-                              handleAcceptSwipeStart(e.touches[0].clientX)
-                            }
-                            onMouseMove={(e) => {
-                              if (acceptSwipeActiveRef.current)
-                                handleAcceptSwipeMove(e.clientX);
-                            }}
-                            onTouchMove={(e) =>
-                              handleAcceptSwipeMove(e.touches[0].clientX)
-                            }
-                            onMouseUp={handleAcceptSwipeEnd}
-                            onTouchEnd={handleAcceptSwipeEnd}
-                            onTouchCancel={handleAcceptSwipeEnd}
-                            onClick={triggerSwipeAccept}
-                            disabled={isAcceptingOrder}>
-                            <span className="text-lg font-bold">›</span>
-                          </motion.button>
-                        </div>
-
-                        <button
-                          onClick={handleRejectClick}
-                          disabled={isAcceptingOrder}
-                          className="w-full bg-white border-2 border-red-500 text-red-600 py-3 rounded-lg font-semibold text-sm hover:bg-red-50 transition-colors disabled:opacity-60">
-                          Reject Order
-                        </button>
-                      </div>
-                    );
-                  })()}
-                </div>
-              </motion.div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-
-      {/* Reject Order Popup */}
-      <AnimatePresence>
-        {showRejectPopup && (
-          <>
-            <motion.div
-              className="fixed inset-0 z-[70] bg-black/60 flex items-center justify-center p-4"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={handleRejectCancel}>
-              <motion.div
-                className="w-[95%] max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden"
-                initial={{ scale: 0.9, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.9, opacity: 0 }}
-                transition={{ type: "spring", damping: 25, stiffness: 300 }}
-                onClick={(e) => e.stopPropagation()}>
-                {/* Header */}
-                <div className="px-4 py-4 border-b border-gray-200">
-                  <h3 className="text-lg font-bold text-gray-900">
-                    Reject Order {(popupOrder || newOrder)?.orderId || "#Order"}
-                  </h3>
-                  <p className="text-sm text-gray-500 mt-1">
-                    Please select a reason for rejecting this order
-                  </p>
-                </div>
-
-                {/* Content */}
-                <div className="px-4 py-4 max-h-[60vh] overflow-y-auto">
-                  <div className="space-y-2">
-                    {rejectReasons.map((reason) => (
-                      <button
-                        key={reason}
-                        onClick={() => setRejectReason(reason)}
-                        className={`w-full text-left p-4 rounded-lg border-2 transition-all ${
-                          rejectReason === reason
-                            ? "border-primary-orange bg-primary-orange/10"
-                            : "border-gray-200 bg-white hover:border-gray-300"
-                        }`}>
-                        <div className="flex items-center justify-between">
-                          <span
-                            className={`text-sm font-medium ${
-                              rejectReason === reason
-                                ? "text-primary-orange"
-                                : "text-gray-900"
-                            }`}>
-                            {reason}
-                          </span>
-                          {rejectReason === reason && (
-                            <div className="w-5 h-5 rounded-full bg-primary-orange flex items-center justify-center">
-                              <svg
-                                className="w-3 h-3 text-white"
-                                fill="none"
-                                stroke="currentColor"
-                                viewBox="0 0 24 24">
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  strokeWidth={3}
-                                  d="M5 13l4 4L19 7"
-                                />
-                              </svg>
-                            </div>
-                          )}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Footer */}
-                <div className="px-4 py-4 bg-gray-50 border-t border-gray-200 flex gap-3">
-                  <button
-                    onClick={handleRejectCancel}
-                    className="flex-1 bg-white border-2 border-gray-300 text-gray-700 py-3 rounded-lg font-semibold text-sm hover:bg-gray-50 transition-colors">
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleRejectConfirm}
-                    disabled={!rejectReason}
-                    className={`flex-1 py-3 rounded-lg font-semibold text-sm transition-colors ${
-                      rejectReason
-                        ? "!bg-primary-orange !text-white hover:!bg-primary-orange/90"
-                        : "bg-gray-200 text-gray-400 cursor-not-allowed"
-                    }`}>
-                    Confirm Rejection
-                  </button>
-                </div>
-              </motion.div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-
-      {/* Cancel Order Popup */}
-      <AnimatePresence>
-        {showCancelPopup && orderToCancel && (
-          <>
-            <motion.div
-              className="fixed inset-0 z-[70] bg-black/60 flex items-center justify-center p-4"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={handleCancelPopupClose}>
-              <motion.div
-                className="w-[95%] max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden"
-                initial={{ scale: 0.9, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.9, opacity: 0 }}
-                transition={{ type: "spring", damping: 25, stiffness: 300 }}
-                onClick={(e) => e.stopPropagation()}>
-                {/* Header */}
-                <div className="px-4 py-4 border-b border-gray-200">
-                  <h3 className="text-lg font-bold text-gray-900">
-                    Cancel Order {orderToCancel.orderId || "#Order"}
-                  </h3>
-                  <p className="text-sm text-gray-500 mt-1">
-                    Please provide a reason for cancelling this order
-                  </p>
-                </div>
-
-                {/* Content */}
-                <div className="px-4 py-4">
-                  <div className="space-y-3">
-                    {rejectReasons.map((reason) => (
-                      <button
-                        key={reason}
-                        type="button"
-                        onClick={() => setCancelReason(reason)}
-                        className={`w-full text-left px-4 py-3 rounded-lg border-2 transition-colors ${
-                          cancelReason === reason
-                            ? "border-red-500 bg-red-50"
-                            : "border-gray-200 hover:border-gray-300"
-                        }`}>
-                        <div className="flex items-center gap-3">
-                          <div
-                            className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
-                              cancelReason === reason
-                                ? "border-red-500 bg-red-500"
-                                : "border-gray-300"
-                            }`}>
-                            {cancelReason === reason && (
-                              <svg
-                                className="w-3 h-3 text-white"
-                                fill="none"
-                                stroke="currentColor"
-                                viewBox="0 0 24 24">
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  strokeWidth={3}
-                                  d="M5 13l4 4L19 7"
-                                />
-                              </svg>
-                            )}
-                          </div>
-                          <span
-                            className={`text-sm font-medium ${
-                              cancelReason === reason
-                                ? "text-red-700"
-                                : "text-gray-700"
-                            }`}>
-                            {reason}
-                          </span>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Footer */}
-                <div className="px-4 py-4 bg-gray-50 border-t border-gray-200 flex gap-3">
-                  <button
-                    onClick={handleCancelPopupClose}
-                    className="flex-1 bg-white border-2 border-gray-300 text-gray-700 py-3 rounded-lg font-semibold text-sm hover:bg-gray-50 transition-colors">
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleCancelConfirm}
-                    disabled={!cancelReason}
-                    className={`flex-1 py-3 rounded-lg font-semibold text-sm transition-colors ${
-                      cancelReason
-                        ? "!bg-red-600 !text-white hover:bg-red-700"
-                        : "bg-gray-200 text-gray-400 cursor-not-allowed"
-                    }`}>
-                    Confirm Cancellation
-                  </button>
-                </div>
-              </motion.div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-
-      {/* Bottom Sheet for Order Details - mobile only */}
-      <AnimatePresence>
-        {isSheetOpen && selectedOrder && (
-          <motion.div
-            className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 lg:hidden"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setIsSheetOpen(false)}>
-            <motion.div
-              className="mx-auto max-h-[90vh] w-full max-w-md overflow-hidden rounded-t-3xl bg-white shadow-lg"
-              initial={{ y: 80 }}
-              animate={{ y: 0 }}
-              exit={{ y: 80 }}
-              transition={{ duration: 0.25 }}
-              onClick={(e) => e.stopPropagation()}>
-              <div className="flex justify-center py-3">
-                <div className="h-1 w-10 rounded-full bg-gray-300" />
+      <RestaurantPanelModal
+        open={showCancelPopup && !!orderToCancel}
+        onClose={handleCancelPopupClose}
+        title={`Cancel Order ${orderToCancel?.orderId || "#Order"}`}
+        description="Please provide a reason for cancelling this order"
+        size="md"
+        mobileMaxHeight="auto"
+        zIndex={70}
+        bodyClassName="space-y-3 px-4 py-4 lg:px-5 lg:py-5"
+        footer={
+          <div className="flex gap-3">
+            <button
+              onClick={handleCancelPopupClose}
+              className="flex-1 rounded-lg border-2 border-gray-300 bg-white py-3 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleCancelConfirm}
+              disabled={!cancelReason}
+              className={`flex-1 rounded-lg py-3 text-sm font-semibold transition-colors ${
+                cancelReason
+                  ? "!bg-red-600 !text-white hover:bg-red-700"
+                  : "cursor-not-allowed bg-gray-200 text-gray-400"
+              }`}
+            >
+              Confirm Cancellation
+            </button>
+          </div>
+        }
+      >
+        {rejectReasons.map((reason) => (
+          <button
+            key={reason}
+            type="button"
+            onClick={() => setCancelReason(reason)}
+            className={`w-full rounded-lg border-2 px-4 py-3 text-left transition-colors ${
+              cancelReason === reason
+                ? "border-red-500 bg-red-50"
+                : "border-gray-200 hover:border-gray-300"
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <div
+                className={`flex h-5 w-5 items-center justify-center rounded-full border-2 ${
+                  cancelReason === reason ? "border-red-500 bg-red-500" : "border-gray-300"
+                }`}
+              >
+                {cancelReason === reason && (
+                  <svg className="h-3 w-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                  </svg>
+                )}
               </div>
-              <OrderDetailPanel
-                order={selectedOrder}
-                onClose={() => setIsSheetOpen(false)}
-                className="max-h-[calc(90vh-2rem)]"
-              />
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+              <span className={`text-sm font-medium ${cancelReason === reason ? "text-red-700" : "text-gray-700"}`}>
+                {reason}
+              </span>
+            </div>
+          </button>
+        ))}
+      </RestaurantPanelModal>
+
+      {!isDesktop && (
+        <RestaurantPanelModal
+          open={isSheetOpen && !!selectedOrder}
+          onClose={() => setIsSheetOpen(false)}
+          hideHeader
+          mobileMaxHeight="full"
+          bodyClassName="p-0"
+        >
+          <OrderDetailPanel
+            order={selectedOrder}
+            onClose={() => setIsSheetOpen(false)}
+            className="max-h-[calc(90vh-2rem)]"
+          />
+        </RestaurantPanelModal>
+      )}
 
       {/* Bottom Navigation - Sticky */}
       <BottomNavOrders />
@@ -4096,7 +3997,7 @@ function EmptyState({ message = "Temporarily closed" }) {
         onClick={() => {
           // If message is related to rejection/offline, go to status page, otherwise refresh orders
           if (message?.toLowerCase().includes("rejected") || message?.toLowerCase().includes("closed")) {
-            window.location.href = "/food/restaurant/status";
+            window.location.href = "/food/restaurant/outlet-timings";
           } else {
             window.location.reload();
           }

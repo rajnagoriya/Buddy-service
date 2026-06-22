@@ -1,93 +1,132 @@
-import { useState, useEffect, useRef } from "react"
-import { motion, AnimatePresence } from "framer-motion"
-import Lenis from "lenis"
-import { ChevronUp, ChevronDown, Clock } from "lucide-react"
-import RestaurantSubPageShell from "@food/components/restaurant/panel/RestaurantSubPageShell"
-import { PanelSurface } from "@food/components/restaurant/panel/panelUi"
-import { RESTAURANT_BASE } from "@food/utils/restaurantNavConfig"
-import { Switch } from "@food/components/ui/switch"
-import { MobileTimePicker } from "@mui/x-date-pickers/MobileTimePicker"
+import { useState, useEffect, useRef, useMemo } from "react"
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider"
 import { AdapterDateFns } from "@mui/x-date-pickers/AdapterDateFns"
-import { useCompanyName } from "@food/hooks/useCompanyName"
+import RestaurantSubPageShell from "@food/components/restaurant/panel/RestaurantSubPageShell"
+import { RestaurantConfirmModal } from "@food/components/restaurant/panel/RestaurantPanelModal"
+import OutletOnlineStatusCard from "@food/components/restaurant/outlet-timings/OutletOnlineStatusCard"
+import OutletWeeklySchedule from "@food/components/restaurant/outlet-timings/OutletWeeklySchedule"
+import { RESTAURANT_BASE } from "@food/utils/restaurantNavConfig"
+import {
+  evaluateOutletTimingState,
+  getDefaultDays,
+  getTodayName,
+  getTodaySlotLabel,
+  timeToString,
+} from "@food/utils/outletTimingsUtils"
 import { restaurantAPI } from "@food/api"
-const debugLog = (...args) => {}
-const debugWarn = (...args) => {}
-const debugError = (...args) => {}
 
-// Helper function to convert "HH:mm" string to Date object
-const stringToTime = (timeString) => {
-  if (!timeString || !timeString.includes(":")) {
-    return new Date(2000, 0, 1, 9, 0) // Default to 9:00 AM
-  }
-  const [hours, minutes] = timeString.split(":").map(Number)
-  // Ensure valid hours (0-23) and minutes (0-59)
-  const validHours = Math.max(0, Math.min(23, hours || 9))
-  const validMinutes = Math.max(0, Math.min(59, minutes || 0))
-  return new Date(2000, 0, 1, validHours, validMinutes)
+const RESTAURANT_ONLINE_STATUS_KEY = "restaurant_online_status"
+
+const persistRestaurantOnlineStatus = (isOnline) => {
+  try {
+    localStorage.setItem(RESTAURANT_ONLINE_STATUS_KEY, JSON.stringify(Boolean(isOnline)))
+  } catch {}
 }
 
-// Helper function to convert Date object to "HH:mm" string
-const timeToString = (date) => {
-  if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
-    return "09:00"
-  }
-  const hours = date.getHours().toString().padStart(2, "0")
-  const minutes = date.getMinutes().toString().padStart(2, "0")
-  return `${hours}:${minutes}`
+const formatAddress = (location) => {
+  if (!location) return ""
+  const parts = []
+  if (location.area) parts.push(location.area.trim())
+  if (location.city) parts.push(location.city.trim())
+  return parts.join(", ") || ""
 }
-
-// Format time from 24-hour to 12-hour format for display
-const formatTime12Hour = (time24) => {
-  if (!time24) return "09:00 AM"
-  const [hours, minutes] = time24.split(":").map(Number)
-  const period = hours >= 12 ? 'PM' : 'AM'
-  const hours12 = hours % 12 || 12
-  const minutesStr = minutes.toString().padStart(2, '0')
-  return `${hours12}:${minutesStr} ${period}`
-}
-
-const getDefaultDays = () => ({
-  Monday: { isOpen: true, openingTime: "09:00", closingTime: "22:00" },
-  Tuesday: { isOpen: true, openingTime: "09:00", closingTime: "22:00" },
-  Wednesday: { isOpen: true, openingTime: "09:00", closingTime: "22:00" },
-  Thursday: { isOpen: true, openingTime: "09:00", closingTime: "22:00" },
-  Friday: { isOpen: true, openingTime: "09:00", closingTime: "22:00" },
-  Saturday: { isOpen: true, openingTime: "09:00", closingTime: "22:00" },
-  Sunday: { isOpen: true, openingTime: "09:00", closingTime: "22:00" },
-})
 
 export default function OutletTimings() {
-  const companyName = useCompanyName()
-  const [expandedDay, setExpandedDay] = useState("Monday")
-  const isInternalUpdate = useRef(false)
-  const [days, setDays] = useState(getDefaultDays)
-  const [loading, setLoading] = useState(true)
+  const scheduleRef = useRef(null)
   const saveTimerRef = useRef(null)
 
-  // Load from backend on mount.
+  const [restaurantData, setRestaurantData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [deliveryStatus, setDeliveryStatus] = useState(false)
+  const [currentDateTime, setCurrentDateTime] = useState(new Date())
+  const [days, setDays] = useState(getDefaultDays)
+  const [expandedDay, setExpandedDay] = useState(getTodayName())
+  const [showOutletClosedDialog, setShowOutletClosedDialog] = useState(false)
+  const [showOutsideTimingsDialog, setShowOutsideTimingsDialog] = useState(false)
+
+  const todayName = getTodayName()
+
+  const timingState = useMemo(
+    () => evaluateOutletTimingState(days, currentDateTime),
+    [days, currentDateTime],
+  )
+
+  const { isDayClosed, isWithinTimings } = timingState
+  const todaySlotLabel = useMemo(() => getTodaySlotLabel(days, currentDateTime), [days, currentDateTime])
+
+  const restaurantMeta = useMemo(() => {
+    if (!restaurantData) return ""
+    const id = restaurantData.id ? `ID ${String(restaurantData.id).slice(-5)}` : ""
+    const address = formatAddress(restaurantData.location)
+    return [id, address].filter(Boolean).join(" · ")
+  }, [restaurantData])
+
+  useEffect(() => {
+    const interval = setInterval(() => setCurrentDateTime(new Date()), 60000)
+    return () => clearInterval(interval)
+  }, [])
+
   useEffect(() => {
     let mounted = true
-    ;(async () => {
+
+    const loadPageData = async () => {
       try {
         setLoading(true)
-        const res = await restaurantAPI.getOutletTimings()
-        const outletTimings = res?.data?.data?.outletTimings || res?.data?.outletTimings
-        if (mounted && outletTimings && typeof outletTimings === "object") {
+        const [restaurantRes, timingsRes] = await Promise.all([
+          restaurantAPI.getCurrentRestaurant(),
+          restaurantAPI.getOutletTimings(),
+        ])
+
+        if (!mounted) return
+
+        const restaurant =
+          restaurantRes?.data?.data?.restaurant || restaurantRes?.data?.restaurant
+        if (restaurant) {
+          setRestaurantData(restaurant)
+          const online = restaurant.isAcceptingOrders === true
+          setDeliveryStatus(online)
+          persistRestaurantOnlineStatus(online)
+        }
+
+        const outletTimings =
+          timingsRes?.data?.data?.outletTimings || timingsRes?.data?.outletTimings
+        if (outletTimings && typeof outletTimings === "object") {
           setDays({ ...getDefaultDays(), ...outletTimings })
         }
       } catch (error) {
-        debugError("Error loading outlet timings from backend:", error)
+        if (
+          error.code !== "ERR_NETWORK" &&
+          error.code !== "ECONNABORTED" &&
+          !error.message?.includes("timeout")
+        ) {
+          console.error("Error loading outlet hours page:", error)
+        }
       } finally {
         if (mounted) setLoading(false)
       }
-    })()
+    }
+
+    loadPageData()
+
+    const onTimingsUpdated = () => {
+      restaurantAPI
+        .getOutletTimings()
+        .then((res) => {
+          const outletTimings = res?.data?.data?.outletTimings || res?.data?.outletTimings
+          if (outletTimings && typeof outletTimings === "object") {
+            setDays({ ...getDefaultDays(), ...outletTimings })
+          }
+        })
+        .catch(() => {})
+    }
+
+    window.addEventListener("outletTimingsUpdated", onTimingsUpdated)
     return () => {
       mounted = false
+      window.removeEventListener("outletTimingsUpdated", onTimingsUpdated)
     }
   }, [])
 
-  // Save to backend whenever days change (debounced).
   useEffect(() => {
     if (loading) return
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
@@ -96,90 +135,101 @@ export default function OutletTimings() {
         await restaurantAPI.saveOutletTimings(days)
         window.dispatchEvent(new Event("outletTimingsUpdated"))
       } catch (error) {
-        debugError("Error saving outlet timings to backend:", error)
+        console.error("Error saving outlet timings:", error)
       }
     }, 500)
+
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     }
   }, [days, loading])
 
-  // Lenis smooth scrolling
-  useEffect(() => {
-    const lenis = new Lenis({
-      duration: 1.2,
-      easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
-      smoothWheel: true,
-    })
+  const scrollToSchedule = () => {
+    scheduleRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+    setExpandedDay(todayName)
+  }
 
-    function raf(time) {
-      lenis.raf(time)
-      requestAnimationFrame(raf)
+  const handleDeliveryStatusChange = async (checked) => {
+    if (checked && isDayClosed) {
+      setShowOutletClosedDialog(true)
+      return
     }
 
-    requestAnimationFrame(raf)
-
-    return () => {
-      lenis.destroy()
+    if (checked && isWithinTimings === false && !isDayClosed) {
+      setShowOutsideTimingsDialog(true)
+      return
     }
-  }, [])
+
+    setDeliveryStatus(checked)
+    try {
+      await restaurantAPI.updateAcceptingOrders(checked)
+      persistRestaurantOnlineStatus(checked)
+      window.dispatchEvent(
+        new CustomEvent("restaurantStatusChanged", { detail: { isOnline: checked } }),
+      )
+    } catch {
+      setDeliveryStatus((prev) => !prev)
+      persistRestaurantOnlineStatus(!checked)
+    }
+  }
+
+  const handleOutsideTimingsConfirm = async () => {
+    setShowOutsideTimingsDialog(false)
+    setDeliveryStatus(true)
+    try {
+      await restaurantAPI.updateAcceptingOrders(true)
+      persistRestaurantOnlineStatus(true)
+      window.dispatchEvent(
+        new CustomEvent("restaurantStatusChanged", { detail: { isOnline: true } }),
+      )
+    } catch {
+      setDeliveryStatus(false)
+      persistRestaurantOnlineStatus(false)
+    }
+  }
 
   const toggleDay = (day) => {
     setExpandedDay(expandedDay === day ? null : day)
   }
 
   const toggleDayOpen = (day) => {
-    isInternalUpdate.current = true
-    setDays(prev => {
+    setDays((prev) => {
       const newOpen = !prev[day].isOpen
       return {
         ...prev,
         [day]: {
           ...prev[day],
           isOpen: newOpen,
-          openingTime: newOpen ? (prev[day].openingTime || "09:00") : "",
-          closingTime: newOpen ? (prev[day].closingTime || "22:00") : ""
-        }
+          openingTime: newOpen ? prev[day].openingTime || "09:00" : "",
+          closingTime: newOpen ? prev[day].closingTime || "22:00" : "",
+        },
       }
     })
   }
 
   const handleTimeChange = (day, timeType, newTime) => {
-    if (!newTime) {
-      debugWarn('?? No time value received in handleTimeChange')
-      return
-    }
-    
-    isInternalUpdate.current = true
+    if (!newTime) return
     const timeString = timeToString(newTime)
-    
-    // Validate time string format
-    if (!timeString || !timeString.includes(":")) {
-      debugWarn('?? Invalid time string generated:', timeString)
-      return
-    }
-    
-    debugLog(`?? Time changed for ${day} - ${timeType}: ${timeString}`)
-    
-    setDays(prev => ({
+    if (!timeString.includes(":")) return
+
+    setDays((prev) => ({
       ...prev,
       [day]: {
         ...prev[day],
-        [timeType]: timeString
-      }
+        [timeType]: timeString,
+      },
     }))
   }
-
-  const dayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
   if (loading) {
     return (
       <RestaurantSubPageShell
-        title="Outlet timings"
-        subtitle="Set weekly opening hours"
+        title="Hours & status"
+        subtitle="Online availability and weekly schedule"
         backTo={`${RESTAURANT_BASE}/explore`}
+        showBottomNav
       >
-        <div className="py-12 text-center text-sm text-gray-600">Loading outlet timings...</div>
+        <div className="py-12 text-center text-sm text-gray-500">Loading outlet hours...</div>
       </RestaurantSubPageShell>
     )
   }
@@ -187,197 +237,70 @@ export default function OutletTimings() {
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
       <RestaurantSubPageShell
-        title="Outlet timings"
-        subtitle="Set weekly opening hours"
+        title="Hours & status"
+        subtitle="Online availability and weekly schedule"
         backTo={`${RESTAURANT_BASE}/explore`}
+        showBottomNav
+        contentClassName="space-y-5 pb-10"
       >
-        <div className="mb-6">
-          <div className="text-center mb-2">
-            <h2 className="text-base font-semibold text-[var(--rt-primary-strong)]">{companyName} delivery</h2>
-          </div>
-          <div className="h-0.5 bg-[var(--rt-primary-strong)]" />
-        </div>
+        <OutletOnlineStatusCard
+          restaurantName={restaurantData?.name}
+          restaurantMeta={restaurantMeta}
+          loading={loading}
+          deliveryStatus={deliveryStatus}
+          onDeliveryStatusChange={handleDeliveryStatusChange}
+          todaySlotLabel={todaySlotLabel}
+          isDayClosed={isDayClosed}
+          isWithinTimings={isWithinTimings}
+          showOutsideWarning={!isWithinTimings && !deliveryStatus}
+        />
 
-        <div className="space-y-2">
-          {dayNames.map((day, index) => {
-            const dayData = days[day] || { isOpen: true, openingTime: "09:00", closingTime: "22:00" }
-            const isExpanded = expandedDay === day
+        <OutletWeeklySchedule
+          ref={scheduleRef}
+          days={days}
+          expandedDay={expandedDay}
+          onToggleDay={toggleDay}
+          onToggleDayOpen={toggleDayOpen}
+          onTimeChange={handleTimeChange}
+          todayName={todayName}
+        />
 
-            return (
-              <motion.div
-                key={day}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.2, delay: index * 0.03 }}
-              >
-                <PanelSurface className="overflow-hidden p-0">
-                  {/* Day Header */}
-                  <div
-                    className={`w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-color transition-all ${isExpanded ? "bg-gray-100" : ""}`}
-                  >
-                    <button
-                      onClick={() => toggleDay(day)}
-                      className="flex items-center gap-3 flex-1 text-left"
-                    >
-                      {isExpanded ? (
-                        <ChevronUp className="w-5 h-5 text-gray-700" />
-                      ) : (
-                        <ChevronDown className="w-5 h-5 text-gray-700" />
-                      )}
-                      <span className="text-base font-medium text-gray-900">{day}</span>
-                    </button>
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm text-gray-700">{dayData.isOpen ? "Open" : "Close"}</span>
-                      <div onClick={(e) => e.stopPropagation()}>
-                        <Switch
-                          checked={dayData.isOpen}
-                          onCheckedChange={() => toggleDayOpen(day)}
-                          className="data-[state=checked]:bg-green-500 data-[state=unchecked]:bg-gray-300"
-                        />
-                      </div>
-                    </div>
-                  </div>
+        <RestaurantConfirmModal
+          open={showOutletClosedDialog}
+          onClose={() => setShowOutletClosedDialog(false)}
+          onConfirm={() => {
+            setShowOutletClosedDialog(false)
+            scrollToSchedule()
+          }}
+          title="Outlet closed today"
+          description="Today is marked closed in your weekly schedule."
+          confirmLabel="Edit today's hours"
+          cancelLabel="Cancel"
+          confirmVariant="primary"
+        >
+          <p className="text-center text-sm text-gray-600">
+            Open today&apos;s schedule or turn the day on before going online.
+          </p>
+        </RestaurantConfirmModal>
 
-                  {/* Expanded Content */}
-                  <AnimatePresence>
-                    {isExpanded && (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: "auto", opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.2 }}
-                        className="overflow-hidden"
-                      >
-                        <div className="p-4 space-y-4 border-t border-gray-100">
-                          {dayData.isOpen ? (
-                            <>
-                              {/* Opening Time */}
-                              <div className="space-y-2">
-                                <label className="text-sm font-medium text-gray-700 flex items-center gap-2">
-                                  <Clock className="w-4 h-4" />
-                                  Opening time
-                                </label>
-                                <div className="border border-gray-200 rounded-md px-3 py-2 bg-gray-50/60">
-                                  <MobileTimePicker
-                                    value={stringToTime(dayData.openingTime)}
-                                    onChange={(newValue) => {
-                                      debugLog('?? Opening time picker onChange:', newValue)
-                                      if (newValue) {
-                                        handleTimeChange(day, "openingTime", newValue)
-                                      }
-                                    }}
-                                    onAccept={(newValue) => {
-                                      debugLog('? Opening time picker onAccept:', newValue)
-                                      if (newValue) {
-                                        handleTimeChange(day, "openingTime", newValue)
-                                      }
-                                    }}
-                                    slotProps={{
-                                      textField: {
-                                        variant: "outlined",
-                                        size: "small",
-                                        placeholder: "Select opening time",
-                                        sx: {
-                                          "& .MuiOutlinedInput-root": {
-                                            height: "36px",
-                                            fontSize: "12px",
-                                            backgroundColor: "white",
-                                            "& fieldset": {
-                                              borderColor: "#e5e7eb",
-                                            },
-                                            "&:hover fieldset": {
-                                              borderColor: "#d1d5db",
-                                            },
-                                            "&.Mui-focused fieldset": {
-                                              borderColor: "#000",
-                                            },
-                                          },
-                                          "& .MuiInputBase-input": {
-                                            padding: "8px 12px",
-                                            fontSize: "12px",
-                                          },
-                                        },
-                                      },
-                                    }}
-                                    format="hh:mm a"
-                                  />
-                                </div>
-                                <p className="text-xs text-gray-500">
-                                  Current: {formatTime12Hour(dayData.openingTime)}
-                                </p>
-                              </div>
-
-                              {/* Closing Time */}
-                              <div className="space-y-2">
-                                <label className="text-sm font-medium text-gray-700 flex items-center gap-2">
-                                  <Clock className="w-4 h-4" />
-                                  Closing time
-                                </label>
-                                <div className="border border-gray-200 rounded-md px-3 py-2 bg-gray-50/60">
-                                  <MobileTimePicker
-                                    value={stringToTime(dayData.closingTime)}
-                                    onChange={(newValue) => {
-                                      debugLog('?? Closing time picker onChange:', newValue)
-                                      if (newValue) {
-                                        handleTimeChange(day, "closingTime", newValue)
-                                      }
-                                    }}
-                                    onAccept={(newValue) => {
-                                      debugLog('? Closing time picker onAccept:', newValue)
-                                      if (newValue) {
-                                        handleTimeChange(day, "closingTime", newValue)
-                                      }
-                                    }}
-                                    slotProps={{
-                                      textField: {
-                                        variant: "outlined",
-                                        size: "small",
-                                        placeholder: "Select closing time",
-                                        sx: {
-                                          "& .MuiOutlinedInput-root": {
-                                            height: "36px",
-                                            fontSize: "12px",
-                                            backgroundColor: "white",
-                                            "& fieldset": {
-                                              borderColor: "#e5e7eb",
-                                            },
-                                            "&:hover fieldset": {
-                                              borderColor: "#d1d5db",
-                                            },
-                                            "&.Mui-focused fieldset": {
-                                              borderColor: "#000",
-                                            },
-                                          },
-                                          "& .MuiInputBase-input": {
-                                            padding: "8px 12px",
-                                            fontSize: "12px",
-                                          },
-                                        },
-                                      },
-                                    }}
-                                    format="hh:mm a"
-                                  />
-                                </div>
-                                <p className="text-xs text-gray-500">
-                                  Current: {formatTime12Hour(dayData.closingTime)}
-                                </p>
-                              </div>
-                            </>
-                          ) : (
-                            <p className="text-sm text-gray-500 pl-6">This day is closed</p>
-                          )}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </PanelSurface>
-              </motion.div>
-            )
-          })}
-        </div>
+        <RestaurantConfirmModal
+          open={showOutsideTimingsDialog}
+          onClose={() => {
+            setShowOutsideTimingsDialog(false)
+            scrollToSchedule()
+          }}
+          onConfirm={handleOutsideTimingsConfirm}
+          title="Outside scheduled hours"
+          description="You are currently outside today's opening hours."
+          confirmLabel="Turn on anyway"
+          cancelLabel="Edit hours"
+          confirmVariant="warning"
+        >
+          <p className="text-center text-sm text-gray-600">
+            You can still go online, or scroll down to adjust today&apos;s timings.
+          </p>
+        </RestaurantConfirmModal>
       </RestaurantSubPageShell>
     </LocalizationProvider>
   )
 }
-
-

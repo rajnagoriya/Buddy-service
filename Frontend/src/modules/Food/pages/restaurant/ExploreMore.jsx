@@ -37,6 +37,7 @@ import { restaurantAPI } from "@food/api"
 import { firebaseAuth, ensureFirebaseInitialized } from "@food/firebase"
 import BottomNavOrders from "@food/components/restaurant/BottomNavOrders"
 import RestaurantPanelHeader from "@food/components/restaurant/panel/RestaurantPanelHeader"
+import RestaurantPanelModal, { RestaurantConfirmModal } from "@food/components/restaurant/panel/RestaurantPanelModal"
 import { EXPLORE_SECTIONS, RESTAURANT_BASE } from "@food/utils/restaurantNavConfig"
 import useRestaurantLayout from "@food/hooks/useRestaurantLayout"
 import { Switch } from "@food/components/ui/switch"
@@ -1016,61 +1017,30 @@ export default function ExploreMore() {
       </div>
 
       {/* Search Popup */}
+      <RestaurantConfirmModal
+        open={logoutConfirmOpen}
+        onClose={() => {
+          if (!isLoggingOut) setLogoutConfirmOpen(false)
+        }}
+        onConfirm={async () => {
+          await handleLogout()
+          setLogoutConfirmOpen(false)
+        }}
+        title="Logout?"
+        description="Are you sure you want to logout?"
+        confirmLabel={isLoggingOut ? "Logging out..." : "Yes"}
+        cancelLabel="No"
+        loading={isLoggingOut}
+        confirmVariant="danger"
+        zIndex={60}
+        icon={
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#16A34A]/10">
+            <LogOut className="h-5 w-5 text-[#16A34A]" />
+          </div>
+        }
+      />
+
       <AnimatePresence>
-        {logoutConfirmOpen && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="fixed inset-0 bg-black/50 z-[60]"
-              onClick={() => {
-                if (!isLoggingOut) setLogoutConfirmOpen(false)
-              }}
-            />
-
-            <motion.div
-              initial={{ opacity: 0, y: 24 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 24 }}
-              transition={{ duration: 0.22 }}
-              className="fixed inset-x-4 bottom-28 z-[61] mx-auto w-auto max-w-md rounded-3xl bg-white p-5 shadow-2xl"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="text-center">
-                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-[#16A34A]/10">
-                  <LogOut className="w-5 h-5 text-[#16A34A]" />
-                </div>
-                <h3 className="text-lg font-bold text-gray-900">Logout?</h3>
-                <p className="mt-1 text-sm text-gray-500">Are you sure you want to logout?</p>
-              </div>
-
-              <div className="mt-5 grid grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => setLogoutConfirmOpen(false)}
-                  disabled={isLoggingOut}
-                  className="rounded-2xl border border-gray-200 px-4 py-3 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50"
-                >
-                  No
-                </button>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await handleLogout()
-                    setLogoutConfirmOpen(false)
-                  }}
-                  disabled={isLoggingOut}
-                  className="rounded-2xl bg-[#16A34A] px-4 py-3 text-sm font-bold text-white transition-all hover:bg-[#1a2614] active:scale-95 disabled:opacity-50"
-                >
-                  {isLoggingOut ? "Logging out..." : "Yes"}
-                </button>
-              </div>
-            </motion.div>
-          </>
-        )}
-
         {searchOpen && (
           <>
             {/* Backdrop */}
@@ -1096,7 +1066,7 @@ export default function ExploreMore() {
                 damping: 30,
                 stiffness: 300
               }}
-              className="fixed top-0 left-0 right-0 bg-white shadow-lg z-50 h-screen"
+              className="fixed top-0 left-0 right-0 z-50 h-[100dvh] bg-white shadow-lg lg:inset-auto lg:left-1/2 lg:top-1/2 lg:h-auto lg:max-h-[80vh] lg:w-[calc(100%-2rem)] lg:max-w-xl lg:-translate-x-1/2 lg:-translate-y-1/2 lg:rounded-2xl lg:border lg:border-gray-200"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Search Header */}
@@ -1197,46 +1167,16 @@ export default function ExploreMore() {
       </AnimatePresence>
 
       {/* Profile Popup */}
-      <AnimatePresence>
-        {profileOpen && (
-          <>
-            {/* Backdrop */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="fixed inset-0 bg-black/50 z-50"
-              onClick={() => setProfileOpen(false)}
-            />
-
-            {/* Popup Sheet */}
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{
-                type: "spring",
-                damping: 30,
-                stiffness: 300
-              }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-[2.5rem] shadow-[0_-15px_50px_-12px_rgba(0,0,0,0.3)] z-50 max-h-[90vh] overflow-y-auto"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Header */}
-              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 sticky top-0 bg-white z-10">
-                <h2 className="text-lg font-bold text-gray-900">My profile</h2>
-                <button
-                  onClick={() => setProfileOpen(false)}
-                  className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
-                  aria-label="Close"
-                >
-                  <X className="w-5 h-5 text-gray-900" />
-                </button>
-              </div>
-
-              {/* User Information Section */}
-              <div className="px-6 py-6">
+      <RestaurantPanelModal
+        open={profileOpen}
+        onClose={() => setProfileOpen(false)}
+        title="My profile"
+        size="md"
+        mobileMaxHeight="tall"
+        bodyClassName="px-0 py-0"
+      >
+        {/* User Information Section */}
+        <div className="px-6 py-6">
                 <button 
                   onClick={() => {
                     setProfileOpen(false)
@@ -1306,148 +1246,74 @@ export default function ExploreMore() {
                 </button>
               </div>
 
-              {/* Footer Links */}
-              <div className="px-6 py-4 border-t border-gray-200">
-                <div className="flex items-center justify-center gap-2 text-sm text-gray-500">
-                  <a
-                    href="#"
-                    className="hover:text-gray-700 transition-colors border-b border-dotted border-gray-400"
-                    onClick={(e) => {
-                      e.preventDefault()
-                      // Navigate to terms of service
-                      debugLog("Terms of Service clicked")
-                    }}
-                  >
-                    Terms of Service
-                  </a>
-                  <span className="text-gray-400">|</span>
-                  <a
-                    href="#"
-                    className="hover:text-gray-700 transition-colors border-b border-dotted border-gray-400"
-                    onClick={(e) => {
-                      e.preventDefault()
-                      // Navigate to privacy policy
-                      debugLog("Privacy Policy clicked")
-                    }}
-                  >
-                    Privacy Policy
-                  </a>
-                  <span className="text-gray-400">|</span>
-                  <a
-                    href="#"
-                    className="hover:text-gray-700 transition-colors border-b border-dotted border-gray-400"
-                    onClick={(e) => {
-                      e.preventDefault()
-                      // Navigate to code of conduct
-                      debugLog("Code of Conduct clicked")
-                    }}
-                  >
-                    Code of Conduct
-                  </a>
-                </div>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+        {/* Footer Links */}
+        <div className="px-6 py-4 border-t border-gray-200">
+          <div className="flex items-center justify-center gap-2 text-sm text-gray-500">
+            <a
+              href="#"
+              className="hover:text-gray-700 transition-colors border-b border-dotted border-gray-400"
+              onClick={(e) => {
+                e.preventDefault()
+                debugLog("Terms of Service clicked")
+              }}
+            >
+              Terms of Service
+            </a>
+            <span className="text-gray-400">|</span>
+            <a
+              href="#"
+              className="hover:text-gray-700 transition-colors border-b border-dotted border-gray-400"
+              onClick={(e) => {
+                e.preventDefault()
+                debugLog("Privacy Policy clicked")
+              }}
+            >
+              Privacy Policy
+            </a>
+            <span className="text-gray-400">|</span>
+            <a
+              href="#"
+              className="hover:text-gray-700 transition-colors border-b border-dotted border-gray-400"
+              onClick={(e) => {
+                e.preventDefault()
+                debugLog("Code of Conduct clicked")
+              }}
+            >
+              Code of Conduct
+            </a>
+          </div>
+        </div>
+      </RestaurantPanelModal>
 
       {/* Schedule Off Reason Selection Popup */}
-      <AnimatePresence>
-        {scheduleOffOpen && (
-          <>
-            {/* Backdrop */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="fixed inset-0 bg-black/50 z-50"
-              onClick={() => setScheduleOffOpen(false)}
-            />
-
-            {/* Popup Sheet */}
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{
-                type: "spring",
-                damping: 30,
-                stiffness: 300
-              }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl z-50 max-h-[90vh] overflow-y-auto"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Header */}
-              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 sticky top-0 bg-white z-10">
-                <h2 className="text-lg font-bold text-gray-900">Select reason</h2>
-                <button
-                  onClick={() => setScheduleOffOpen(false)}
-                  className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
-                  aria-label="Close"
-                >
-                  <X className="w-5 h-5 text-gray-900" />
-                </button>
-              </div>
-
-              {/* Reason Options */}
-              <div className="px-6 py-4">
-                {scheduleOffReasons.map((reason, index) => (
-                  <button
-                    key={index}
-                    onClick={() => handleReasonSelect(reason)}
-                    className="w-full text-left py-4 px-4 rounded-lg hover:bg-gray-50 transition-colors border-b border-gray-100 last:border-b-0"
-                  >
-                    <span className="text-base text-gray-900">{reason}</span>
-                  </button>
-                ))}
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+      <RestaurantPanelModal
+        open={scheduleOffOpen}
+        onClose={() => setScheduleOffOpen(false)}
+        title="Select reason"
+        size="md"
+        mobileMaxHeight="auto"
+        bodyClassName="px-6 py-4"
+      >
+        {scheduleOffReasons.map((reason, index) => (
+          <button
+            key={index}
+            onClick={() => handleReasonSelect(reason)}
+            className="w-full text-left py-4 px-4 rounded-lg hover:bg-gray-50 transition-colors border-b border-gray-100 last:border-b-0"
+          >
+            <span className="text-base text-gray-900">{reason}</span>
+          </button>
+        ))}
+      </RestaurantPanelModal>
 
       {/* Date and Time Picker Popup */}
-      <AnimatePresence>
-        {dateTimePickerOpen && (
-          <>
-            {/* Backdrop */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="fixed inset-0 bg-black/50 z-50"
-              onClick={() => setDateTimePickerOpen(false)}
-            />
-
-            {/* Popup Sheet */}
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{
-                type: "spring",
-                damping: 30,
-                stiffness: 300
-              }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl z-50 max-h-[90vh] overflow-y-auto"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Header */}
-              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 sticky top-0 bg-white z-10">
-                <h2 className="text-lg font-bold text-gray-900">Schedule off</h2>
-                <button
-                  onClick={() => setDateTimePickerOpen(false)}
-                  className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
-                  aria-label="Close"
-                >
-                  <X className="w-5 h-5 text-gray-900" />
-                </button>
-              </div>
-
-              {/* Content */}
-              <div className="px-6 py-6 space-y-6">
+      <RestaurantPanelModal
+        open={dateTimePickerOpen}
+        onClose={() => setDateTimePickerOpen(false)}
+        title="Schedule off"
+        size="lg"
+        mobileMaxHeight="tall"
+        bodyClassName="px-6 py-6 space-y-6"
+      >
                 {/* Selected Reason */}
                 {selectedReason && (
                   <div className="pb-4 border-b border-gray-200">
@@ -1510,18 +1376,14 @@ export default function ExploreMore() {
                   </div>
                 </div>
 
-                {/* Submit Button */}
-                <button
-                  onClick={handleSubmitScheduleOff}
-                  className="w-full bg-[#16A34A] hover:bg-[#1a2614] text-white font-bold py-3.5 px-4 rounded-xl transition-all shadow-md active:scale-[0.98] mt-4"
-                >
-                  Submit
-                </button>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+        {/* Submit Button */}
+        <button
+          onClick={handleSubmitScheduleOff}
+          className="w-full bg-[#16A34A] hover:bg-[#1a2614] text-white font-bold py-3.5 px-4 rounded-xl transition-all shadow-md active:scale-[0.98] mt-4"
+        >
+          Submit
+        </button>
+      </RestaurantPanelModal>
 
       {/* Calendar Popup */}
       {showCalendar && (
@@ -1557,166 +1419,99 @@ export default function ExploreMore() {
         onConfirm={handleEndTimeConfirm}
       />
 
-      {/* Success Popup */}
-      <AnimatePresence>
-        {successPopupOpen && (
-          <>
-            {/* Backdrop */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setSuccessPopupOpen(false)}
-              className="fixed inset-0 bg-black/50 z-[10000]"
-            />
-
-            {/* Success Modal */}
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="fixed inset-0 flex items-center justify-center z-[10000] px-4"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center">
-                <div className="flex justify-center mb-4">
-                  <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center">
-                    <CheckCircle className="w-10 h-10 text-green-600" />
-                  </div>
-                </div>
-                <h3 className="text-xl font-bold text-gray-900 mb-2">Success!</h3>
-                <p className="text-sm text-gray-600 mb-6">
-                  Restaurant is marked offline
-                </p>
-                <button
-                  onClick={() => {
-                    setSuccessPopupOpen(false)
-                    // Reset states
-                    setSelectedReason(null)
-                    setStartDate(null)
-                    setEndDate(null)
-                    setStartTime({ hour: "9", minute: "00", period: "am" })
-                    setEndTime({ hour: "5", minute: "00", period: "pm" })
-                  }}
-                  className="w-full bg-[#16A34A] text-white py-3.5 rounded-xl font-bold text-sm hover:bg-[#1a2614] transition-all shadow-md active:scale-[0.98]"
-                >
-                  Done 
-                </button>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+      <RestaurantConfirmModal
+        open={successPopupOpen}
+        onClose={() => setSuccessPopupOpen(false)}
+        onConfirm={() => {
+          setSuccessPopupOpen(false)
+          setSelectedReason(null)
+          setStartDate(null)
+          setEndDate(null)
+          setStartTime({ hour: "9", minute: "00", period: "am" })
+          setEndTime({ hour: "5", minute: "00", period: "pm" })
+        }}
+        title="Success!"
+        description="Restaurant is marked offline"
+        confirmLabel="Done"
+        showCancel={false}
+        zIndex={10000}
+        icon={
+          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
+            <CheckCircle className="h-10 w-10 text-green-600" />
+          </div>
+        }
+      />
 
       {/* Existing Schedule Popup */}
-      <AnimatePresence>
-        {existingScheduleOpen && existingSchedule && (
+      <RestaurantPanelModal
+        open={existingScheduleOpen && !!existingSchedule}
+        onClose={() => setExistingScheduleOpen(false)}
+        title="Schedule off"
+        size="md"
+        mobileMaxHeight="tall"
+        bodyClassName="px-6 py-6"
+      >
+        {existingSchedule ? (
           <>
-            {/* Backdrop */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="fixed inset-0 bg-black/50 z-50"
-              onClick={() => setExistingScheduleOpen(false)}
-            />
+            {/* Status Message */}
+            <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+              <p className="text-base font-semibold text-gray-900 mb-1">
+                Restaurant is scheduled off
+              </p>
+              <p className="text-sm text-gray-600">
+                Your restaurant is currently marked as offline
+              </p>
+            </div>
 
-            {/* Popup Sheet */}
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{
-                type: "spring",
-                damping: 30,
-                stiffness: 300
-              }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl z-50 max-h-[90vh] overflow-y-auto"
-              onClick={(e) => e.stopPropagation()}
+            {/* Schedule Details */}
+            <div className="space-y-4 mb-6">
+              {existingSchedule.reason && (
+                <div>
+                  <p className="text-sm text-gray-500 mb-1">Reason</p>
+                  <p className="text-base font-medium text-gray-900">{existingSchedule.reason}</p>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm text-gray-500 mb-1">Start date</p>
+                  <p className="text-base font-medium text-gray-900">
+                    {formatDate(existingSchedule.startDate)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500 mb-1">End date</p>
+                  <p className="text-base font-medium text-gray-900">
+                    {formatDate(existingSchedule.endDate)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm text-gray-500 mb-1">Start time</p>
+                  <p className="text-base font-medium text-gray-900">
+                    {formatTime(existingSchedule.startTime)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500 mb-1">End time</p>
+                  <p className="text-base font-medium text-gray-900">
+                    {formatTime(existingSchedule.endTime)}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={handleDeleteSchedule}
+              className="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors"
             >
-              {/* Header */}
-              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 sticky top-0 bg-white z-10">
-                <h2 className="text-lg font-bold text-gray-900">Schedule off</h2>
-                <button
-                  onClick={() => setExistingScheduleOpen(false)}
-                  className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
-                  aria-label="Close"
-                >
-                  <X className="w-5 h-5 text-gray-900" />
-                </button>
-              </div>
-
-              {/* Content */}
-              <div className="px-6 py-6">
-                {/* Status Message */}
-                <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                  <p className="text-base font-semibold text-gray-900 mb-1">
-                    Restaurant is scheduled off
-                  </p>
-                  <p className="text-sm text-gray-600">
-                    Your restaurant is currently marked as offline
-                  </p>
-                </div>
-
-                {/* Schedule Details */}
-                <div className="space-y-4 mb-6">
-                  {/* Reason */}
-                  {existingSchedule.reason && (
-                    <div>
-                      <p className="text-sm text-gray-500 mb-1">Reason</p>
-                      <p className="text-base font-medium text-gray-900">{existingSchedule.reason}</p>
-                    </div>
-                  )}
-
-                  {/* Dates */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-sm text-gray-500 mb-1">Start date</p>
-                      <p className="text-base font-medium text-gray-900">
-                        {formatDate(existingSchedule.startDate)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-500 mb-1">End date</p>
-                      <p className="text-base font-medium text-gray-900">
-                        {formatDate(existingSchedule.endDate)}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Times */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-sm text-gray-500 mb-1">Start time</p>
-                      <p className="text-base font-medium text-gray-900">
-                        {formatTime(existingSchedule.startTime)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-500 mb-1">End time</p>
-                      <p className="text-base font-medium text-gray-900">
-                        {formatTime(existingSchedule.endTime)}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Delete Button */}
-                <button
-                  onClick={() => {
-                    handleDeleteSchedule()
-                  }}
-                  className="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors"
-                >
-                  Delete Schedule
-                </button>
-              </div>
-            </motion.div>
+              Delete Schedule
+            </button>
           </>
-        )}
-      </AnimatePresence>
+        ) : null}
+      </RestaurantPanelModal>
       <BottomNavOrders />
     </motion.div>
   )
