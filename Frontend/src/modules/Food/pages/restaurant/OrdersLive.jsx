@@ -636,7 +636,7 @@ function TableBookings() {
 
               {booking.specialRequest && (
                 <div className="mt-3 p-2 bg-blue-50/50 rounded-lg border border-blue-100/50">
-                  <p className="text-[10px] text-blue-700 italic flex items-start gap-1">
+                  <p className="text-[10px] text-blue-700  flex items-start gap-1">
                     <MessageSquare className="w-3 h-3 mt-0.5 shrink-0" />
                     <span className="line-clamp-2">
                       {booking.specialRequest}
@@ -865,7 +865,7 @@ function SearchResults({ query, results, isLoading, onSelectOrder }) {
     <div className="pt-4 pb-6">
       <div className="flex items-center gap-2 mb-4">
         <h2 className="text-base font-semibold text-black">Search results for</h2>
-        <span className="bg-gray-200 px-2 py-0.5 rounded text-sm text-gray-700 italic">"{query}"</span>
+        <span className="bg-gray-200 px-2 py-0.5 rounded text-sm text-gray-700 ">"{query}"</span>
         <span className="text-xs text-gray-500 font-medium ml-1">({transformedResults.length})</span>
       </div>
 
@@ -972,7 +972,7 @@ function ScheduledOrders({ onSelectOrder, refreshToken }) {
       </div>
 
       {orders.length === 0 ? (
-        <div className="text-center py-8 text-gray-500 text-sm italic">
+        <div className="text-center py-8 text-gray-500 text-sm ">
           No scheduled orders found
         </div>
       ) : (
@@ -1346,24 +1346,31 @@ export default function OrdersLive() {
   };
 
   // Lenis smooth scrolling
-  useEffect(() => {
-    const lenis = new Lenis({
-      duration: 1.2,
-      easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
-      smoothWheel: true,
-    });
+  // useEffect(() => {
+  //   const lenis = new Lenis({
+  //     duration: 1.2,
+  //     easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+  //     smoothWheel: true,
+  //     wheelMultiplier: 1,
+  //     touchMultiplier: 1.5,
+  //   });
 
-    function raf(time) {
-      lenis.raf(time);
-      requestAnimationFrame(raf);
-    }
+  //   // Connect Lenis to the content container
+  //   if (contentRef.current) {
+  //     lenis.target = contentRef.current;
+  //   }
 
-    requestAnimationFrame(raf);
+  //   function raf(time) {
+  //     lenis.raf(time);
+  //     requestAnimationFrame(raf);
+  //   }
 
-    return () => {
-      lenis.destroy();
-    };
-  }, []);
+  //   requestAnimationFrame(raf);
+
+  //   return () => {
+  //     lenis.destroy();
+  //   };
+  // }, []);
 
   // Show new order popup when real order notification arrives from Socket.IO
   useEffect(() => {
@@ -2114,7 +2121,7 @@ export default function OrdersLive() {
       // Footer
       const pageHeight = doc.internal.pageSize.height;
       doc.setFontSize(8);
-      doc.setFont("helvetica", "italic");
+      doc.setFont("helvetica");
       doc.text(
         `Generated on ${new Date().toLocaleString("en-GB")}`,
         105,
@@ -2352,286 +2359,359 @@ export default function OrdersLive() {
         }
       </AnimatePresence>
 
-      {/* Top Filter Bar - Sticky below navbar */}
-      <div className="sticky top-[50px] z-40 bg-[var(--rt-surface-muted)] pb-2 lg:top-0 lg:px-6 lg:pt-4">
-        <div
-          ref={filterBarRef}
-          className="flex gap-2 overflow-x-auto scrollbar-hide px-3 py-2 lg:px-0"
-          style={{
-            scrollbarWidth: "none",
-            msOverflowStyle: "none",
-            WebkitOverflowScrolling: "touch",
-          }}>
-          <style>{`
-            .scrollbar-hide::-webkit-scrollbar {
-              display: none;
-            }
-          `}</style>
-          {filterTabs.map((tab, index) => {
-            const isActive = activeFilter === tab.id;
+        {/* Top Filter Bar - Sticky below navbar */}
+        <div className="sticky top-[50px] z-40 bg-white/80 backdrop-blur-md border-b border-[var(--rt-border)] lg:top-0 lg:px-6 lg:pt-3 lg:pb-0">
+          <div
+            ref={filterBarRef}
+            className="flex gap-1.5 overflow-x-auto scrollbar-hide px-3 py-2.5 lg:px-0 lg:py-3"
+            style={{
+              scrollbarWidth: "none",
+              msOverflowStyle: "none",
+              WebkitOverflowScrolling: "touch",
+            }}
+          >
+            {filterTabs.map((tab, index) => {
+              const isActive = activeFilter === tab.id;
+              const hasBadge = (tab.id === 'table-booking' && pendingBookingsCount > 0) ||
+                (tab.id === 'all' && pendingOrdersCount > 0);
 
-            return (
-              <motion.button
-                key={tab.id}
-                onClick={() => {
-                  if (!isTransitioning) {
-                    setIsTransitioning(true);
-                    setActiveFilter(tab.id);
-                    scrollToFilter(index);
-                    setTimeout(() => setIsTransitioning(false), 300);
-                  }
-                }}
-                className={`shrink-0 rounded-[18px] border px-5 py-2.5 text-sm font-semibold whitespace-nowrap transition ${
-                  isActive ? "rt-pill-active shadow-sm" : "border-[var(--rt-border)] bg-white text-gray-700 hover:bg-gray-50"
-                }`}
-                animate={{
-                  scale: isActive ? 1.02 : 1,
-                  opacity: 1,
-                }}
-                transition={{
-                  duration: 0.3,
-                  ease: [0.25, 0.1, 0.25, 1],
-                }}
-                whileTap={{ scale: 0.95 }}>
-                <div className="flex items-center gap-2">
-                  <span className="flex items-center gap-1.5">
-                    {tab.label}
+              return (
+                <motion.button
+                  key={tab.id}
+                  onClick={() => {
+                    if (!isTransitioning) {
+                      setIsTransitioning(true);
+                      setActiveFilter(tab.id);
+                      scrollToFilter(index);
+                      setTimeout(() => setIsTransitioning(false), 300);
+                    }
+                  }}
+                  className={`relative shrink-0 rounded-full px-4 py-2 text-xs font-medium whitespace-nowrap transition-all duration-200 ${isActive
+                      ? "bg-[var(--primary)] text-white shadow-lg shadow-[var(--primary)]/30 scale-[1.02]"
+                      : "bg-gray-100/80 text-gray-600 hover:bg-gray-200/80 hover:text-gray-900"
+                    }`}
+                  animate={{
+                    scale: isActive ? 1.02 : 1,
+                  }}
+                  transition={{
+                    duration: 0.3,
+                    ease: [0.25, 0.1, 0.25, 1],
+                  }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  <div className="flex items-center gap-2">
+                    {/* Icon */}
+                    {tab.id === 'all' && (
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                      </svg>
+                    )}
+                    {tab.id === 'preparing' && (
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    )}
+                    {tab.id === 'ready' && (
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                    )}
+                    {tab.id === 'out-for-delivery' && (
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                      </svg>
+                    )}
+                    {tab.id === 'table-booking' && (
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                      </svg>
+                    )}
+                    {tab.id === 'completed' && (
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    )}
+                    {tab.id === 'cancelled' && (
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    )}
+                    {tab.id === 'scheduled' && (
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                    )}
+
+                    <span className="font-medium">{tab.label}</span>
+
+                    {/* Badge */}
                     {tab.id === 'table-booking' && pendingBookingsCount > 0 && (
-                      <span className="px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 text-[10px] font-black animate-bounce">
+                      <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full bg-red-500 text-white text-[9px] font-bold animate-pulse">
                         {pendingBookingsCount}
                       </span>
                     )}
                     {tab.id === 'all' && pendingOrdersCount > 0 && (
-                      <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-black">
+                      <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full bg-amber-500 text-white text-[9px] font-bold">
                         {pendingOrdersCount}
                       </span>
                     )}
-                  </span>
-                  {((tab.id === 'table-booking' && pendingBookingsCount > 0) || 
-                    (tab.id === 'all' && pendingOrdersCount > 0)) && (
-                    <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.6)]" />
-                  )}
-                </div>
-              </motion.button>
-            );
-          })}
-        </div>
-      </div>
 
-      {/* Content Area - Split pane on desktop */}
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-      <div
-        ref={contentRef}
-        className="content-scroll flex-1 overflow-y-auto px-4 pb-24 lg:max-w-none lg:px-6 lg:pb-6"
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-        onMouseDown={(e) => {
-          mouseStartX.current = e.clientX;
-          mouseEndX.current = e.clientX;
-          isMouseDown.current = true;
-          isSwiping.current = false;
-        }}
-        onMouseMove={(e) => {
-          if (isMouseDown.current) {
-            if (!isSwiping.current) {
-              const deltaX = Math.abs(e.clientX - mouseStartX.current);
-              if (deltaX > 10) {
-                isSwiping.current = true;
-              }
-            }
-            if (isSwiping.current) {
-              mouseEndX.current = e.clientX;
-            }
-          }
-        }}
-        onMouseUp={() => {
-          if (isMouseDown.current && isSwiping.current) {
-            const swipeDistance = mouseStartX.current - mouseEndX.current;
-            const minSwipeDistance = 50;
-
-            if (
-              Math.abs(swipeDistance) > minSwipeDistance &&
-              !isTransitioning
-            ) {
-              const currentIndex = filterTabs.findIndex(
-                (tab) => tab.id === activeFilter,
+                    {/* Active indicator dot */}
+                    {isActive && (
+                      <span className="absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-1.5 h-1.5 rounded-full bg-white/70" />
+                    )}
+                  </div>
+                </motion.button>
               );
-              let newIndex = currentIndex;
+            })}
+          </div>
+        </div>
+     
 
-              if (swipeDistance > 0 && currentIndex < filterTabs.length - 1) {
-                newIndex = currentIndex + 1;
-              } else if (swipeDistance < 0 && currentIndex > 0) {
-                newIndex = currentIndex - 1;
+        {/* Content Area - Split pane on desktop */}
+        <div className="flex min-h-0 flex-1 overflow-hidden lg:gap-2 lg:py-1">
+          {/* Left Content */}
+          <div
+            ref={contentRef}
+            className="flex-1 overflow-y-auto px-4 pb-24 lg:max-w-none lg:px-6 lg:pb-6 scrollbar-hide"
+            style={{
+              overflowY: 'auto',
+              overflowX: 'hidden',
+              height: '100%',
+              maxHeight: '100%',
+              scrollBehavior: 'smooth',
+              WebkitOverflowScrolling: 'touch',
+            }}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+            onMouseDown={(e) => {
+              mouseStartX.current = e.clientX;
+              mouseEndX.current = e.clientX;
+              isMouseDown.current = true;
+              isSwiping.current = false;
+            }}
+            onMouseMove={(e) => {
+              if (isMouseDown.current) {
+                if (!isSwiping.current) {
+                  const deltaX = Math.abs(e.clientX - mouseStartX.current);
+                  if (deltaX > 10) {
+                    isSwiping.current = true;
+                  }
+                }
+                if (isSwiping.current) {
+                  mouseEndX.current = e.clientX;
+                }
+              }
+            }}
+            onMouseUp={() => {
+              if (isMouseDown.current && isSwiping.current) {
+                const swipeDistance = mouseStartX.current - mouseEndX.current;
+                const minSwipeDistance = 50;
+
+                if (
+                  Math.abs(swipeDistance) > minSwipeDistance &&
+                  !isTransitioning
+                ) {
+                  const currentIndex = filterTabs.findIndex(
+                    (tab) => tab.id === activeFilter,
+                  );
+                  let newIndex = currentIndex;
+
+                  if (swipeDistance > 0 && currentIndex < filterTabs.length - 1) {
+                    newIndex = currentIndex + 1;
+                  } else if (swipeDistance < 0 && currentIndex > 0) {
+                    newIndex = currentIndex - 1;
+                  }
+
+                  if (newIndex !== currentIndex) {
+                    setIsTransitioning(true);
+                    setTimeout(() => {
+                      setActiveFilter(filterTabs[newIndex].id);
+                      scrollToFilter(newIndex);
+                      setTimeout(() => setIsTransitioning(false), 300);
+                    }, 50);
+                  }
+                }
               }
 
-              if (newIndex !== currentIndex) {
-                setIsTransitioning(true);
-                setTimeout(() => {
-                  setActiveFilter(filterTabs[newIndex].id);
-                  scrollToFilter(newIndex);
-                  setTimeout(() => setIsTransitioning(false), 300);
-                }, 50);
-              }
-            }
-          }
+              isMouseDown.current = false;
+              isSwiping.current = false;
+              mouseStartX.current = 0;
+              mouseEndX.current = 0;
+            }}
+            onMouseLeave={() => {
+              isMouseDown.current = false;
+              isSwiping.current = false;
+            }}
+          >
+            <style>{`
+      /* Custom scrollbar styling */
+      .content-scroll {
+        scrollbar-width: thin;
+        scrollbar-color: #d1d5db transparent;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior: contain;
+      }
+      .content-scroll::-webkit-scrollbar {
+        width: 4px;
+      }
+      .content-scroll::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .content-scroll::-webkit-scrollbar-thumb {
+        background: #d1d5db;
+        border-radius: 20px;
+      }
+      .content-scroll::-webkit-scrollbar-thumb:hover {
+        background: #9ca3af;
+      }
+    `}</style>
 
-          isMouseDown.current = false;
-          isSwiping.current = false;
-          mouseStartX.current = 0;
-          mouseEndX.current = 0;
-        }}
-        onMouseLeave={() => {
-          isMouseDown.current = false;
-          isSwiping.current = false;
-        }}>
-        <style>{`
-          .content-scroll {
-            scrollbar-width: none;
-            -ms-overflow-style: none;
-          }
-          .content-scroll::-webkit-scrollbar {
-            display: none;
-          }
-        `}</style>
-
-        {/* Verification Pending Card - Show if onboarding is complete (all 4 steps) and restaurant is not active */}
-        {!restaurantStatus.isLoading &&
-          !restaurantStatus.isActive &&
-          restaurantStatus.onboarding?.completedSteps === 4 && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.1 }}
-              className={`mt-4 mb-4 rounded-2xl shadow-sm px-6 py-4 ${
-                restaurantStatus.rejectionReason
-                  ? "bg-white border border-red-200"
-                  : "bg-white border border-yellow-200"
-              }`}>
-              {restaurantStatus.rejectionReason ? (
-                <>
-                  <div className="flex items-start gap-3 mb-3">
-                    <div className="flex-shrink-0 rounded-full p-2 bg-red-100">
-                      <AlertCircle className="w-5 h-5 text-red-600" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-lg font-bold text-red-600 mb-2">
-                        Denied Verification
-                      </h3>
-                      <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-3">
-                        <p className="text-xs font-semibold text-red-800 mb-2">
-                          Reason for Rejection:
-                        </p>
-                        <div className="text-xs text-red-700 space-y-1">
-                          {restaurantStatus.rejectionReason
-                            .split("\n")
-                            .filter((line) => line.trim()).length > 1 ? (
-                            <ul className="space-y-1 list-disc list-inside">
+            {/* Verification Pending Card */}
+            {!restaurantStatus.isLoading &&
+              !restaurantStatus.isActive &&
+              restaurantStatus.onboarding?.completedSteps === 4 && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3, delay: 0.1 }}
+                  className={`mt-4 mb-4 rounded-2xl shadow-sm px-6 py-4 ${restaurantStatus.rejectionReason
+                      ? "bg-white border border-red-200"
+                      : "bg-white border border-yellow-200"
+                    }`}>
+                  {restaurantStatus.rejectionReason ? (
+                    <>
+                      <div className="flex items-start gap-3 mb-3">
+                        <div className="flex-shrink-0 rounded-full p-2 bg-red-100">
+                          <AlertCircle className="w-5 h-5 text-red-600" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h3 className="text-lg font-bold text-red-600 mb-2">
+                            Denied Verification
+                          </h3>
+                          <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-3">
+                            <p className="text-xs font-semibold text-red-800 mb-2">
+                              Reason for Rejection:
+                            </p>
+                            <div className="text-xs text-red-700 space-y-1">
                               {restaurantStatus.rejectionReason
                                 .split("\n")
-                                .map(
-                                  (point, index) =>
-                                    point.trim() && (
-                                      <li key={index}>{point.trim()}</li>
-                                    ),
-                                )}
-                            </ul>
-                          ) : (
-                            <p className="text-red-700">
-                              {restaurantStatus.rejectionReason}
-                            </p>
-                          )}
+                                .filter((line) => line.trim()).length > 1 ? (
+                                <ul className="space-y-1 list-disc list-inside">
+                                  {restaurantStatus.rejectionReason
+                                    .split("\n")
+                                    .map(
+                                      (point, index) =>
+                                        point.trim() && (
+                                          <li key={index}>{point.trim()}</li>
+                                        ),
+                                    )}
+                                </ul>
+                              ) : (
+                                <p className="text-red-700">
+                                  {restaurantStatus.rejectionReason}
+                                </p>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </div>
-                  <p className="text-sm text-gray-700 mb-3">
-                    Please correct the above issues and click "Reverify" to
-                    resubmit your request for approval.
-                  </p>
-                  <button
-                    onClick={handleReverify}
-                    disabled={isReverifying}
-                    className="w-full px-6 py-2.5 bg-blue-600 text-white rounded-lg font-semibold text-sm hover:bg-blue-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-                    {isReverifying ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Submitting...
-                      </>
-                    ) : (
-                      "Reverify"
-                    )}
-                  </button>
-                </>
-              ) : (
-                <>
-                  <h3 className="text-lg font-bold text-gray-900 mb-1">
-                    Verification Done in 24 Hours
-                  </h3>
-                  <p className="text-sm text-gray-600">
-                    Your account is under verification. You'll be notified once
-                    approved.
-                  </p>
-                </>
+                      <p className="text-sm text-gray-700 mb-3">
+                        Please correct the above issues and click "Reverify" to
+                        resubmit your request for approval.
+                      </p>
+                      <button
+                        onClick={handleReverify}
+                        disabled={isReverifying}
+                        className="w-full px-6 py-2.5 bg-blue-600 text-white rounded-lg font-semibold text-sm hover:bg-blue-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                        {isReverifying ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Submitting...
+                          </>
+                        ) : (
+                          "Reverify"
+                        )}
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <h3 className="text-lg font-bold text-gray-900 mb-1">
+                        Verification Done in 24 Hours
+                      </h3>
+                      <p className="text-sm text-gray-600">
+                        Your account is under verification. You'll be notified once
+                        approved.
+                      </p>
+                    </>
+                  )}
+                </motion.div>
               )}
-            </motion.div>
-          )}
 
-        {/* Dining Approval Pending Card */}
-        {pendingDiningRequest && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mt-4 mb-4 rounded-2xl shadow-sm px-6 py-4 bg-white border border-blue-200">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="p-2 rounded-full bg-blue-100">
-                <Clock className="w-4 h-4 text-blue-600" />
-              </div>
-              <h3 className="text-base font-bold text-gray-900">
-                Dining Activation Request Pending
-              </h3>
-            </div>
-            <p className="text-sm text-gray-600">
-              Your request to {pendingDiningRequest.requestedSettings?.isEnabled ? "enable" : "update"} dining services is being reviewed by our team. You'll be notified via SMS/Dashboard once it's approved.
-            </p>
-            <div className="mt-3 flex items-center gap-2 text-[10px] font-black text-blue-500 uppercase tracking-widest">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
-              </span>
-              Under Review
-            </div>
-          </motion.div>
-        )}
+            {/* Dining Approval Pending Card */}
+            {pendingDiningRequest && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mt-4 mb-4 rounded-2xl shadow-sm px-6 py-4 bg-white border border-blue-200">
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="p-2 rounded-full bg-blue-100">
+                    <Clock className="w-4 h-4 text-blue-600" />
+                  </div>
+                  <h3 className="text-base font-bold text-gray-900">
+                    Dining Activation Request Pending
+                  </h3>
+                </div>
+                <p className="text-sm text-gray-600">
+                  Your request to {pendingDiningRequest.requestedSettings?.isEnabled ? "enable" : "update"} dining services is being reviewed by our team. You'll be notified via SMS/Dashboard once it's approved.
+                </p>
+                <div className="mt-3 flex items-center gap-2 text-[10px] font-black text-blue-500 uppercase tracking-widest">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                  </span>
+                  Under Review
+                </div>
+              </motion.div>
+            )}
 
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={activeFilter}
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            transition={{ duration: 0.3 }}>
-            {renderContent()}
-          </motion.div>
-        </AnimatePresence>
-      </div>
-
-      <aside className="hidden lg:flex lg:w-[400px] lg:shrink-0 lg:flex-col lg:border-l lg:border-[var(--rt-border)] lg:bg-white">
-        {selectedOrder ? (
-          <OrderDetailPanel
-            order={selectedOrder}
-            onClose={() => setSelectedOrder(null)}
-          />
-        ) : (
-          <div className="flex flex-1 flex-col items-center justify-center p-8 text-center">
-            <p className="text-sm font-semibold text-gray-900">No order selected</p>
-            <p className="mt-1 text-xs text-gray-500">
-              Select an order from the list to view details
-            </p>
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={activeFilter}
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                transition={{ duration: 0.3 }}>
+                {renderContent()}
+              </motion.div>
+            </AnimatePresence>
           </div>
-        )}
-      </aside>
-      </div>
+
+          {/* Right Panel */}
+          {/* Right Panel */}
+          <aside className="hidden lg:flex lg:w-[420px] lg:shrink-0 lg:flex-col lg:bg-white lg:rounded-3xl lg:shadow-2xl lg:border lg:border-[var(--rt-border)] lg:mx-2 lg:my-1 lg:overflow-hidden lg:h-full">
+            {selectedOrder ? (
+              <OrderDetailPanel
+                order={selectedOrder}
+                onClose={() => setSelectedOrder(null)}
+                className="rounded-3xl border-0 shadow-none"
+              />
+            ) : (
+              <div className="flex flex-1 flex-col items-center justify-center p-8 text-center">
+                <div className="w-20 h-20 rounded-full bg-gray-100 flex items-center justify-center mb-4">
+                  <svg className="w-10 h-10 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                  </svg>
+                </div>
+                <p className="text-sm font-semibold text-gray-900">No order selected</p>
+                <p className="mt-1 text-xs text-gray-500 max-w-xs">
+                  Select an order from the list to view detailed information, items, and status
+                </p>
+              </div>
+            )}
+          </aside>
+        </div>
 
       {/* Audio element */}
       <audio
@@ -3248,6 +3328,7 @@ export default function OrdersLive() {
 
 
 // Order Card Component
+// Order Card Component
 function OrderCard({
   orderId,
   mongoId,
@@ -3282,27 +3363,38 @@ function OrderCard({
     .replace(/\b\w/g, (c) => c.toUpperCase());
 
   return (
-    <div className={`w-full rounded-xl p-3 mb-3 border shadow-sm relative overflow-hidden transition-colors ${
-      isSelected
+    <div className={`w-full rounded-xl p-3 mb-3 border shadow-sm relative overflow-hidden transition-colors ${isSelected
         ? "border-[var(--rt-primary-strong)] bg-[var(--rt-primary-soft)] ring-2 ring-[var(--rt-primary-strong)]/20"
-        : "border-slate-100 bg-white active:bg-slate-50"
-    }`}>
-      <div 
-        className="absolute top-0 left-0 w-1 h-full" 
+        : "border-slate-200 bg-white hover:border-slate-300 hover:shadow-md"
+      }`}>
+      <div
+        className="absolute top-0 left-0 w-1 h-full"
         style={{ backgroundColor: brandColor }}
       />
-      
+
       <div
-        onClick={() => onSelect?.({ orderId, status, customerName, type, tableOrToken, timePlaced, eta, itemsSummary, paymentMethod, scheduledAt, restaurantNote })}
-        className="flex gap-3 items-start cursor-pointer pl-1">
-        
-        {/* Photo Container - Smaller for mobile */}
-        <div className="h-14 w-14 rounded-lg overflow-hidden bg-slate-50 flex-shrink-0 border border-slate-100 mt-0.5">
+        onClick={() => onSelect?.({
+          orderId,
+          status,
+          customerName,
+          type,
+          tableOrToken,
+          timePlaced,
+          eta,
+          itemsSummary,
+          paymentMethod,
+          scheduledAt,
+          restaurantNote
+        })}
+        className="flex gap-3 items-start cursor-pointer pl-1"
+      >
+        {/* Photo Container */}
+        <div className="h-14 w-14 rounded-lg overflow-hidden bg-slate-100 flex-shrink-0 border border-slate-200 mt-0.5">
           {photoUrl ? (
             <img src={photoUrl} alt={photoAlt} className="h-full w-full object-cover" />
           ) : (
-            <div className="h-full w-full flex items-center justify-center p-1 bg-slate-50">
-              <span className="text-[8px] font-bold text-slate-300 text-center leading-none uppercase">
+            <div className="h-full w-full flex items-center justify-center p-1 bg-slate-100">
+              <span className="text-[8px] font-bold text-slate-400 text-center leading-none uppercase">
                 {photoAlt}
               </span>
             </div>
@@ -3316,22 +3408,25 @@ function OrderCard({
             <h3 className="text-[13px] font-black text-slate-900 truncate">
               #<span style={{ color: brandColor }}>{orderId}</span>
             </h3>
-            
+
             <div className="flex items-center gap-1.5 flex-shrink-0">
               {scheduledAt && (
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-green-50 text-green-600 border border-green-100 text-[8px] font-black uppercase">
-                  <Calendar className="w-2 h-2" />
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-200 text-[8px] font-bold uppercase">
+                  <Calendar className="w-2.5 h-2.5" />
                   Scheduled
                 </span>
               )}
-              <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[8px] font-black border uppercase tracking-wider ${
-                isReady ? "bg-emerald-50 text-emerald-600 border-emerald-100" : 
-                normalizedStatus === "confirmed" ? "bg-amber-50 text-amber-600 border-amber-100" : 
-                "bg-slate-50 text-slate-500 border-slate-100"
-              }`}>
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[8px] font-bold border uppercase tracking-wider ${isReady
+                  ? "bg-emerald-100 text-emerald-700 border-emerald-200"
+                  : normalizedStatus === "confirmed"
+                    ? "bg-amber-100 text-amber-700 border-amber-200"
+                    : normalizedStatus === "preparing"
+                      ? "bg-blue-100 text-blue-700 border-blue-200"
+                      : "bg-slate-100 text-slate-700 border-slate-200"
+                }`}>
                 {statusLabel}
               </span>
-              
+
               {isPreparing && onCancel && (
                 <button
                   type="button"
@@ -3339,7 +3434,7 @@ function OrderCard({
                     e.stopPropagation();
                     onCancel({ orderId, mongoId, customerName });
                   }}
-                  className="p-1 rounded-full bg-rose-50 text-rose-500"
+                  className="p-1 rounded-full bg-rose-100 text-rose-600 hover:bg-rose-200 transition-colors"
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -3348,50 +3443,50 @@ function OrderCard({
           </div>
 
           {/* Customer & Type */}
-          <div className="flex items-center justify-between text-[9px] text-slate-400 font-bold uppercase tracking-tight mb-1">
+          <div className="flex items-center justify-between text-[10px] text-slate-600 font-semibold uppercase tracking-wide mb-1">
             <span className="truncate max-w-[60%]">{customerName}</span>
-            <span className="whitespace-nowrap">{type}</span>
+            <span className="whitespace-nowrap text-slate-500">{type}</span>
           </div>
 
-          {/* Items Summary - One line only */}
-          <p className="text-[10px] text-slate-600 font-bold truncate italic mb-1">
+          {/* Items Summary */}
+          <p className="text-[11px] text-slate-700 font-medium truncate mb-1">
             {itemsSummary}
           </p>
 
           {restaurantNote && (
-            <div className="mb-2 px-2 py-1 bg-blue-50 border border-blue-100 rounded-md">
-              <p className="text-[9px] text-blue-700 font-bold line-clamp-1 italic">
-                Note: {restaurantNote}
+            <div className="mb-2 px-2.5 py-1.5 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-[10px] text-blue-700 font-semibold line-clamp-1">
+                📝 Note: {restaurantNote}
               </p>
             </div>
           )}
 
-          {/* Bottom Actions Row - Clean Grid/Flex */}
-          <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-50 mt-auto">
-              {scheduledAt ? (
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-[8px] font-bold text-green-600 uppercase">Scheduled For</span>
-                  <span className="text-[10px] font-black text-green-700">
-                    {new Date(scheduledAt).toLocaleString("en-US", {
-                      day: "numeric",
-                      month: "short",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      hour12: true,
-                    })}
-                  </span>
-                </div>
-              ) : (
-                <div className="flex flex-col gap-0.5">
-                  {!isReady && eta && (
-                    <div className="flex items-center gap-1">
-                      <span className="text-[8px] font-bold text-slate-400 uppercase">ETA</span>
-                      <span className="text-[11px] font-black text-slate-800">{eta}</span>
-                    </div>
-                  )}
-                  <span className="text-[7px] text-slate-300 font-bold uppercase">{timePlaced}</span>
-                </div>
-              )}
+          {/* Bottom Actions Row */}
+          <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100 mt-auto">
+            {scheduledAt ? (
+              <div className="flex flex-col gap-0.5">
+                <span className="text-[8px] font-bold text-green-600 uppercase tracking-wider">Scheduled For</span>
+                <span className="text-[10px] font-bold text-green-700">
+                  {new Date(scheduledAt).toLocaleString("en-US", {
+                    day: "numeric",
+                    month: "short",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    hour12: true,
+                  })}
+                </span>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-0.5">
+                {!isReady && eta && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[8px] font-bold text-slate-500 uppercase tracking-wider">ETA</span>
+                    <span className="text-[12px] font-bold text-slate-800">{eta}</span>
+                  </div>
+                )}
+                <span className="text-[8px] text-slate-400 font-semibold uppercase">{timePlaced}</span>
+              </div>
+            )}
 
             <div className="flex items-center gap-1.5 flex-shrink-0">
               {(isPreparing || isReady || normalizedStatus === "confirmed") && (
@@ -3403,9 +3498,9 @@ function OrderCard({
                       </svg>
                     </div>
                   )}
-                  
+
                   {!deliveryPartnerId && isPreparing && (
-                    <div className="px-1.5 py-0.5 rounded bg-slate-50 text-slate-400 text-[7px] font-black border border-slate-100 uppercase tracking-tighter">
+                    <div className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 text-[7px] font-bold border border-amber-200 uppercase tracking-tighter">
                       No Rider
                     </div>
                   )}
@@ -3428,9 +3523,16 @@ function OrderCard({
                     onMarkReady({ orderId, mongoId, customerName });
                   }}
                   disabled={isMarkingReady}
-                  className="px-3 py-1.5 rounded-lg text-[9px] font-black text-white shadow-sm transition-transform active:scale-95 disabled:opacity-50"
-                  style={{ backgroundColor: brandColor }}>
-                  {isMarkingReady ? "..." : "MARK READY"}
+                  className="px-3 py-1.5 rounded-lg text-[9px] font-bold text-white shadow-sm transition-all hover:shadow-md active:scale-95 disabled:opacity-50"
+                  style={{ backgroundColor: brandColor }}
+                >
+                  {isMarkingReady ? (
+                    <span className="flex items-center gap-1">
+                      <span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    </span>
+                  ) : (
+                    "MARK READY"
+                  )}
                 </button>
               )}
             </div>
@@ -4105,6 +4207,6 @@ function EmptyState({ message = "Temporarily closed" }) {
         View status
       </button>
     </div>
-  );
+  ); 
 }
 
