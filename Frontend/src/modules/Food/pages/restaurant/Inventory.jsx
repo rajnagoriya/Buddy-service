@@ -1822,7 +1822,7 @@ export default function Inventory() {
     >
       <InventoryStatsRow activeTab={activeTab} stats={inventoryStats} />
 
-      <div ref={tabBarRef}>
+      <div ref={tabBarRef} className="sticky top-[52px] lg:top-0 z-30 bg-[#f4f6f9]/95 backdrop-blur-sm py-2 px-4 -mx-4 lg:px-6 lg:-mx-6 transition-all duration-200">
         <InventoryToolbar
           activeTab={activeTab}
           totalItems={totalItems}
