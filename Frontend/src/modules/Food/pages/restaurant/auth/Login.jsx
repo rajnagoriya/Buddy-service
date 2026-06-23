@@ -1,5 +1,5 @@
 import { useRef, useState } from "react"
-import { useNavigate, Link } from "react-router-dom"
+import { useNavigate, Link, useLocation } from "react-router-dom"
 import { Loader2, Phone } from "lucide-react"
 import { toast } from "sonner"
 import { restaurantAPI } from "@food/api"
@@ -12,6 +12,7 @@ const DEFAULT_COUNTRY_CODE = "+91"
 
 export default function RestaurantLogin() {
   const navigate = useNavigate()
+  const location = useLocation()
   const phoneInputRef = useRef(null)
   const [phone, setPhone] = useState(() => sessionStorage.getItem("restaurantLoginPhone") || "")
   const [loading, setLoading] = useState(false)
@@ -46,7 +47,7 @@ export default function RestaurantLogin() {
       sessionStorage.setItem("restaurantAuthData", JSON.stringify(authData))
       sessionStorage.setItem("restaurantLoginPhone", phone)
       toast.success("Verification code sent!")
-      navigate("/food/restaurant/otp")
+      navigate("/food/restaurant/otp", { state: { from: location.state?.from } })
     } catch (apiErr) {
       const msg = apiErr?.response?.data?.message || apiErr?.message || "Failed to send OTP."
       toast.error(msg)

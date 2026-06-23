@@ -1,22 +1,18 @@
-import { api, restaurantAPI } from "@food/api"
-const debugLog = (...args) => {}
-const debugWarn = (...args) => {}
+import { restaurantAPI } from "@food/api"
+
 const debugError = (...args) => {}
 
-
 export const getOnboardingStorageKey = () => {
-    try {
-      const userStr = localStorage.getItem("restaurant_user")
-      if (userStr) {
-        const user = JSON.parse(userStr)
-        const userId = user._id || user.id
-        if (userId) return `restaurant_onboarding_data_${userId}`
-      }
-    } catch (e) {}
-    return "restaurant_onboarding_data"
+  try {
+    const userStr = localStorage.getItem("restaurant_user")
+    if (userStr) {
+      const user = JSON.parse(userStr)
+      const userId = user._id || user.id
+      if (userId) return `restaurant_onboarding_data_${userId}`
+    }
+  } catch (e) {}
+  return "restaurant_onboarding_data"
 }
-
-const getOnboardingStorageKeyInternal = getOnboardingStorageKey
 
 const isPresentImage = (value) => {
   if (!value) return false
@@ -39,14 +35,18 @@ const isPresentDocument = (value) => {
   return false
 }
 
-// Helper function to check if a step is complete
 const isStepComplete = (stepData, stepNumber) => {
   if (!stepData) return false
 
   if (stepNumber === 1) {
+    const dietType = stepData.dietaryType || stepData.step1?.dietaryType
+    const hasDiet =
+      dietType === "veg" || dietType === "non_veg" || dietType === "mixed" ||
+      typeof stepData.pureVegRestaurant === "boolean"
+
     return (
       stepData.restaurantName &&
-      typeof stepData.pureVegRestaurant === "boolean" &&
+      hasDiet &&
       stepData.ownerName &&
       stepData.ownerEmail &&
       stepData.ownerPhone &&
@@ -83,7 +83,7 @@ const isStepComplete = (stepData, stepNumber) => {
     const hasFssaiImage = isPresentImage(stepData.fssai?.image)
     const hasGstImage =
       !stepData.gst?.isRegistered || isPresentImage(stepData.gst?.image)
-    
+
     return (
       stepData.pan?.panNumber &&
       stepData.pan?.nameOnPan &&
@@ -181,61 +181,68 @@ const buildOnboardingLikeDataFromRestaurant = (restaurant) => {
   }
 }
 
+export const resolveRestaurantOnboardingStatus = (restaurant) => {
+  if (!restaurant) return "NOT_STARTED"
+  const explicit = String(restaurant?.onboardingStatus || "").toUpperCase()
+  if (explicit) return explicit
+  if (restaurant?.status === "approved") return "APPROVED"
+  if (restaurant?.status === "rejected") return "REJECTED"
+  if (restaurant?.submittedAt || restaurant?.pendingUpdateReason === "New Registration") {
+    return "SUBMITTED"
+  }
+  return "IN_PROGRESS"
+}
+
 export const isRestaurantOnboardingComplete = (restaurant) => {
   if (!restaurant) return false
 
-  // Approved restaurants should never be forced into onboarding again.
-  if (restaurant?.status === "approved") {
+  const status = resolveRestaurantOnboardingStatus(restaurant)
+  if (status === "APPROVED") return true
+
+  if (
+    restaurant?.status === "pending" &&
+    (restaurant?.approvedAt ||
+      (restaurant?.pendingUpdateReason &&
+        restaurant?.pendingUpdateReason !== "New Registration"))
+  ) {
     return true
   }
 
-  // If a restaurant is pending but has already been approved once (e.g. they updated their profile/location),
-  // OR if they have a pendingUpdateReason that is not "New Registration",
-  // they should not be redirected back to onboarding.
-  if (restaurant?.status === "pending" && (restaurant?.approvedAt || (restaurant?.pendingUpdateReason && restaurant?.pendingUpdateReason !== 'New Registration'))) {
-    return true
-  }
+  if (restaurant?.isActive === true) return true
 
-  if (restaurant?.isActive === true) {
-    return true
-  }
+  if (status === "SUBMITTED" || status === "UNDER_REVIEW") return true
 
   const onboardingLikeData = buildOnboardingLikeDataFromRestaurant(restaurant)
-  if (onboardingLikeData.completedSteps === 4) {
-    return true
-  }
+  if (onboardingLikeData.completedSteps === 4) return true
 
   const step1Complete = isStepComplete(onboardingLikeData.step1, 1)
   const step2Complete = isStepComplete(onboardingLikeData.step2, 2)
   const step3Complete = isStepComplete(onboardingLikeData.step3, 3)
 
-  if (step1Complete && step2Complete && step3Complete) {
-    return true
-  }
+  if (step1Complete && step2Complete && step3Complete) return true
 
-  // Some older or migrated restaurant accounts have complete live profile data
-  // without a reliable onboarding.completedSteps value.
   const hasOperationalProfile =
     Boolean(String(restaurant?.name || "").trim()) &&
     Boolean(String(restaurant?.restaurantId || "").trim()) &&
     Boolean(String(restaurant?.slug || "").trim()) &&
     step1Complete &&
     step2Complete &&
-    (restaurant?.approvedAt || restaurant?.rejectedAt || restaurant?.rejectionReason || restaurant?.isActive === false)
+    (restaurant?.approvedAt ||
+      restaurant?.rejectedAt ||
+      restaurant?.rejectionReason ||
+      restaurant?.isActive === false)
 
-  if (hasOperationalProfile) {
-    return true
-  }
+  if (hasOperationalProfile) return true
 
   return false
 }
 
-/** Map flat onboarding form state (Onboarding.jsx) to API/check shape used by isStepComplete */
 export const mapOnboardingFormToCheckData = (step1 = {}, step2 = {}, step3 = {}) => ({
-  step1: {
-    ...step1,
-    zoneId: step1.zoneId,
-  },
+    step1: {
+      ...step1,
+      zoneId: step1.zoneId,
+      dietaryType: step1.dietaryType,
+    },
   step2: {
     cuisines: step2.cuisines,
     openDays: step2.openDays,
@@ -286,59 +293,33 @@ export const getCompletedOnboardingSteps = (step1, step2, step3) => {
   return completed
 }
 
-// Determine which step to show based on completeness
 export const determineStepToShow = (data) => {
   if (!data) return 1
 
-  // If completedSteps is 4, onboarding is complete (admin-created restaurants)
-  if (data.completedSteps === 4) {
-    return null
-  }
+  if (data.completedSteps === 4) return null
 
-  // Check step 1
-  if (!isStepComplete(data.step1, 1)) {
-    return 1
-  }
+  if (!isStepComplete(data.step1, 1)) return 1
+  if (!isStepComplete(data.step2, 2)) return 2
+  if (!isStepComplete(data.step3, 3)) return 3
 
-  // Check step 2
-  if (!isStepComplete(data.step2, 2)) {
-    return 2
-  }
-
-  // Check step 3
-  if (!isStepComplete(data.step3, 3)) {
-    return 3
-  }
-
-  // All steps complete
   return null
 }
 
-// Check onboarding status from API and return the step to navigate to
 export const checkOnboardingStatus = async () => {
   try {
-    const restaurantResponse = await restaurantAPI.getMe()
-    const restaurant =
-      restaurantResponse?.data?.data?.user ||
-      restaurantResponse?.data?.data?.restaurant ||
-      restaurantResponse?.data?.restaurant ||
-      restaurantResponse?.data?.user ||
-      null
+    const res = await restaurantAPI.getOnboardingProgress()
+    const payload = res?.data?.data?.onboarding || res?.data?.onboarding
+    if (!payload) return 1
 
-    if (restaurant && isRestaurantOnboardingComplete(restaurant)) {
-      return null
-    }
+    const status = String(payload.onboardingStatus || "").toUpperCase()
+    if (status === "APPROVED") return null
+    if (status === "SUBMITTED" || status === "UNDER_REVIEW") return null
 
-    const res = await api.get("/restaurant/onboarding")
-    const data = res?.data?.data?.onboarding
-    if (data) {
-      const stepToShow = determineStepToShow(data)
-      return stepToShow
-    }
-    // No onboarding data, start from step 1
-    return 1
+    if (payload.currentStep) return payload.currentStep
+
+    const stepToShow = determineStepToShow(payload.onboarding)
+    return stepToShow || 1
   } catch (err) {
-    // If API call fails, check localStorage
     try {
       const localData = localStorage.getItem(getOnboardingStorageKey())
       if (localData) {
@@ -348,8 +329,6 @@ export const checkOnboardingStatus = async () => {
     } catch (localErr) {
       debugError("Failed to check localStorage:", localErr)
     }
-    // Default to step 1 if everything fails
     return 1
   }
 }
-

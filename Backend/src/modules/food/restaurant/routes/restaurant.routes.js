@@ -56,6 +56,11 @@ import { authMiddleware } from '../../../../core/auth/auth.middleware.js';
 import { sendError } from '../../../../utils/response.js';
 import { getRestaurantFinanceController } from '../controllers/restaurantFinance.controller.js';
 import { deleteRestaurantAccountController } from '../controllers/deleteAccount.controller.js';
+import {
+    getOnboardingProgressController,
+    saveOnboardingStepController,
+    submitOnboardingController,
+} from '../controllers/restaurantOnboarding.controller.js';
 
 import { cacheResponse, invalidateCache } from '../../../../middleware/cache.js';
 
@@ -77,7 +82,33 @@ const uploadFields = upload.fields([
     { name: 'menuPdf', maxCount: 1 }
 ]);
 
+const onboardingUploadFields = upload.fields([
+    { name: 'profileImage', maxCount: 1 },
+    { name: 'panImage', maxCount: 1 },
+    { name: 'gstImage', maxCount: 1 },
+    { name: 'fssaiImage', maxCount: 1 },
+    { name: 'menuImages', maxCount: 10 },
+    { name: 'menuPdf', maxCount: 1 }
+]);
+
 router.post('/register', uploadFields, registerRestaurantController);
+
+// Onboarding draft + submit (authenticated restaurant)
+router.get('/onboarding', authMiddleware, requireRestaurant, getOnboardingProgressController);
+router.put(
+    '/onboarding/step/:step',
+    authMiddleware,
+    requireRestaurant,
+    onboardingUploadFields,
+    saveOnboardingStepController
+);
+router.post(
+    '/onboarding/submit',
+    authMiddleware,
+    requireRestaurant,
+    onboardingUploadFields,
+    submitOnboardingController
+);
 
 // Public: approved restaurants list (for user app)
 router.get('/restaurants', cacheResponse(300, 'restaurants'), listApprovedRestaurantsController);
