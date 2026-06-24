@@ -1167,14 +1167,14 @@ export async function createRestaurant(req, res, next) {
 export async function rejectRestaurant(req, res, next) {
     try {
         const { id } = req.params;
-        const { reason } = req.body || {};
+        const { reason, rejectionStep } = req.body || {};
         if (!id || !mongoose.Types.ObjectId.isValid(id)) {
             return res.status(400).json({
                 success: false,
                 message: 'Invalid restaurant id'
             });
         }
-        const restaurant = await adminService.rejectRestaurant(id, reason);
+        const restaurant = await adminService.rejectRestaurant(id, reason, rejectionStep);
         if (!restaurant) {
             return res.status(404).json({
                 success: false,

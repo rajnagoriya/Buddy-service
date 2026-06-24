@@ -1,6 +1,7 @@
 import { Suspense, lazy } from "react"
 import { Routes, Route, Navigate } from "react-router-dom"
 import ProtectedRoute from "@food/components/ProtectedRoute"
+import RestaurantAccessGuard from "./RestaurantAccessGuard"
 import Loader from "@food/components/Loader"
 import RestaurantPanelLayout from "./RestaurantPanelLayout"
 import "./restaurantTheme.css"
@@ -53,7 +54,13 @@ const VerificationPending = lazy(() => import("@food/pages/restaurant/auth/Verif
 
 const restaurantGuard = (element) => (
   <ProtectedRoute requiredRole="restaurant" loginPath="/food/restaurant/login">
-    {element}
+    <RestaurantAccessGuard mode="dashboard">{element}</RestaurantAccessGuard>
+  </ProtectedRoute>
+)
+
+const onboardingGuard = (element) => (
+  <ProtectedRoute requiredRole="restaurant" loginPath="/food/restaurant/login">
+    <RestaurantAccessGuard mode="onboarding">{element}</RestaurantAccessGuard>
   </ProtectedRoute>
 )
 
@@ -69,7 +76,7 @@ export default function RestaurantRouter() {
           <Route path="signup" element={<Signup />} />
           <Route path="forgot-password" element={<ForgotPassword />} />
           <Route path="pending-verification" element={<VerificationPending />} />
-          <Route path="onboarding" element={<RestaurantOnboarding />} />
+          <Route path="onboarding" element={onboardingGuard(<RestaurantOnboarding />)} />
           <Route path="privacy" element={<PrivacyPolicyPage />} />
           <Route path="terms" element={<TermsAndConditionsPage />} />
 

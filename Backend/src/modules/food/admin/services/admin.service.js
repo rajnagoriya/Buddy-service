@@ -3323,14 +3323,19 @@ export async function createRestaurantByAdmin(body) {
 
 export async function approveRestaurant(id) {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
+    const now = new Date();
     const updated = await FoodRestaurant.findByIdAndUpdate(
         id,
         {
             $set: {
                 status: 'approved',
-                approvedAt: new Date(),
+                onboardingStatus: 'APPROVED',
+                approvedAt: now,
+                verifiedAt: now,
                 rejectedAt: undefined,
                 rejectionReason: undefined,
+                adminRemarks: undefined,
+                rejectionStep: undefined,
                 pendingUpdateReason: undefined
             }
         },
@@ -3359,15 +3364,21 @@ export async function approveRestaurant(id) {
     return updated;
 }
 
-export async function rejectRestaurant(id, reason) {
+export async function rejectRestaurant(id, reason, rejectionStep = 1) {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
+    const step = Math.min(3, Math.max(1, Number(rejectionStep) || 1));
+    const remarks = typeof reason === 'string' ? reason.trim() : undefined;
     const updated = await FoodRestaurant.findByIdAndUpdate(
         id,
         {
             $set: {
                 status: 'rejected',
+                onboardingStatus: 'REJECTED',
                 rejectedAt: new Date(),
-                rejectionReason: typeof reason === 'string' ? reason.trim() : undefined,
+                rejectionReason: remarks,
+                adminRemarks: remarks,
+                rejectionStep: step,
+                currentStep: step,
                 approvedAt: null,
                 pendingUpdateReason: undefined
             }

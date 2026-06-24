@@ -13,6 +13,7 @@ export const normalizeFoodVariants = (value) =>
         _id: id,
         name,
         price,
+        unit: entry?.unit ? String(entry.unit).trim() : "",
       }
     })
     .filter(Boolean)

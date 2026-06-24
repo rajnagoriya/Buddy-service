@@ -1409,13 +1409,28 @@ export default function HubMenu() {
                           </div>
 
                           {/* Right: Image */}
-                          <div className="relative">
-                            <img
-                              src={item.image}
-                              alt={item.name}
-                              className="w-20 h-20 rounded-lg object-cover"
-                            />
-                            <div className="absolute bottom-1 right-1 bg-black/60 rounded-full p-1">
+                          <div className="relative w-20 h-20 flex-shrink-0 bg-gray-100 rounded-lg overflow-hidden flex items-center justify-center border border-gray-200">
+                            {item.image && typeof item.image === 'string' && item.image.trim() !== '' && item.image !== 'null' && item.image !== 'undefined' ? (
+                              <img
+                                src={item.image}
+                                alt={item.name}
+                                className="w-full h-full object-cover"
+                                onError={(e) => {
+                                  e.target.style.display = 'none';
+                                  const fallback = e.target.nextSibling;
+                                  if (fallback) {
+                                    fallback.style.display = 'flex';
+                                  }
+                                }}
+                              />
+                            ) : null}
+                            <div
+                              className="w-full h-full flex items-center justify-center bg-gray-100 text-gray-400"
+                              style={{ display: (item.image && typeof item.image === 'string' && item.image.trim() !== '' && item.image !== 'null' && item.image !== 'undefined') ? 'none' : 'flex' }}
+                            >
+                              <Utensils className="w-6 h-6 text-gray-300" />
+                            </div>
+                            <div className="absolute bottom-1 right-1 bg-black/60 rounded-full p-1 z-10">
                               <div className="flex items-center gap-1">
                                 <Camera className="w-3 h-3 text-white" />
                                 <span className="text-white text-xs font-semibold">{item.photoCount}</span>
@@ -1966,11 +1981,28 @@ export default function HubMenu() {
                                     : "bg-gray-50/60 cursor-not-allowed"
                                 }`}
                               >
-                                <img
-                                  src={item.image}
-                                  alt={item.name}
-                                  className="w-16 h-16 rounded-lg object-cover"
-                                />
+                                <div className="w-16 h-16 flex-shrink-0 rounded-lg overflow-hidden bg-gray-100 border border-gray-200 flex items-center justify-center">
+                                   {item.image && typeof item.image === 'string' && item.image.trim() !== '' && item.image !== 'null' && item.image !== 'undefined' ? (
+                                     <img
+                                       src={item.image}
+                                       alt={item.name}
+                                       className="w-full h-full object-cover"
+                                       onError={(e) => {
+                                         e.target.style.display = 'none';
+                                         const fallback = e.target.nextSibling;
+                                         if (fallback) {
+                                           fallback.style.display = 'flex';
+                                         }
+                                       }}
+                                     />
+                                   ) : null}
+                                   <div
+                                     className="w-full h-full flex items-center justify-center bg-gray-100 text-gray-400"
+                                     style={{ display: (item.image && typeof item.image === 'string' && item.image.trim() !== '' && item.image !== 'null' && item.image !== 'undefined') ? 'none' : 'flex' }}
+                                   >
+                                     <Utensils className="w-5 h-5 text-gray-300" />
+                                   </div>
+                                 </div>
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2 mb-1">
                                     <div

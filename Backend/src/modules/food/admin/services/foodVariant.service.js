@@ -36,9 +36,11 @@ export const normalizeFoodVariantsInput = (value = [], options = {}) => {
                 throw new ValidationError(`${priceLabel} must be greater than 0`);
             }
 
+            const unit = toTrimmedString(entry?.unit);
             const variant = {
                 name,
-                price
+                price,
+                unit
             };
 
             const variantId = entry?._id || entry?.id;
@@ -69,7 +71,8 @@ export const serializeFoodVariants = (value = []) =>
                 id: variantId ? String(variantId) : '',
                 _id: variantId ? String(variantId) : '',
                 name,
-                price
+                price,
+                unit: toTrimmedString(entry?.unit)
             };
         })
         .filter(Boolean);

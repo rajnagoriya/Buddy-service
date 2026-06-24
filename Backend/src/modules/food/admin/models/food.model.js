@@ -3,7 +3,8 @@ import mongoose from 'mongoose';
 const foodVariantSchema = new mongoose.Schema(
     {
         name: { type: String, required: true, trim: true },
-        price: { type: Number, required: true, min: 0 }
+        price: { type: Number, required: true, min: 0 },
+        unit: { type: String, trim: true, default: '' }
     },
     { _id: true }
 );

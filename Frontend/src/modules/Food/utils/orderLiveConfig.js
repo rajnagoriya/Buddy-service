@@ -42,6 +42,8 @@ export const transformOrderForList = (order) => ({
     minute: "2-digit",
   }),
   eta: null,
+  items: order.items || [],
+  amount: order.pricing?.total || order.total || 0,
   itemsSummary:
     order.items?.map((item) => `${item.quantity}x ${item.name}`).join(", ") || "No items",
   photoUrl: order.items?.[0]?.image || null,

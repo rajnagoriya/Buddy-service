@@ -51,6 +51,21 @@ const STORAGE_KEY = "restaurant_online_status";
 
 const SelectedOrderContext = createContext(null);
 
+// Consistent Empty State Component for all order lists
+function EmptyOrdersState({ message }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-16 px-4 bg-white rounded-2xl border border-slate-100 shadow-sm text-center my-2 mx-1">
+      <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-4 border border-slate-100 mx-auto">
+        <svg className="w-8 h-8 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+        </svg>
+      </div>
+      <h3 className="text-sm font-semibold text-slate-800">{message}</h3>
+      <p className="text-xs text-slate-400 mt-1">There are no orders here right now.</p>
+    </div>
+  );
+}
+
 // Completed Orders List Component
 function CompletedOrders({ onSelectOrder, refreshToken = 0 }) {
   const [orders, setOrders] = useState([]);
@@ -68,7 +83,8 @@ function CompletedOrders({ onSelectOrder, refreshToken = 0 }) {
         if (response.data?.success && response.data.data?.orders) {
           const completedOrders = response.data.data.orders.filter(
             (order) =>
-              order.status === "delivered" || order.status === "completed",
+              (order.status === "delivered" || order.status === "completed") &&
+              (order.items && order.items.length > 0),
           );
 
           const transformedOrders = completedOrders.map((order) => ({
@@ -84,6 +100,7 @@ function CompletedOrders({ onSelectOrder, refreshToken = 0 }) {
             }),
             deliveredAt:
               order.deliveredAt || order.updatedAt || order.createdAt,
+            items: order.items || [],
             itemsSummary:
               order.items
                 ?.map((item) => `${item.quantity}x ${item.name}`)
@@ -152,9 +169,7 @@ function CompletedOrders({ onSelectOrder, refreshToken = 0 }) {
         <span className="text-xs text-gray-500">{orders.length} total</span>
       </div>
       {orders.length === 0 ? (
-        <div className="text-center py-8 text-gray-500 text-sm">
-          No completed orders yet
-        </div>
+        <EmptyOrdersState message="No completed orders yet" />
       ) : (
         <div>
           {orders.map((order) => {
@@ -177,13 +192,16 @@ function CompletedOrders({ onSelectOrder, refreshToken = 0 }) {
                   onClick={() =>
                     onSelectOrder?.({
                       orderId: order.orderId,
+                      mongoId: order.mongoId,
                       status: "Delivered",
                       customerName: order.customerName,
                       type: order.type,
                       tableOrToken: order.tableOrToken,
                       timePlaced: deliveredDate,
+                      items: order.items,
                       itemsSummary: order.itemsSummary,
                       paymentMethod: order.paymentMethod,
+                      amount: order.amount,
                     })
                   }
                   className="w-full text-left flex gap-3 items-stretch">
@@ -274,7 +292,9 @@ function CancelledOrders({ onSelectOrder, refreshToken = 0 }) {
         if (response.data?.success && response.data.data?.orders) {
           // Filter cancelled orders (both restaurant and user cancelled)
           const cancelledOrders = response.data.data.orders.filter(
-            (order) => order.status === "cancelled",
+            (order) =>
+              order.status === "cancelled" &&
+              (order.items && order.items.length > 0),
           );
 
           const transformedOrders = cancelledOrders.map((order) => ({
@@ -293,6 +313,7 @@ function CancelledOrders({ onSelectOrder, refreshToken = 0 }) {
             cancelledBy: order.cancelledBy || "unknown",
             cancellationReason:
               order.cancellationReason || "No reason provided",
+            items: order.items || [],
             itemsSummary:
               order.items
                 ?.map((item) => `${item.quantity}x ${item.name}`)
@@ -362,9 +383,7 @@ function CancelledOrders({ onSelectOrder, refreshToken = 0 }) {
         <span className="text-xs text-gray-500">{orders.length} total</span>
       </div>
       {orders.length === 0 ? (
-        <div className="text-center py-8 text-gray-500 text-sm">
-          No cancelled orders yet
-        </div>
+        <EmptyOrdersState message="No cancelled orders yet" />
       ) : (
         <div>
           {orders.map((order) => {
@@ -394,13 +413,17 @@ function CancelledOrders({ onSelectOrder, refreshToken = 0 }) {
                   onClick={() =>
                     onSelectOrder?.({
                       orderId: order.orderId,
+                      mongoId: order.mongoId,
                       status: "Cancelled",
                       customerName: order.customerName,
                       type: order.type,
                       tableOrToken: order.tableOrToken,
                       timePlaced: cancelledDate,
+                      items: order.items,
                       itemsSummary: order.itemsSummary,
                       paymentMethod: order.paymentMethod,
+                      amount: order.amount,
+                      cancellationReason: order.cancellationReason,
                     })
                   }
                   className="w-full text-left flex gap-3 items-stretch">
@@ -579,9 +602,7 @@ function TableBookings() {
       </div>
 
       {bookings.length === 0 ? (
-        <div className="text-center py-12 bg-white rounded-2xl border border-gray-200">
-          <p className="text-gray-400 text-sm">No table bookings yet</p>
-        </div>
+        <EmptyOrdersState message="No table bookings yet" />
       ) : (
         <div className="space-y-3">
           {bookings.map((booking) => (
@@ -688,7 +709,19 @@ function AllOrders({ onSelectOrder, onCancel }) {
         if (!isMounted) return;
 
         if (response.data?.success && response.data.data?.orders) {
-          const transformedOrders = response.data.data.orders
+          const liveOrders = response.data.data.orders.filter((order) => {
+            const status = String(order.status || "").toLowerCase();
+            return (
+              status !== "delivered" &&
+              status !== "completed" &&
+              status !== "cancelled" &&
+              !status.includes("cancel") &&
+              !status.includes("reject") &&
+              (order.items && order.items.length > 0)
+            );
+          });
+
+          const transformedOrders = liveOrders
             .map(transformOrderForList)
             .sort((a, b) => {
               const priorityDiff =
@@ -796,9 +829,7 @@ function AllOrders({ onSelectOrder, onCancel }) {
         </button>
       </div>
       {orders.length === 0 ? (
-        <div className="text-center py-8 text-gray-500 text-sm">
-          No orders found
-        </div>
+        <EmptyOrdersState message="There is no live order" />
       ) : (
         <div>
           {orders.map((order) => {
@@ -916,7 +947,8 @@ function ScheduledOrders({ onSelectOrder, refreshToken }) {
             // regardless of whether the kitchen has already started "preparing" it.
             return (
               hasScheduledDate &&
-              ["created", "confirmed", "preparing", "ready"].includes(status)
+              ["created", "confirmed", "preparing", "ready"].includes(status) &&
+              (o.items && o.items.length > 0)
             );
           })
           .map(transformOrderForList)
@@ -973,9 +1005,7 @@ function ScheduledOrders({ onSelectOrder, refreshToken }) {
       </div>
 
       {orders.length === 0 ? (
-        <div className="text-center py-8 text-gray-500 text-sm ">
-          No scheduled orders found
-        </div>
+        <EmptyOrdersState message="No scheduled orders found" />
       ) : (
         <div className="space-y-3">
           {orders.map((order) => (
@@ -3471,7 +3501,9 @@ function PreparingOrders({
           // 'confirmed' orders should only appear in popup notification, not in preparing list
           // After accepting, order status changes to 'preparing' and then appears here
           const preparingOrders = response.data.data.orders.filter(
-            (order) => order.status === "preparing",
+            (order) =>
+              order.status === "preparing" &&
+              (order.items && order.items.length > 0),
           );
 
           const transformedOrders = preparingOrders.map((order) => {
@@ -3707,9 +3739,7 @@ function PreparingOrders({
         <span className="text-xs text-gray-500">{orders.length} active</span>
       </div>
       {orders.length === 0 ? (
-        <div className="text-center py-8 text-gray-500 text-sm">
-          No orders in preparation
-        </div>
+        <EmptyOrdersState message="No orders in preparation" />
       ) : (
         <div>
           {orders.map((order) => {
@@ -3787,7 +3817,9 @@ function ReadyOrders({ onSelectOrder, refreshToken = 0 }) {
         if (response.data?.success && response.data.data?.orders) {
           // Filter orders with 'ready' status
           const readyOrders = response.data.data.orders.filter(
-            (order) => order.status === "ready",
+            (order) =>
+              order.status === "ready" &&
+              (order.items && order.items.length > 0),
           );
 
           const transformedOrders = readyOrders.map((order) => ({
@@ -3871,9 +3903,7 @@ function ReadyOrders({ onSelectOrder, refreshToken = 0 }) {
         <span className="text-xs text-gray-500">{orders.length} active</span>
       </div>
       {orders.length === 0 ? (
-        <div className="text-center py-8 text-gray-500 text-sm">
-          No orders ready for pickup
-        </div>
+        <EmptyOrdersState message="No orders ready for pickup" />
       ) : (
         <div>
           {orders.map((order) => (
@@ -3907,7 +3937,9 @@ const OutForDeliveryOrders = ({ onSelectOrder, refreshToken = 0 }) => {
         if (response.data?.success && response.data.data?.orders) {
           // Filter orders with 'out_for_delivery' status
           const outForDeliveryOrders = response.data.data.orders.filter(
-            (order) => order.status === "out_for_delivery",
+            (order) =>
+              order.status === "out_for_delivery" &&
+              (order.items && order.items.length > 0),
           );
 
           const transformedOrders = outForDeliveryOrders.map((order) => ({
@@ -3991,9 +4023,7 @@ const OutForDeliveryOrders = ({ onSelectOrder, refreshToken = 0 }) => {
         <span className="text-xs text-gray-500">{orders.length} active</span>
       </div>
       {orders.length === 0 ? (
-        <div className="text-center py-8 text-gray-500 text-sm">
-          No orders out for delivery
-        </div>
+        <EmptyOrdersState message="No orders out for delivery" />
       ) : (
         <div>
           {orders.map((order) => (

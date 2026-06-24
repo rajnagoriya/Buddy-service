@@ -31,11 +31,11 @@ const ROUTE_THEMES = {
   },
   dining: {
     shell: "border-b border-gray-100 bg-white/95 backdrop-blur-xl dark:border-gray-800 dark:bg-[#0a0a0a]/95",
-    card: "flex-1 rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2 shadow-sm dark:border-gray-700 dark:bg-[#141414]",
-    iconBtn: "h-10 w-10 rounded-xl border border-gray-200 bg-white text-gray-900 shadow-sm dark:border-gray-700 dark:bg-[#1a1a1a] dark:text-white",
-    label: "text-[10px] font-bold uppercase tracking-[0.18em] text-green-700 dark:text-green-400",
-    title: "text-sm font-extrabold text-gray-900 dark:text-white",
-    sub: "text-[11px] font-semibold text-gray-500 dark:text-gray-400",
+    card: "flex-1 rounded-xl sm:rounded-2xl border border-gray-200 bg-gray-50 px-2 py-1.5 sm:px-3 sm:py-2 shadow-sm dark:border-gray-700 dark:bg-[#141414]",
+    iconBtn: "h-9 w-9 sm:h-10 sm:w-10 rounded-xl border border-gray-200 bg-white text-gray-900 shadow-sm dark:border-gray-700 dark:bg-[#1a1a1a] dark:text-white",
+    label: "text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.18em] text-green-700 dark:text-green-400",
+    title: "text-xs sm:text-sm font-extrabold text-gray-900 dark:text-white",
+    sub: "hidden sm:block text-[11px] font-semibold text-gray-500 dark:text-gray-400",
     chevron: "text-green-600 dark:text-green-400",
     cartBadge: "ring-white dark:ring-[#0a0a0a]",
     showBack: true,
@@ -43,11 +43,11 @@ const ROUTE_THEMES = {
   },
   under250: {
     shell: "border-b border-orange-100 bg-orange-50/95 backdrop-blur-xl dark:border-orange-900/30 dark:bg-[#1a1208]/95",
-    card: "flex-1 rounded-2xl border border-orange-200/80 bg-white px-3 py-2 shadow-sm dark:border-orange-900/40 dark:bg-[#2a1a0c]",
-    iconBtn: "h-10 w-10 rounded-xl border border-orange-200/80 bg-white text-orange-700 shadow-sm dark:border-orange-900/40 dark:bg-[#3a2410] dark:text-orange-200",
-    label: "text-[10px] font-bold uppercase tracking-[0.18em] text-orange-600 dark:text-orange-400",
-    title: "text-sm font-extrabold text-gray-900 dark:text-white",
-    sub: "text-[11px] font-semibold text-orange-600/70 dark:text-orange-300/70",
+    card: "flex-1 rounded-xl sm:rounded-2xl border border-orange-200/80 bg-white px-2 py-1.5 sm:px-3 sm:py-2 shadow-sm dark:border-orange-900/40 dark:bg-[#2a1a0c]",
+    iconBtn: "h-9 w-9 sm:h-10 sm:w-10 rounded-xl border border-orange-200/80 bg-white text-orange-700 shadow-sm dark:border-orange-900/40 dark:bg-[#3a2410] dark:text-orange-200",
+    label: "text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.18em] text-orange-600 dark:text-orange-400",
+    title: "text-xs sm:text-sm font-extrabold text-gray-900 dark:text-white",
+    sub: "hidden sm:block text-[11px] font-semibold text-orange-600/70 dark:text-orange-300/70",
     chevron: "text-orange-500 dark:text-orange-400",
     cartBadge: "ring-white dark:ring-[#1a1208]",
     showBack: true,
@@ -55,11 +55,11 @@ const ROUTE_THEMES = {
   },
   profile: {
     shell: "border-b border-gray-100 bg-white/95 backdrop-blur-xl dark:border-gray-800 dark:bg-[#0a0a0a]/95",
-    card: "flex-1 rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2 shadow-sm dark:border-gray-700 dark:bg-[#141414]",
-    iconBtn: "h-10 w-10 rounded-xl border border-gray-200 bg-white text-gray-900 shadow-sm dark:border-gray-700 dark:bg-[#1a1a1a] dark:text-white",
-    label: "text-[10px] font-bold uppercase tracking-[0.18em] text-green-700 dark:text-green-400",
-    title: "text-sm font-extrabold text-gray-900 dark:text-white",
-    sub: "text-[11px] font-semibold text-gray-500 dark:text-gray-400",
+    card: "flex-1 rounded-xl sm:rounded-2xl border border-gray-200 bg-gray-50 px-2 py-1.5 sm:px-3 sm:py-2 shadow-sm dark:border-gray-700 dark:bg-[#141414]",
+    iconBtn: "h-9 w-9 sm:h-10 sm:w-10 rounded-xl border border-gray-200 bg-white text-gray-900 shadow-sm dark:border-gray-700 dark:bg-[#1a1a1a] dark:text-white",
+    label: "text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.18em] text-green-700 dark:text-green-400",
+    title: "text-xs sm:text-sm font-extrabold text-gray-900 dark:text-white",
+    sub: "hidden sm:block text-[11px] font-semibold text-gray-500 dark:text-gray-400",
     chevron: "text-gray-500 dark:text-gray-400",
     cartBadge: "ring-white dark:ring-[#0a0a0a]",
     showBack: true,
@@ -96,8 +96,8 @@ export default function FoodUserHeader({ variant, className = "" }) {
 
   const locationCardClass =
     themeKey === "home"
-      ? "flex min-w-0 flex-1 items-center gap-2.5 text-left transition active:scale-[0.99]"
-      : `${theme.card} flex min-w-0 items-center gap-2.5 text-left transition active:scale-[0.99]`
+      ? "flex min-w-0 flex-1 items-center gap-1.5 sm:gap-2.5 text-left transition active:scale-[0.99]"
+      : `${theme.card} flex min-w-0 items-center gap-1.5 sm:gap-2.5 text-left transition active:scale-[0.99]`
 
   const locationCard = (
     <button
@@ -106,7 +106,7 @@ export default function FoodUserHeader({ variant, className = "" }) {
       onClick={openLocationSelector}
       className={locationCardClass}
     >
-      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${themeKey === "home" ? "bg-white/15" : "bg-green-50 dark:bg-green-950/40"}`}>
+      <div className={`flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-xl ${themeKey === "home" ? "bg-white/15" : "bg-green-50 dark:bg-green-950/40"}`}>
         <MapPin className={`h-4 w-4 ${themeKey === "home" ? "text-amber-300" : "text-green-600 dark:text-green-400"}`} />
       </div>
       <div className="min-w-0 flex-1">
@@ -180,7 +180,7 @@ export default function FoodUserHeader({ variant, className = "" }) {
       <div className="pt-[env(safe-area-inset-top)]">
         <div
           className={`mx-auto flex max-w-7xl items-center px-3 py-2.5 ${
-            themeKey === "home" ? theme.card : "gap-2"
+            themeKey === "home" ? theme.card : "gap-1.5 sm:gap-2"
           }`}
         >
           {theme.showBack ? (

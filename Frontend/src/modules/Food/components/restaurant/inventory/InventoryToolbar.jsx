@@ -1,6 +1,5 @@
 import { motion } from "framer-motion"
 import { Plus, Search, SlidersHorizontal, X } from "lucide-react"
-import { PanelPill, PanelSurface } from "@food/components/restaurant/panel/panelUi"
 
 export default function InventoryToolbar({
   activeTab,
@@ -14,91 +13,59 @@ export default function InventoryToolbar({
   selectedFilter,
   onFilterSelect,
   filterOptions,
-  filterCounts,
-  hasActiveTools,
-  onClearTools,
   onOpenAddAddon,
   isAddAddonOpen,
-  isDesktop,
-  listToRender,
-  activeCategoryPill,
-  onCategoryPillChange,
   onOpenCategoryJump,
 }) {
   return (
     <div className="space-y-4">
-      <div className="grid max-w-lg grid-cols-2 gap-2">
-        <motion.button
+      {/* Tab Switcher - Simple and modern tabs */}
+      <div className="flex border-b border-slate-100 bg-white px-2 rounded-xl">
+        <button
           type="button"
           onClick={() => onTabChange("all-items")}
-          className={`rounded-2xl border px-4 py-3 text-sm font-semibold ${
+          className={`pb-3 pt-3 px-4 text-xs sm:text-sm font-bold border-b-2 transition-all flex items-center gap-2 ${
             activeTab === "all-items"
-              ? "rt-pill-active shadow-sm"
-              : "border-[var(--rt-border)] bg-white text-gray-600"
+              ? "border-[#16A34A] text-[#16A34A]"
+              : "border-transparent text-slate-500 hover:text-slate-700"
           }`}
-          whileTap={{ scale: 0.98 }}
         >
-          <span className="flex items-center justify-center gap-2">
-            Menu items
-            <span
-              className={`rounded-full px-2 py-0.5 text-xs ${
-                activeTab === "all-items" ? "bg-white/80" : "bg-gray-100 text-gray-500"
-              }`}
-            >
-              {totalItems}
-            </span>
+          Menu Items
+          <span
+            className={`rounded-full px-1.5 py-0.5 text-[10px] ${
+              activeTab === "all-items" ? "bg-[#16A34A]/10 text-[#16A34A]" : "bg-slate-100 text-slate-500"
+            }`}
+          >
+            {totalItems}
           </span>
-        </motion.button>
+        </button>
 
-        <motion.button
+        <button
           type="button"
           onClick={() => onTabChange("add-ons")}
-          className={`rounded-2xl border px-4 py-3 text-sm font-semibold ${
+          className={`pb-3 pt-3 px-4 text-xs sm:text-sm font-bold border-b-2 transition-all flex items-center gap-2 ${
             activeTab === "add-ons"
-              ? "rt-pill-active shadow-sm"
-              : "border-[var(--rt-border)] bg-white text-gray-600"
+              ? "border-[#16A34A] text-[#16A34A]"
+              : "border-transparent text-slate-500 hover:text-slate-700"
           }`}
-          whileTap={{ scale: 0.98 }}
         >
-          <span className="flex items-center justify-center gap-2">
-            Add-ons
-            <span
-              className={`rounded-full px-2 py-0.5 text-xs ${
-                activeTab === "add-ons" ? "bg-white/80" : "bg-gray-100 text-gray-500"
-              }`}
-            >
-              {addonsCount}
-            </span>
+          Add-ons
+          <span
+            className={`rounded-full px-1.5 py-0.5 text-[10px] ${
+              activeTab === "add-ons" ? "bg-[#16A34A]/10 text-[#16A34A]" : "bg-slate-100 text-slate-500"
+            }`}
+          >
+            {addonsCount}
           </span>
-        </motion.button>
+        </button>
       </div>
 
-      <PanelSurface className="p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="text-sm font-semibold text-gray-900">
-              {activeTab === "add-ons" ? "Manage add-ons" : "Browse menu inventory"}
-            </p>
-            <p className="mt-0.5 text-xs text-gray-500">
-              {activeTab === "add-ons"
-                ? "Create, approve, and toggle add-on availability"
-                : "Search dishes, filter stock, and update availability"}
-            </p>
-          </div>
-          {hasActiveTools ? (
-            <button
-              type="button"
-              onClick={onClearTools}
-              className="rounded-full border border-[var(--rt-border)] px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50"
-            >
-              Clear
-            </button>
-          ) : null}
-        </div>
-
-        <div className="mt-3 flex flex-wrap gap-2">
-          <div className="relative min-w-[200px] flex-1">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+      {/* Search and Filter Section */}
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Search Input */}
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
               value={searchQuery}
@@ -106,97 +73,78 @@ export default function InventoryToolbar({
               placeholder={
                 activeTab === "add-ons" ? "Search add-ons..." : "Search categories or dishes..."
               }
-              className="h-11 w-full rounded-xl border border-[var(--rt-border)] bg-white pl-10 pr-9 text-sm outline-none focus:border-[var(--rt-primary-strong)]"
+              className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-9 text-xs font-semibold text-slate-800 placeholder-slate-400 outline-none focus:border-[#16A34A] focus:ring-1 focus:ring-[#16A34A]/30 transition-all shadow-sm"
             />
             {searchQuery ? (
               <button
                 type="button"
                 onClick={() => onSearchChange("")}
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-gray-400 hover:bg-gray-100"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-full p-1 text-slate-400 hover:bg-slate-100"
                 aria-label="Clear search"
               >
-                <X className="h-4 w-4" />
+                <X className="h-3 w-3" />
               </button>
             ) : null}
           </div>
 
-          <button
-            type="button"
-            onClick={onOpenFilters}
-            className="relative flex h-11 items-center gap-2 rounded-xl border border-[var(--rt-border)] bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50"
-          >
-            <SlidersHorizontal className="h-4 w-4 text-[var(--rt-primary-strong)]" />
-            Filters
-            {hasActiveFilter ? (
-              <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[var(--rt-primary-strong)]" />
-            ) : null}
-          </button>
-
-          {activeTab === "add-ons" ? (
+          {/* Action Buttons */}
+          <div className="flex items-center gap-1.5">
             <button
               type="button"
-              onClick={onOpenAddAddon}
-              className="flex h-11 items-center gap-1.5 rounded-xl bg-[var(--rt-primary-strong)] px-4 text-sm font-semibold text-white hover:opacity-90"
+              onClick={onOpenFilters}
+              className={`relative flex h-10 items-center gap-1.5 rounded-xl border px-3 text-xs font-bold transition-all shadow-sm ${
+                hasActiveFilter
+                  ? "bg-[#16A34A]/5 border-[#16A34A] text-[#16A34A]"
+                  : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+              }`}
             >
-              <Plus className="h-4 w-4" />
-              {isAddAddonOpen ? "Close form" : "New add-on"}
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={onOpenCategoryJump}
-              className="flex h-11 items-center rounded-xl border border-[var(--rt-border)] bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50 lg:hidden"
-            >
-              Categories
-            </button>
-          )}
-        </div>
-
-        <div className="mt-3 flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-          {filterOptions.map((option) => {
-            const isActive = selectedFilter === option.value
-            return (
-              <PanelPill
-                key={option.value}
-                active={isActive}
-                onClick={() => onFilterSelect(option.value)}
-                className="shrink-0 text-xs"
-              >
-                {option.label}
-                <span
-                  className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] ${
-                    isActive ? "bg-white/25" : "bg-gray-100 text-gray-500"
-                  }`}
-                >
-                  {filterCounts[option.value] || 0}
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Filters
+              {hasActiveFilter ? (
+                <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-[#16A34A] text-[9px] font-bold text-white">
+                  1
                 </span>
-              </PanelPill>
-            )
-          })}
+              ) : null}
+            </button>
+
+            {activeTab === "add-ons" ? (
+              <button
+                type="button"
+                onClick={onOpenAddAddon}
+                className="flex h-10 items-center gap-1.5 rounded-xl bg-[#16A34A] px-3.5 text-xs font-bold text-white hover:bg-[#15803D] transition-all shadow-sm"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                {isAddAddonOpen ? "Close Form" : "New Add-on"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onOpenCategoryJump}
+                className="flex h-10 items-center rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-bold text-slate-700 hover:bg-slate-50 lg:hidden transition-all shadow-sm"
+              >
+                Categories
+              </button>
+            )}
+          </div>
         </div>
 
-        {isDesktop && activeTab === "all-items" && listToRender.length > 0 ? (
-          <div className="mt-3 hidden gap-2 overflow-x-auto pb-1 lg:flex scrollbar-hide">
-            <PanelPill
-              active={activeCategoryPill === "all"}
-              onClick={() => onCategoryPillChange("all")}
-              className="shrink-0 text-xs"
-            >
-              All ({totalItems})
-            </PanelPill>
-            {listToRender.map((category) => (
-              <PanelPill
-                key={category.id}
-                active={activeCategoryPill === String(category.id)}
-                onClick={() => onCategoryPillChange(String(category.id))}
-                className="shrink-0 text-xs"
+        {/* Active Filter Badge */}
+        {hasActiveFilter ? (
+          <div className="flex flex-wrap gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-lg bg-[#16A34A]/5 px-2.5 py-1 text-xs font-bold text-[#16A34A] border border-[#16A34A]/10">
+              Filter: {filterOptions?.find((o) => o.value === selectedFilter)?.label}
+              <button
+                type="button"
+                onClick={() => onFilterSelect("all")}
+                className="rounded-full p-0.5 hover:bg-[#16A34A]/10 transition-colors"
+                aria-label="Remove filter"
               >
-                {category.name} ({category.items?.length || 0})
-              </PanelPill>
-            ))}
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </span>
           </div>
         ) : null}
-      </PanelSurface>
+      </div>
     </div>
   )
 }

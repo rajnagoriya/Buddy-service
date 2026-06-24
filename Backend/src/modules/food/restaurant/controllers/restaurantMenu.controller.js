@@ -8,7 +8,7 @@ import {
 export const getMenuController = async (req, res, next) => {
     try {
         const restaurantId = req.user?.userId;
-        const menu = await getRestaurantMenu(restaurantId);
+        const menu = await getRestaurantMenu(restaurantId, req.query);
         return sendResponse(res, 200, 'Menu fetched successfully', { menu });
     } catch (error) {
         next(error);
@@ -27,7 +27,7 @@ export const updateMenuController = async (req, res, next) => {
 
 export const getPublicRestaurantMenuController = async (req, res, next) => {
     try {
-        const menu = await getPublicApprovedRestaurantMenu(req.params.id);
+        const menu = await getPublicApprovedRestaurantMenu(req.params.id, req.query);
         if (!menu) {
             return res.status(404).json({ success: false, message: 'Restaurant not found' });
         }

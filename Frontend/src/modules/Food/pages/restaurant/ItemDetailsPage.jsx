@@ -14,15 +14,25 @@ import {
   ThumbsUp,
   ChevronLeft,
   ChevronRight,
-  Loader2
+  Loader2,
+  Utensils
 } from "lucide-react"
 import { Switch } from "@food/components/ui/switch"
+import { Input } from "@food/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@food/components/ui/select"
 // Removed getAllFoods and saveFood - now using menu API
 import api from "@food/api"
 import { restaurantAPI, uploadAPI } from "@food/api"
 import { toast } from "sonner"
 import { ImageSourcePicker } from "@food/components/ImageSourcePicker"
 import RestaurantPanelModal from "@food/components/restaurant/panel/RestaurantPanelModal"
+import RestaurantSubPageShell from "@food/components/restaurant/panel/RestaurantSubPageShell"
 import { isFlutterBridgeAvailable } from "@food/utils/imageUploadUtils"
 import { getFoodVariants } from "@food/utils/foodVariants"
 const debugLog = (...args) => {}
@@ -47,6 +57,7 @@ const createVariantDraft = (variant = {}) => ({
   persistedId: String(variant?.id || variant?._id || ""),
   name: String(variant?.name || ""),
   price: variant?.price != null ? String(variant.price) : "",
+  unit: String(variant?.unit || "piece"),
 })
 
 export default function ItemDetailsPage() {
@@ -89,6 +100,7 @@ export default function ItemDetailsPage() {
   const [images, setImages] = useState([])
   const [imageFiles, setImageFiles] = useState(new Map()) // Track File objects by preview URL
   const [uploadingImages, setUploadingImages] = useState(false)
+  const [saveStatus, setSaveStatus] = useState("") // "" | "uploading" | "saving"
   const [isPhotoPickerOpen, setIsPhotoPickerOpen] = useState(false)
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
   const [touchStart, setTouchStart] = useState(null)
@@ -518,6 +530,7 @@ export default function ItemDetailsPage() {
 
     try {
       setUploadingImages(true)
+      setSaveStatus("uploading")
 
       // Upload new images to Cloudinary
       const uploadedImageUrls = []
@@ -538,7 +551,6 @@ export default function ItemDetailsPage() {
       debugLog('Files to upload:', filesToUpload.length, filesToUpload)
 
       if (filesToUpload.length > 0) {
-        toast.info(`Uploading ${filesToUpload.length} image(s)...`)
         for (let i = 0; i < filesToUpload.length; i++) {
           const file = filesToUpload[i]
           try {
@@ -617,6 +629,7 @@ export default function ItemDetailsPage() {
           persistedId: String(variant.persistedId || "").trim(),
           name: String(variant.name || "").trim(),
           price: Number(variant.price),
+          unit: String(variant.unit || "piece").trim(),
         }))
         .filter((variant) => variant.name || variant.persistedId || variant.price)
 
@@ -644,9 +657,11 @@ export default function ItemDetailsPage() {
         ...(variant.persistedId ? { _id: variant.persistedId } : {}),
         name: variant.name,
         price: variant.price,
+        unit: variant.unit,
       }))
 
       // Create/update FoodItem in DB (single call per explicit Save; no autosave spam)
+      setSaveStatus("saving")
       let itemId
       if (isNewItem) {
         const createRes = await restaurantAPI.createFood({
@@ -725,6 +740,7 @@ export default function ItemDetailsPage() {
       }
     } finally {
       setUploadingImages(false)
+      setSaveStatus("")
     }
   }
 
@@ -751,7 +767,12 @@ export default function ItemDetailsPage() {
   }
 
   return (
-    <div className="h-screen bg-white flex flex-col overflow-hidden">
+    <RestaurantSubPageShell
+      title={isNewItem ? "Add dish" : "Item details"}
+      subtitle={isNewItem ? "Add a new dish to your menu" : "Update dish details, pricing, and variants"}
+      backTo="/food/restaurant/inventory"
+      showBottomNav={false}
+    >
       <style>{`
         [data-slot="switch"][data-state="checked"] {
           background-color: #16a34a !important;
@@ -760,423 +781,471 @@ export default function ItemDetailsPage() {
           background-color: #ffffff !important;
         }
       `}</style>
-      {/* Header */}
-      <div className="sticky top-0 z-40 bg-white border-b border-gray-200 flex-shrink-0">
-        <div className="px-4 py-3 flex items-center gap-3">
-          <button
-            onClick={goBack}
-            className="p-1 rounded-full hover:bg-gray-100"
-          >
-            <ArrowLeft className="w-5 h-5 text-gray-700" />
-          </button>
-          <h1 className="text-xl font-bold text-gray-900">Item details</h1>
-        </div>
-      </div>
 
-
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto" style={{ paddingBottom: `${96 + keyboardInset}px` }}>
-        {!isNewItem && currentApprovalStatus === "rejected" && currentRejectionReason ? (
-          <div className="px-4 pt-4">
-            <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3">
+      {/* Main Grid: Form on left, Media/Actions on right */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        {/* Left/Middle Column - Form */}
+        <div className="lg:col-span-2 space-y-6">
+          
+          {/* Rejection Warning Banner */}
+          {!isNewItem && currentApprovalStatus === "rejected" && currentRejectionReason ? (
+            <div className="rounded-2xl border border-red-200 bg-red-50 p-4 shadow-sm">
               <p className="text-sm font-semibold text-red-700">Approval rejected</p>
-              <p className="mt-1 text-sm leading-5 text-red-600">Reason: {currentRejectionReason}</p>
-              <p className="mt-2 text-xs font-medium uppercase tracking-[0.18em] text-red-500">
-                Update the dish and save to send it for approval again
+              <p className="mt-1 text-sm leading-relaxed text-red-600">Reason: {currentRejectionReason}</p>
+              <p className="mt-2.5 text-xs font-bold uppercase tracking-[0.1em] text-red-500">
+                Update the dish details below and save to resubmit for approval
               </p>
             </div>
-          </div>
-        ) : null}
+          ) : null}
 
-        {/* Image Carousel */}
-        <div className="relative bg-white">
-          {images.length > 0 ? (
-            <div className="relative w-full h-80 overflow-hidden bg-gray-100">
-              {/* Image container with swipe support */}
-              <div
-                ref={carouselRef}
-                onTouchStart={onTouchStart}
-                onTouchMove={onTouchMove}
-                onTouchEnd={onTouchEnd}
-                className="relative w-full h-full"
+          {/* Basic Details Section */}
+          <div className="bg-white rounded-2xl border border-slate-100 p-5 lg:p-6 shadow-sm space-y-5">
+            <h2 className="text-base font-bold text-slate-900 border-b border-slate-50 pb-2">Basic Info</h2>
+            
+            {/* Category Selector */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                Category
+              </label>
+              <button
+                type="button"
+                onClick={() => setIsCategoryPopupOpen(true)}
+                className="w-full px-4 py-3 border border-slate-200 rounded-xl text-left flex items-center justify-between bg-white hover:bg-slate-50/50 hover:border-slate-300 transition-all focus:outline-none focus:ring-2 focus:ring-[#16A34A] focus:border-transparent"
               >
-                <AnimatePresence mode="wait" custom={direction}>
-                  <motion.div
-                    key={currentImageIndex}
-                    custom={direction}
-                    initial={{ opacity: 0, x: direction > 0 ? 300 : -300 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: direction > 0 ? -300 : 300 }}
-                    transition={{ duration: 0.3, ease: "easeInOut" }}
-                    className="absolute inset-0"
-                  >
-                    {images[currentImageIndex] ? (
-                      <img
-                        src={images[currentImageIndex]}
-                        alt={`${itemName} - Image ${currentImageIndex + 1}`}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : null}
-                  </motion.div>
-                </AnimatePresence>
+                <span className="text-sm font-medium text-slate-800">
+                  {category || "Select category"}
+                </span>
+                <ChevronDown className="w-5 h-5 text-slate-400" />
+              </button>
+            </div>
 
-                {/* Navigation arrows */}
-                {images.length > 1 && (
-                  <>
-                    <button
-                      onClick={goToPrevious}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/90 backdrop-blur-sm rounded-full flex items-center justify-center shadow-lg hover:bg-white transition-all z-10"
-                    >
-                      <ChevronLeft className="w-5 h-5 text-gray-900" />
-                    </button>
-                    <button
-                      onClick={goToNext}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/90 backdrop-blur-sm rounded-full flex items-center justify-center shadow-lg hover:bg-white transition-all z-10"
-                    >
-                      <ChevronRight className="w-5 h-5 text-gray-900" />
-                    </button>
-                  </>
-                )}
+            {/* Item Name */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                Item Name
+              </label>
+              <div className="relative">
+                <Input
+                  type="text"
+                  value={itemName}
+                  onChange={(e) => setItemName(e.target.value)}
+                  maxLength={maxNameLength}
+                  className="w-full pr-12 focus-visible:ring-2 focus-visible:ring-[#16A34A] focus-visible:border-transparent transition-all text-sm font-medium text-slate-800"
+                  placeholder="Enter item name"
+                />
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400">
+                  <EditIcon className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="text-right mt-1.5">
+                <span className="text-[10px] font-semibold text-slate-400">
+                  {nameLength} / {maxNameLength}
+                </span>
+              </div>
+            </div>
 
-                {/* Delete image button */}
+            {/* Item Description & Food Type */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                Description
+              </label>
+              <div className="relative">
+                <textarea
+                  value={itemDescription}
+                  onChange={(e) => setItemDescription(e.target.value)}
+                  maxLength={maxDescriptionLength}
+                  rows={4}
+                  placeholder="Eg: Yummy veg paneer burger with a soft patty, veggies, cheese, and special sauce"
+                  className="w-full px-4 py-3 pr-12 border border-slate-200 rounded-xl text-sm font-medium text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-[#16A34A] focus:border-transparent transition-all resize-none leading-relaxed"
+                />
+                <div className="absolute right-3 top-3 p-1 text-slate-400">
+                  <EditIcon className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="flex items-center justify-between mt-1.5">
+                <span className={`text-xs ${descriptionLength < minDescriptionLength ? "text-red-500" : "text-slate-400"}`}>
+                  {descriptionLength < minDescriptionLength ? "Min 5 characters required" : ""}
+                </span>
+                <span className="text-[10px] font-semibold text-slate-400">
+                  {descriptionLength} / {maxDescriptionLength}
+                </span>
+              </div>
+            </div>
+
+            {/* Dietary Options */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                Food Type
+              </label>
+              <div className="flex gap-2.5">
                 <button
-                  onClick={() => handleImageDelete(currentImageIndex)}
-                  className="absolute top-4 right-4 w-10 h-10 bg-white/90 backdrop-blur-sm rounded-full flex items-center justify-center shadow-lg hover:bg-white transition-all z-10"
+                  type="button"
+                  onClick={() => setFoodType("Veg")}
+                  className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm ${foodType === "Veg"
+                    ? "bg-green-50 text-green-700 border-2 border-green-600"
+                    : "bg-slate-50 text-slate-700 hover:bg-slate-100 border-2 border-transparent"
+                    }`}
                 >
-                  <Trash2 className="w-5 h-5 text-gray-900" />
-                </button>
-
-                {/* Image counter */}
-                {images.length > 1 && (
-                  <div className="absolute top-4 left-4 bg-black/60 backdrop-blur-sm px-3 py-1.5 rounded-full z-10">
-                    <span className="text-white text-xs font-medium">
-                      {currentImageIndex + 1} / {images.length}
-                    </span>
+                  <div className="h-4 w-4 shrink-0 rounded border flex items-center justify-center border-green-600">
+                    <div className="h-1.5 w-1.5 rounded-full bg-green-600" />
                   </div>
-                )}
+                  <span>Veg</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFoodType("Non-Veg")}
+                  className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm ${foodType === "Non-Veg"
+                    ? "bg-red-50 text-red-700 border-2 border-red-600"
+                    : "bg-slate-50 text-slate-700 hover:bg-slate-100 border-2 border-transparent"
+                    }`}
+                >
+                  <div className="h-4 w-4 shrink-0 rounded border flex items-center justify-center border-red-600">
+                    <div className="h-1.5 w-1.5 rounded-full bg-red-600" />
+                  </div>
+                  <span>Non-Veg</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Pricing & Variants Section */}
+          <div className="bg-white rounded-2xl border border-slate-100 p-5 lg:p-6 shadow-sm space-y-5">
+            <h2 className="text-base font-bold text-slate-900 border-b border-slate-50 pb-2">Pricing & Variations</h2>
+            
+            {variants.length === 0 ? (
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Base Price</label>
+                <div className="relative">
+                  <Input
+                    type="text"
+                    value={basePrice}
+                    onChange={(e) => {
+                      const value = e.target.value.replace(/[\u20B9\s,]/g, '').replace(/[^0-9.]/g, '')
+                      const parts = value.split('.')
+                      const cleanedValue = parts.length > 2
+                        ? parts[0] + '.' + parts.slice(1).join('')
+                        : value
+                      setBasePrice(cleanedValue)
+                    }}
+                    placeholder="Enter price"
+                    className="w-full pl-8 pr-12 focus-visible:ring-2 focus-visible:ring-[#16A34A] focus-visible:border-transparent transition-all text-sm font-semibold text-slate-800"
+                  />
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500">₹</span>
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400">
+                    <EditIcon className="w-4 h-4" />
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-amber-100 bg-amber-50/50 p-3.5 text-xs font-semibold text-amber-800 leading-normal">
+                💡 Customers will see the lowest variant price first. Base price is disabled while variants exist.
+              </div>
+            )}
+
+            {/* Variants Editor */}
+            <div className="rounded-xl border border-slate-100 bg-slate-50/30 p-4 space-y-4">
+              <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                <div>
+                  <p className="text-sm font-bold text-slate-900">Custom Variants</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">Add options with custom names and prices (e.g. Half, Full).</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAddVariant}
+                  className="inline-flex items-center gap-1 rounded-xl bg-green-50 hover:bg-green-100 border border-green-200 px-3 py-2 text-xs font-bold text-green-700 transition-colors shrink-0 shadow-sm"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Add Variant
+                </button>
               </div>
 
-              {/* Carousel dots */}
-              {images.length > 1 && (
-                <div className="flex items-center justify-center gap-2 py-4 bg-white">
-                  {images.map((_, index) => (
-                    <button
-                      key={index}
-                      onClick={() => {
-                        setDirection(index > currentImageIndex ? 1 : -1)
-                        setCurrentImageIndex(index)
-                      }}
-                      className={`transition-all duration-300 rounded-full ${index === currentImageIndex
-                        ? "w-8 h-2 bg-gray-900"
-                        : "w-2 h-2 bg-gray-300 hover:bg-gray-400"
-                        }`}
-                    />
+              {variants.length > 0 ? (
+                <div className="space-y-3">
+                  {variants.map((variant, index) => (
+                    <div key={variant.localId} className="flex gap-2 items-center bg-white rounded-xl border border-slate-100 p-3 shadow-sm">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 flex-1">
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Variant Name</label>
+                          <Input
+                            type="text"
+                            value={variant.name}
+                            onChange={(e) => handleVariantChange(variant.localId, "name", e.target.value)}
+                            placeholder={index === 0 ? "e.g., Half" : "e.g., Full"}
+                            className="w-full focus-visible:ring-2 focus-visible:ring-[#16A34A] focus-visible:border-transparent transition-all text-sm font-medium text-slate-800"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Price (₹)</label>
+                          <div className="relative">
+                            <Input
+                              type="text"
+                              value={variant.price}
+                              onChange={(e) => {
+                                const value = e.target.value.replace(/[\u20B9\s,]/g, '').replace(/[^0-9.]/g, '')
+                                const parts = value.split('.')
+                                const cleanedValue = parts.length > 2
+                                  ? parts[0] + '.' + parts.slice(1).join('')
+                                  : value
+                                handleVariantChange(variant.localId, "price", cleanedValue)
+                              }}
+                              placeholder="Enter price"
+                              className="w-full pl-8 pr-3 focus-visible:ring-2 focus-visible:ring-[#16A34A] focus-visible:border-transparent transition-all text-sm font-semibold text-slate-800"
+                            />
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400">₹</span>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Unit</label>
+                          <Select
+                            value={variant.unit || "piece"}
+                            onValueChange={(val) => handleVariantChange(variant.localId, "unit", val)}
+                          >
+                            <SelectTrigger className="w-full bg-white text-sm font-medium text-slate-800 rounded-lg border border-slate-200 focus:ring-2 focus:ring-[#16A34A] focus:border-transparent h-[40px]">
+                              <SelectValue placeholder="Select unit" />
+                            </SelectTrigger>
+                            <SelectContent className="bg-white">
+                              <SelectItem value="piece">piece</SelectItem>
+                              <SelectItem value="kg">kg</SelectItem>
+                              <SelectItem value="gm">gm</SelectItem>
+                              <SelectItem value="litre">litre</SelectItem>
+                              <SelectItem value="ml">ml</SelectItem>
+                              <SelectItem value="plates">plates</SelectItem>
+                              <SelectItem value="serves">serves</SelectItem>
+                              <SelectItem value="serving">serving</SelectItem>
+                              <SelectItem value="portion">portion</SelectItem>
+                              <SelectItem value="Plate">Plate</SelectItem>
+                              <SelectItem value="Serving">Serving</SelectItem>
+                              <SelectItem value="Portion">Portion</SelectItem>
+                              {variant.unit && ![
+                                "piece", "kg", "gm", "litre", "ml", "plates", "serves",
+                                "serving", "portion", "Plate", "Serving", "Portion"
+                              ].includes(variant.unit) && (
+                                <SelectItem value={variant.unit}>{variant.unit}</SelectItem>
+                              )}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveVariant(variant.localId)}
+                        className="h-9 w-9 rounded-xl bg-rose-50 text-rose-600 border border-rose-100 hover:bg-rose-100 flex items-center justify-center transition-colors shrink-0 mt-4"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
                   ))}
                 </div>
+              ) : (
+                <p className="text-xs text-slate-400 italic">No variants added. This item will use the base price.</p>
               )}
             </div>
-          ) : (
-            <div className="relative w-full h-80 bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
-              <div className="text-center">
-                <div className="w-20 h-20 bg-white/80 rounded-full flex items-center justify-center mx-auto mb-3 shadow-lg">
-                  <Camera className="w-10 h-10 text-gray-400" />
-                </div>
-                <p className="text-sm font-medium text-gray-600">No images added yet</p>
-                <p className="text-xs text-gray-500 mt-1">Tap the button below to add one image</p>
-              </div>
-            </div>
-          )}
 
-          {/* Add image button - redesigned */}
-          <div className="px-4 py-4 bg-white border-t border-gray-100">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              onChange={(e) => handleImageAdd(e.target.files?.[0])}
-              className="hidden"
-            />
-            <button
-              onClick={handleCameraClick}
-              className="w-full flex items-center justify-center gap-2.5 px-6 py-3.5 bg-gradient-to-r from-gray-900 to-gray-800 text-white rounded-xl text-sm font-semibold cursor-pointer hover:from-gray-800 hover:to-gray-700 transition-all shadow-md hover:shadow-lg active:scale-95"
-            >
-              <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center">
-                <Plus className="w-4 h-4" />
-              </div>
-              <span>Add Image</span>
-            </button>
+            {/* Preparation Time */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Preparation Time</label>
+              <Select
+                value={preparationTime}
+                onValueChange={setPreparationTime}
+              >
+                <SelectTrigger className="w-full bg-white text-sm font-medium text-slate-800 rounded-xl border border-slate-200 focus:ring-2 focus:ring-[#16A34A] focus:border-transparent h-[46px]">
+                  <SelectValue placeholder="Select timing" />
+                </SelectTrigger>
+                <SelectContent className="bg-white">
+                  <SelectItem value="10-20 mins">10-20 mins</SelectItem>
+                  <SelectItem value="20-25 mins">20-25 mins</SelectItem>
+                  <SelectItem value="25-35 mins">25-35 mins</SelectItem>
+                  <SelectItem value="35-45 mins">35-45 mins</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </div>
 
-        {/* Form Fields */}
-        <div className="p-4 space-y-3">
-          {/* Category Selector */}
-          <div>
-            <label className="block text-sm font-medium text-gray-900 mb-2">
-              Category
-            </label>
-            <button
-              onClick={() => setIsCategoryPopupOpen(true)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg text-left flex items-center justify-between bg-white hover:bg-gray-50 transition-colors"
-            >
-              <span className="text-sm text-gray-900">
-                {category || "Select category"}
-              </span>
-              <ChevronDown className="w-5 h-5 text-gray-500" />
-            </button>
-          </div>
+        {/* Right Column - Media Carousel & Actions */}
+        <div className="lg:col-span-1 space-y-6">
+          
+          {/* Media/Image Upload Card */}
+          <div className="bg-white rounded-2xl border border-slate-100 p-5 shadow-sm space-y-4">
+            <h2 className="text-base font-bold text-slate-900 border-b border-slate-50 pb-2">Dish Image</h2>
+            
+            {images.length > 0 ? (
+              <div className="relative w-full h-56 rounded-xl overflow-hidden bg-slate-100 border border-slate-100">
+                {/* Carousel container */}
+                <div
+                  ref={carouselRef}
+                  onTouchStart={onTouchStart}
+                  onTouchMove={onTouchMove}
+                  onTouchEnd={onTouchEnd}
+                  className="relative w-full h-full"
+                >
+                  <AnimatePresence mode="wait" custom={direction}>
+                    <motion.div
+                      key={currentImageIndex}
+                      custom={direction}
+                      initial={{ opacity: 0, x: direction > 0 ? 150 : -150 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: direction > 0 ? -150 : 150 }}
+                      transition={{ duration: 0.25, ease: "easeInOut" }}
+                      className="absolute inset-0"
+                    >
+                      {images[currentImageIndex] ? (
+                        <img
+                          src={images[currentImageIndex]}
+                          alt={`${itemName}`}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : null}
+                    </motion.div>
+                  </AnimatePresence>
 
-          {/* Item Name */}
-          <div>
-            <label className="block text-sm font-medium text-gray-900 mb-2">
-              Item name
-            </label>
-            <div className="relative">
-              <input
-                type="text"
-                value={itemName}
-                onChange={(e) => setItemName(e.target.value)}
-                maxLength={maxNameLength}
-                className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Enter item name"
-              />
-              <button className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-gray-100">
-                <EditIcon className="w-4 h-4 text-gray-500" />
-              </button>
-            </div>
-            <div className="text-right mt-1">
-              <span className="text-xs text-gray-500">
-                {nameLength} / {maxNameLength}
-              </span>
-            </div>
-          </div>
-
-
-          {/* Item Description */}
-          <div>
-            <label className="block text-sm font-medium text-gray-900 mb-2">
-              Item description
-            </label>
-            <div className="relative">
-              <textarea
-                value={itemDescription}
-                onChange={(e) => setItemDescription(e.target.value)}
-                maxLength={maxDescriptionLength}
-                rows={4}
-                placeholder="Eg: Yummy veg paneer burger with a soft patty, veggies, cheese, and special sauce"
-                className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-              />
-              <button className="absolute right-3 top-3 p-1 rounded-full hover:bg-gray-100">
-                <EditIcon className="w-4 h-4 text-gray-500" />
-              </button>
-            </div>
-            <div className="flex items-center justify-between mt-1">
-              <span className={`text-xs ${descriptionLength < minDescriptionLength ? "text-red-500" : "text-gray-500"}`}>
-                {descriptionLength < minDescriptionLength ? "Min 5 characters required" : ""}
-              </span>
-              <span className="text-xs text-gray-500">
-                {descriptionLength} / {maxDescriptionLength}
-              </span>
-            </div>
-            {/* Dietary Options */}
-            <div className="flex gap-2 mt-3">
-              <button
-                onClick={() => setFoodType("Veg")}
-                className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${foodType === "Veg"
-                  ? "border-green-600 border-2 text-green-600"
-                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                  }`}
-              >
-                {foodType === "Veg" && <Check className="w-4 h-4" />}
-                <span>Veg</span>
-              </button>
-              <button
-                onClick={() => setFoodType("Non-Veg")}
-                className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${foodType === "Non-Veg"
-                  ? "border-red-600 border-2 text-red-600"
-                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                  }`}
-              >
-                {foodType === "Non-Veg" && <Check className="w-4 h-4" />}
-                <span>Non-Veg</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Item Price */}
-          <div>
-            <label className="block text-sm font-medium text-gray-900 mb-2">
-              Item price
-            </label>
-            <div className="space-y-3">
-              {variants.length === 0 ? (
-                <>
-                  <div className="relative">
-                    <label className="block text-xs text-gray-600 mb-1">Base price</label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        value={basePrice}
-                        onChange={(e) => {
-                          const value = e.target.value.replace(/[\u20B9\s,]/g, '').replace(/[^0-9.]/g, '')
-                          const parts = value.split('.')
-                          const cleanedValue = parts.length > 2
-                            ? parts[0] + '.' + parts.slice(1).join('')
-                            : value
-                          setBasePrice(cleanedValue)
-                        }}
-                        onFocus={(e) => {
-                          if (e.target.value.startsWith('\u20B9')) {
-                            e.target.value = e.target.value.replace(/[\u20B9\s]+/g, '')
-                          }
-                        }}
-                        placeholder="Enter price"
-                        className="w-full pl-8 pr-12 py-3 border border-gray-300 rounded-lg text-sm text-gray-900 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      />
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-600">{"\u20B9"}</span>
-                      <button className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-gray-100">
-                        <EditIcon className="w-4 h-4 text-gray-500" />
+                  {/* Nav Arrows */}
+                  {images.length > 1 && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={goToPrevious}
+                        className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 bg-white/90 backdrop-blur-sm rounded-lg flex items-center justify-center shadow-md hover:bg-white transition-all z-10"
+                      >
+                        <ChevronLeft className="w-4 h-4 text-slate-700" />
                       </button>
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <div className="rounded-lg border border-orange-100 bg-orange-50 px-3 py-2 text-sm text-orange-700">
-                  Customers will see the lowest variant price first.
-                </div>
-              )}
+                      <button
+                        type="button"
+                        onClick={goToNext}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 bg-white/90 backdrop-blur-sm rounded-lg flex items-center justify-center shadow-md hover:bg-white transition-all z-10"
+                      >
+                        <ChevronRight className="w-4 h-4 text-slate-700" />
+                      </button>
+                    </>
+                  )}
 
-              <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">Variants</p>
-                    <p className="text-xs text-gray-500">Optional. Add multiple names and prices like Half, Full, Small, Large.</p>
-                  </div>
+                  {/* Delete Image */}
                   <button
                     type="button"
-                    onClick={handleAddVariant}
-                    className="inline-flex items-center gap-1 rounded-full border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-semibold text-orange-700 hover:bg-orange-100"
+                    onClick={() => handleImageDelete(currentImageIndex)}
+                    className="absolute top-2 right-2 w-8 h-8 bg-white/95 backdrop-blur-sm text-rose-600 rounded-lg flex items-center justify-center shadow-md hover:bg-rose-50 hover:text-rose-700 transition-all z-10 border border-slate-100"
                   >
-                    <Plus className="w-3.5 h-3.5" />
-                    Add variant
+                    <Trash2 className="w-4 h-4" />
                   </button>
-                </div>
 
-                {variants.length > 0 ? (
-                  <div className="space-y-3">
-                    {variants.map((variant, index) => (
-                      <div key={variant.localId} className="grid grid-cols-[1fr_auto] gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          <div>
-                            <label className="block text-xs text-gray-600 mb-1">Variant name</label>
-                            <input
-                              type="text"
-                              value={variant.name}
-                              onChange={(e) => handleVariantChange(variant.localId, "name", e.target.value)}
-                              placeholder={index === 0 ? "e.g., Half" : "e.g., Full"}
-                              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs text-gray-600 mb-1">Variant price</label>
-                            <div className="relative">
-                              <input
-                                type="text"
-                                value={variant.price}
-                                onChange={(e) => {
-                                  const value = e.target.value.replace(/[\u20B9\s,]/g, '').replace(/[^0-9.]/g, '')
-                                  const parts = value.split('.')
-                                  const cleanedValue = parts.length > 2
-                                    ? parts[0] + '.' + parts.slice(1).join('')
-                                    : value
-                                  handleVariantChange(variant.localId, "price", cleanedValue)
-                                }}
-                                placeholder="Enter price"
-                                className="w-full pl-8 pr-3 py-2.5 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                              />
-                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-600">{"\u20B9"}</span>
-                            </div>
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveVariant(variant.localId)}
-                          className="h-10 w-10 rounded-full border border-gray-200 bg-white text-gray-500 hover:bg-gray-100 flex items-center justify-center"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-gray-500">No variants added. This item will use the base price only.</p>
-                )}
-              </div>
-
-              {/* Preparation Time */}
-              <div className="relative">
-                <label className="block text-xs text-gray-600 mb-1">Preparation Time</label>
-                <div className="relative">
-                  <select
-                    value={preparationTime}
-                    onChange={(e) => setPreparationTime(e.target.value)}
-                    className="w-full pl-4 pr-10 py-3 border border-gray-300 rounded-lg text-sm text-gray-900 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent appearance-none"
-                  >
-                    <option value="">Select timing</option>
-                    <option value="10-20 mins">10-20 mins</option>
-                    <option value="20-25 mins">20-25 mins</option>
-                    <option value="25-35 mins">25-35 mins</option>
-                    <option value="35-45 mins">35-45 mins</option>
-                  </select>
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500 pointer-events-none" />
+                  {/* Image Counter */}
+                  {images.length > 1 && (
+                    <div className="absolute top-2 left-2 bg-black/60 backdrop-blur-sm px-2.5 py-1 rounded-md z-10">
+                      <span className="text-white text-[10px] font-semibold">
+                        {currentImageIndex + 1} / {images.length}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
-              {/* <div>
-                <label className="block text-xs text-gray-600 mb-1">GST</label>
-                <button
-                  onClick={() => setIsGstPopupOpen(true)}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg text-left flex items-center justify-between bg-white hover:bg-gray-50 transition-colors"
-                >
-                  <span className="text-sm text-gray-900">GST {gst}%</span>
-                  <ChevronDown className="w-5 h-5 text-gray-500" />
-                </button>
-              </div> */}
+            ) : (
+              <div className="relative w-full h-48 bg-slate-50/50 rounded-xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center p-4 text-center">
+                <div className="w-12 h-12 bg-white rounded-xl border border-slate-100 flex items-center justify-center shadow-sm mb-2 text-slate-400">
+                  <Camera className="w-6 h-6" />
+                </div>
+                <p className="text-xs font-semibold text-slate-600">No Image Added</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">Upload a picture of your dish</p>
+              </div>
+            )}
+
+            {/* Upload Button */}
+            <div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={(e) => handleImageAdd(e.target.files?.[0])}
+                className="hidden"
+              />
+              <button
+                type="button"
+                onClick={handleCameraClick}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold cursor-pointer transition-all shadow-sm"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Upload Dish Image</span>
+              </button>
             </div>
-
           </div>
 
-          {/* Recommend and In Stock */}
-          <div className="flex items-center justify-between py-3 border-t border-gray-200">
-            <button
-              onClick={() => setIsRecommended(!isRecommended)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${isRecommended
-                ? "bg-blue-100 text-blue-700"
-                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                }`}
-            >
-              <ThumbsUp className="w-4 h-4" />
-              <span>Recommend</span>
-            </button>
-            <div className="flex items-center gap-2">
+          {/* Visibility and Recommendations Card */}
+          <div className="bg-white rounded-2xl border border-slate-100 p-5 shadow-sm space-y-4">
+            <h2 className="text-base font-bold text-slate-900 border-b border-slate-50 pb-2">Status & Listing</h2>
+            
+            {/* In Stock Toggle */}
+            <div className="flex items-center justify-between p-3 bg-slate-50/50 rounded-xl border border-slate-100">
+              <div>
+                <p className="text-xs font-bold text-slate-700 uppercase tracking-wider">In Stock</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">Enable to allow customers to order</p>
+              </div>
               <Switch
                 checked={isInStock}
                 onCheckedChange={setIsInStock}
-                className="data-[state=unchecked]:bg-gray-300"
+                className="data-[state=unchecked]:bg-slate-200"
               />
-              <span className="text-sm text-gray-700">In stock</span>
+            </div>
+
+            {/* Recommended Toggle */}
+            <div className="flex items-center justify-between p-3 bg-slate-50/50 rounded-xl border border-slate-100">
+              <div>
+                <p className="text-xs font-bold text-slate-700 uppercase tracking-wider">Recommended</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">Display in recommended section</p>
+              </div>
+              <Switch
+                checked={isRecommended}
+                onCheckedChange={setIsRecommended}
+                className="data-[state=unchecked]:bg-slate-200"
+              />
             </div>
           </div>
 
-
+          {/* Action Buttons */}
+          <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm flex gap-3">
+            {!isNewItem && (
+              <button
+                type="button"
+                onClick={handleDelete}
+                className="flex-1 py-3 px-4 border-2 border-rose-200 text-rose-600 rounded-xl text-xs font-bold bg-white hover:bg-rose-50/50 hover:border-rose-300 transition-colors"
+              >
+                Delete Dish
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={uploadingImages}
+              className={`${isNewItem ? 'w-full' : 'flex-1'} py-3 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${!uploadingImages
+                ? "bg-[#16A34A] text-white hover:bg-[#15803d]"
+                : "bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200"
+                }`}
+            >
+              {uploadingImages ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>
+                    {saveStatus === "uploading"
+                      ? "Uploading image..."
+                      : saveStatus === "saving"
+                      ? "Saving dish..."
+                      : "Saving changes..."}
+                  </span>
+                </>
+              ) : (
+                "Save Changes"
+              )}
+            </button>
+          </div>
         </div>
       </div>
 
+      {/* Popups and Modals */}
       <RestaurantPanelModal
         open={isCategoryPopupOpen}
         onClose={() => setIsCategoryPopupOpen(false)}
-        title="Select category"
+        title="Select Category"
         mobileMaxHeight="tall"
-        bodyClassName="flex-1 overflow-y-auto overscroll-contain p-2 lg:p-3"
+        bodyClassName="flex-1 overflow-y-auto overscroll-contain p-3"
         headerRight={
           <button
             type="button"
@@ -1184,30 +1253,29 @@ export default function ItemDetailsPage() {
               setIsCategoryPopupOpen(false)
               navigate('/restaurant/menu-categories')
             }}
-            className="flex items-center gap-1.5 rounded-lg bg-black p-2 text-white transition-colors hover:bg-gray-800"
-            title="Add Category"
+            className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-2.5 py-1.5 text-white transition-colors hover:bg-slate-800"
           >
-            <Plus className="h-4 w-4" />
-            <span className="text-sm font-medium">Add</span>
+            <Plus className="h-3.5 w-3.5" />
+            <span className="text-xs font-semibold">New</span>
           </button>
         }
       >
         {loadingCategories ? (
           <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-6 w-6 animate-spin text-gray-600" />
+            <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
           </div>
         ) : categories.length === 0 ? (
           <div className="space-y-4 py-12 text-center">
-            <p className="text-sm text-gray-500">No categories available</p>
+            <p className="text-xs text-slate-500">No categories found</p>
             <button
               type="button"
               onClick={() => {
                 setIsCategoryPopupOpen(false)
                 navigate('/restaurant/menu-categories')
               }}
-              className="inline-flex items-center gap-2 rounded-lg bg-black px-4 py-2 font-semibold text-white transition-colors hover:bg-gray-800"
+              className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 font-semibold text-white transition-colors hover:bg-slate-800 text-xs"
             >
-              <Plus className="h-5 w-5" />
+              <Plus className="h-4 w-4" />
               Add Category
             </button>
           </div>
@@ -1218,18 +1286,18 @@ export default function ItemDetailsPage() {
                 key={cat.id}
                 type="button"
                 onClick={() => handleCategorySelect(cat.id, cat.name)}
-                className={`w-full rounded-lg px-4 py-3 text-left transition-colors ${String(selectedCategoryId || "") === String(cat.id)
-                  ? "bg-gray-900 text-white"
-                  : "bg-gray-50 text-gray-900 hover:bg-gray-100"
+                className={`w-full rounded-xl px-4 py-3 text-left transition-colors border ${String(selectedCategoryId || "") === String(cat.id)
+                  ? "bg-[#16A34A]/5 border-[#16A34A] text-[#16A34A] font-bold"
+                  : "bg-slate-50 border-slate-100 text-slate-700 hover:bg-slate-100 hover:border-slate-200"
                   }`}
               >
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm font-medium">{cat.name}</span>
-                  <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${cat.foodTypeScope === "Veg"
+                  <span className="text-xs sm:text-sm font-semibold">{cat.name}</span>
+                  <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider border shadow-sm ${cat.foodTypeScope === "Veg"
                     ? "border-green-200 bg-green-50 text-green-700"
                     : cat.foodTypeScope === "Non-Veg"
                       ? "border-red-200 bg-red-50 text-red-700"
-                      : "border-slate-200 bg-slate-100 text-slate-700"
+                      : "border-slate-200 bg-slate-100 text-slate-600"
                     }`}>
                     {cat.foodTypeScope || "Both"}
                   </span>
@@ -1245,7 +1313,7 @@ export default function ItemDetailsPage() {
         onClose={() => setIsGstPopupOpen(false)}
         title="Select GST"
         mobileMaxHeight="medium"
-        bodyClassName="flex-1 overflow-y-auto overscroll-contain px-4 py-4 lg:px-5"
+        bodyClassName="flex-1 overflow-y-auto overscroll-contain px-4 py-4"
       >
         <div className="space-y-2">
           {GST_OPTIONS.map((gstValue) => (
@@ -1253,10 +1321,10 @@ export default function ItemDetailsPage() {
               key={gstValue}
               type="button"
               onClick={() => handleGstSelect(gstValue)}
-              className={`w-full rounded-lg px-4 py-3 text-left text-sm font-medium transition-colors ${
+              className={`w-full rounded-xl px-4 py-3 text-left text-xs font-semibold transition-colors ${
                 gst === gstValue
-                  ? "bg-gray-900 text-white"
-                  : "bg-gray-50 text-gray-900 hover:bg-gray-100"
+                  ? "bg-[#16A34A] text-white"
+                  : "bg-slate-50 border border-slate-100 text-slate-700 hover:bg-slate-100"
               }`}
             >
               {gstValue}%
@@ -1264,41 +1332,6 @@ export default function ItemDetailsPage() {
           ))}
         </div>
       </RestaurantPanelModal>
-
-
-      {/* Bottom Sticky Buttons */}
-      <div
-        className="fixed left-0 right-0 bg-white border-t border-gray-200 z-40"
-        style={{ bottom: `${keyboardInset}px` }}
-      >
-        <div className={`flex gap-3 px-4 py-4 ${isNewItem ? 'justify-end' : ''}`}>
-          {!isNewItem && (
-            <button
-              onClick={handleDelete}
-              className="flex-1 py-3 px-4 border border-black rounded-lg text-sm font-semibold text-black bg-white hover:bg-gray-50 transition-colors"
-            >
-              Delete
-            </button>
-          )}
-          <button
-            onClick={handleSave}
-            disabled={uploadingImages}
-            className={`${isNewItem ? 'w-full' : 'flex-1'} py-3 px-4 rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${!uploadingImages
-              ? "bg-black text-white hover:bg-black"
-              : "bg-gray-300 text-gray-500 cursor-not-allowed"
-              }`}
-          >
-            {uploadingImages ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Uploading...</span>
-              </>
-            ) : (
-              "Save"
-            )}
-          </button>
-        </div>
-      </div>
       {/* Photo Picker */}
       <ImageSourcePicker
         isOpen={isPhotoPickerOpen}
@@ -1309,7 +1342,7 @@ export default function ItemDetailsPage() {
         fileNamePrefix="item-photo"
         galleryInputRef={fileInputRef}
       />
-    </div>
+    </RestaurantSubPageShell>
   )
 }
 

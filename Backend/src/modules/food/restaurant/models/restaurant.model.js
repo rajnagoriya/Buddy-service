@@ -83,6 +83,10 @@ const restaurantSchema = new mongoose.Schema(
       required: true,
       default: false,
     },
+    dietaryType: {
+      type: String,
+      enum: ["veg", "non_veg", "mixed"],
+    },
     addressLine1: {
       type: String,
     },
@@ -259,6 +263,49 @@ const restaurantSchema = new mongoose.Schema(
     pendingUpdateReason: {
       type: String,
       trim: true,
+    },
+    onboardingStatus: {
+      type: String,
+      enum: [
+        "NOT_STARTED",
+        "IN_PROGRESS",
+        "SUBMITTED",
+        "UNDER_REVIEW",
+        "APPROVED",
+        "REJECTED",
+      ],
+      default: "NOT_STARTED",
+      index: true,
+    },
+    currentStep: {
+      type: Number,
+      min: 1,
+      max: 3,
+      default: 1,
+    },
+    completedSteps: {
+      type: [Number],
+      default: [],
+    },
+    submittedAt: {
+      type: Date,
+    },
+    verifiedAt: {
+      type: Date,
+    },
+    adminRemarks: {
+      type: String,
+      trim: true,
+    },
+    rejectionStep: {
+      type: Number,
+      min: 1,
+      max: 3,
+    },
+    onboarding: {
+      step1: { type: mongoose.Schema.Types.Mixed, default: undefined },
+      step2: { type: mongoose.Schema.Types.Mixed, default: undefined },
+      step3: { type: mongoose.Schema.Types.Mixed, default: undefined },
     },
   },
   {

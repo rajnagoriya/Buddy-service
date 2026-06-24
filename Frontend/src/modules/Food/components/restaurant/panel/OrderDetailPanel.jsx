@@ -77,12 +77,36 @@ export default function OrderDetailPanel({ order, onClose, className = "" }) {
             Items
           </p>
           <div className="rounded-xl bg-[var(--rt-surface-muted)] px-4 py-3 text-xs text-gray-700 border border-[var(--rt-border)]">
-            {order.itemsSummary}
+            {order.items && order.items.length > 0 ? (
+              <div className="space-y-3">
+                {order.items.map((item, index) => (
+                  <div key={index} className="flex justify-between items-center">
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${item.isVeg ? "bg-green-500" : "bg-red-500"}`} />
+                      <span className="font-semibold text-slate-800">{item.quantity} x {item.name}</span>
+                    </div>
+                    {item.price && <span className="text-slate-600 font-medium">₹{(item.price * item.quantity).toFixed(2)}</span>}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div>{order.itemsSummary}</div>
+            )}
           </div>
         </section>
 
         {/* Stats Grid */}
         <div className="grid grid-cols-2 gap-2.5">
+          {order.amount != null && order.amount > 0 ? (
+            <div className="rounded-xl border border-[var(--rt-border)] px-3.5 py-2.5 bg-white shadow-sm">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                Amount
+              </p>
+              <p className="mt-1 font-bold text-gray-900 text-base">
+                ₹{Number(order.amount).toFixed(2)}
+              </p>
+            </div>
+          ) : null}
           {!isReady && order.eta ? (
             <div className="rounded-xl border border-[var(--rt-border)] px-3.5 py-2.5 bg-white shadow-sm">
               <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
@@ -93,7 +117,7 @@ export default function OrderDetailPanel({ order, onClose, className = "" }) {
               </p>
             </div>
           ) : null}
-          <div className={`rounded-xl border border-[var(--rt-border)] px-3.5 py-2.5 bg-white shadow-sm ${!isReady || !order.eta ? "col-span-2" : ""}`}>
+          <div className={`rounded-xl border border-[var(--rt-border)] px-3.5 py-2.5 bg-white shadow-sm ${(!order.amount && (!order.eta || isReady)) ? "col-span-2" : ""}`}>
             <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />

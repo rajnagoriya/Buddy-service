@@ -944,6 +944,27 @@ export const restaurantAPI = {
   getMe: () => authService.getMe("restaurant"),
   /** Restaurant dashboard: fetch current restaurant profile (deduped + short-cached). */
   getCurrentRestaurant: () => getRestaurantCurrentOnce(),
+  /** Onboarding progress from database. */
+  getOnboardingProgress: () =>
+    apiClient.get("/food/restaurant/onboarding", {
+      contextModule: "restaurant",
+    }),
+  saveOnboardingStep: (step, formData) => {
+    restaurantCurrentCached = null;
+    restaurantCurrentCacheTime = 0;
+    return apiClient.put(`/food/restaurant/onboarding/step/${step}`, formData, {
+      contextModule: "restaurant",
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+  },
+  submitOnboarding: (formData) => {
+    restaurantCurrentCached = null;
+    restaurantCurrentCacheTime = 0;
+    return apiClient.post("/food/restaurant/onboarding/submit", formData, {
+      contextModule: "restaurant",
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+  },
   /** Finance dashboard for `hub-finance`. */
   getFinance: (params = {}) =>
     apiClient.get("/food/restaurant/finance", {

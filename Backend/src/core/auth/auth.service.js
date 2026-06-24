@@ -4,6 +4,10 @@ import { FoodUser } from "../users/user.model.js";
 import { Admin } from '../admin/admin.model.js';
 import { AdminResetOtp } from "../admin/adminResetOtp.model.js";
 import { FoodRestaurant } from "../../modules/food/restaurant/models/restaurant.model.js";
+import {
+  ensureDraftRestaurantForPhone,
+  resolveOnboardingStatus,
+} from "../../modules/food/restaurant/services/restaurantOnboarding.service.js";
 import { FoodDeliveryPartner } from "../../modules/food/delivery/models/deliveryPartner.model.js";
 import { FoodReferralSettings } from "../../modules/food/admin/models/referralSettings.model.js";
 import { FoodReferralLog } from "../../modules/food/admin/models/referralLog.model.js";
@@ -383,65 +387,107 @@ export const verifyRestaurantOtpAndLogin = async (phone, otp, fcmToken, platform
       ...phoneOrFields("primaryContactNumber"),
     ],
   });
-  if (!restaurant) {
-    // Phone has been successfully verified, but no restaurant exists yet.
-    // Frontend will use this to redirect into registration/onboarding.
-    return {
-      needsRegistration: true,
-      phone,
+
+  const issueRestaurantTokens = async (restaurantDoc) => {
+    const payload = {
+      userId: restaurantDoc._id.toString(),
+      role: ROLES.RESTAURANT,
     };
+    const accessToken = signAccessToken(payload);
+    const refreshToken = signRefreshToken(payload);
+    const ttlMs = ms(config.jwtRefreshExpiresIn || "7d");
+    const expiresAt = new Date(Date.now() + ttlMs);
+
+    await FoodRefreshToken.create({
+      userId: restaurantDoc._id,
+      token: refreshToken,
+      expiresAt,
+    });
+
+    return {
+      token: accessToken,
+      accessToken,
+      refreshToken,
+      user: sanitizeRestaurantForAuthResponse(
+        restaurantDoc?.toObject?.() || restaurantDoc,
+      ),
+      needsRegistration: false,
+    };
+  };
+
+  let activeRestaurant = restaurant;
+  if (!activeRestaurant) {
+    activeRestaurant = await ensureDraftRestaurantForPhone(phone);
   }
 
   // Update FCM token if provided
   if (fcmToken) {
     let isModified = false;
     if (platform === "mobile") {
-      if (!restaurant.fcmTokenMobile) restaurant.fcmTokenMobile = [];
-      if (!restaurant.fcmTokenMobile.includes(fcmToken)) {
-        restaurant.fcmTokenMobile.push(fcmToken);
+      if (!activeRestaurant.fcmTokenMobile) activeRestaurant.fcmTokenMobile = [];
+      if (!activeRestaurant.fcmTokenMobile.includes(fcmToken)) {
+        activeRestaurant.fcmTokenMobile.push(fcmToken);
         isModified = true;
       }
     } else {
-      if (!restaurant.fcmTokens) restaurant.fcmTokens = [];
-      if (!restaurant.fcmTokens.includes(fcmToken)) {
-        restaurant.fcmTokens.push(fcmToken);
+      if (!activeRestaurant.fcmTokens) activeRestaurant.fcmTokens = [];
+      if (!activeRestaurant.fcmTokens.includes(fcmToken)) {
+        activeRestaurant.fcmTokens.push(fcmToken);
         isModified = true;
       }
     }
     if (isModified) {
-      await restaurant.save();
+      await activeRestaurant.save();
     }
   }
 
-  // If restaurant approval status is used, handle pending/rejected states by returning info instead of throwing errors.
-  if (restaurant.status && restaurant.status !== "approved") {
+  const onboardingStatus = resolveOnboardingStatus(activeRestaurant);
+
+  if (
+    onboardingStatus === "SUBMITTED" ||
+    onboardingStatus === "UNDER_REVIEW" ||
+    (activeRestaurant.status === "pending" &&
+      onboardingStatus !== "IN_PROGRESS" &&
+      onboardingStatus !== "REJECTED" &&
+      onboardingStatus !== "NOT_STARTED" &&
+      activeRestaurant.pendingUpdateReason === "New Registration")
+  ) {
     return {
       pendingApproval: true,
-      status: restaurant.status,
-      isRejected: restaurant.status === "rejected",
-      rejectionReason: restaurant.rejectionReason || null,
+      status: activeRestaurant.status || "pending",
+      onboardingStatus,
+      isRejected: false,
+      rejectionReason: null,
       phone,
     };
   }
 
-  const payload = { userId: restaurant._id.toString(), role: ROLES.RESTAURANT };
-  const accessToken = signAccessToken(payload);
-  const refreshToken = signRefreshToken(payload);
-  const ttlMs = ms(config.jwtRefreshExpiresIn || "7d");
-  const expiresAt = new Date(Date.now() + ttlMs);
+  if (onboardingStatus === "REJECTED" || activeRestaurant.status === "rejected") {
+    const tokens = await issueRestaurantTokens(activeRestaurant);
+    return {
+      ...tokens,
+      pendingApproval: true,
+      isRejected: true,
+      onboardingStatus: "REJECTED",
+      rejectionReason:
+        activeRestaurant.adminRemarks ||
+        activeRestaurant.rejectionReason ||
+        null,
+      rejectionStep: activeRestaurant.rejectionStep || activeRestaurant.currentStep || 1,
+      phone,
+    };
+  }
 
-  await FoodRefreshToken.create({
-    userId: restaurant._id,
-    token: refreshToken,
-    expiresAt,
-  });
+  if (onboardingStatus === "APPROVED" || activeRestaurant.status === "approved") {
+    return issueRestaurantTokens(activeRestaurant);
+  }
 
+  const tokens = await issueRestaurantTokens(activeRestaurant);
   return {
-    token: accessToken,
-    accessToken,
-    refreshToken,
-    user: sanitizeRestaurantForAuthResponse(restaurant?.toObject?.() || restaurant),
-    needsRegistration: false,
+    ...tokens,
+    onboardingStatus,
+    currentStep: activeRestaurant.currentStep || 1,
+    isNewOnboarding: onboardingStatus === "IN_PROGRESS",
   };
 };
 

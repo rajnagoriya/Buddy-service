@@ -32,6 +32,7 @@ export const registerRestaurantController = async (req, res, next) => {
 
 export const listApprovedRestaurantsController = async (req, res, next) => {
     try {
+        // Trigger cache refresh V5
         const data = await listApprovedRestaurants(req.query);
         return sendResponse(res, 200, 'Restaurants fetched successfully', data);
     } catch (error) {

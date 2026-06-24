@@ -79,6 +79,21 @@ const debugLog = (...args) => { }
 const debugWarn = (...args) => { }
 const debugError = (...args) => { }
 
+const mergeMenuSections = (existingSections, newSections) => {
+  const merged = [...existingSections];
+  newSections.forEach(newSec => {
+    const existingSec = merged.find(s => s.name === newSec.name || (s.categoryId && s.categoryId === newSec.categoryId));
+    if (existingSec) {
+      const existingItemIds = new Set(existingSec.items.map(item => String(item.id || item._id)));
+      const uniqueNewItems = (newSec.items || []).filter(item => !existingItemIds.has(String(item.id || item._id)));
+      existingSec.items = [...existingSec.items, ...uniqueNewItems];
+    } else {
+      merged.push(newSec);
+    }
+  });
+  return merged;
+};
+
 
 
 const FOOD_IMAGE_FALLBACK = "https://picsum.photos/seed/food-fallback/800/600"
@@ -152,6 +167,13 @@ function RestaurantDetailsContent() {
   const [loadingMenuItems, setLoadingMenuItems] = useState(true)
   const [selectedMenuCategory, setSelectedMenuCategory] = useState("all")
   const dishCardRefs = useRef({})
+
+  const [menuPage, setMenuPage] = useState(1)
+  const [hasMoreMenu, setHasMoreMenu] = useState(false)
+  const [loadingMoreMenu, setLoadingMoreMenu] = useState(false)
+  const menuLookupIdsRef = useRef([])
+  const resolvedMenuLookupIdRef = useRef(null)
+  const currentMenuPageRef = useRef(1)
 
   const getLineItemIdForDish = (item, variant = null) =>
     buildCartLineId(item?.id || item?._id || "", variant?.id || variant?._id || "")
@@ -290,6 +312,101 @@ function RestaurantDetailsContent() {
 
     return () => clearInterval(intervalId)
   }, [])
+
+  const loadMoreMenu = async () => {
+    if (loadingMoreMenu || !hasMoreMenu || !resolvedMenuLookupIdRef.current) return
+
+    setLoadingMoreMenu(true)
+    const nextPage = currentMenuPageRef.current + 1
+    debugLog('? Fetching menu page:', nextPage)
+
+    try {
+      const response = await restaurantAPI.getMenuByRestaurantId(resolvedMenuLookupIdRef.current, {
+        noCache: true,
+        params: { page: nextPage, limit: 15 }
+      })
+
+      if (response?.data?.success && response?.data?.data?.menu) {
+        const newRawSections = response.data.data.menu.sections || []
+        const toArray = (value) => {
+          if (Array.isArray(value)) return value
+          if (!value || typeof value !== "object") return []
+          return Object.values(value).filter((entry) => entry && typeof entry === "object")
+        }
+
+        const normalizeItem = (item = {}) => {
+          const isRecommended = item.isRecommended === true || item.isRecommended === 1 || String(item.isRecommended) === "true"
+          const isSpicy = item.isSpicy === true || item.isSpicy === 1 || String(item.isSpicy) === "true"
+          let foodType = item.foodType || "Non-Veg"
+          if (typeof foodType === 'string') {
+            if (foodType.toLowerCase() === 'veg') foodType = 'Veg'
+            else if (foodType.toLowerCase() === 'non-veg' || foodType.toLowerCase() === 'nonveg') foodType = 'Non-Veg'
+          }
+          const isVeg = foodType === 'Veg'
+
+          return {
+            ...item,
+            id: String(item.id || item._id || `${Date.now()}-${Math.random()}`),
+            name: item.name || "Unnamed Item",
+            foodType,
+            isVeg,
+            price: getFoodDisplayPrice(item),
+            variants: getFoodVariants(item),
+            variations: getFoodVariants(item),
+            isAvailable: item.isAvailable !== false,
+            isRecommended,
+            isSpicy,
+            description: typeof item.description === "string" ? item.description : "",
+          }
+        }
+
+        const newMenuSections = toArray(newRawSections)
+          .map((section, sectionIndex) => ({
+            ...section,
+            id: String(section.id || section._id || `section-${sectionIndex}`),
+            categoryId: String(section.categoryId || section.id || section._id || `section-${sectionIndex}`),
+            name: section.name || section.title || "Unnamed Section",
+            itemCount: Number(section.itemCount) || toArray(section.items).length,
+            sortOrder: Number(section.sortOrder) || 0,
+            items: toArray(section.items).map(normalizeItem),
+            subsections: toArray(section.subsections).map((subsection, subsectionIndex) => ({
+              ...subsection,
+              id: String(subsection.id || subsection._id || `subsection-${sectionIndex}-${subsectionIndex}`),
+              name: subsection.name || "Unnamed Subsection",
+              items: toArray(subsection.items).map(normalizeItem),
+            })),
+          }))
+
+        setRestaurant(prev => {
+          if (!prev) return prev
+          const mergedSections = mergeMenuSections(prev.menuSections || [], newMenuSections)
+          return {
+            ...prev,
+            menuSections: mergedSections
+          }
+        })
+
+        const pagination = response.data.data.menu.pagination || {}
+        setHasMoreMenu(pagination.hasMore === true)
+        setMenuPage(nextPage)
+        currentMenuPageRef.current = nextPage
+      }
+    } catch (error) {
+      debugError('? Error fetching more menu items:', error)
+    } finally {
+      setLoadingMoreMenu(false)
+    }
+  }
+
+  useEffect(() => {
+    const handleScroll = () => {
+      if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 300) {
+        loadMoreMenu()
+      }
+    }
+    window.addEventListener('scroll', handleScroll)
+    return () => window.removeEventListener('scroll', handleScroll)
+  }, [hasMoreMenu, loadingMoreMenu])
 
   useEffect(() => {
     if (restaurant) {
@@ -839,13 +956,18 @@ function RestaurantDetailsContent() {
               debugLog('? Fetching menu for restaurant ID:', restaurantIdForMenu)
               let menuResponse = null
               let resolvedMenuLookupId = null
+              menuLookupIdsRef.current = normalizedLookupIds
               for (const lookupId of normalizedLookupIds) {
                 try {
                   debugLog('? Fetching menu for restaurant lookup ID:', lookupId)
-                  const response = await restaurantAPI.getMenuByRestaurantId(lookupId, { noCache: true })
+                  const response = await restaurantAPI.getMenuByRestaurantId(lookupId, { 
+                    noCache: true,
+                    params: { page: 1, limit: 15 }
+                  })
                   if (response?.data?.success) {
                     menuResponse = response
                     resolvedMenuLookupId = lookupId
+                    resolvedMenuLookupIdRef.current = lookupId
                     break
                   }
                 } catch (lookupError) {
@@ -1007,6 +1129,11 @@ function RestaurantDetailsContent() {
                     }
                   })
                   .filter(Boolean)
+
+                 const pagination = menuResponse.data.data.menu.pagination || {}
+                setHasMoreMenu(pagination.hasMore === true)
+                setMenuPage(1)
+                currentMenuPageRef.current = 1
 
                 setRestaurant(prev => ({
                   ...prev,
@@ -2284,6 +2411,12 @@ function RestaurantDetailsContent() {
                     toRenderableArray={toRenderableArray}
                   />
                 ))}
+                {loadingMoreMenu && (
+                  <div className="flex justify-center items-center py-6 w-full">
+                    <div className="animate-spin rounded-full h-8 w-8 border-[#16A34A] dark:border-[#15803D]"></div>
+                    <span className="ml-3 text-sm text-gray-500">Loading more items...</span>
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -2916,7 +3049,7 @@ function RestaurantDetailsContent() {
                                   : "border-gray-200 bg-white text-gray-700 dark:border-gray-700 dark:bg-[#2a2a2a] dark:text-gray-300"
                                 }`}
                             >
-                              {variant.name} · {RUPEE_SYMBOL}{Math.round(variant.price)}
+                              {variant.name} · {RUPEE_SYMBOL}{Math.round(variant.price)}{variant.unit ? ` / ${variant.unit}` : ''}
                             </button>
                           ))}
                         </div>

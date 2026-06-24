@@ -29,6 +29,7 @@ const createVariantDraft = (variant = {}) => ({
   id: String(variant?.id || variant?._id || `variant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
   name: String(variant?.name || ""),
   price: variant?.price != null ? String(variant.price) : "",
+  unit: String(variant?.unit || "piece"),
 })
 
 export default function FoodsList() {
@@ -360,6 +361,7 @@ export default function FoodsList() {
         id: String(variant?.id || variant?._id || "").trim(),
         name: String(variant?.name || "").trim(),
         price: Number(variant?.price),
+        unit: String(variant?.unit || "piece").trim(),
       }))
       .filter((variant) => variant.id || variant.name || variant.price)
 
@@ -405,6 +407,7 @@ export default function FoodsList() {
           ...(variant.id && !variant.id.startsWith("variant-") ? { _id: variant.id } : {}),
           name: variant.name,
           price: variant.price,
+          unit: variant.unit,
         })),
         description: foodForm.description.trim(),
         image: imageUrl,
@@ -724,7 +727,7 @@ export default function FoodsList() {
                   <div className="space-y-2">
                     {selectedFood.variants.map((variant) => (
                       <div key={variant.id || variant._id} className="flex items-center justify-between text-sm text-slate-700">
-                        <span>{variant.name}</span>
+                        <span>{variant.name}{variant.unit ? ` (${variant.unit})` : ""}</span>
                         <span className="font-semibold text-slate-900">{"\u20B9"}{variant.price}</span>
                       </div>
                     ))}
@@ -952,7 +955,7 @@ export default function FoodsList() {
                 <div className="space-y-3">
                   {(foodForm.variants || []).map((variant, index) => (
                     <div key={variant.id} className="grid grid-cols-[1fr_auto] gap-3 rounded-lg border border-slate-200 bg-white p-3">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 w-full">
                         <div>
                           <label className="block text-xs font-medium text-slate-600 mb-1">Variant name</label>
                           <input
@@ -973,6 +976,33 @@ export default function FoodsList() {
                             onChange={(e) => handleVariantChange(variant.id, "price", e.target.value)}
                             className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
                           />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Unit</label>
+                          <select
+                            value={variant.unit || "piece"}
+                            onChange={(e) => handleVariantChange(variant.id, "unit", e.target.value)}
+                            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white h-[38px]"
+                          >
+                            <option value="piece">piece</option>
+                            <option value="kg">kg</option>
+                            <option value="gm">gm</option>
+                            <option value="litre">litre</option>
+                            <option value="ml">ml</option>
+                            <option value="plates">plates</option>
+                            <option value="serves">serves</option>
+                            <option value="serving">serving</option>
+                            <option value="portion">portion</option>
+                            <option value="Plate">Plate</option>
+                            <option value="Serving">Serving</option>
+                            <option value="Portion">Portion</option>
+                            {variant.unit && ![
+                              "piece", "kg", "gm", "litre", "ml", "plates", "serves",
+                              "serving", "portion", "Plate", "Serving", "Portion"
+                            ].includes(variant.unit) && (
+                              <option value={variant.unit}>{variant.unit}</option>
+                            )}
+                          </select>
                         </div>
                       </div>
                       <button

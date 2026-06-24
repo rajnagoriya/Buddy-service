@@ -99,15 +99,71 @@ const buildMenuFromFoods = async (foods = []) => {
     return { sections, categories };
 };
 
-export async function getRestaurantMenu(restaurantId) {
+export async function getRestaurantMenu(restaurantId, query = {}) {
     if (!restaurantId || !mongoose.Types.ObjectId.isValid(String(restaurantId))) {
         throw new ValidationError('Invalid restaurant id');
     }
-    const foods = await FoodItem.find({ restaurantId })
-        .sort({ createdAt: -1 })
-        .limit(5000)
-        .lean();
-    return buildMenuFromFoods(foods);
+
+    const limit = Math.min(Math.max(parseInt(query.limit, 10) || 20, 1), 200);
+    const page = Math.max(parseInt(query.page, 10) || 1, 1);
+    const skip = (page - 1) * limit;
+
+    const filter = { restaurantId };
+
+    if (query.search) {
+        const term = String(query.search).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        filter.$or = [
+            { name: { $regex: term, $options: 'i' } },
+            { categoryName: { $regex: term, $options: 'i' } }
+        ];
+    }
+
+    if (query.filter && query.filter !== 'all') {
+        if (query.filter === 'in-stock') {
+            filter.isAvailable = true;
+        } else if (query.filter === 'out-of-stock') {
+            filter.isAvailable = false;
+        } else if (query.filter === 'veg') {
+            filter.foodType = 'Veg';
+        } else if (query.filter === 'non-veg') {
+            filter.foodType = 'Non-Veg';
+        } else if (query.filter === 'recommended') {
+            let recIds = [];
+            if (query.recommendedIds) {
+                try {
+                    recIds = Array.isArray(query.recommendedIds)
+                        ? query.recommendedIds
+                        : String(query.recommendedIds).split(',').filter(Boolean);
+                } catch (e) {
+                    recIds = [];
+                }
+            }
+            const validRecIds = recIds.filter(id => mongoose.Types.ObjectId.isValid(String(id)));
+            filter._id = { $in: validRecIds.map(id => new mongoose.Types.ObjectId(String(id))) };
+        }
+    }
+
+    const [foods, totalItems] = await Promise.all([
+        FoodItem.find(filter)
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .lean(),
+        FoodItem.countDocuments(filter)
+    ]);
+
+    const menu = await buildMenuFromFoods(foods);
+
+    return {
+        ...menu,
+        pagination: {
+            totalItems,
+            page,
+            limit,
+            totalPages: Math.ceil(totalItems / limit),
+            hasMore: page * limit < totalItems
+        }
+    };
 }
 
 export async function updateRestaurantMenu(restaurantId, body = {}) {
@@ -116,7 +172,7 @@ export async function updateRestaurantMenu(restaurantId, body = {}) {
     throw new ValidationError('Menu editing is disabled. Menu is generated from food items.');
 }
 
-export async function getPublicApprovedRestaurantMenu(restaurantIdOrSlug) {
+export async function getPublicApprovedRestaurantMenu(restaurantIdOrSlug, query = {}) {
     const value = String(restaurantIdOrSlug || '').trim();
     if (!value) throw new ValidationError('Restaurant id is required');
 
@@ -135,11 +191,73 @@ export async function getPublicApprovedRestaurantMenu(restaurantIdOrSlug) {
     if (!restaurant?._id) {
         return null;
     }
-    const foods = await FoodItem.find({ restaurantId: restaurant._id, approvalStatus: 'approved' })
-        .sort({ createdAt: -1 })
-        .limit(2000)
+
+    const limit = Math.min(Math.max(parseInt(query.limit, 10) || 200, 1), 1000);
+    const page = Math.max(parseInt(query.page, 10) || 1, 1);
+    const skip = (page - 1) * limit;
+
+    const filter = { restaurantId: restaurant._id, approvalStatus: 'approved' };
+
+    if (query.search) {
+        const term = String(query.search).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        filter.name = { $regex: term, $options: 'i' };
+    }
+
+    // Get all food items for categories construction to ensure tabs are fully populated
+    const allFoods = await FoodItem.find({ restaurantId: restaurant._id, approvalStatus: 'approved' })
+        .select('categoryName sectionName sortOrder')
         .lean();
-    return buildMenuFromFoods(foods);
+
+    // Group allFoods to build complete categories list
+    const categoryMap = new Map();
+    for (const food of allFoods) {
+        const catName = food.categoryName || food.sectionName || 'Main Course';
+        if (!categoryMap.has(catName)) {
+            categoryMap.set(catName, {
+                name: catName,
+                itemCount: 0,
+                sortOrder: food.sortOrder || 0
+            });
+        }
+        categoryMap.get(catName).itemCount += 1;
+    }
+
+    const categories = Array.from(categoryMap.values())
+        .map(cat => ({
+            id: cat.name.toLowerCase().replace(/\s+/g, '-'),
+            categoryId: cat.name.toLowerCase().replace(/\s+/g, '-'),
+            name: cat.name,
+            sortOrder: cat.sortOrder,
+            itemCount: cat.itemCount
+        }))
+        .sort((a, b) => {
+            if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+            return a.name.localeCompare(b.name);
+        });
+
+    // Query paginated items for sections
+    const [foods, totalItems] = await Promise.all([
+        FoodItem.find(filter)
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .lean(),
+        FoodItem.countDocuments(filter)
+    ]);
+
+    const menu = await buildMenuFromFoods(foods);
+
+    return {
+        sections: menu.sections,
+        categories,
+        pagination: {
+            totalItems,
+            page,
+            limit,
+            totalPages: Math.ceil(totalItems / limit),
+            hasMore: page * limit < totalItems
+        }
+    };
 }
 
 export async function syncMenuItemApprovalStatus(restaurantId, itemId, status, rejectionReason = '') {
