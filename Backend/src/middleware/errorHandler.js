@@ -5,6 +5,9 @@ const DUPLICATE_KEY_CODE = 11000;
 
 const DUPLICATE_FIELD_MESSAGES = {
     phone: 'This phone number is already registered',
+    ownerPhone: 'This phone number is already registered',
+    ownerPhoneLast10: 'Restaurant already exists with this phone number',
+    ownerEmail: 'Restaurant already exists with this email',
     vehicleNumber: 'This vehicle number is already registered',
     email: 'This email is already registered',
 };

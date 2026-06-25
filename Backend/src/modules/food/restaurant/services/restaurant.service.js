@@ -9,6 +9,12 @@ import {
     getDefaultOutletTimingsShape,
     getOutletTimingsMapForRestaurants
 } from './outletTimings.service.js';
+import {
+    createRestaurant,
+    CREATION_SOURCE,
+    normalizeRestaurantPhone,
+    normalizeRestaurantEmail,
+} from './restaurantCreation.service.js';
 
 const normalizeName = (value) =>
     String(value || '')
@@ -17,13 +23,7 @@ const normalizeName = (value) =>
         .replace(/-/g, ' ')
         .replace(/\s+/g, ' ');
 
-const normalizePhone = (value) => {
-    const digits = String(value || '').replace(/\D/g, '').slice(-15);
-    return {
-        digits: digits || '',
-        last10: digits ? digits.slice(-10) : ''
-    };
-};
+const normalizePhone = normalizeRestaurantPhone;
 
 const normalizeRatingValue = (value) => {
     const numeric = Number(value);
@@ -355,38 +355,17 @@ export const registerRestaurant = async (payload, files) => {
         const latNum = toFiniteNumber(latitude);
         const lngNum = toFiniteNumber(longitude);
 
-        // Allow retry: If a restaurant with the same name and phone exists but was rejected,
-        // delete it so the user can re-register without "number blocked" errors.
-        const existingRejected = await FoodRestaurant.findOne({
-            $or: [
-                { ownerPhoneDigits },
-                { restaurantNameNormalized, ownerPhoneLast10 }
-            ]
-        });
-
-        if (existingRejected) {
-            if (existingRejected.status === 'rejected') {
-                await FoodRestaurant.deleteOne({ _id: existingRejected._id });
-            } else {
-                throw new ValidationError('Restaurant with this name and owner phone already exists');
-            }
-        }
-
-        const restaurant = await FoodRestaurant.create({
+        const restaurant = await createRestaurant({
             restaurantName,
             restaurantNameNormalized,
             ownerName,
-            ownerEmail,
-            // Store phone in a consistent digits-only format to match OTP login flow.
-            ownerPhone: ownerPhoneDigits,
-            ownerPhoneDigits,
-            ownerPhoneLast10,
+            ownerEmail: normalizeRestaurantEmail(ownerEmail) || undefined,
+            ownerPhone,
             primaryContactNumber,
             pureVegRestaurant: pureVegRestaurant === true,
             zoneId: zoneId && mongoose.Types.ObjectId.isValid(String(zoneId).trim())
                 ? new mongoose.Types.ObjectId(String(zoneId).trim())
                 : undefined,
-            // Store unified location object (geo + address).
             location: {
                 type: 'Point',
                 coordinates: latNum !== null && lngNum !== null ? [lngNum, latNum] : undefined,
@@ -422,13 +401,8 @@ export const registerRestaurant = async (payload, files) => {
             accountType,
             menuImages,
             menuPdf,
-            pendingUpdateReason: 'New Registration',
-            onboardingStatus: 'SUBMITTED',
-            currentStep: null,
-            completedSteps: [1, 2, 3],
-            submittedAt: new Date(),
             ...images
-        });
+        }, { source: CREATION_SOURCE.LEGACY_REGISTER });
 
         try {
             const { notifyAdminsSafely } = await import('../../../../core/notifications/firebase.service.js');
@@ -445,12 +419,8 @@ export const registerRestaurant = async (payload, files) => {
             console.error('Failed to notify admins of new restaurant registration:', e);
         }
 
-        return restaurant.toObject();
+        return restaurant.toObject ? restaurant.toObject() : restaurant;
     } catch (err) {
-        // Handle uniqueness conflicts deterministically (race-safe).
-        if (err && (err.code === 11000 || err?.name === 'MongoServerError')) {
-            throw new ValidationError('Restaurant with this name and owner phone already exists');
-        }
         throw err;
     }
 };

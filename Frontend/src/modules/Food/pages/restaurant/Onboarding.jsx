@@ -528,15 +528,23 @@ const parseLocalYMDDate = (value) => {
 }
 
 function TimeSelector({ label, value, onChange }) {
-  const timeValue = stringToTime(value)
+  const committedValue = stringToTime(value)
+  const [pickerValue, setPickerValue] = useState(committedValue)
 
-  const handleTimeChange = (newValue) => {
+  useEffect(() => {
+    setPickerValue(committedValue)
+  }, [value])
+
+  const handleTimeAccept = (newValue) => {
+    setPickerValue(newValue || null)
     if (!newValue) {
       onChange("")
       return
     }
     const timeString = timeToString(newValue)
-    onChange(timeString)
+    if (timeString) {
+      onChange(timeString)
+    }
   }
 
   return (
@@ -546,9 +554,9 @@ function TimeSelector({ label, value, onChange }) {
         <span className="text-xs font-medium text-gray-900">{label}</span>
       </div>
       <MobileTimePicker ampm={true}
-        value={timeValue}
-        onChange={handleTimeChange}
-        onAccept={handleTimeChange}
+        value={pickerValue}
+        onChange={(newValue) => setPickerValue(newValue)}
+        onAccept={handleTimeAccept}
         slotProps={{
           textField: {
             variant: "outlined",
@@ -634,9 +642,10 @@ export default function RestaurantOnboarding() {
   const [zonesLoading, setZonesLoading] = useState(false)
   const [isOnboardingHydrated, setIsOnboardingHydrated] = useState(false)
 
-  const goToStep = (nextStep, { replaceUrl = true } = {}) => {
+  const goToStep = (nextStep, { replaceUrl = true, maxStep } = {}) => {
     const requested = Math.min(3, Math.max(1, Number(nextStep) || 1))
-    const safeStep = requested > maxAllowedStep ? maxAllowedStep : requested
+    const allowedCap = maxStep ?? maxAllowedStep
+    const safeStep = requested > allowedCap ? allowedCap : requested
     setStep(safeStep)
     if (replaceUrl) {
       setSearchParams({ step: String(safeStep) }, { replace: true })
@@ -700,6 +709,79 @@ export default function RestaurantOnboarding() {
     () => getCompletedOnboardingSteps(step1, step2, step3),
     [step1, step2, step3],
   )
+
+  // Lightweight check to disable the Continue button until minimum required fields are filled.
+  // This does NOT replace the full validateStep*() logic — it only gates the button visually.
+  const isCurrentStepValid = useMemo(() => {
+    if (step === 1) {
+      return (
+        Boolean(step1.restaurantName?.trim()) &&
+        Boolean(step1.dietaryType) &&
+        Boolean(step1.ownerName?.trim()) &&
+        Boolean(step1.ownerEmail?.trim()) &&
+        Boolean(step1.ownerPhone?.trim()) &&
+        Boolean(step1.primaryContactNumber?.trim()) &&
+        Boolean(step1.zoneId?.trim()) &&
+        Boolean(step1.location?.area?.trim()) &&
+        Boolean(step1.location?.city?.trim()) &&
+        Boolean(step1.location?.pincode?.trim())
+      )
+    }
+    if (step === 2) {
+      const hasMenuImages =
+        (step2.menuImages || []).filter(
+          (img) =>
+            isUploadableFile(img) ||
+            (img?.url && typeof img.url === "string") ||
+            (typeof img === "string" && img.trim()),
+        ).length > 0
+      const hasProfileImage =
+        Boolean(step2.profileImage) &&
+        (isUploadableFile(step2.profileImage) ||
+          (step2.profileImage?.url && typeof step2.profileImage.url === "string") ||
+          (typeof step2.profileImage === "string" && step2.profileImage.trim()))
+      const hasMenuPdf =
+        Boolean(step2.menuPdf) &&
+        (isUploadableFile(step2.menuPdf) ||
+          (step2.menuPdf?.url && typeof step2.menuPdf.url === "string") ||
+          (typeof step2.menuPdf === "string" && step2.menuPdf.trim()))
+      return (
+        (step2.cuisines || []).length > 0 &&
+        hasMenuImages &&
+        hasProfileImage &&
+        hasMenuPdf &&
+        timeStringToMinutes(step2.openingTime) !== null &&
+        timeStringToMinutes(step2.closingTime) !== null &&
+        (step2.openDays || []).length > 0 &&
+        Boolean(step2.estimatedDeliveryTime?.trim())
+      )
+    }
+    if (step === 3) {
+      const baseValid =
+        Boolean(step3.panNumber?.trim()) &&
+        Boolean(step3.nameOnPan?.trim()) &&
+        Boolean(step3.panImage) &&
+        Boolean(step3.fssaiNumber?.trim()) &&
+        Boolean(step3.fssaiExpiry?.trim()) &&
+        Boolean(step3.fssaiImage) &&
+        Boolean(step3.accountNumber?.trim()) &&
+        Boolean(step3.confirmAccountNumber?.trim()) &&
+        Boolean(step3.ifscCode?.trim()) &&
+        Boolean(step3.accountHolderName?.trim()) &&
+        Boolean(step3.accountType?.trim())
+      if (!baseValid) return false
+      if (step3.gstRegistered) {
+        return (
+          Boolean(step3.gstNumber?.trim()) &&
+          Boolean(step3.gstLegalName?.trim()) &&
+          Boolean(step3.gstAddress?.trim()) &&
+          Boolean(step3.gstImage)
+        )
+      }
+      return true
+    }
+    return true
+  }, [step, step1, step2, step3])
 
   const previewUrlCacheRef = useRef(new Map())
   const locationSearchInputRef = useRef(null)
@@ -947,7 +1029,11 @@ export default function RestaurantOnboarding() {
     setVerifiedPhoneNumber(getVerifiedPhoneFromStoredRestaurant())
 
     // Check if step is specified in URL (from OTP login redirect)
-    const stepParam = searchParams.get("step")
+    // NOTE: Read searchParams via window.location to avoid adding searchParams as a dependency.
+    // Adding searchParams as a dep causes this effect to re-run every time setSearchParams is
+    // called inside the effect, which creates an infinite load loop and double API calls.
+    const urlParams = new URLSearchParams(window.location.search)
+    const stepParam = urlParams.get("step")
     if (stepParam) {
       const stepNum = parseInt(stepParam, 10)
       if (stepNum >= 1 && stepNum <= 3) {
@@ -1153,7 +1239,8 @@ export default function RestaurantOnboarding() {
     }
 
     loadData()
-  }, [searchParams])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // Run only once on mount — do NOT add searchParams here.
 
   useEffect(() => {
     if (!verifiedPhoneNumber) return
@@ -1622,7 +1709,7 @@ export default function RestaurantOnboarding() {
         )
         setMaxAllowedStep(nextAllowed)
         invalidateRestaurantAccessGuardCache()
-        goToStep(2)
+        goToStep(2, { maxStep: nextAllowed })
         return
       }
 
@@ -1636,7 +1723,7 @@ export default function RestaurantOnboarding() {
         )
         setMaxAllowedStep(nextAllowed)
         invalidateRestaurantAccessGuardCache()
-        goToStep(3)
+        goToStep(3, { maxStep: nextAllowed })
         return
       }
 
@@ -2588,40 +2675,14 @@ export default function RestaurantOnboarding() {
               label="Opening time"
               value={step2.openingTime || ""}
               onChange={(val) => {
-                const nextOpening = normalizeTimeValue(val) || ""
-                const openingMinutes = timeStringToMinutes(nextOpening)
-                const closingMinutes = timeStringToMinutes(step2.closingTime)
-                if (openingMinutes !== null && closingMinutes !== null) {
-                  if (openingMinutes === closingMinutes) {
-                    toast.error("Opening time and closing time cannot be same")
-                    return
-                  }
-                  if (closingMinutes < openingMinutes) {
-                    toast.error("Closing time cannot be less than opening time")
-                    return
-                  }
-                }
-                setStep2((prev) => ({ ...prev, openingTime: nextOpening }))
+                setStep2((prev) => ({ ...prev, openingTime: normalizeTimeValue(val) || "" }))
               }}
             />
             <TimeSelector
               label="Closing time"
               value={step2.closingTime || ""}
               onChange={(val) => {
-                const nextClosing = normalizeTimeValue(val) || ""
-                const openingMinutes = timeStringToMinutes(step2.openingTime)
-                const closingMinutes = timeStringToMinutes(nextClosing)
-                if (openingMinutes !== null && closingMinutes !== null) {
-                  if (openingMinutes === closingMinutes) {
-                    toast.error("Opening time and closing time cannot be same")
-                    return
-                  }
-                  if (closingMinutes < openingMinutes) {
-                    toast.error("Closing time cannot be less than opening time")
-                    return
-                  }
-                }
-                setStep2((prev) => ({ ...prev, closingTime: nextClosing }))
+                setStep2((prev) => ({ ...prev, closingTime: normalizeTimeValue(val) || "" }))
               }}
             />
           </div>
@@ -3037,6 +3098,7 @@ export default function RestaurantOnboarding() {
         onLogout={handleLogout}
         onBack={() => goToStep(step - 1)}
         onContinue={handleNext}
+        continueDisabled={!isCurrentStepValid}
         onClose={() => navigate("/food/restaurant/explore")}
         onEdit={() => setIsEditing(true)}
         onStepSelect={handleStepSelect}

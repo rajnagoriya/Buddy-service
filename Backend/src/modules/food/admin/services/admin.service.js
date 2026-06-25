@@ -28,6 +28,12 @@ import { FoodAddon } from '../../restaurant/models/foodAddon.model.js';
 import { FoodSupportTicket } from '../../user/models/supportTicket.model.js';
 import { FoodRestaurantSupportTicket } from '../../restaurant/models/supportTicket.model.js';
 import { FoodOrder } from '../../orders/models/order.model.js';
+import {
+    createRestaurant,
+    CREATION_SOURCE,
+    checkRestaurantPhoneAvailability,
+    checkRestaurantEmailAvailability,
+} from '../../restaurant/services/restaurantCreation.service.js';
 import { FoodTransaction } from '../../orders/models/foodTransaction.model.js';
 import { FoodRestaurantWithdrawal } from '../../restaurant/models/foodRestaurantWithdrawal.model.js';
 import { FoodDeliveryWithdrawal } from '../../delivery/models/foodDeliveryWithdrawal.model.js';
@@ -286,17 +292,41 @@ export async function getRestaurants(query) {
     if (status && ['pending', 'approved', 'rejected'].includes(status)) {
         filter.status = status;
     }
-    const [restaurants, total] = await Promise.all([
+    const searchTerm = String(query.search || '').trim();
+    if (searchTerm) {
+        const escaped = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(escaped, 'i');
+        filter.$or = [
+            { restaurantName: regex },
+            { ownerName: regex },
+            { ownerPhone: regex },
+        ];
+    }
+    if (query.isActive === 'true' || query.isActive === true) {
+        filter.isActive = true;
+    } else if (query.isActive === 'false' || query.isActive === false) {
+        filter.isActive = false;
+    }
+    if (query.zoneId && mongoose.Types.ObjectId.isValid(query.zoneId)) {
+        filter.zoneId = new mongoose.Types.ObjectId(query.zoneId);
+    }
+
+    const statsFilter = { ...filter };
+    delete statsFilter.isActive;
+
+    const [restaurants, total, activeCount, inactiveCount] = await Promise.all([
         FoodRestaurant.find(filter)
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit)
-            .select('restaurantName location area city profileImage coverImages menuImages menuPdf status ownerName ownerPhone zoneId')
-            .populate('zoneId', 'name zoneName')
+            .select('-__v')
+            .populate('zoneId', 'name zoneName serviceLocation isActive')
             .lean(),
-        FoodRestaurant.countDocuments(filter)
+        FoodRestaurant.countDocuments(filter),
+        FoodRestaurant.countDocuments({ ...statsFilter, isActive: true }),
+        FoodRestaurant.countDocuments({ ...statsFilter, isActive: false }),
     ]);
-    return { restaurants, total, page, limit };
+    return { restaurants, total, page, limit, activeCount, inactiveCount };
 }
 
 export async function getRestaurantMenuPdfDownloadUrl(restaurantId) {
@@ -3317,8 +3347,16 @@ export async function createRestaurantByAdmin(body) {
         throw new ValidationError('Owner phone or primary contact number is required');
     }
 
-    const restaurant = await FoodRestaurant.create(doc);
-    return restaurant.toObject();
+    const restaurant = await createRestaurant(doc, { source: CREATION_SOURCE.ADMIN });
+    return restaurant.toObject ? restaurant.toObject() : restaurant;
+}
+
+export async function checkRestaurantPhoneForAdmin(phone) {
+    return checkRestaurantPhoneAvailability(phone);
+}
+
+export async function checkRestaurantEmailForAdmin(email) {
+    return checkRestaurantEmailAvailability(email);
 }
 
 export async function approveRestaurant(id) {

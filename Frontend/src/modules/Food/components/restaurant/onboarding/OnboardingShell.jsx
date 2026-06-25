@@ -18,6 +18,7 @@ export default function OnboardingShell({
   onClose,
   onEdit,
   onStepSelect,
+  continueDisabled = false,
   children,
   footerExtra,
 }) {
@@ -155,7 +156,7 @@ export default function OnboardingShell({
               <Button
                 type="button"
                 onClick={onContinue}
-                disabled={saving || (step === 3 && !isEditing)}
+                disabled={saving || loading || continueDisabled || (step === 3 && !isEditing)}
                 className="h-10 min-w-28 rounded-xl bg-primary-orange px-5 text-sm font-semibold text-white hover:bg-primary-orange/90 disabled:opacity-50"
               >
                 {continueLabel}

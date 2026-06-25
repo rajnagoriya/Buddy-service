@@ -5,6 +5,14 @@ import {
   uploadFileBuffer,
 } from "../../../../services/cloudinary.service.js";
 import { ValidationError } from "../../../../core/auth/errors.js";
+import {
+  ensureDraftRestaurantForPhone,
+  assertOnboardingContactUniqueness,
+  normalizeRestaurantPhone,
+  mapDuplicateKeyError,
+} from "./restaurantCreation.service.js";
+
+export { ensureDraftRestaurantForPhone };
 
 const ONBOARDING_STATUSES = new Set([
   "NOT_STARTED",
@@ -15,15 +23,7 @@ const ONBOARDING_STATUSES = new Set([
   "REJECTED",
 ]);
 
-const normalizePhone = (value) => {
-  const digits = String(value || "")
-    .replace(/\D/g, "")
-    .slice(-15);
-  return {
-    digits: digits || "",
-    last10: digits ? digits.slice(-10) : "",
-  };
-};
+const normalizePhone = normalizeRestaurantPhone;
 
 const normalizeRestaurantTime = (value) => {
   const raw = String(value || "").trim();
@@ -185,41 +185,6 @@ export const getOnboardingProgress = async (restaurantId) => {
   return buildOnboardingPayload(doc);
 };
 
-export const ensureDraftRestaurantForPhone = async (phone) => {
-  const { digits, last10 } = normalizePhone(phone);
-  if (!last10) throw new ValidationError("Phone is invalid");
-
-  const phoneCandidates = [phone, digits, last10].filter(Boolean);
-  const existing = await FoodRestaurant.findOne({
-    $or: [
-      { ownerPhone: { $in: phoneCandidates } },
-      { ownerPhoneDigits: digits },
-      { ownerPhoneLast10: last10 },
-      { primaryContactNumber: { $in: phoneCandidates } },
-    ],
-  });
-
-  if (existing) return existing;
-
-  return FoodRestaurant.create({
-    restaurantName: DRAFT_PLACEHOLDER_NAME,
-    ownerName: DRAFT_PLACEHOLDER_NAME,
-    ownerPhone: digits,
-    ownerPhoneDigits: digits,
-    ownerPhoneLast10: last10,
-    pureVegRestaurant: false,
-    onboardingStatus: "IN_PROGRESS",
-    currentStep: 1,
-    completedSteps: [],
-    status: "pending",
-    onboarding: {
-      step1: { ownerPhone: digits, primaryContactNumber: digits },
-      step2: {},
-      step3: {},
-    },
-  });
-};
-
 const uploadStepFiles = async (stepNumber, files = {}) => {
   const uploaded = {};
   if (stepNumber === 2) {
@@ -304,6 +269,16 @@ export const saveOnboardingStep = async (restaurantId, stepNumber, payload, file
   const onboarding = restaurant.onboarding || {};
 
   if (step === 1) {
+    const nextOwnerPhone = normalizePhone(
+      payload.ownerPhone || restaurant.ownerPhone,
+    ).digits;
+    const nextOwnerEmail = String(payload.ownerEmail || "").trim().toLowerCase();
+
+    await assertOnboardingContactUniqueness(restaurantId, {
+      ownerPhone: nextOwnerPhone,
+      ownerEmail: nextOwnerEmail,
+    });
+
     const latNum = toFiniteNumber(payload.latitude ?? payload.location?.latitude);
     const lngNum = toFiniteNumber(payload.longitude ?? payload.location?.longitude);
     const zoneId =
@@ -315,8 +290,8 @@ export const saveOnboardingStep = async (restaurantId, stepNumber, payload, file
       String(payload.restaurantName || "").trim() || restaurant.restaurantName;
     restaurant.ownerName =
       String(payload.ownerName || "").trim() || restaurant.ownerName;
-    restaurant.ownerEmail = String(payload.ownerEmail || "").trim();
-    restaurant.ownerPhone = normalizePhone(payload.ownerPhone || restaurant.ownerPhone).digits;
+    restaurant.ownerEmail = nextOwnerEmail;
+    restaurant.ownerPhone = nextOwnerPhone;
     restaurant.primaryContactNumber = normalizePhone(
       payload.primaryContactNumber || payload.ownerPhone || restaurant.primaryContactNumber,
     ).digits;
@@ -457,7 +432,13 @@ export const saveOnboardingStep = async (restaurantId, stepNumber, payload, file
     restaurant.adminRemarks = undefined;
   }
 
-  await restaurant.save();
+  try {
+    await restaurant.save();
+  } catch (err) {
+    const mapped = mapDuplicateKeyError(err);
+    if (mapped) throw mapped;
+    throw err;
+  }
   return buildOnboardingPayload(restaurant.toObject());
 };
 
@@ -490,7 +471,13 @@ export const submitOnboarding = async (restaurantId, payload, files) => {
   restaurant.rejectionReason = undefined;
   restaurant.adminRemarks = undefined;
 
-  await restaurant.save();
+  try {
+    await restaurant.save();
+  } catch (err) {
+    const mapped = mapDuplicateKeyError(err);
+    if (mapped) throw mapped;
+    throw err;
+  }
 
   try {
     const { notifyAdminsSafely } = await import(
