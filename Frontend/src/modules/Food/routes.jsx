@@ -64,11 +64,15 @@ function RestaurantGlobalNotificationListener() {
     location.pathname === "/food/restaurant/orders/live" ||
     location.pathname === "/food/restaurant/orders" ||
     location.pathname.startsWith("/food/restaurant/orders/")
+  const isOnboardingRoute =
+    location.pathname === "/food/restaurant/onboarding" ||
+    location.pathname === "/food/restaurant/pending-verification"
 
   const shouldListen =
     isRestaurantRoute &&
     !isRestaurantAuthRoute &&
     !isOrderManagedRoute &&
+    !isOnboardingRoute &&
     isModuleAuthenticated("restaurant")
 
   if (!shouldListen) {

@@ -163,10 +163,17 @@ export default function UpdateBankDetails() {
 
     try {
       setSaving(true)
-      await restaurantAPI.updateProfile(payload)
-      await loadProfile()
-      setErrors({})
-      alert("Bank details updated successfully")
+        const res = await restaurantAPI.updateProfile(payload)
+        await loadProfile()
+        setErrors({})
+        const needsApproval =
+          res?.data?.data?.restaurant?.requiresApproval ||
+          res?.data?.data?.restaurant?.hasPendingProfileReview
+        if (needsApproval) {
+          toast.success("Your changes have been submitted for Admin Review. They will become visible after approval.")
+        } else {
+          toast.success("Bank details updated successfully")
+        }
     } catch (error) {
       alert(error?.response?.data?.message || "Failed to update bank details")
     } finally {

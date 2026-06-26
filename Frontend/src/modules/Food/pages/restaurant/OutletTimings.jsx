@@ -14,6 +14,7 @@ import {
   timeToString,
 } from "@food/utils/outletTimingsUtils"
 import { restaurantAPI } from "@food/api"
+import { toast } from "sonner"
 
 const RESTAURANT_ONLINE_STATUS_KEY = "restaurant_online_status"
 
@@ -43,6 +44,7 @@ export default function OutletTimings() {
   const [expandedDay, setExpandedDay] = useState(getTodayName())
   const [showOutletClosedDialog, setShowOutletClosedDialog] = useState(false)
   const [showOutsideTimingsDialog, setShowOutsideTimingsDialog] = useState(false)
+  const [isUnderReview, setIsUnderReview] = useState(false)
 
   const todayName = getTodayName()
 
@@ -83,7 +85,11 @@ export default function OutletTimings() {
           restaurantRes?.data?.data?.restaurant || restaurantRes?.data?.restaurant
         if (restaurant) {
           setRestaurantData(restaurant)
-          const online = restaurant.isAcceptingOrders === true
+          const underReview = Boolean(
+            restaurant.hasPendingProfileReview || restaurant.profileReviewStatus === "pending",
+          )
+          setIsUnderReview(underReview)
+          const online = !underReview && restaurant.isAcceptingOrders === true
           setDeliveryStatus(online)
           persistRestaurantOnlineStatus(online)
         }
@@ -150,6 +156,10 @@ export default function OutletTimings() {
   }
 
   const handleDeliveryStatusChange = async (checked) => {
+    if (isUnderReview) {
+      toast.error("You are under admin review and cannot go online until approved.")
+      return
+    }
     if (checked && isDayClosed) {
       setShowOutletClosedDialog(true)
       return
@@ -167,9 +177,10 @@ export default function OutletTimings() {
       window.dispatchEvent(
         new CustomEvent("restaurantStatusChanged", { detail: { isOnline: checked } }),
       )
-    } catch {
+    } catch (error) {
       setDeliveryStatus((prev) => !prev)
       persistRestaurantOnlineStatus(!checked)
+      toast.error(error?.response?.data?.message || "Could not update online status")
     }
   }
 
@@ -253,6 +264,7 @@ export default function OutletTimings() {
           isDayClosed={isDayClosed}
           isWithinTimings={isWithinTimings}
           showOutsideWarning={!isWithinTimings && !deliveryStatus}
+          isUnderReview={isUnderReview}
         />
 
         <OutletWeeklySchedule

@@ -1267,6 +1267,9 @@ export default function OrdersLive() {
             status: restaurant.status,
             approvedAt: restaurant.approvedAt,
             pendingUpdateReason: restaurant.pendingUpdateReason,
+            hasPendingProfileReview: Boolean(
+              restaurant.hasPendingProfileReview || restaurant.profileReviewStatus === "pending",
+            ),
             rejectionReason: restaurant.rejectionReason || null,
             onboarding: restaurant.onboarding || null,
             isLoading: false,
@@ -2365,9 +2368,12 @@ export default function OrdersLive() {
 
       {/* Profile Update Pending Banner */}
       <AnimatePresence>
-        {!restaurantStatus.isLoading && 
-          restaurantStatus.status === 'pending' && 
-          (restaurantStatus.approvedAt || (restaurantStatus.pendingUpdateReason && restaurantStatus.pendingUpdateReason !== 'New Registration')) && (
+        {!restaurantStatus.isLoading &&
+          (restaurantStatus.hasPendingProfileReview ||
+            (restaurantStatus.status === 'pending' &&
+              (restaurantStatus.approvedAt ||
+                (restaurantStatus.pendingUpdateReason &&
+                  restaurantStatus.pendingUpdateReason !== 'New Registration')))) && (
             <motion.div
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
@@ -2379,9 +2385,25 @@ export default function OrdersLive() {
                   <Clock className="w-5 h-5 text-amber-600" />
                 </div>
                 <div className="flex-1">
-                  <p className="text-sm font-bold text-amber-900">{restaurantStatus.pendingUpdateReason || "Update Pending"}</p>
+                  <p className="text-sm font-bold text-amber-900">
+                    {restaurantStatus.hasPendingProfileReview
+                      ? "You are under review"
+                      : restaurantStatus.pendingUpdateReason || "Update Pending"}
+                  </p>
                   <p className="text-xs text-amber-700 mt-1 leading-relaxed">
-                    Your restaurant <strong>{restaurantStatus.pendingUpdateReason || "profile update"}</strong> is pending approval. Please wait for admin response. You are currently continuing operations with your existing details/location.
+                    {restaurantStatus.hasPendingProfileReview ? (
+                      <>
+                        Your profile changes (
+                        <strong>{restaurantStatus.pendingUpdateReason || "profile update"}</strong>) are under admin
+                        review. You cannot go online until they are approved. Your current approved details remain
+                        visible to customers.
+                      </>
+                    ) : (
+                      <>
+                        Your restaurant <strong>{restaurantStatus.pendingUpdateReason || "profile update"}</strong> is
+                        pending approval. Please wait for admin response.
+                      </>
+                    )}
                   </p>
                 </div>
               </div>

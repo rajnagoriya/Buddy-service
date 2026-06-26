@@ -149,12 +149,18 @@ export default function EditCuisines() {
       const response = await restaurantAPI.updateProfile({ cuisines: selected })
       
       if (response?.data?.data?.restaurant) {
-        // Also save to localStorage as backup
+        const needsApproval =
+          response.data.data.restaurant.requiresApproval ||
+          response.data.data.restaurant.hasPendingProfileReview
         try {
           localStorage.setItem(CUISINES_STORAGE_KEY, JSON.stringify(selected))
           window.dispatchEvent(new Event("cuisinesUpdated"))
         } catch (e) {
           console.error("Error saving cuisines to localStorage:", e)
+        }
+        if (needsApproval) {
+          const { toast } = await import("sonner")
+          toast.success("Your changes have been submitted for Admin Review. They will become visible after approval.")
         }
         navigate(-1)
       } else {

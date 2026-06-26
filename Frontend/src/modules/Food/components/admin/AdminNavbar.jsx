@@ -17,8 +17,6 @@ import {
   Utensils,
   Grid,
   PlusCircle,
-  Bell,
-  BellOff,
 } from "lucide-react";
 import {
   Dialog,
@@ -35,15 +33,9 @@ import {
   DropdownMenuTrigger,
 } from "@food/components/ui/dropdown-menu";
 import { Input } from "@food/components/ui/input";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@food/components/ui/popover";
 import BusinessLogo from "@food/components/BusinessLogo";
 import { adminAPI } from "@food/api";
 import { clearModuleAuth } from "@food/utils/auth";
-import useAdminNotifications from "@food/hooks/useAdminNotifications";
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -52,14 +44,12 @@ const debugError = (...args) => {}
 export default function AdminNavbar({ onMenuClick }) {
   const navigate = useNavigate();
   const [searchOpen, setSearchOpen] = useState(false);
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [recentSearches, setRecentSearches] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [adminData, setAdminData] = useState(null);
   const searchInputRef = useRef(null);
-  const { items: adminNotifications } = useAdminNotifications();
 
   // Load recent searches from localStorage
   useEffect(() => {
@@ -227,11 +217,7 @@ export default function AdminNavbar({ onMenuClick }) {
     }
   };
 
-  const notificationCount = adminNotifications.length;
-  const openNotificationsPage = () => {
-    setNotificationsOpen(false);
-    navigate("/admin/food/notifications");
-  };
+
 
   return (
     <>
@@ -273,75 +259,6 @@ export default function AdminNavbar({ onMenuClick }) {
 
           {/* Right: User Profile */}
           <div className="flex items-center gap-3">
-            <Popover open={notificationsOpen} onOpenChange={setNotificationsOpen}>
-              <PopoverTrigger asChild>
-                <button
-                  type="button"
-                  className="relative h-11 w-11 rounded-full border border-neutral-200 bg-neutral-50 text-neutral-700 flex items-center justify-center hover:bg-neutral-100 transition-colors"
-                  aria-label="Notifications"
-                >
-                  <Bell className="w-5 h-5" />
-                  {notificationCount > 0 && (
-                    <span className="absolute top-2 right-2 min-w-4 h-4 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center px-1">
-                      {notificationCount > 9 ? "9+" : notificationCount}
-                    </span>
-                  )}
-                </button>
-              </PopoverTrigger>
-              <PopoverContent className="w-96 p-0 mt-2 border border-neutral-200 shadow-2xl rounded-2xl overflow-hidden" align="end">
-                <div className="bg-white">
-                  <div className="px-4 py-3 border-b border-neutral-200 flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-semibold text-neutral-900">Notifications</p>
-                      <p className="text-xs text-neutral-500">Approval and support alerts</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={openNotificationsPage}
-                      className="text-xs font-semibold text-amber-600 hover:text-amber-700"
-                    >
-                      View all
-                    </button>
-                  </div>
-
-                  <div className="max-h-96 overflow-y-auto">
-                    {adminNotifications.length === 0 ? (
-                      <div className="px-6 py-10 text-center flex flex-col items-center gap-2">
-                        <BellOff className="w-9 h-9 text-neutral-300" />
-                        <p className="text-sm text-neutral-500">No notifications yet</p>
-                      </div>
-                    ) : (
-                      adminNotifications.slice(0, 8).map((item) => (
-                        <button
-                          key={item?.id}
-                          type="button"
-                          onClick={openNotificationsPage}
-                          className="w-full text-left px-4 py-4 border-b border-neutral-100 last:border-b-0 hover:bg-neutral-50 transition-colors"
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <p className="text-sm font-semibold text-neutral-900 truncate">
-                                {item?.title || "Notification"}
-                              </p>
-                              <p className="text-xs text-neutral-600 mt-1 line-clamp-2">
-                                {item?.message || "-"}
-                              </p>
-                              <p className="text-[11px] text-neutral-400 mt-2">
-                                {item?.metaLabel || item?.category || "Admin alert"}
-                              </p>
-                            </div>
-                            <span className="shrink-0 text-[10px] text-neutral-400">
-                              {item?.timeLabel || "Now"}
-                            </span>
-                          </div>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                </div>
-              </PopoverContent>
-            </Popover>
-
             {/* User Profile */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

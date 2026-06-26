@@ -12,6 +12,7 @@ export default function OutletOnlineStatusCard({
   isDayClosed,
   isWithinTimings,
   showOutsideWarning,
+  isUnderReview = false,
 }) {
   return (
     <PanelSurface className="overflow-hidden p-0">
@@ -24,6 +25,15 @@ export default function OutletOnlineStatusCard({
       </div>
 
       <div className="space-y-4 p-4 sm:p-5">
+        {isUnderReview ? (
+          <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+            <p className="text-xs text-amber-900">
+              You are under admin review. Your outlet cannot go online until your profile changes are approved.
+            </p>
+          </div>
+        ) : null}
+
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <p className="truncate text-base font-bold text-gray-900">
@@ -57,7 +67,8 @@ export default function OutletOnlineStatusCard({
           <Switch
             checked={deliveryStatus}
             onCheckedChange={onDeliveryStatusChange}
-            className="data-[state=checked]:bg-[var(--rt-primary-strong)] data-[state=unchecked]:bg-gray-300"
+            disabled={isUnderReview}
+            className="data-[state=checked]:bg-[var(--rt-primary-strong)] data-[state=unchecked]:bg-gray-300 disabled:opacity-50"
           />
         </div>
 

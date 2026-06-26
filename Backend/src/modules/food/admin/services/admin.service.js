@@ -1,7 +1,13 @@
 import mongoose from 'mongoose';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
+import { mergePendingProfileIntoSet } from '../../restaurant/services/restaurantProfileReview.service.js';
 import { buildRawDownloadUrlFromFileUrl } from '../../../../services/cloudinary.service.js';
+import {
+    collectImageAssetsFromRestaurant,
+    deleteCollectedImageAssets,
+    deleteFoodImageAsset,
+} from '../../services/foodImage.service.js';
 import { FoodDeliveryPartner } from '../../delivery/models/deliveryPartner.model.js';
 import { DeliverySupportTicket } from '../../delivery/models/supportTicket.model.js';
 import { FoodZone } from '../models/zone.model.js';
@@ -28,6 +34,12 @@ import { FoodAddon } from '../../restaurant/models/foodAddon.model.js';
 import { FoodSupportTicket } from '../../user/models/supportTicket.model.js';
 import { FoodRestaurantSupportTicket } from '../../restaurant/models/supportTicket.model.js';
 import { FoodOrder } from '../../orders/models/order.model.js';
+import {
+    createRestaurant,
+    CREATION_SOURCE,
+    checkRestaurantPhoneAvailability,
+    checkRestaurantEmailAvailability,
+} from '../../restaurant/services/restaurantCreation.service.js';
 import { FoodTransaction } from '../../orders/models/foodTransaction.model.js';
 import { FoodRestaurantWithdrawal } from '../../restaurant/models/foodRestaurantWithdrawal.model.js';
 import { FoodDeliveryWithdrawal } from '../../delivery/models/foodDeliveryWithdrawal.model.js';
@@ -286,17 +298,41 @@ export async function getRestaurants(query) {
     if (status && ['pending', 'approved', 'rejected'].includes(status)) {
         filter.status = status;
     }
-    const [restaurants, total] = await Promise.all([
+    const searchTerm = String(query.search || '').trim();
+    if (searchTerm) {
+        const escaped = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(escaped, 'i');
+        filter.$or = [
+            { restaurantName: regex },
+            { ownerName: regex },
+            { ownerPhone: regex },
+        ];
+    }
+    if (query.isActive === 'true' || query.isActive === true) {
+        filter.isActive = true;
+    } else if (query.isActive === 'false' || query.isActive === false) {
+        filter.isActive = false;
+    }
+    if (query.zoneId && mongoose.Types.ObjectId.isValid(query.zoneId)) {
+        filter.zoneId = new mongoose.Types.ObjectId(query.zoneId);
+    }
+
+    const statsFilter = { ...filter };
+    delete statsFilter.isActive;
+
+    const [restaurants, total, activeCount, inactiveCount] = await Promise.all([
         FoodRestaurant.find(filter)
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit)
-            .select('restaurantName location area city profileImage coverImages menuImages menuPdf status ownerName ownerPhone zoneId')
-            .populate('zoneId', 'name zoneName')
+            .select('-__v')
+            .populate('zoneId', 'name zoneName serviceLocation isActive')
             .lean(),
-        FoodRestaurant.countDocuments(filter)
+        FoodRestaurant.countDocuments(filter),
+        FoodRestaurant.countDocuments({ ...statsFilter, isActive: true }),
+        FoodRestaurant.countDocuments({ ...statsFilter, isActive: false }),
     ]);
-    return { restaurants, total, page, limit };
+    return { restaurants, total, page, limit, activeCount, inactiveCount };
 }
 
 export async function getRestaurantMenuPdfDownloadUrl(restaurantId) {
@@ -2317,7 +2353,12 @@ export async function updateRestaurantMenuById(id, menu) {
 }
 
 export async function getPendingRestaurants() {
-    const restaurants = await FoodRestaurant.find({ status: { $in: ['pending', 'rejected'] } })
+    const restaurants = await FoodRestaurant.find({
+        $or: [
+            { status: { $in: ['pending', 'rejected'] } },
+            { profileReviewStatus: 'pending' },
+        ],
+    })
         .populate('zoneId', 'name zoneName')
         .sort({ createdAt: -1 })
         .lean();
@@ -2721,7 +2762,14 @@ export async function updateCategory(id, body) {
     }
 
     if (body.name !== undefined) doc.name = String(body.name || '').trim();
-    if (body.image !== undefined) doc.image = String(body.image || '').trim();
+    if (body.image !== undefined) {
+        const nextImage = String(body.image || '').trim();
+        if (nextImage !== doc.image) {
+            await deleteFoodImageAsset({ publicId: doc.imagePublicId, url: doc.image });
+            doc.image = nextImage;
+            doc.imagePublicId = String(body.imagePublicId || '').trim();
+        }
+    }
     if (body.type !== undefined) doc.type = String(body.type || '').trim();
     if (body.foodTypeScope !== undefined) doc.foodTypeScope = nextFoodTypeScope;
     if (!doc.restaurantId && doc.createdByRestaurantId) {
@@ -2750,8 +2798,15 @@ export async function deleteCategory(id) {
     if (inUse > 0) {
         throw new ValidationError('Cannot delete category while it has items');
     }
-    const deleted = await FoodCategory.findByIdAndDelete(id).lean();
-    return deleted ? { id } : null;
+    const existing = await FoodCategory.findById(id).lean();
+    if (!existing) return null;
+
+    await deleteFoodImageAsset({
+        publicId: existing.imagePublicId,
+        url: existing.image,
+    });
+    await FoodCategory.findByIdAndDelete(id);
+    return { id };
 }
 
 export async function toggleCategoryStatus(id) {
@@ -3184,7 +3239,14 @@ export async function updateFood(id, body) {
     const pricingUpdate = getAdminFoodUpdatedPricing(doc.toObject(), body);
     if (pricingUpdate.price !== undefined) doc.price = pricingUpdate.price;
     if (pricingUpdate.variants !== undefined) doc.variants = pricingUpdate.variants;
-    if (body.image !== undefined) doc.image = String(body.image || '').trim();
+    if (body.image !== undefined) {
+        const nextImage = String(body.image || '').trim();
+        if (nextImage !== doc.image) {
+            await deleteFoodImageAsset({ publicId: doc.imagePublicId, url: doc.image });
+            doc.image = nextImage;
+            doc.imagePublicId = String(body.imagePublicId || '').trim();
+        }
+    }
     if (body.foodType !== undefined) doc.foodType = targetFoodType;
     if (body.isAvailable !== undefined) doc.isAvailable = body.isAvailable !== false;
     if (body.preparationTime !== undefined) doc.preparationTime = String(body.preparationTime || '').trim();
@@ -3207,8 +3269,15 @@ export async function updateFood(id, body) {
 
 export async function deleteFood(id) {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
-    const deleted = await FoodItem.findByIdAndDelete(id).lean();
-    return deleted ? { id } : null;
+    const existing = await FoodItem.findById(id).lean();
+    if (!existing) return null;
+
+    await deleteFoodImageAsset({
+        publicId: existing.imagePublicId,
+        url: existing.image,
+    });
+    await FoodItem.findByIdAndDelete(id);
+    return { id };
 }
 
 /** Admin creates a restaurant (JSON body with image URLs already uploaded). Single API. */
@@ -3317,13 +3386,29 @@ export async function createRestaurantByAdmin(body) {
         throw new ValidationError('Owner phone or primary contact number is required');
     }
 
-    const restaurant = await FoodRestaurant.create(doc);
-    return restaurant.toObject();
+    const restaurant = await createRestaurant(doc, { source: CREATION_SOURCE.ADMIN });
+    return restaurant.toObject ? restaurant.toObject() : restaurant;
+}
+
+export async function checkRestaurantPhoneForAdmin(phone) {
+    return checkRestaurantPhoneAvailability(phone);
+}
+
+export async function checkRestaurantEmailForAdmin(email) {
+    return checkRestaurantEmailAvailability(email);
 }
 
 export async function approveRestaurant(id) {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
+
+    const existing = await FoodRestaurant.findById(id).select('status pendingProfile profileReviewStatus').lean();
+    if (!existing) return null;
+
     const now = new Date();
+    const pendingMerge = mergePendingProfileIntoSet(existing.pendingProfile || {});
+    const isProfileReviewOnly =
+        existing.status === 'approved' && existing.profileReviewStatus === 'pending';
+
     const updated = await FoodRestaurant.findByIdAndUpdate(
         id,
         {
@@ -3336,8 +3421,13 @@ export async function approveRestaurant(id) {
                 rejectionReason: undefined,
                 adminRemarks: undefined,
                 rejectionStep: undefined,
-                pendingUpdateReason: undefined
-            }
+                pendingUpdateReason: undefined,
+                ...pendingMerge,
+            },
+            $unset: {
+                pendingProfile: 1,
+                profileReviewStatus: 1,
+            },
         },
         { new: true, runValidators: false }
     ).lean();
@@ -3348,11 +3438,13 @@ export async function approveRestaurant(id) {
             await notifyOwnersSafely(
                 [{ ownerType: 'RESTAURANT', ownerId: updated._id }],
                 {
-                    title: 'Congratulations! Ã°Å¸Å½â€°',
-                    body: `Your restaurant "${updated.restaurantName}" has been approved. You can now start receiving orders!`,
+                    title: isProfileReviewOnly ? 'Profile Update Approved' : 'Congratulations! 🎉',
+                    body: isProfileReviewOnly
+                        ? `Your profile changes for "${updated.restaurantName}" have been approved and are now live.`
+                        : `Your restaurant "${updated.restaurantName}" has been approved. You can now start receiving orders!`,
                     image: updated.profileImage || 'https://i.ibb.co/3m2Yh7r/Appzeto-Brand-Image.png',
                     data: {
-                        type: 'restaurant_approved',
+                        type: isProfileReviewOnly ? 'restaurant_profile_approved' : 'restaurant_approved',
                         restaurantId: String(updated._id)
                     }
                 }
@@ -3366,6 +3458,52 @@ export async function approveRestaurant(id) {
 
 export async function rejectRestaurant(id, reason, rejectionStep = 1) {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
+
+    const existing = await FoodRestaurant.findById(id).select('status profileReviewStatus restaurantName').lean();
+    if (!existing) return null;
+
+    const isProfileReviewOnly =
+        existing.status === 'approved' && existing.profileReviewStatus === 'pending';
+
+    if (isProfileReviewOnly) {
+        const updated = await FoodRestaurant.findByIdAndUpdate(
+            id,
+            {
+                $unset: {
+                    pendingProfile: 1,
+                    profileReviewStatus: 1,
+                    pendingUpdateReason: 1,
+                },
+                $set: {
+                    adminRemarks: typeof reason === 'string' ? reason.trim() : undefined,
+                },
+            },
+            { new: true, runValidators: false }
+        ).lean();
+
+        if (updated) {
+            try {
+                const { notifyOwnersSafely } = await import('../../../../core/notifications/firebase.service.js');
+                await notifyOwnersSafely(
+                    [{ ownerType: 'RESTAURANT', ownerId: updated._id }],
+                    {
+                        title: 'Profile Update Rejected',
+                        body: `Your profile changes for "${updated.restaurantName}" were not approved.${reason ? ` Reason: ${reason}` : ''}`,
+                        image: 'https://i.ibb.co/3m2Yh7r/Appzeto-Brand-Image.png',
+                        data: {
+                            type: 'restaurant_profile_rejected',
+                            restaurantId: String(updated._id),
+                            reason: reason || ''
+                        }
+                    }
+                );
+            } catch (e) {
+                console.error('Failed to send restaurant profile rejection notification:', e);
+            }
+        }
+        return updated;
+    }
+
     const step = Math.min(3, Math.max(1, Number(rejectionStep) || 1));
     const remarks = typeof reason === 'string' ? reason.trim() : undefined;
     const updated = await FoodRestaurant.findByIdAndUpdate(
@@ -3381,7 +3519,11 @@ export async function rejectRestaurant(id, reason, rejectionStep = 1) {
                 currentStep: step,
                 approvedAt: null,
                 pendingUpdateReason: undefined
-            }
+            },
+            $unset: {
+                pendingProfile: 1,
+                profileReviewStatus: 1,
+            },
         },
         { new: true, runValidators: false }
     ).lean();
@@ -3416,24 +3558,27 @@ export async function deleteRestaurant(id) {
     const restaurant = await FoodRestaurant.findById(restaurantId).lean();
     if (!restaurant) return null;
 
-    // Cascading deletion
+    const [foodItems, categories] = await Promise.all([
+        FoodItem.find({ restaurantId }).select('image imagePublicId').lean(),
+        FoodCategory.find({ restaurantId }).select('image imagePublicId').lean(),
+    ]);
+
+    const assets = [
+        ...collectImageAssetsFromRestaurant(restaurant),
+        ...foodItems.map((item) => ({ url: item.image, publicId: item.imagePublicId })),
+        ...categories.map((category) => ({ url: category.image, publicId: category.imagePublicId })),
+    ];
+    await deleteCollectedImageAssets(assets);
+
     await Promise.all([
-        // Delete all food items
         FoodItem.deleteMany({ restaurantId }),
-        // Delete all addons
         FoodAddon.deleteMany({ restaurantId }),
-        // Delete restaurant-specific categories
         FoodCategory.deleteMany({ restaurantId }),
-        // Delete commissions
         FoodRestaurantCommission.deleteMany({ restaurantId }),
-        // Delete withdrawals
         FoodRestaurantWithdrawal.deleteMany({ restaurantId }),
-        // Delete support tickets
         FoodRestaurantSupportTicket.deleteMany({ restaurantId }),
-        // Delete offers linked to this restaurant
         FoodOffer.deleteMany({ restaurantId, restaurantScope: 'selected' }),
-        // Finally delete the restaurant
-        FoodRestaurant.findByIdAndDelete(restaurantId)
+        FoodRestaurant.findByIdAndDelete(restaurantId),
     ]);
 
     return { id: restaurantId };

@@ -585,6 +585,16 @@ export const adminAPI = {
     apiClient.post("/food/admin/restaurants", body ?? {}, {
       contextModule: "admin",
     }),
+  checkRestaurantPhone: (phone) =>
+    apiClient.get("/food/admin/restaurants/check-phone", {
+      params: { phone },
+      contextModule: "admin",
+    }),
+  checkRestaurantEmail: (email) =>
+    apiClient.get("/food/admin/restaurants/check-email", {
+      params: { email },
+      contextModule: "admin",
+    }),
   /** List delivery zones. Query: limit, page, isActive, search */
   getZones: (params = {}) =>
     apiClient.get("/food/admin/zones", {

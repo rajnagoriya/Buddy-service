@@ -35,11 +35,15 @@ const buildSignature = (params, apiSecret) => {
 
 export const uploadDataUrlToCloudinary = async ({
   dataUrl,
-  folder = env.cloudinary.folder,
+  folder = process.env.CLOUDINARY_FOLDER || 'uploads',
   publicIdPrefix = 'driver-document',
   publicIdSuffix = '',
 }) => {
-  if (!env.cloudinary.cloudName || !env.cloudinary.apiKey || !env.cloudinary.apiSecret) {
+  const cloudName = env.cloudinaryCloudName;
+  const apiKey = env.cloudinaryApiKey;
+  const apiSecret = env.cloudinaryApiSecret;
+
+  if (!cloudName || !apiKey || !apiSecret) {
     throw new ApiError(500, 'Cloudinary credentials are not configured');
   }
 
@@ -51,23 +55,21 @@ export const uploadDataUrlToCloudinary = async ({
   const signature = buildSignature(
     {
       folder,
-      format: 'webp',
       public_id: publicId,
       timestamp,
     },
-    env.cloudinary.apiSecret,
+    apiSecret,
   );
 
   const formData = new FormData();
   formData.append('file', new Blob([buffer], { type: mimeType }), `upload.${extension}`);
-  formData.append('api_key', env.cloudinary.apiKey);
+  formData.append('api_key', apiKey);
   formData.append('timestamp', timestamp);
   formData.append('folder', folder);
   formData.append('public_id', publicId);
-  formData.append('format', 'webp');
   formData.append('signature', signature);
 
-  const response = await fetch(`https://api.cloudinary.com/v1_1/${env.cloudinary.cloudName}/image/upload`, {
+  const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
     method: 'POST',
     body: formData,
   });

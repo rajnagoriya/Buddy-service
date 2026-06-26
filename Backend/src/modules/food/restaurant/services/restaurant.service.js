@@ -1,5 +1,11 @@
 import { FoodRestaurant } from '../models/restaurant.model.js';
-import { uploadImageBuffer, uploadFileBuffer } from '../../../../services/cloudinary.service.js';
+import { uploadFileBuffer } from '../../../../services/cloudinary.service.js';
+import {
+    normalizeImageAssetList,
+    replaceCloudinaryImage,
+    setRestaurantImageField,
+    uploadFoodImage,
+} from '../../services/foodImage.service.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import mongoose from 'mongoose';
 import { FoodZone } from '../../admin/models/zone.model.js';
@@ -9,6 +15,24 @@ import {
     getDefaultOutletTimingsShape,
     getOutletTimingsMapForRestaurants
 } from './outletTimings.service.js';
+import {
+    createRestaurant,
+    CREATION_SOURCE,
+    normalizeRestaurantPhone,
+    normalizeRestaurantEmail,
+} from './restaurantCreation.service.js';
+import {
+    applyCoverImageDeletionToLive,
+    buildPendingProfileSet,
+    computePendingFieldsFromSnapshot,
+    extractApprovedSnapshot,
+    getEffectiveCoverImages,
+    getPendingFieldLabels,
+    isCoverImageDeletionOnly,
+    mergePendingProfile,
+    resolvePendingUpdateReason,
+    splitProfileUpdate,
+} from './restaurantProfileReview.service.js';
 
 const normalizeName = (value) =>
     String(value || '')
@@ -17,13 +41,7 @@ const normalizeName = (value) =>
         .replace(/-/g, ' ')
         .replace(/\s+/g, ' ');
 
-const normalizePhone = (value) => {
-    const digits = String(value || '').replace(/\D/g, '').slice(-15);
-    return {
-        digits: digits || '',
-        last10: digits ? digits.slice(-10) : ''
-    };
-};
+const normalizePhone = normalizeRestaurantPhone;
 
 const normalizeRatingValue = (value) => {
     const numeric = Number(value);
@@ -131,12 +149,8 @@ const toRestaurantProfile = (doc) => {
             }
             : null;
 
-    const menuImages = Array.isArray(doc.menuImages)
-        ? doc.menuImages.map((m) => toUrl(m)).filter(Boolean).map((url) => ({ url, publicId: null }))
-        : [];
-    const coverImages = Array.isArray(doc.coverImages)
-        ? doc.coverImages.map((m) => toUrl(m)).filter(Boolean).map((url) => ({ url, publicId: null }))
-        : [];
+    const menuImages = normalizeImageAssetList(doc.menuImages);
+    const coverImages = normalizeImageAssetList(doc.coverImages);
 
     return {
         id: doc._id,
@@ -200,6 +214,14 @@ const toRestaurantProfile = (doc) => {
         updatedAt: doc.updatedAt,
         approvedAt: doc.approvedAt,
         pendingUpdateReason: doc.pendingUpdateReason,
+        profileReviewStatus: doc.profileReviewStatus || null,
+        hasPendingProfileReview: doc.profileReviewStatus === 'pending',
+        isUnderReview: doc.profileReviewStatus === 'pending',
+        pendingProfile: doc.pendingProfile && typeof doc.pendingProfile === 'object' ? doc.pendingProfile : null,
+        pendingSubmittedFields: Array.isArray(doc.pendingProfile?.pendingFields)
+            ? doc.pendingProfile.pendingFields
+            : [],
+        pendingSubmittedFieldLabels: getPendingFieldLabels(doc.pendingProfile?.pendingFields),
         rating: normalizeRatingValue(doc.rating),
         totalRatings: normalizeTotalRatingsValue(doc.totalRatings)
     };
@@ -303,24 +325,29 @@ export const registerRestaurant = async (payload, files) => {
     }
 
     const images = {};
+    const imagePublicIds = {};
 
     if (files?.profileImage?.[0]) {
-        images.profileImage = await uploadImageBuffer(files.profileImage[0].buffer, 'food/restaurants/profile');
+        const asset = await uploadFoodImage(files.profileImage[0], 'food/restaurants/profile');
+        setRestaurantImageField(images, 'profileImage', asset, imagePublicIds);
     }
     if (files?.panImage?.[0]) {
-        images.panImage = await uploadImageBuffer(files.panImage[0].buffer, 'food/restaurants/pan');
+        const asset = await uploadFoodImage(files.panImage[0], 'food/restaurants/pan');
+        setRestaurantImageField(images, 'panImage', asset, imagePublicIds);
     }
     if (files?.gstImage?.[0]) {
-        images.gstImage = await uploadImageBuffer(files.gstImage[0].buffer, 'food/restaurants/gst');
+        const asset = await uploadFoodImage(files.gstImage[0], 'food/restaurants/gst');
+        setRestaurantImageField(images, 'gstImage', asset, imagePublicIds);
     }
     if (files?.fssaiImage?.[0]) {
-        images.fssaiImage = await uploadImageBuffer(files.fssaiImage[0].buffer, 'food/restaurants/fssai');
+        const asset = await uploadFoodImage(files.fssaiImage[0], 'food/restaurants/fssai');
+        setRestaurantImageField(images, 'fssaiImage', asset, imagePublicIds);
     }
 
     let menuImages = [];
     if (files?.menuImages?.length) {
         menuImages = await Promise.all(
-            files.menuImages.map((file) => uploadImageBuffer(file.buffer, 'food/restaurants/menu'))
+            files.menuImages.map((file) => uploadFoodImage(file, 'food/restaurants/menu'))
         );
     }
 
@@ -355,38 +382,17 @@ export const registerRestaurant = async (payload, files) => {
         const latNum = toFiniteNumber(latitude);
         const lngNum = toFiniteNumber(longitude);
 
-        // Allow retry: If a restaurant with the same name and phone exists but was rejected,
-        // delete it so the user can re-register without "number blocked" errors.
-        const existingRejected = await FoodRestaurant.findOne({
-            $or: [
-                { ownerPhoneDigits },
-                { restaurantNameNormalized, ownerPhoneLast10 }
-            ]
-        });
-
-        if (existingRejected) {
-            if (existingRejected.status === 'rejected') {
-                await FoodRestaurant.deleteOne({ _id: existingRejected._id });
-            } else {
-                throw new ValidationError('Restaurant with this name and owner phone already exists');
-            }
-        }
-
-        const restaurant = await FoodRestaurant.create({
+        const restaurant = await createRestaurant({
             restaurantName,
             restaurantNameNormalized,
             ownerName,
-            ownerEmail,
-            // Store phone in a consistent digits-only format to match OTP login flow.
-            ownerPhone: ownerPhoneDigits,
-            ownerPhoneDigits,
-            ownerPhoneLast10,
+            ownerEmail: normalizeRestaurantEmail(ownerEmail) || undefined,
+            ownerPhone,
             primaryContactNumber,
             pureVegRestaurant: pureVegRestaurant === true,
             zoneId: zoneId && mongoose.Types.ObjectId.isValid(String(zoneId).trim())
                 ? new mongoose.Types.ObjectId(String(zoneId).trim())
                 : undefined,
-            // Store unified location object (geo + address).
             location: {
                 type: 'Point',
                 coordinates: latNum !== null && lngNum !== null ? [lngNum, latNum] : undefined,
@@ -422,13 +428,9 @@ export const registerRestaurant = async (payload, files) => {
             accountType,
             menuImages,
             menuPdf,
-            pendingUpdateReason: 'New Registration',
-            onboardingStatus: 'SUBMITTED',
-            currentStep: null,
-            completedSteps: [1, 2, 3],
-            submittedAt: new Date(),
+            imagePublicIds,
             ...images
-        });
+        }, { source: CREATION_SOURCE.LEGACY_REGISTER });
 
         try {
             const { notifyAdminsSafely } = await import('../../../../core/notifications/firebase.service.js');
@@ -445,12 +447,8 @@ export const registerRestaurant = async (payload, files) => {
             console.error('Failed to notify admins of new restaurant registration:', e);
         }
 
-        return restaurant.toObject();
+        return restaurant.toObject ? restaurant.toObject() : restaurant;
     } catch (err) {
-        // Handle uniqueness conflicts deterministically (race-safe).
-        if (err && (err.code === 11000 || err?.name === 'MongoServerError')) {
-            throw new ValidationError('Restaurant with this name and owner phone already exists');
-        }
         throw err;
     }
 };
@@ -495,6 +493,8 @@ export const getCurrentRestaurantProfile = async (restaurantId) => {
                 'status',
                 'approvedAt',
                 'pendingUpdateReason',
+                'profileReviewStatus',
+                'pendingProfile',
                 'onboardingStatus',
                 'currentStep',
                 'completedSteps',
@@ -529,6 +529,26 @@ export const updateRestaurantAcceptingOrders = async (restaurantId, isAcceptingO
         throw new ValidationError('Invalid restaurant id');
     }
     const value = Boolean(isAcceptingOrders);
+
+    if (value) {
+        const current = await FoodRestaurant.findById(restaurantId)
+            .select('status profileReviewStatus pendingUpdateReason')
+            .lean();
+        if (!current) {
+            throw new ValidationError('Restaurant not found');
+        }
+        if (current.profileReviewStatus === 'pending') {
+            throw new ValidationError(
+                'Your profile changes are under admin review. You cannot go online until they are approved.'
+            );
+        }
+        if (current.status !== 'approved') {
+            throw new ValidationError(
+                'Your restaurant is under review. You cannot go online until admin approval.'
+            );
+        }
+    }
+
     const doc = await FoodRestaurant.findByIdAndUpdate(
         restaurantId,
         { $set: { isAcceptingOrders: value } },
@@ -568,6 +588,8 @@ export const updateRestaurantAcceptingOrders = async (restaurantId, isAcceptingO
                 'status',
                 'approvedAt',
                 'pendingUpdateReason',
+                'profileReviewStatus',
+                'pendingProfile',
                 'createdAt',
                 'updatedAt'
             ].join(' ')
@@ -689,7 +711,9 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
     }
 
     const currentRestaurant = await FoodRestaurant.findById(restaurantId)
-        .select('restaurantName restaurantNameNormalized ownerPhone ownerPhoneDigits ownerPhoneLast10 primaryContactNumber status')
+        .select(
+            'restaurantName restaurantNameNormalized ownerName ownerPhone ownerPhoneDigits ownerPhoneLast10 primaryContactNumber status profileReviewStatus pendingProfile cuisines location addressLine1 addressLine2 area city state pincode landmark pureVegRestaurant dietaryType profileImage coverImages panNumber nameOnPan fssaiNumber accountNumber ifscCode accountHolderName upiId'
+        )
         .lean();
 
     if (!currentRestaurant) {
@@ -726,22 +750,16 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
         }
     }
 
-    // Note: UI keeps phone read-only, but we accept it safely and normalize if sent.
+    // Owner phone is not editable after registration; only contact number may change.
     if (body.ownerPhone !== undefined) {
-        const { digits, last10 } = normalizePhone(body.ownerPhone);
-        if (!digits || digits.length < 8) {
-            throw new ValidationError('Owner phone is invalid');
-        }
-
+        const { digits } = normalizePhone(body.ownerPhone);
         const currentOwnerPhoneDigits =
             currentRestaurant.ownerPhoneDigits ||
             normalizePhone(currentRestaurant.ownerPhone).digits ||
             '';
 
-        if (digits !== currentOwnerPhoneDigits) {
-            update.ownerPhone = digits;
-            update.ownerPhoneDigits = digits;
-            update.ownerPhoneLast10 = last10 || undefined;
+        if (digits && digits !== currentOwnerPhoneDigits) {
+            throw new ValidationError('Owner phone number cannot be changed. Update the contact number instead.');
         }
     }
 
@@ -838,33 +856,46 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
             throw new ValidationError('Location must be an object');
         }
         const toStr = (v) => (v != null ? String(v).trim() : '');
-        const formattedAddress = toStr(loc.formattedAddress || loc.address);
-        update.addressLine1 = toStr(loc.addressLine1);
-        update.addressLine2 = toStr(loc.addressLine2);
-        update.area = toStr(loc.area);
-        update.city = toStr(loc.city);
-        update.state = toStr(loc.state);
-        update.pincode = toStr(loc.pincode);
-        update.landmark = toStr(loc.landmark);
-
-        // Optional geo coords for server-side distance filtering.
         const lat = toFiniteNumber(loc.latitude);
         const lng = toFiniteNumber(loc.longitude);
-        update.location = {
-            type: 'Point',
-            coordinates: lat !== null && lng !== null ? [lng, lat] : undefined,
-            latitude: lat ?? undefined,
-            longitude: lng ?? undefined,
-            formattedAddress,
-            address: formattedAddress,
-            addressLine1: toStr(loc.addressLine1),
-            addressLine2: toStr(loc.addressLine2),
-            area: toStr(loc.area),
-            city: toStr(loc.city),
-            state: toStr(loc.state),
-            pincode: toStr(loc.pincode),
-            landmark: toStr(loc.landmark)
-        };
+        const isDeliveryPinUpdate = body.deliveryPinUpdate === true;
+
+        if (isDeliveryPinUpdate) {
+            const formattedAddress = toStr(loc.formattedAddress || loc.address);
+            update.location = {
+                type: 'Point',
+                coordinates: lat !== null && lng !== null ? [lng, lat] : undefined,
+                latitude: lat ?? undefined,
+                longitude: lng ?? undefined,
+                formattedAddress,
+                address: formattedAddress,
+            };
+            update._directLocationOnly = true;
+        } else {
+            const formattedAddress = toStr(loc.formattedAddress || loc.address);
+            update.addressLine1 = toStr(loc.addressLine1);
+            update.addressLine2 = toStr(loc.addressLine2);
+            update.area = toStr(loc.area);
+            update.city = toStr(loc.city);
+            update.state = toStr(loc.state);
+            update.pincode = toStr(loc.pincode);
+            update.landmark = toStr(loc.landmark);
+            update.location = {
+                type: 'Point',
+                coordinates: lat !== null && lng !== null ? [lng, lat] : undefined,
+                latitude: lat ?? undefined,
+                longitude: lng ?? undefined,
+                formattedAddress,
+                address: formattedAddress,
+                addressLine1: toStr(loc.addressLine1),
+                addressLine2: toStr(loc.addressLine2),
+                area: toStr(loc.area),
+                city: toStr(loc.city),
+                state: toStr(loc.state),
+                pincode: toStr(loc.pincode),
+                landmark: toStr(loc.landmark)
+            };
+        }
     }
 
     if (body.openingTime !== undefined) {
@@ -989,32 +1020,178 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
         return getCurrentRestaurantProfile(restaurantId);
     }
 
-    // Determine the reason for the update to show to the admin
-    const updatedFields = Object.keys(update);
-    let reason = 'Profile Update';
+    const { directUpdate, pendingUpdate } = splitProfileUpdate(update);
 
-    if (updatedFields.includes('zoneId')) {
-        reason = 'Zone Update';
-    } else if (updatedFields.some(f => ['accountNumber', 'ifscCode', 'accountHolderName', 'upiId'].includes(f))) {
-        reason = 'Financial Details Update';
-    } else if (updatedFields.some(f => ['panNumber', 'nameOnPan', 'panImage', 'gstNumber', 'fssaiNumber', 'fssaiExpiry'].includes(f))) {
-        reason = 'Regulatory Documents Update';
-    } else if (updatedFields.some(f => ['addressLine1', 'area', 'city', 'pincode'].includes(f))) {
-        reason = 'Location/Address Update';
-    } else if (updatedFields.some(f => ['menuImages', 'menuPdf'].includes(f))) {
-        reason = 'Menu Update';
-    } else if (updatedFields.some(f => ['openingTime', 'closingTime', 'openDays'].includes(f))) {
-        reason = 'Timings Update';
-    } else if (updatedFields.some(f => ['profileImage', 'coverImages'].includes(f))) {
-        reason = 'Photo/Banner Update';
-    } else if (updatedFields.some(f => ['ownerName', 'ownerEmail', 'ownerPhone', 'primaryContactNumber'].includes(f))) {
-        reason = 'Owner Details Update';
-    } else if (updatedFields.includes('pureVegRestaurant')) {
-        reason = 'Dietary Category Update';
-    } else if (updatedFields.includes('restaurantName')) {
-        reason = 'Restaurant Name Change';
+    const isApprovedRestaurant = currentRestaurant.status === 'approved';
+
+    if (!isApprovedRestaurant) {
+        if (update._directLocationOnly) {
+            if (pendingUpdate.location) {
+                directUpdate.location = pendingUpdate.location;
+                delete pendingUpdate.location;
+            }
+            delete directUpdate._directLocationOnly;
+            delete pendingUpdate._directLocationOnly;
+        }
+
+        if (body.zoneSelectionUpdate === true) {
+            for (const key of ['zoneId', 'city', 'area']) {
+                if (pendingUpdate[key] !== undefined) {
+                    directUpdate[key] = pendingUpdate[key];
+                    delete pendingUpdate[key];
+                }
+            }
+            if (pendingUpdate.location) {
+                directUpdate.location = pendingUpdate.location;
+                delete pendingUpdate.location;
+            }
+        }
     }
 
+    if (
+        pendingUpdate.coverImages !== undefined &&
+        isCoverImageDeletionOnly(getEffectiveCoverImages(currentRestaurant), pendingUpdate.coverImages)
+    ) {
+        const requestedCovers = normalizeImageAssetList(pendingUpdate.coverImages);
+        const updatedLiveCovers = applyCoverImageDeletionToLive(
+            currentRestaurant.coverImages,
+            requestedCovers
+        );
+        directUpdate.coverImages = updatedLiveCovers.map((item) => item.url);
+
+        const existingPending = currentRestaurant.pendingProfile;
+        if (existingPending && existingPending.coverImages !== undefined) {
+            const mergedPending = mergePendingProfile(existingPending, {
+                coverImages: requestedCovers,
+            });
+            const snapshot =
+                existingPending._approvedSnapshot || extractApprovedSnapshot(currentRestaurant);
+            const pendingFields = computePendingFieldsFromSnapshot(snapshot, mergedPending);
+
+            directUpdate['pendingProfile.coverImages'] = requestedCovers;
+            directUpdate['pendingProfile.pendingFields'] = pendingFields;
+
+            if (pendingFields.length === 0) {
+                directUpdate._clearPendingProfile = true;
+            }
+        }
+
+        delete pendingUpdate.coverImages;
+        delete pendingUpdate.imagePublicIds;
+    }
+
+    if (isApprovedRestaurant) {
+        const dbUpdate = {};
+        if (Object.keys(directUpdate).length) {
+            dbUpdate.$set = { ...directUpdate };
+        }
+
+        if (dbUpdate.$set?._clearPendingProfile) {
+            delete dbUpdate.$set._clearPendingProfile;
+            dbUpdate.$unset = {
+                ...(dbUpdate.$unset || {}),
+                pendingProfile: 1,
+                profileReviewStatus: 1,
+                pendingUpdateReason: 1,
+            };
+        }
+
+        let requiresApproval = false;
+        if (Object.keys(pendingUpdate).length) {
+            const reason = resolvePendingUpdateReason(Object.keys(pendingUpdate));
+            dbUpdate.$set = {
+                ...(dbUpdate.$set || {}),
+                ...buildPendingProfileSet(
+                    pendingUpdate,
+                    reason,
+                    currentRestaurant.pendingProfile,
+                    currentRestaurant
+                ),
+            };
+            requiresApproval = true;
+        }
+
+        if (!dbUpdate.$set) {
+            return getCurrentRestaurantProfile(restaurantId);
+        }
+
+        const doc = await FoodRestaurant.findByIdAndUpdate(
+            restaurantId,
+            dbUpdate,
+            {
+                new: true,
+                runValidators: true,
+                projection: [
+                    'restaurantName',
+                    'cuisines',
+                    'location',
+                    'addressLine1',
+                    'addressLine2',
+                    'area',
+                    'city',
+                    'state',
+                    'pincode',
+                    'landmark',
+                    'ownerName',
+                    'ownerEmail',
+                    'ownerPhone',
+                    'primaryContactNumber',
+                    'pureVegRestaurant',
+                    'profileImage',
+                    'coverImages',
+                    'menuImages',
+                    'openingTime',
+                    'closingTime',
+                    'openDays',
+                    'status',
+                    'profileReviewStatus',
+                    'pendingProfile',
+                    'pendingUpdateReason',
+                    'createdAt',
+                    'updatedAt',
+                    'panNumber',
+                    'nameOnPan',
+                    'panImage',
+                    'gstRegistered',
+                    'gstNumber',
+                    'gstLegalName',
+                    'gstAddress',
+                    'gstImage',
+                    'fssaiNumber',
+                    'fssaiExpiry',
+                    'fssaiImage',
+                    'accountNumber',
+                    'ifscCode',
+                    'accountHolderName',
+                    'accountType',
+                    'upiId',
+                    'upiQrImage',
+                    'estimatedDeliveryTime',
+                    'estimatedDeliveryTimeMinutes',
+                    'zoneId'
+                ].join(' ')
+            }
+        ).lean();
+
+        if (requiresApproval) {
+            void notifyAdminsAboutRestaurantProfileReview(
+                restaurantId,
+                pendingUpdate.restaurantName || currentRestaurant.restaurantName || doc?.restaurantName
+            );
+        }
+
+        const profile = toRestaurantProfile(doc);
+        if (requiresApproval) {
+            profile.requiresApproval = true;
+            profile.pendingSubmittedFields = profile.pendingSubmittedFields || [];
+            profile.pendingSubmittedFieldLabels = getPendingFieldLabels(profile.pendingSubmittedFields);
+            profile.lastSubmittedFields = Object.keys(pendingUpdate);
+            profile.lastSubmittedFieldLabels = getPendingFieldLabels(Object.keys(pendingUpdate));
+        }
+        return profile;
+    }
+
+    const reason = resolvePendingUpdateReason(Object.keys(update));
     update.pendingUpdateReason = reason;
     update.status = 'pending';
 
@@ -1100,16 +1277,65 @@ export const uploadRestaurantProfileImage = async (restaurantId, file) => {
     if (!file?.buffer) throw new ValidationError('Image file is required');
 
     const currentRestaurant = await FoodRestaurant.findById(restaurantId)
-        .select('restaurantName status')
+        .select(
+            'restaurantName status profileImage imagePublicIds pendingProfile coverImages ownerName cuisines location addressLine1 addressLine2 area city state pincode landmark pureVegRestaurant dietaryType panNumber nameOnPan fssaiNumber accountNumber ifscCode accountHolderName upiId'
+        )
         .lean();
     if (!currentRestaurant) throw new ValidationError('Restaurant not found');
 
-    const url = await uploadImageBuffer(file.buffer, 'food/restaurants/profile');
+    const isApprovedRestaurant = currentRestaurant.status === 'approved';
+    const oldPublicId = isApprovedRestaurant
+        ? currentRestaurant.pendingProfile?.imagePublicIds?.profileImage
+        : currentRestaurant.imagePublicIds?.profileImage;
+    const oldUrl = isApprovedRestaurant
+        ? currentRestaurant.pendingProfile?.profileImage
+        : currentRestaurant.profileImage;
+
+    const asset = await replaceCloudinaryImage({
+        buffer: file.buffer,
+        folder: 'food/restaurants/profile',
+        oldPublicId,
+        oldUrl,
+        mimeType: file.mimetype,
+    });
+    const imagePublicIds = {
+        ...(currentRestaurant.imagePublicIds || {}),
+        profileImage: asset.publicId,
+    };
+
+    if (isApprovedRestaurant) {
+        const pendingUpdate = {
+            profileImage: asset.url,
+            imagePublicIds,
+        };
+        await FoodRestaurant.findByIdAndUpdate(
+            restaurantId,
+            {
+                $set: buildPendingProfileSet(
+                    pendingUpdate,
+                    'Photo/Banner Update',
+                    currentRestaurant.pendingProfile,
+                    currentRestaurant
+                ),
+            },
+            { new: true }
+        ).lean();
+
+        void notifyAdminsAboutRestaurantProfileReview(restaurantId, currentRestaurant.restaurantName || '');
+
+        return {
+            profileImage: { url: asset.url, publicId: asset.publicId },
+            requiresApproval: true,
+            lastSubmittedFieldLabels: getPendingFieldLabels(['profileImage']),
+        };
+    }
+
     const doc = await FoodRestaurant.findByIdAndUpdate(
         restaurantId,
         {
             $set: {
-                profileImage: url,
+                profileImage: asset.url,
+                imagePublicIds,
                 status: 'pending'
             },
             $unset: {
@@ -1126,13 +1352,13 @@ export const uploadRestaurantProfileImage = async (restaurantId, file) => {
         void notifyAdminsAboutRestaurantProfileReview(restaurantId, currentRestaurant.restaurantName || doc.restaurantName);
     }
 
-    return { profileImage: { url } };
+    return { profileImage: { url: asset.url, publicId: asset.publicId } };
 };
 
 export const uploadRestaurantMenuImage = async (file) => {
     if (!file?.buffer) throw new ValidationError('Image file is required');
-    const url = await uploadImageBuffer(file.buffer, 'food/restaurants/menu');
-    return { menuImage: { url, publicId: null } };
+    const asset = await uploadFoodImage(file, 'food/restaurants/menu');
+    return { menuImage: asset };
 };
 
 export const uploadRestaurantCoverImages = async (restaurantId, files = []) => {
@@ -1147,29 +1373,70 @@ export const uploadRestaurantCoverImages = async (restaurantId, files = []) => {
     }
 
     const currentRestaurant = await FoodRestaurant.findById(restaurantId)
-        .select('restaurantName status profileImage coverImages')
+        .select(
+            'restaurantName status profileImage coverImages imagePublicIds pendingProfile ownerName cuisines location addressLine1 addressLine2 area city state pincode landmark pureVegRestaurant dietaryType panNumber nameOnPan fssaiNumber accountNumber ifscCode accountHolderName upiId'
+        )
         .lean();
     if (!currentRestaurant) throw new ValidationError('Restaurant not found');
 
-    const uploadedUrls = await Promise.all(
-        validFiles.slice(0, 20).map((file) => uploadImageBuffer(file.buffer, 'food/restaurants/cover'))
+    const uploadedAssets = await Promise.all(
+        validFiles.slice(0, 20).map((file) => uploadFoodImage(file, 'food/restaurants/cover'))
     );
-    const existingCoverImages = Array.isArray(currentRestaurant.coverImages)
-        ? currentRestaurant.coverImages.map((image) => toUrl(image)).filter(Boolean)
-        : [];
+    const existingCoverImages = getEffectiveCoverImages(currentRestaurant);
     const nextCoverImages = [...existingCoverImages];
 
-    uploadedUrls.forEach((url) => {
-        if (!nextCoverImages.includes(url)) nextCoverImages.push(url);
+    uploadedAssets.forEach((asset) => {
+        if (!nextCoverImages.some((image) => image.url === asset.url)) {
+            nextCoverImages.push(asset);
+        }
     });
+
+    const isApprovedRestaurant = currentRestaurant.status === 'approved';
+
+    if (isApprovedRestaurant) {
+        const pendingCoverImages = nextCoverImages.slice(0, 20);
+        const pendingUpdate = { coverImages: pendingCoverImages };
+
+        if (!toUrl(currentRestaurant.profileImage) && uploadedAssets[0]?.url) {
+            pendingUpdate.profileImage = uploadedAssets[0].url;
+            pendingUpdate.imagePublicIds = {
+                ...(currentRestaurant.imagePublicIds || {}),
+                profileImage: uploadedAssets[0].publicId,
+            };
+        }
+
+        const pendingSet = buildPendingProfileSet(
+            pendingUpdate,
+            'Photo/Banner Update',
+            currentRestaurant.pendingProfile,
+            currentRestaurant
+        );
+
+        await FoodRestaurant.findByIdAndUpdate(restaurantId, { $set: pendingSet }, { new: true }).lean();
+
+        void notifyAdminsAboutRestaurantProfileReview(restaurantId, currentRestaurant.restaurantName || '');
+
+        return {
+            coverImages: uploadedAssets,
+            profileImage: pendingUpdate.profileImage
+                ? { url: pendingUpdate.profileImage, publicId: uploadedAssets[0]?.publicId || '' }
+                : undefined,
+            requiresApproval: true,
+            lastSubmittedFieldLabels: getPendingFieldLabels(Object.keys(pendingUpdate)),
+        };
+    }
 
     const update = {
         coverImages: nextCoverImages.slice(0, 20),
         status: 'pending'
     };
 
-    if (!toUrl(currentRestaurant.profileImage) && uploadedUrls[0]) {
-        update.profileImage = uploadedUrls[0];
+    if (!toUrl(currentRestaurant.profileImage) && uploadedAssets[0]?.url) {
+        update.profileImage = uploadedAssets[0].url;
+        update.imagePublicIds = {
+            ...(currentRestaurant.imagePublicIds || {}),
+            profileImage: uploadedAssets[0].publicId,
+        };
     }
 
     await FoodRestaurant.findByIdAndUpdate(
@@ -1189,8 +1456,8 @@ export const uploadRestaurantCoverImages = async (restaurantId, files = []) => {
     }
 
     return {
-        coverImages: uploadedUrls.map((url) => ({ url, publicId: null })),
-        profileImage: update.profileImage ? { url: update.profileImage } : undefined
+        coverImages: uploadedAssets,
+        profileImage: update.profileImage ? { url: update.profileImage, publicId: update.imagePublicIds?.profileImage || '' } : undefined
     };
 };
 
@@ -1210,16 +1477,16 @@ export const uploadRestaurantMenuImages = async (restaurantId, files = []) => {
         .lean();
     if (!currentRestaurant) throw new ValidationError('Restaurant not found');
 
-    const uploadedUrls = await Promise.all(
-        validFiles.slice(0, 20).map((file) => uploadImageBuffer(file.buffer, 'food/restaurants/menu'))
+    const uploadedAssets = await Promise.all(
+        validFiles.slice(0, 20).map((file) => uploadFoodImage(file, 'food/restaurants/menu'))
     );
-    const existingMenuImages = Array.isArray(currentRestaurant.menuImages)
-        ? currentRestaurant.menuImages.map((image) => toUrl(image)).filter(Boolean)
-        : [];
+    const existingMenuImages = normalizeImageAssetList(currentRestaurant.menuImages);
     const nextMenuImages = [...existingMenuImages];
 
-    uploadedUrls.forEach((url) => {
-        if (!nextMenuImages.includes(url)) nextMenuImages.push(url);
+    uploadedAssets.forEach((asset) => {
+        if (!nextMenuImages.some((image) => image.url === asset.url)) {
+            nextMenuImages.push(asset);
+        }
     });
 
     await FoodRestaurant.findByIdAndUpdate(
@@ -1227,22 +1494,13 @@ export const uploadRestaurantMenuImages = async (restaurantId, files = []) => {
         {
             $set: {
                 menuImages: nextMenuImages.slice(0, 20),
-                status: 'pending'
             },
-            $unset: {
-                rejectedAt: 1,
-                rejectionReason: 1
-            }
         },
         { new: true }
     ).lean();
 
-    if (currentRestaurant.status !== 'pending') {
-        void notifyAdminsAboutRestaurantProfileReview(restaurantId, currentRestaurant.restaurantName || '');
-    }
-
     return {
-        menuImages: uploadedUrls.map((url) => ({ url, publicId: null }))
+        menuImages: uploadedAssets
     };
 };
 

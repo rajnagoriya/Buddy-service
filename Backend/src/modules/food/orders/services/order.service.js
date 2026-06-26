@@ -148,13 +148,17 @@ export async function createOrder(userId, dto) {
   }
 
   const restaurants = await FoodRestaurant.find({ _id: { $in: restaurantIds } })
-    .select("status restaurantName zoneId location isAcceptingOrders name")
+    .select("status restaurantName zoneId location isAcceptingOrders name profileReviewStatus")
     .lean();
 
   if (restaurants.length === 0) throw new ValidationError("Restaurants not found");
 
   for (const r of restaurants) {
-    if (r.status !== "approved" || r.isAcceptingOrders === false) {
+    if (
+      r.status !== "approved" ||
+      r.profileReviewStatus === "pending" ||
+      r.isAcceptingOrders === false
+    ) {
       throw new ValidationError(`Restaurant ${r.name || r.restaurantName} is not accepting orders`);
     }
   }

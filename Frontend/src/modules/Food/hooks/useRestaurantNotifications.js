@@ -264,69 +264,6 @@ export const useRestaurantNotifications = () => {
     fetchRestaurantId();
   }, []);
 
-  // Reliability fallback:
-  // If Socket.IO fails (expired jwt / missing token / room join failed),
-  // we still fetch restaurant orders from REST periodically and trigger the same
-  // alert flow. This prevents "restaurant didn't receive the order" cases.
-  useEffect(() => {
-    if (!restaurantId) return;
-
-    const ALERT_POLL_MS = 8000;
-    let isCancelled = false;
-
-    const pollOrders = async () => {
-      if (isCancelled) return;
-
-      try {
-        const response = await restaurantAPI.getOrders({ page: 1, limit: 30 });
-        const rows =
-          response?.data?.data?.orders ||
-          response?.data?.data?.data?.orders ||
-          [];
-
-        // REST layer normalizes backend statuses so:
-        // - backend "created" -> UI "confirmed"
-        // We alert only for "confirmed/new order waiting for review".
-        const confirmed = (rows || [])
-          .filter((o) => {
-            const status = String(o?.status || "").toLowerCase();
-            if (status !== "confirmed") return false;
-
-            // If it's a scheduled order, only alert if it's due soon (within 30 mins)
-            if (o.scheduledAt) {
-              const scheduledTime = new Date(o.scheduledAt).getTime();
-              const now = Date.now();
-              // Only alert if scheduled time is <= 30 mins from now
-              return scheduledTime <= now + 30 * 60000;
-            }
-
-            return true;
-          })
-          .sort((a, b) => {
-            const at = a?.updatedAt || a?.createdAt || 0;
-            const bt = b?.updatedAt || b?.createdAt || 0;
-            return new Date(bt).getTime() - new Date(at).getTime();
-          });
-
-        if (confirmed.length > 0) {
-          // Trigger alerts for newest confirmed orders (dedupe prevents spam).
-          confirmed.slice(0, 5).forEach((o) => handleIncomingOrderAlert(o, 'poll'));
-        }
-      } catch (error) {
-        // Non-blocking: keep polling.
-      }
-    };
-
-    // Initial poll immediately.
-    pollOrders();
-    const intervalId = setInterval(pollOrders, ALERT_POLL_MS);
-
-    return () => {
-      isCancelled = true;
-      clearInterval(intervalId);
-    };
-  }, [restaurantId]);
-
   useEffect(() => {
     if (!supportsBrowserNotifications()) return;
 
