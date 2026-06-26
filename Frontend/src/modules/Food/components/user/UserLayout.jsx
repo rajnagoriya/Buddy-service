@@ -3,6 +3,7 @@ import { useEffect, useState, createContext, useContext } from "react"
 import { ProfileProvider } from "@food/context/ProfileContext"
 import LocationPrompt from "./LocationPrompt"
 import { CartProvider } from "@food/context/CartContext"
+import { RestaurantChainRadiusModalProvider } from "@food/context/RestaurantChainRadiusModalContext"
 import { OrdersProvider } from "@food/context/OrdersContext"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
@@ -152,6 +153,7 @@ export default function UserLayout() {
   return (
     <div className="min-h-screen bg-[var(--background)] dark:bg-[#0a0a0a] transition-colors duration-200">
       <CartProvider>
+        <RestaurantChainRadiusModalProvider>
         <ProfileProvider>
           <OrdersProvider>
             <SearchOverlayProvider>
@@ -181,6 +183,7 @@ export default function UserLayout() {
             </SearchOverlayProvider>
           </OrdersProvider>
         </ProfileProvider>
+        </RestaurantChainRadiusModalProvider>
       </CartProvider>
     </div>
   )

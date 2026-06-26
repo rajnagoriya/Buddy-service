@@ -63,12 +63,40 @@ export const extractImages = (source, backendOrigin = "") => {
   return candidates.filter(Boolean);
 };
 
+export const getRestaurantFssaiNumber = (restaurant) => {
+  if (!restaurant) return "";
+  return String(
+    restaurant.fssaiNumber ||
+      restaurant?.onboarding?.step3?.fssai?.registrationNumber ||
+      restaurant?.onboarding?.step3?.fssai?.number ||
+      "",
+  ).trim();
+};
+
+export const resolveFoodItemImage = (item, backendOrigin = "") => {
+  if (!item || typeof item !== "object") return "";
+  return (
+    extractImages(
+      [
+        item.image,
+        item.imageUrl,
+        item.imageURL,
+        item.photoUrl,
+        item.photo,
+        item.thumbnail,
+        item.media,
+      ],
+      backendOrigin,
+    )[0] || ""
+  );
+};
+
 /**
  * Calculates distance between two coordinates in kilometers using Haversine formula
  */
 export const calculateDistance = (lat1, lng1, lat2, lng2) => {
   if (!lat1 || !lng1 || !lat2 || !lng2) return null;
-  const R = 6371; // Earth's radius in kilometers
+  const R = 6371;
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLng = (lng2 - lng1) * Math.PI / 180;
   const a =
@@ -88,9 +116,8 @@ export const formatDistance = (distanceInKm) => {
   if (distanceInKm === null || distanceInKm === undefined) return "1.2 km";
   if (distanceInKm >= 1) {
     return `${distanceInKm.toFixed(1)} km`;
-  } else {
-    return `${Math.round(distanceInKm * 1000)} m`;
   }
+  return `${Math.round(distanceInKm * 1000)} m`;
 };
 
 /**

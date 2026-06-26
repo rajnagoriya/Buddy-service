@@ -31,6 +31,10 @@ import { getFirebaseDB } from '../../../../config/firebase.js';
 import * as foodTransactionService from './foodTransaction.service.js';
 import * as userWalletService from '../../user/services/userWallet.service.js';
 import { calculateOrderPricing } from './order-pricing.service.js';
+import {
+  validateRestaurantChainForItems,
+  validateNewRestaurantAgainstLast,
+} from './restaurant-chain-radius.service.js';
 import * as dispatchService from './order-dispatch.service.js';
 import * as deliveryService from './order-delivery.service.js';
 import * as paymentService from './order-payment.service.js';
@@ -126,10 +130,16 @@ export async function calculateOrder(userId, dto) {
   return calculateOrderPricing(userId, dto);
 }
 
+export async function validateRestaurantChain(lastRestaurantId, newRestaurantId) {
+  return validateNewRestaurantAgainstLast(lastRestaurantId, newRestaurantId);
+}
+
 // ----- Create order -----
 export async function createOrder(userId, dto) {
   const items = Array.isArray(dto.items) ? dto.items : [];
   if (items.length === 0) throw new ValidationError("No items in order");
+
+  await validateRestaurantChainForItems(items);
 
   // Identify unique restaurants
   const restaurantIds = [...new Set(items.map(it => it.restaurantId).filter(Boolean))];
@@ -294,6 +304,9 @@ export async function createOrder(userId, dto) {
     riderEarning,
     platformProfit,
     deliveryFleet: dto.deliveryFleet || "standard",
+    deliveryOption: dto.deliveryOption || "Standard Delivery",
+    deliveryTime: dto.deliveryTime || "25–35 mins",
+    estimatedTime: dto.estimatedTime ?? 30,
     dispatch: { modeAtCreation: dispatchMode, status: "unassigned" },
     statusHistory: [
       {

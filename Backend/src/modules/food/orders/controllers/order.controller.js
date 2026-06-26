@@ -1,5 +1,6 @@
 import { sendResponse } from '../../../../utils/response.js';
 import * as orderService from '../services/order.service.js';
+import { validateNewRestaurantAgainstLast } from '../services/restaurant-chain-radius.service.js';
 import * as foodOrderPaymentService from '../services/foodOrderPayment.service.js';
 import {
     validateCalculateOrderDto,
@@ -9,8 +10,22 @@ import {
     validateOrderStatusDto,
     validateAssignDeliveryDto,
     validateDispatchSettingsDto,
-    validateOrderRatingsDto
+    validateOrderRatingsDto,
+    validateRestaurantChainDto
 } from '../validators/order.validator.js';
+
+export async function validateRestaurantChainController(req, res, next) {
+    try {
+        const dto = validateRestaurantChainDto(req.body);
+        const result = await validateNewRestaurantAgainstLast(
+            dto.lastRestaurantId,
+            dto.newRestaurantId,
+        );
+        return sendResponse(res, 200, 'Restaurant chain validated', result);
+    } catch (err) {
+        next(err);
+    }
+}
 
 export async function calculateOrderController(req, res, next) {
     try {

@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from "react"
 import { createPortal } from "react-dom"
 import { Link, useNavigate } from "react-router-dom"
-import { Plus, Minus, ArrowLeft, ChevronRight, Clock, MapPin, Phone, FileText, Utensils, Tag, Percent, Share2, ChevronUp, ChevronDown, X, Check, Settings, CreditCard, Wallet, Building2, Sparkles, Banknote, Zap, CheckCircle2, MessageCircle, Send, Mail, Copy, AlertCircle } from "lucide-react"
+import { Plus, Minus, ArrowLeft, ChevronRight, Clock, MapPin, Phone, FileText, Utensils, Tag, Percent, Share2, ChevronUp, ChevronDown, X, Check, Settings, CreditCard, Wallet, Building2, Sparkles, Banknote, Zap, CheckCircle2, MessageCircle, Send, Mail, Copy, AlertCircle, Leaf, Bike } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 import confetti from "canvas-confetti"
 
 import AnimatedPage from "@food/components/user/AnimatedPage"
 import { Button } from "@food/components/ui/button"
+import { Badge } from "@food/components/ui/badge"
 import { useCart } from "@food/context/CartContext"
 import { useProfile } from "@food/context/ProfileContext"
 import { useOrders } from "@food/context/OrdersContext"
@@ -26,6 +27,8 @@ import CartEmptyState from "@food/components/user/cart/CartEmptyState"
 import CartPageHeader, { CartSavingsBanner } from "@food/components/user/cart/CartPageHeader"
 import CartItemsCard from "@food/components/user/cart/CartItemsCard"
 import CartCheckoutBar from "@food/components/user/cart/CartCheckoutBar"
+import RestaurantUnavailableModal from "@food/components/user/cart/RestaurantUnavailableModal"
+import { useCartRestaurantValidation } from "@food/hooks/useCartRestaurantValidation"
 const zoopSound = "/zomato_sms.mp3"
 const debugLog = (...args) => { }
 const debugWarn = (...args) => { }
@@ -84,6 +87,41 @@ const RUPEE_SYMBOL = "\u20B9"
 const CART_RECIPIENT_DETAILS_STORAGE_KEY = "food-cart-recipient-details-v1"
 const CART_ORDER_NOTE_STORAGE_KEY = "food-cart-order-note-v1"
 
+const DUMMY_COUPONS = [
+  {
+    code: "BUDDY50",
+    discountType: "percentage",
+    discountPercentage: 50,
+    maxDiscount: 150,
+    minOrder: 200,
+    discountDisplay: "50% OFF",
+    description: "50% OFF up to ₹150 on orders above ₹200",
+    customerGroup: "all",
+    isGlobalCoupon: true
+  },
+  {
+    code: "SUPERBUDDY",
+    discountType: "flat",
+    discount: 100,
+    minOrder: 400,
+    discountDisplay: "₹100 OFF",
+    description: "Flat ₹100 OFF on orders above ₹400",
+    customerGroup: "all",
+    isGlobalCoupon: true
+  },
+  {
+    code: "NEWUSER",
+    discountType: "percentage",
+    discountPercentage: 30,
+    maxDiscount: 100,
+    minOrder: 150,
+    discountDisplay: "30% OFF",
+    description: "30% OFF up to ₹100 for your first order",
+    customerGroup: "new",
+    isGlobalCoupon: true
+  }
+]
+
 function Cart() {
   const companyName = useCompanyName()
   const navigate = useNavigate()
@@ -91,6 +129,7 @@ function Cart() {
   const orderSuccessAudioRef = useRef(null)
   const hasRestoredRecipientRef = useRef(false)
   const hasRestoredNoteRef = useRef(false)
+  const hasManuallyRemovedCouponRef = useRef(false)
 
   // Defensive check: Ensure CartProvider is available
   let cartContext;
@@ -117,7 +156,42 @@ function Cart() {
     );
   }
 
-  const { cart, updateQuantity, addToCart, getCartCount, clearCart, cleanCartForRestaurant } = cartContext;
+  const {
+    cart,
+    updateQuantity,
+    addToCart,
+    getCartCount,
+    clearCart,
+    cleanCartForRestaurant,
+    restaurantMeta,
+    setRestaurantMeta,
+    removeItemsByRestaurantIds,
+    flushCartSave,
+  } = cartContext;
+
+  const {
+    closedRestaurants,
+    showAvailabilityModal,
+    isValidating,
+    validateRestaurants,
+    handleRemoveClosedRestaurantItems,
+    handleContinueReviewingCart,
+  } = useCartRestaurantValidation({
+    cart,
+    restaurantMeta,
+    setRestaurantMeta,
+    removeItemsByRestaurantIds,
+  });
+
+  const hasValidatedOnLoadRef = useRef(false)
+
+  useEffect(() => {
+    if (cart.length === 0 || hasValidatedOnLoadRef.current) return
+    hasValidatedOnLoadRef.current = true
+    validateRestaurants({ force: false })
+  }, [cart.length, validateRestaurants])
+
+  const hasClosedRestaurants = closedRestaurants.length > 0
   const { getDefaultAddress, getDefaultPaymentMethod, setDefaultAddress, addresses, paymentMethods, userProfile } = useProfile()
   const { createOrder } = useOrders()
   const { openLocationSelector } = useLocationSelector()
@@ -166,6 +240,7 @@ function Cart() {
   const [isPlacingOrder, setIsPlacingOrder] = useState(false)
   const [showBillDetails, setShowBillDetails] = useState(true)
   const [showPlacingOrder, setShowPlacingOrder] = useState(false)
+  const [deliveryOption, setDeliveryOption] = useState("standard")
   const [isScheduled, setIsScheduled] = useState(() => {
     try {
       const stored = localStorage.getItem('scheduled_order_time')
@@ -173,7 +248,7 @@ function Cart() {
         const parsed = JSON.parse(stored)
         return parsed.isScheduled || false
       }
-    } catch {}
+    } catch { }
     return false
   })
   const [scheduledDate, setScheduledDate] = useState(() => {
@@ -183,7 +258,7 @@ function Cart() {
         const parsed = JSON.parse(stored)
         return parsed.date || ""
       }
-    } catch {}
+    } catch { }
     return ""
   })
   const [scheduledTime, setScheduledTime] = useState(() => {
@@ -193,7 +268,7 @@ function Cart() {
         const parsed = JSON.parse(stored)
         return parsed.time || ""
       }
-    } catch {}
+    } catch { }
     return ""
   })
   const [orderProgress, setOrderProgress] = useState(0)
@@ -282,6 +357,8 @@ function Cart() {
     gstRate: 5,
   })
 
+  const subtotal = pricing?.subtotal || cart.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 1), 0)
+
 
   const availableTimeSlots = useMemo(() => {
     if (!isScheduled || !scheduledDate || !restaurantData) return []
@@ -348,6 +425,8 @@ function Cart() {
   }, [isScheduled, availableTimeSlots, scheduledTime])
 
   const cartCount = getCartCount()
+  const LARGE_CART_ITEM_THRESHOLD = 20
+  const isLargeCart = cartCount >= LARGE_CART_ITEM_THRESHOLD
   const getAddressId = (address) => address?.id || address?._id || null
   const normalizeAddressLabel = (label) => {
     if (!label) return ""
@@ -836,74 +915,78 @@ function Cart() {
     fetchAddons()
   }, [restaurantData, cart.length, loadingRestaurant])
 
-  // Fetch coupons for items in cart
+  // Set dummy coupons locally instead of fetching from backend
   useEffect(() => {
-    const fetchCouponsForCartItems = async () => {
+    const fetchCouponsForCartItems = () => {
       if (cart.length === 0 || !restaurantId) {
         setAvailableCoupons([])
         return
       }
 
-      debugLog(`[CART-COUPONS] Fetching coupons for ${cart.length} items in cart`)
+      debugLog(`[CART-COUPONS] Loading dummy offers for cart`)
       setLoadingCoupons(true)
-
-      const allCoupons = []
-      const uniqueCouponCodes = new Set()
-
-      // Fetch coupons for each item in cart
-      for (const cartItem of cart) {
-        const couponItemId = cartItem.itemId || cartItem.id
-        if (!couponItemId) {
-          debugLog(`[CART-COUPONS] Skipping item without id:`, cartItem)
-          continue
-        }
-
-        try {
-          debugLog(`[CART-COUPONS] Fetching coupons for itemId: ${couponItemId}, name: ${cartItem.name}`)
-          const response = await restaurantAPI.getCouponsByItemIdPublic(restaurantId, couponItemId)
-
-          if (response?.data?.success && response?.data?.data?.coupons) {
-            const coupons = response.data.data.coupons
-            debugLog(`[CART-COUPONS] Found ${coupons.length} coupons for item ${couponItemId}`)
-
-            // Add coupons, avoiding duplicates
-            coupons.forEach(coupon => {
-              if (!uniqueCouponCodes.has(coupon.couponCode)) {
-                uniqueCouponCodes.add(coupon.couponCode)
-                // Convert backend coupon format to frontend format
-                allCoupons.push({
-                  code: coupon.couponCode,
-                  discount: coupon.originalPrice - coupon.discountedPrice,
-                  discountPercentage: coupon.discountPercentage,
-                  discountDisplay: coupon.discountType === "percentage"
-                    ? `${coupon.discountPercentage}% OFF`
-                    : `${RUPEE_SYMBOL}${Math.max(0, (coupon.originalPrice || 0) - (coupon.discountedPrice || 0))} OFF`,
-                  minOrder: coupon.minOrderValue || 0,
-                  description: coupon.discountType === "percentage"
-                    ? `${coupon.discountPercentage}% OFF with '${coupon.couponCode}'`
-                    : `Save ${RUPEE_SYMBOL}${Math.max(0, (coupon.originalPrice || 0) - (coupon.discountedPrice || 0))} with '${coupon.couponCode}'`,
-                  originalPrice: coupon.originalPrice,
-                  discountedPrice: coupon.discountedPrice,
-                  customerGroup: coupon.customerGroup || "all",
-                  isGlobalCoupon: Boolean(coupon.isGlobalCoupon),
-                  itemId: couponItemId,
-                  itemName: cartItem.name,
-                })
-              }
-            })
-          }
-        } catch (error) {
-          debugError(`[CART-COUPONS] Error fetching coupons for item ${cartItem.id}:`, error)
-        }
-      }
-
-      debugLog(`[CART-COUPONS] Total unique coupons found: ${allCoupons.length}`, allCoupons)
-      setAvailableCoupons(allCoupons)
+      setAvailableCoupons(DUMMY_COUPONS)
       setLoadingCoupons(false)
     }
 
     fetchCouponsForCartItems()
   }, [cart, restaurantId])
+
+  // Reset manually removed flag if cart items change
+  const prevCartLengthRef = useRef(cart.length)
+  const prevCartTotalItemsRef = useRef(cart.reduce((sum, item) => sum + (item.quantity || 1), 0))
+
+  useEffect(() => {
+    const currentTotalItems = cart.reduce((sum, item) => sum + (item.quantity || 1), 0)
+    if (cart.length !== prevCartLengthRef.current || currentTotalItems !== prevCartTotalItemsRef.current) {
+      hasManuallyRemovedCouponRef.current = false
+      prevCartLengthRef.current = cart.length
+      prevCartTotalItemsRef.current = currentTotalItems
+    }
+  }, [cart])
+
+  // Auto-apply best eligible coupon
+  useEffect(() => {
+    if (loadingCoupons || availableCoupons.length === 0 || hasManuallyRemovedCouponRef.current) {
+      return
+    }
+
+    // Find all eligible coupons
+    const eligibleCoupons = availableCoupons.filter(coupon => {
+      const minOrderOk = subtotal >= (Number(coupon.minOrder) || 0)
+      const newOk = coupon.customerGroup !== "new" || userOrderCount === 0
+      return minOrderOk && newOk
+    })
+
+    if (eligibleCoupons.length === 0) {
+      // If subtotal fell below eligibility, remove applied coupon
+      if (appliedCoupon) {
+        setAppliedCoupon(null)
+        setCouponCode("")
+      }
+      return
+    }
+
+    // Calculate maximum discount for each eligible coupon
+    let bestCoupon = null
+    let maxDiscount = 0
+    eligibleCoupons.forEach(coupon => {
+      const amt = coupon.discountType === "percentage"
+        ? Math.min(subtotal * (coupon.discountPercentage / 100), coupon.maxDiscount || Infinity)
+        : (coupon.discount || 0)
+      if (amt > maxDiscount) {
+        maxDiscount = amt
+        bestCoupon = coupon
+      }
+    })
+
+    if (bestCoupon && (!appliedCoupon || appliedCoupon.code !== bestCoupon.code)) {
+      setAppliedCoupon(bestCoupon)
+      setCouponCode(bestCoupon.code)
+      setManualCouponCode(bestCoupon.code)
+      toast.success(`Coupon ${bestCoupon.code} auto-applied!`)
+    }
+  }, [availableCoupons, subtotal, userOrderCount, loadingCoupons, appliedCoupon])
 
   // Calculate pricing from backend whenever cart, address, or coupon changes
   useEffect(() => {
@@ -930,13 +1013,12 @@ function Cart() {
         }))
 
         const resolvedRestaurantId = restaurantData?.restaurantId || restaurantData?._id || restaurantId || undefined
-        const resolvedCouponCode = appliedCoupon?.code || couponCode || undefined
 
         const response = await orderAPI.calculateOrder({
           items,
           restaurantId: resolvedRestaurantId,
-          deliveryAddress: defaultAddress,
-          couponCode: resolvedCouponCode
+          deliveryAddress: defaultAddress
+          // Removed couponCode so backend doesn't try to look it up in database
         })
 
         if (response?.data?.success && response?.data?.data?.pricing) {
@@ -1039,7 +1121,6 @@ function Cart() {
   }, [])
 
   // Use backend pricing if available, otherwise fallback to database fee settings
-  const subtotal = pricing?.subtotal || cart.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 1), 0)
   const fallbackDeliveryFee = (() => {
     if (appliedCoupon?.freeDelivery) {
       return 0
@@ -1085,15 +1166,54 @@ function Cart() {
 
     return Number(feeSettings.deliveryFee || 0)
   })()
-  const deliveryFee = pricing != null ? (pricing.deliveryFee ?? 0) : fallbackDeliveryFee
+  const deliveryOptions = [
+    {
+      id: "eco",
+      name: "Eco Saver",
+      badge: "Save ₹15",
+      badgeColor: "bg-green-50 text-green-700 dark:bg-green-950/30 dark:text-green-400 border border-green-100 dark:border-green-900/30",
+      time: "45–55 mins",
+      estimatedTime: 50,
+      feeModifier: -15, // Discount ₹15 from the calculated delivery fee
+      description: "Batch delivery. Lower carbon footprint.",
+      icon: Leaf
+    },
+    {
+      id: "standard",
+      name: "Standard Delivery",
+      badge: "Popular",
+      badgeColor: "bg-orange-50 text-orange-700 dark:bg-orange-950/30 dark:text-orange-400 border border-orange-100 dark:border-orange-900/30",
+      time: "25–35 mins",
+      estimatedTime: 30,
+      feeModifier: 0, // Standard fee
+      description: "Direct to door. Reliable & prompt partner.",
+      icon: Bike
+    },
+    {
+      id: "express",
+      name: "Express Delivery",
+      badge: "Zap Delivery",
+      badgeColor: "bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400 border border-amber-100 dark:border-amber-900/30",
+      time: "15–20 mins",
+      estimatedTime: 18,
+      feeModifier: 20, // Add ₹20 to the calculated delivery fee
+      description: "Direct dispatch. Priority mapping partner.",
+      icon: Zap
+    }
+  ]
+
+  const selectedDeliveryOption = deliveryOptions.find(opt => opt.id === deliveryOption) || deliveryOptions[1]
+
+  const baseDeliveryFee = pricing != null ? (pricing.deliveryFee ?? 0) : fallbackDeliveryFee
+  const deliveryFee = Math.max(0, baseDeliveryFee + selectedDeliveryOption.feeModifier)
   const deliveryFeeBreakdown = pricing?.deliveryFeeBreakdown || null
   const hasDistanceDeliveryBreakdown =
     deliveryFeeBreakdown?.source === "distance" &&
     Number.isFinite(Number(deliveryFeeBreakdown?.distanceKm))
   const deliveryFeeBreakdownText = hasDistanceDeliveryBreakdown
-    ? `Distance ${Number(deliveryFeeBreakdown.distanceKm).toFixed(1)} km${deliveryFeeBreakdown?.isSplitOrder ? ' • Special Order' : ''}`
+    ? `Distance ${Number(deliveryFeeBreakdown.distanceKm).toFixed(1)} km`
     : null
-  
+
   // Detect multi-restaurant order
   const uniqueRestaurantIds = [...new Set(cart
     .map(item => item.restaurantId || item.restaurant)
@@ -1102,15 +1222,34 @@ function Cart() {
   )]
   const isMultiRestaurantOrder = uniqueRestaurantIds.length > 1
   const multiRestaurantExtraCharge = isMultiRestaurantOrder ? 150 : 0
-  
+
   const platformFee = pricing != null ? (pricing.platformFee ?? 0) : (feeSettings.platformFee ?? 0)
   const packagingFee = pricing != null ? (pricing.packagingFee ?? 0) : (feeSettings.packagingFee ?? 0)
   const gstCharges = pricing != null ? (pricing.tax ?? 0) : Math.round(subtotal * ((feeSettings.gstRate ?? 0) / 100))
-  const discount = pricing?.discount || (appliedCoupon ? Math.min(appliedCoupon.discount, subtotal * 0.5) : 0)
-  const totalBeforeDiscount = subtotal + deliveryFee + platformFee + packagingFee + gstCharges
-  const total = pricing?.total || (totalBeforeDiscount - discount)
-  const savings = pricing?.savings ?? Math.max(0, totalBeforeDiscount - total)
   
+  // Calculate discount based on dummy coupon locally
+  const discount = (() => {
+    if (pricing?.discount) {
+      return pricing.discount
+    }
+    if (appliedCoupon) {
+      if (appliedCoupon.discountType === "percentage") {
+        const pctDiscount = subtotal * (appliedCoupon.discountPercentage / 100)
+        const capped = appliedCoupon.maxDiscount ? Math.min(pctDiscount, appliedCoupon.maxDiscount) : pctDiscount
+        return Math.max(0, Math.min(subtotal, Math.floor(capped)))
+      } else {
+        return Math.max(0, Math.min(subtotal, Math.floor(appliedCoupon.discount || 0)))
+      }
+    }
+    return 0
+  })()
+
+  const totalBeforeDiscount = subtotal + deliveryFee + platformFee + packagingFee + gstCharges
+  const total = pricing != null
+    ? Math.max(0, pricing.total - baseDeliveryFee + deliveryFee - (pricing.discount ? 0 : discount))
+    : (totalBeforeDiscount - discount)
+  const savings = Math.max(0, totalBeforeDiscount - total)
+
   // Calculate platform pricing comparison savings
   const platformPricingSavings = useMemo(() => {
     let totalPlatformPrice = 0
@@ -1174,8 +1313,8 @@ function Cart() {
         : "Cash on Delivery"
 
   // Restaurant name from data or cart
-  const restaurantName = isMultiRestaurantOrder 
-    ? "Multi-Restaurant Order" 
+  const restaurantName = isMultiRestaurantOrder
+    ? "Multi-Restaurant Order"
     : (restaurantData?.name || cart[0]?.restaurant || "Restaurant")
 
   const handleShare = async () => {
@@ -1374,7 +1513,7 @@ function Cart() {
     }
   }
 
-  const handleApplyCoupon = async (coupon) => {
+  const handleApplyCoupon = (coupon) => {
     if (coupon?.customerGroup === "new" && userOrderCount > 0) {
       toast.error("This coupon is only for first-time users")
       return
@@ -1385,49 +1524,14 @@ function Cart() {
       return
     }
 
-    // Validate with backend first; only set applied if backend accepts
-    if (cart.length > 0 && hasSavedAddress) {
-      try {
-        const items = cart.map(item => ({
-          itemId: item.itemId || item.id,
-          name: item.name,
-          price: item.price,
-          variantId: item.variantId || undefined,
-          variantName: item.variantName || undefined,
-          variantPrice: item.variantPrice || item.price,
-          quantity: item.quantity || 1,
-          image: item.image,
-          description: item.description,
-          isVeg: item.isVeg !== false,
-          restaurantId: item.restaurantId || item.restaurant?._id || item.restaurant
-        }))
-
-        const response = await orderAPI.calculateOrder({
-          items,
-          restaurantId: restaurantData?.restaurantId || restaurantData?._id || restaurantId || null,
-          deliveryAddress: defaultAddress,
-          couponCode: coupon.code
-        })
-
-        const pricingData = response?.data?.data?.pricing
-        if (!pricingData || !pricingData.appliedCoupon) {
-          toast.error("Coupon not applicable")
-          return
-        }
-
-        setPricing(pricingData)
-        setAppliedCoupon(coupon)
-        setCouponCode(coupon.code)
-        setManualCouponCode(coupon.code)
-        setShowCoupons(false)
-      } catch (error) {
-        debugError("Error recalculating pricing:", error)
-        toast.error("Failed to apply coupon")
-      }
-    }
+    setAppliedCoupon(coupon)
+    setCouponCode(coupon.code)
+    setManualCouponCode(coupon.code)
+    setShowCoupons(false)
+    toast.success("Coupon applied")
   }
 
-  const handleApplyCouponCode = async () => {
+  const handleApplyCouponCode = () => {
     const inputCode = manualCouponCode.trim().toUpperCase()
     if (!inputCode) {
       toast.error("Enter coupon code")
@@ -1443,101 +1547,33 @@ function Cart() {
       (coupon) => String(coupon.code || "").toUpperCase() === inputCode,
     )
 
-    // If we know this is first-time only and user already ordered, block early.
-    if (matchedCoupon?.customerGroup === "new" && userOrderCount > 0) {
+    if (!matchedCoupon) {
+      toast.error("Invalid coupon code")
+      return
+    }
+
+    if (matchedCoupon.customerGroup === "new" && userOrderCount > 0) {
       toast.error("This coupon is only for first-time users")
       return
     }
 
-    try {
-      const items = cart.map(item => ({
-        itemId: item.itemId || item.id,
-        name: item.name,
-        price: item.price,
-        variantId: item.variantId || undefined,
-        variantName: item.variantName || undefined,
-        variantPrice: item.variantPrice || item.price,
-        quantity: item.quantity || 1,
-        image: item.image,
-        description: item.description,
-        isVeg: item.isVeg !== false,
-        restaurantId: item.restaurantId || item.restaurant?._id || item.restaurant
-      }))
-
-      const response = await orderAPI.calculateOrder({
-        items,
-        restaurantId: restaurantData?.restaurantId || restaurantData?._id || restaurantId || null,
-        deliveryAddress: defaultAddress,
-        couponCode: inputCode
-      })
-
-      const pricingData = response?.data?.data?.pricing
-      if (!pricingData) {
-        toast.error("Unable to validate coupon")
-        return
-      }
-
-      if (!pricingData.appliedCoupon) {
-        toast.error("Invalid or unavailable coupon code")
-        setCouponCode("")
-        return
-      }
-
-      setPricing(pricingData)
-      setCouponCode(inputCode)
-      setAppliedCoupon(
-        matchedCoupon || {
-          code: inputCode,
-          discount: pricingData.appliedCoupon.discount || 0,
-          minOrder: 0,
-          customerGroup: "all",
-        },
-      )
-      setShowCoupons(false)
-      toast.success("Coupon applied")
-    } catch (error) {
-      debugError("Error applying coupon code:", error)
-      toast.error("Failed to apply coupon")
+    if (subtotal < (Number(matchedCoupon.minOrder) || 0)) {
+      toast.error(`Min order ${RUPEE_SYMBOL}${Number(matchedCoupon.minOrder || 0)}`)
+      return
     }
+
+    setAppliedCoupon(matchedCoupon)
+    setCouponCode(inputCode)
+    setShowCoupons(false)
+    toast.success("Coupon applied")
   }
 
-
-  const handleRemoveCoupon = async () => {
+  const handleRemoveCoupon = () => {
     setAppliedCoupon(null)
     setCouponCode("")
     setManualCouponCode("")
-
-    // Recalculate pricing without coupon
-    if (cart.length > 0 && hasSavedAddress) {
-      try {
-        const items = cart.map(item => ({
-          itemId: item.itemId || item.id,
-          name: item.name,
-          price: item.price,
-          variantId: item.variantId || undefined,
-          variantName: item.variantName || undefined,
-          variantPrice: item.variantPrice || item.price,
-          quantity: item.quantity || 1,
-          image: item.image,
-          description: item.description,
-          isVeg: item.isVeg === true || item.foodType === 'Veg',
-          restaurantId: item.restaurantId || item.restaurant?._id || item.restaurant
-        }))
-
-        const response = await orderAPI.calculateOrder({
-          items,
-          restaurantId: restaurantData?.restaurantId || restaurantData?._id || restaurantId || null,
-          deliveryAddress: defaultAddress,
-          couponCode: null
-        })
-
-        if (response?.data?.success && response?.data?.data?.pricing) {
-          setPricing(response.data.data.pricing)
-        }
-      } catch (error) {
-        debugError("Error recalculating pricing:", error)
-      }
-    }
+    hasManuallyRemovedCouponRef.current = true
+    toast.success("Coupon removed")
   }
 
 
@@ -1547,6 +1583,18 @@ function Cart() {
       openLocationSelector()
       return
     }
+
+    if (cart.length === 0) {
+      alert("Your cart is empty")
+      return
+    }
+
+    const validation = await validateRestaurants({ force: true })
+    if (validation?.hasClosed) {
+      return
+    }
+
+    await flushCartSave()
 
     if (isScheduled) {
       if (!scheduledDate || !scheduledTime) {
@@ -1561,14 +1609,7 @@ function Cart() {
       }
     }
 
-    if (cart.length === 0) {
-      alert("Your cart is empty")
-      return
-    }
-
     setIsPlacingOrder(true)
-
-    // Use API_BASE_URL from config (supports both dev and production)
 
     try {
       debugLog("?? Starting order placement process...")
@@ -1576,15 +1617,15 @@ function Cart() {
       debugLog("?? Applied coupon:", appliedCoupon?.code || "None")
       debugLog("?? Delivery address:", defaultAddress?.label || defaultAddress?.city)
 
-      // Ensure couponCode is included in pricing
-      const orderPricing = pricing || {
-        subtotal,
-        deliveryFee,
-        tax: gstCharges,
-        platformFee,
-        discount,
-        total,
-        couponCode: appliedCoupon?.code || null
+      // Ensure couponCode and dynamic deliveryFee are included in pricing
+      const orderPricing = {
+        subtotal: pricing?.subtotal || subtotal,
+        deliveryFee: deliveryFee,
+        tax: pricing?.tax || gstCharges,
+        platformFee: pricing?.platformFee || platformFee,
+        discount: pricing?.discount || discount,
+        total: total,
+        couponCode: pricing?.couponCode || appliedCoupon?.code || null
       };
 
       // Add couponCode if not present but coupon is applied
@@ -1725,6 +1766,9 @@ function Cart() {
         // `useZone()` can return `null`. Zod expects string/undefined, not null.
         zoneId: zoneId || undefined,
         scheduledAt: isScheduled ? new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString() : undefined,
+        deliveryOption: selectedDeliveryOption.name,
+        deliveryTime: selectedDeliveryOption.time,
+        estimatedTime: selectedDeliveryOption.estimatedTime,
       };
       // Log final order details (including paymentMethod for COD debugging)
       debugLog('?? FINAL: Sending order to backend with:', {
@@ -1905,7 +1949,7 @@ function Cart() {
               clearCart()
               try {
                 window.localStorage.removeItem('scheduled_order_time')
-              } catch {}
+              } catch { }
               setIsPlacingOrder(false)
             } else {
               throw new Error(verifyResponse.data.message || "Payment verification failed")
@@ -2062,21 +2106,21 @@ function Cart() {
               />
 
               {/* Note & Cutlery */}
-              <div className="rounded-3xl border border-gray-100 bg-white px-4 md:px-6 py-4 shadow-sm dark:border-gray-800 dark:bg-[#141414] flex flex-col sm:flex-row gap-3">
-                <div className="flex-1 flex flex-col gap-2">
-                  <button
-                    onClick={() => setShowRestaurantNoteInput(!showRestaurantNoteInput)}
-                    className="flex-1 flex items-center gap-2 px-3 md:px-4 py-2 md:py-3 border border-gray-200 dark:border-gray-700 rounded-lg md:rounded-xl text-sm md:text-base text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-                  >
-                    <Utensils className="h-4 w-4 md:h-5 md:w-5" />
-                    <span className="truncate">{restaurantNote || "Add note for restaurant"}</span>
-                  </button>
-                </div>
+              <div className="rounded-2xl border border-gray-100 bg-white p-2.5 shadow-xs dark:border-gray-800 dark:bg-[#141414] flex gap-2 items-center">
                 <button
-                  onClick={() => setSendCutlery(!sendCutlery)}
-                  className={`flex items-center gap-2 px-3 md:px-4 py-2 md:py-3 border rounded-lg md:rounded-xl text-sm md:text-base h-full ${sendCutlery ? 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300' : 'border-[#16A34A] dark:border-[#16A34A]/50 text-[#16A34A] dark:text-[#16A34A] bg-[#16A34A05] dark:bg-[#16A34A10]'}`}
+                  type="button"
+                  onClick={() => setShowRestaurantNoteInput(!showRestaurantNoteInput)}
+                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
                 >
-                  <Utensils className="h-4 w-4 md:h-5 md:w-5" />
+                  <Utensils className="h-3.5 w-3.5 text-[#16A34A]" />
+                  <span className="truncate">{restaurantNote || "Add note for restaurant"}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSendCutlery(!sendCutlery)}
+                  className={`flex items-center justify-center gap-1.5 px-3 py-2 border rounded-xl text-xs font-semibold transition-colors ${sendCutlery ? 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300' : 'border-[#16A34A] dark:border-[#16A34A]/50 text-[#16A34A] bg-[#16A34A05] dark:bg-[#16A34A10]'}`}
+                >
+                  <Utensils className="h-3.5 w-3.5 text-[#16A34A]" />
                   <span className="whitespace-nowrap">
                     {sendCutlery ? "Send cutlery" : "Don't send"}
                   </span>
@@ -2085,22 +2129,22 @@ function Cart() {
 
               {/* Restaurant Note Input */}
               {showRestaurantNoteInput && (
-                <div className="bg-white dark:bg-[#1a1a1a] px-4 md:px-6 py-3 md:py-4 rounded-lg md:rounded-xl border border-slate-100 dark:border-gray-800">
-                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">
+                <div className="bg-white dark:bg-[#1a1a1a] p-3 rounded-2xl border border-slate-100 dark:border-gray-800 shadow-xs">
+                  <p className="text-[10px] font-black uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">
                     Restaurant instructions
                   </p>
                   <textarea
                     value={restaurantNote}
                     onChange={(e) => setRestaurantNote(e.target.value)}
                     placeholder="Eg. Don't add onions, make it extra spicy, etc."
-                     className="w-full border border-gray-200 dark:border-gray-700 rounded-lg md:rounded-xl p-3 md:p-4 text-sm md:text-base resize-none h-20 md:h-24 focus:outline-none focus:border-[#16A34A] dark:focus:border-[#16A34A] bg-white dark:bg-[#0a0a0a] text-gray-900 dark:text-gray-100"
+                    className="w-full border border-gray-200 dark:border-gray-700 rounded-xl p-2.5 text-xs resize-none h-16 focus:outline-none focus:border-[#16A34A] dark:focus:border-[#16A34A] bg-white dark:bg-[#0a0a0a] text-gray-900 dark:text-gray-100"
                     maxLength={240}
                   />
-                  <div className="mt-2 flex items-center justify-between gap-3">
-                    <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                  <div className="mt-1 flex items-center justify-between gap-3">
+                    <p className="text-[10px] text-gray-400 dark:text-gray-500">
                       Note for restaurant.
                     </p>
-                    <span className="text-[11px] text-gray-400 dark:text-gray-500 whitespace-nowrap">
+                    <span className="text-[10px] text-gray-400 dark:text-gray-500 whitespace-nowrap">
                       {restaurantNote.length}/240
                     </span>
                   </div>
@@ -2109,45 +2153,43 @@ function Cart() {
 
               {/* Complete your meal section - Approved Addons */}
               {addons.length > 0 && (
-                <div className="rounded-3xl border border-gray-100 bg-white px-4 md:px-6 py-5 shadow-sm dark:border-gray-800 dark:bg-[#141414]">
-                  <div className="flex items-center gap-2 md:gap-3 mb-3 md:mb-4">
-                    <div className="w-6 h-6 md:w-8 md:h-8 bg-gray-100 dark:bg-gray-800 rounded flex items-center justify-center">
-                       <Sparkles className="h-4 w-4 md:h-5 md:w-5 text-[#16A34A]" />
+                <div className="rounded-2xl border border-gray-100 bg-white px-3.5 py-3 shadow-xs dark:border-gray-800 dark:bg-[#141414]">
+                  <div className="flex items-center gap-2 mb-2.5">
+                    <div className="w-6 h-6 bg-gray-100 dark:bg-gray-800 rounded flex items-center justify-center">
+                      <Sparkles className="h-3.5 w-3.5 text-[#16A34A]" />
                     </div>
-                    <span className="text-sm md:text-base font-semibold text-gray-800 dark:text-gray-200">Complete your meal with</span>
+                    <span className="text-xs font-black uppercase tracking-wider text-gray-500 dark:text-gray-400">Complete your meal with</span>
                   </div>
                   {loadingAddons ? (
-                    <div className="flex gap-3 md:gap-4 overflow-x-auto pb-2 -mx-4 md:-mx-6 px-4 md:px-6 scrollbar-hide">
+                    <div className="flex gap-3 overflow-x-auto pb-1 -mx-3.5 px-3.5 scrollbar-hide">
                       {[1, 2, 3].map((i) => (
-                        <div key={i} className="flex-shrink-0 w-28 md:w-36 animate-pulse">
-                          <div className="w-full h-28 md:h-36 bg-gray-200 dark:bg-gray-700 rounded-lg md:rounded-xl" />
-                          <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded mt-2" />
-                          <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded mt-1 w-2/3" />
+                        <div key={i} className="flex-shrink-0 w-20 md:w-24 animate-pulse">
+                          <div className="w-full h-20 md:h-24 bg-gray-200 dark:bg-gray-700 rounded-lg" />
+                          <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded mt-1.5" />
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <div className="flex gap-3 md:gap-4 overflow-x-auto pb-2 -mx-4 md:-mx-6 px-4 md:px-6 scrollbar-hide">
+                    <div className="flex gap-3 overflow-x-auto pb-1 -mx-3.5 px-3.5 scrollbar-hide">
                       {addons.map((addon) => (
-                        <div key={addon.id} className="flex-shrink-0 w-28 md:w-36">
-                          <div className="relative bg-gray-100 dark:bg-gray-800 rounded-lg md:rounded-xl overflow-hidden">
+                        <div key={addon.id} className="flex-shrink-0 w-20 md:w-24">
+                          <div className="relative bg-gray-100 dark:bg-gray-800 rounded-lg overflow-hidden">
                             <img
-                              src={addon.image || (addon.images && addon.images[0]) || "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=200&h=200&fit=crop"}
+                              src={addon.image || (addon.images && addon.images[0]) || "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=120&h=120&fit=crop"}
                               alt={addon.name}
-                              className="w-full h-28 md:h-36 object-cover rounded-lg md:rounded-xl"
+                              className="w-full h-20 md:h-24 object-cover rounded-lg"
                               onError={(e) => {
                                 e.target.onerror = null
-                                e.target.src = "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=200&h=200&fit=crop"
+                                e.target.src = "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=120&h=120&fit=crop"
                               }}
                             />
-                            <div className="absolute top-1 md:top-2 left-1 md:left-2">
-                              <div className="w-3.5 h-3.5 md:w-4 md:h-4 bg-white border border-green-600 flex items-center justify-center rounded">
-                                <div className="w-1.5 h-1.5 md:w-2 md:h-2 rounded-full bg-green-600" />
+                            <div className="absolute top-0.5 left-0.5">
+                              <div className="w-2.5 h-2.5 bg-white border border-green-600 flex items-center justify-center rounded-[3px]">
+                                <div className="w-1.5 h-1.5 rounded-full bg-green-600" />
                               </div>
                             </div>
                             <button
                               onClick={() => {
-                                // Use restaurant info from existing cart items to ensure format consistency
                                 const cartRestaurantId = cart[0]?.restaurantId || restaurantId;
                                 const cartRestaurantName = cart[0]?.restaurant || restaurantName;
 
@@ -2174,16 +2216,13 @@ function Cart() {
                                   restaurantId: cartRestaurantId
                                 });
                               }}
-                               className="absolute bottom-1 md:bottom-2 right-1 md:right-2 w-6 h-6 md:w-7 md:h-7 bg-white border border-[#16A34A] rounded flex items-center justify-center shadow-sm hover:bg-[#16A34A05] dark:hover:bg-[#16A34A10] transition-colors"
+                              className="absolute bottom-1 right-1 w-5 h-5 bg-white border border-[#16A34A] rounded flex items-center justify-center shadow-xs hover:bg-[#16A34A05] dark:hover:bg-[#16A34A10] transition-colors"
                             >
-                               <Plus className="h-3.5 w-3.5 md:h-4 md:w-4 text-[#16A34A]" />
+                              <Plus className="h-3 w-3 text-[#16A34A]" />
                             </button>
                           </div>
-                          <p className="text-xs md:text-sm font-medium text-gray-800 dark:text-gray-200 mt-1.5 md:mt-2 line-clamp-2 leading-tight">{addon.name}</p>
-                          {addon.description && (
-                            <p className="text-xs md:text-sm text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-1">{addon.description}</p>
-                          )}
-                          <p className="text-xs md:text-sm text-gray-800 dark:text-gray-200 font-semibold mt-0.5">{RUPEE_SYMBOL}{addon.price}</p>
+                          <p className="text-[10px] font-bold text-gray-800 dark:text-gray-200 mt-1 line-clamp-1 leading-tight">{addon.name}</p>
+                          <p className="text-[10px] text-gray-900 dark:text-gray-100 font-extrabold mt-0.5">{RUPEE_SYMBOL}{addon.price}</p>
                         </div>
                       ))}
                     </div>
@@ -2193,31 +2232,31 @@ function Cart() {
             </div>
 
             {/* Right Column: Coupon, Delivery, Address, Contact, Bill Details */}
-            <div className="lg:col-span-5 space-y-4">
+            <div className="lg:col-span-5 space-y-3">
               {/* Coupon Section */}
-              <div className="rounded-3xl border border-gray-100 bg-white shadow-sm dark:border-gray-800 dark:bg-[#141414] flex flex-col">
+              <div className="rounded-2xl border border-gray-100 bg-white shadow-xs dark:border-gray-800 dark:bg-[#141414] flex flex-col">
                 {deliveryFee === 0 && (
-                  <div className="px-4 py-3 md:px-6 md:py-4 border-b border-dashed border-gray-200 dark:border-gray-800 flex items-center gap-3 bg-[#f4fcf7] dark:bg-green-900/10">
-                    <CheckCircle2 className="h-5 w-5 text-green-600 fill-green-600/20" />
-                    <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">You saved {RUPEE_SYMBOL}{feeSettings.deliveryFee || 25} on delivery</span>
+                  <div className="px-4 py-2.5 md:px-5 md:py-3 border-b border-dashed border-gray-200 dark:border-gray-800 flex items-center gap-3 bg-[#f4fcf7] dark:bg-green-900/10">
+                    <CheckCircle2 className="h-4.5 w-4.5 text-green-600 fill-green-600/20" />
+                    <span className="text-xs md:text-sm font-bold text-gray-800 dark:text-gray-200">You saved {RUPEE_SYMBOL}{feeSettings.deliveryFee || 25} on delivery</span>
                   </div>
                 )}
 
                 {/* Applied Coupon View */}
                 {appliedCoupon ? (
-                  <div className="px-4 py-3 md:px-6 md:py-4 flex items-center justify-between">
+                  <div className="px-4 py-2.5 md:px-5 md:py-3 flex items-center justify-between">
                     <div className="flex items-start gap-3">
-                       <Percent className="h-5 w-5 text-[#16A34A] mt-0.5" />
+                      <Percent className="h-4.5 w-4.5 text-[#16A34A] mt-0.5" />
                       <div>
-                        <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">'{appliedCoupon.code}' applied</p>
-                         <p className="text-xs text-[#16A34A] font-medium mt-0.5">You saved {RUPEE_SYMBOL}{discount}</p>
+                        <p className="text-xs md:text-sm font-bold text-gray-850 dark:text-gray-200">'{appliedCoupon.code}' applied</p>
+                        <p className="text-xs text-[#16A34A] font-medium mt-0.5">You saved {RUPEE_SYMBOL}{discount}</p>
                       </div>
                     </div>
-                     <button onClick={handleRemoveCoupon} className="text-[#16A34A] text-xs font-semibold px-2 hover:underline">REMOVE</button>
+                    <button onClick={handleRemoveCoupon} className="text-[#16A34A] text-xs font-bold px-2 hover:underline">REMOVE</button>
                   </div>
                 ) : (
                   /* Available / Input View */
-                  <div className="px-4 py-3 md:px-6 md:py-4 flex flex-col gap-3">
+                  <div className="px-4 py-2.5 md:px-5 md:py-3 flex flex-col gap-3">
                     {loadingCoupons ? (
                       <p className="text-sm text-gray-500">Loading offers...</p>
                     ) : availableCoupons.length > 0 ? (
@@ -2229,20 +2268,20 @@ function Cart() {
                               {availableCoupons[0].discountDisplay || `Save ${RUPEE_SYMBOL}${availableCoupons[0].discount}`} with '{availableCoupons[0].code}'
                             </p>
                             {availableCoupons[0].customerGroup === "new" ? (
-                               <p className="text-[11px] text-[#16A34A] mb-1">First-time users only</p>
+                              <p className="text-[11px] text-[#16A34A] mb-1">First-time users only</p>
                             ) : subtotal < availableCoupons[0].minOrder ? (
                               <p className="text-xs text-blue-600 font-medium mb-1">Add items worth {RUPEE_SYMBOL}{(availableCoupons[0].minOrder - subtotal).toFixed(0)} more to unlock</p>
                             ) : null}
 
                             {availableCoupons.length > 1 && (
-                               <button onClick={() => setShowCoupons(!showCoupons)} className="text-[11px] text-[#16A34A] hover:underline flex items-center mt-1">
-                                 View all coupons <ChevronRight className="h-3 w-3 ml-0.5" />
-                               </button>
+                              <button onClick={() => setShowCoupons(!showCoupons)} className="text-[11px] text-[#16A34A] hover:underline flex items-center mt-1">
+                                View all coupons <ChevronRight className="h-3 w-3 ml-0.5" />
+                              </button>
                             )}
                           </div>
                         </div>
                         <button
-                           className="border border-[#16A34A] text-[#16A34A] dark:hover:bg-[#16A34A10] rounded px-3 py-1.5 text-xs font-semibold uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed ml-2 shadow-sm"
+                          className="border border-[#16A34A] text-[#16A34A] dark:hover:bg-[#16A34A10] rounded px-3 py-1.5 text-xs font-semibold uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed ml-2 shadow-sm"
                           onClick={() => handleApplyCoupon(availableCoupons[0])}
                           disabled={subtotal < availableCoupons[0].minOrder || (availableCoupons[0].customerGroup === "new" && userOrderCount > 0)}
                         >
@@ -2266,10 +2305,10 @@ function Cart() {
                             value={manualCouponCode}
                             onChange={(e) => setManualCouponCode(e.target.value.toUpperCase())}
                             placeholder="Enter coupon code"
-                             className="flex-1 h-9 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#0a0a0a] px-3 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:border-[#16A34A]"
+                            className="flex-1 h-9 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#0a0a0a] px-3 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:border-[#16A34A]"
                           />
                           <button
-                             className="bg-white dark:bg-[#1a1a1a] border border-[#16A34A] text-[#16A34A] rounded px-4 h-9 text-xs font-semibold uppercase hover:bg-[#16A34A05] dark:hover:bg-[#16A34A10]"
+                            className="bg-white dark:bg-[#1a1a1a] border border-[#16A34A] text-[#16A34A] rounded px-4 h-9 text-xs font-semibold uppercase hover:bg-[#16A34A05] dark:hover:bg-[#16A34A10]"
                             onClick={handleApplyCouponCode}
                           >
                             APPLY
@@ -2284,7 +2323,7 @@ function Cart() {
                                   {coupon.discountDisplay || `Save ${RUPEE_SYMBOL}${coupon.discount}`} with '{coupon.code}'
                                 </p>
                                 {coupon.customerGroup === "new" ? (
-                                   <p className="text-[11px] text-[#16A34A] mb-1">First-time users only</p>
+                                  <p className="text-[11px] text-[#16A34A] mb-1">First-time users only</p>
                                 ) : subtotal < coupon.minOrder ? (
                                   <p className="text-xs text-blue-600 font-medium mb-1 line-clamp-1">Add items worth {RUPEE_SYMBOL}{(coupon.minOrder - subtotal).toFixed(0)} more to unlock</p>
                                 ) : (
@@ -2307,64 +2346,127 @@ function Cart() {
                 )}
               </div>
 
-              {/* Delivery Time */}
-              <div className="rounded-3xl border border-gray-100 bg-white px-4 md:px-6 py-5 shadow-sm dark:border-gray-800 dark:bg-[#141414]">
-                <div className="flex items-start gap-3 md:gap-4">
-                  <div className="mt-0.5">
-                    <Zap className="h-5 w-5 text-green-600 fill-green-600/20" />
+              {/* Delivery Speed Options */}
+              <div className="rounded-2xl border border-gray-100 bg-white px-4 py-3.5 md:py-4 shadow-xs dark:border-gray-800 dark:bg-[#141414]">
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="bg-[#16A34A05] dark:bg-[#16A34A10] p-1.5 rounded-lg shrink-0">
+                    <Bike className="h-4 w-4 text-[#16A34A]" />
                   </div>
-                  <div className="flex-1">
-                    <p className="text-base text-gray-800 dark:text-gray-200">
-                      Delivery in <span className="text-green-600 font-bold">{restaurantData?.estimatedDeliveryTime || "15-20 mins"}</span>
-                    </p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-1 flex items-center gap-1">
-                      Want this later?
-                      <button onClick={() => {
-                        const next = !isScheduled
-                        setIsScheduled(next)
-                        if (next && !scheduledDate) {
-                          // Auto-set today's date so time slots populate immediately
-                          const now = new Date()
-                          const todayStr = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().split('T')[0]
-                          setScheduledDate(todayStr)
-                        }
-                      }} className="border-b border-dashed border-gray-500 font-medium outline-none">
-                        {isScheduled ? "Cancel schedule" : "Schedule it"}
-                      </button>
-                    </p>
+                  <span className="text-sm font-extrabold text-gray-800 dark:text-gray-200 tracking-tight">Delivery Speed Options</span>
+                </div>
+
+                {!isScheduled ? (
+                  <div className="space-y-2">
+                    {deliveryOptions.map((option) => {
+                      const isSelected = deliveryOption === option.id
+                      const IconComponent = option.icon
+                      const feeAmount = Math.max(0, baseDeliveryFee + option.feeModifier)
+
+                      return (
+                        <div
+                          key={option.id}
+                          className={`flex items-center justify-between p-2.5 rounded-xl cursor-pointer border transition-all ${isSelected
+                              ? "border-[#16A34A] bg-[#16A34A]/5 dark:bg-[#16A34A]/10 shadow-xs"
+                              : "border-gray-100 hover:border-green-200 dark:border-gray-800 dark:hover:border-gray-700 bg-white dark:bg-[#141414]"
+                            }`}
+                          onClick={() => setDeliveryOption(option.id)}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className={`p-1.5 rounded-lg transition-colors shrink-0 ${isSelected
+                                ? "bg-[#16A34A] text-white"
+                                : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+                              }`}>
+                              <IconComponent className="h-3.5 w-3.5" />
+                            </div>
+                            <div className="min-w-0 text-left">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-bold text-xs md:text-sm text-gray-900 dark:text-white leading-none">
+                                  {option.name}
+                                </span>
+                                {option.badge && (
+                                  <span className={`text-[9px] font-extrabold px-1.5 py-0 rounded border ${option.badgeColor}`}>
+                                    {option.badge}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-gray-500 mt-0.5 leading-none">
+                                {option.description}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3 shrink-0">
+                            <div className="text-right">
+                              <p className="text-xs font-bold text-[#16A34A] leading-none">
+                                {option.time}
+                              </p>
+                              <p className="text-[10px] font-semibold text-gray-400 mt-0.5 leading-none">
+                                {feeAmount === 0 ? "FREE" : `${RUPEE_SYMBOL}${feeAmount.toFixed(0)}`}
+                              </p>
+                            </div>
+                            <div className={`h-3.5 w-3.5 rounded-full border flex items-center justify-center shrink-0 ${isSelected ? "border-[#16A34A] bg-[#16A34A]" : "border-gray-300 dark:border-gray-600"
+                              }`}>
+                              {isSelected && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
                   </div>
+                ) : (
+                  <div className="bg-slate-50 dark:bg-slate-900/40 p-2.5 rounded-xl mb-2 text-center border border-slate-100 dark:border-slate-800">
+                    <p className="text-xs font-bold text-slate-850 dark:text-slate-200">Scheduled Order Mode</p>
+                    <p className="text-[10px] text-slate-500 mt-0.5">Delivery will arrive at the scheduled time chosen below</p>
+                  </div>
+                )}
+
+                <div className="mt-3 pt-2.5 border-t border-gray-100 dark:border-gray-800/80">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                    Want this later?
+                    <button onClick={() => {
+                      const next = !isScheduled
+                      setIsScheduled(next)
+                      if (next && !scheduledDate) {
+                        // Auto-set today's date so time slots populate immediately
+                        const now = new Date()
+                        const todayStr = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().split('T')[0]
+                        setScheduledDate(todayStr)
+                      }
+                    }} className="border-b border-dashed border-gray-500 font-bold outline-none">
+                      {isScheduled ? "Cancel schedule" : "Schedule it"}
+                    </button>
+                  </p>
                 </div>
 
                 {isScheduled && (
-                  <div className="mt-5 flex flex-col sm:flex-row gap-3 pt-3 border-t border-gray-100 dark:border-gray-800">
+                  <div className="mt-3 flex flex-col sm:flex-row gap-2.5 pt-2.5 border-t border-gray-100 dark:border-gray-800">
                     <div className="flex-1">
-                      <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Date (Up to Tomorrow)</label>
+                      <label className="block text-[10px] text-gray-500 dark:text-gray-400 mb-1">Date</label>
                       <input
                         type="date"
                         min={new Date().toLocaleDateString('en-CA')}
                         max={new Date(Date.now() + 86400000).toLocaleDateString('en-CA')}
                         value={scheduledDate}
                         onChange={(e) => setScheduledDate(e.target.value)}
-                        className="w-full text-sm p-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-[#0a0a0a] text-gray-800 dark:text-gray-200 focus:outline-none focus:border-[#16A34A]"
+                        className="w-full text-xs p-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-[#0a0a0a] text-gray-800 dark:text-gray-200 focus:outline-none focus:border-[#16A34A]"
                       />
                     </div>
                     <div className="flex-1">
-                      <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Time</label>
+                      <label className="block text-[10px] text-gray-500 dark:text-gray-400 mb-1">Time</label>
                       {availableTimeSlots.length > 0 ? (
                         <div className="relative">
                           <select
                             value={scheduledTime}
                             onChange={(e) => setScheduledTime(e.target.value)}
-                             className="w-full text-sm p-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-[#0a0a0a] text-gray-800 dark:text-gray-200 focus:outline-none focus:border-[#16A34A] appearance-none pr-8"
+                            className="w-full text-xs p-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-[#0a0a0a] text-gray-800 dark:text-gray-200 focus:outline-none focus:border-[#16A34A] appearance-none pr-8"
                           >
                             {availableTimeSlots.map(slot => (
                               <option key={slot.value} value={slot.value}>{slot.label}</option>
                             ))}
                           </select>
-                          <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500 pointer-events-none" />
+                          <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-500 pointer-events-none" />
                         </div>
                       ) : (
-                        <div className="w-full text-sm p-2 bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 rounded-md text-center border border-gray-200 dark:border-gray-700">
+                        <div className="w-full text-xs p-2 bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 rounded-md text-center border border-gray-200 dark:border-gray-700">
                           {scheduledDate ? "No slots available" : "Select date first"}
                         </div>
                       )}
@@ -2374,124 +2476,124 @@ function Cart() {
               </div>
 
               {/* Delivery Address */}
-              <div className="rounded-3xl border border-gray-100 bg-white px-4 md:px-6 py-5 shadow-sm dark:border-gray-800 dark:bg-[#141414]">
-                <div className="flex items-start justify-between w-full text-left">
-                  <div className="flex items-start gap-4 flex-1">
-                     <div className="bg-[#16A34A05] dark:bg-[#16A34A10] p-2 rounded-xl mt-0.5">
-                       <MapPin className="h-5 w-5 text-[#16A34A]" />
-                     </div>
+              <div className="rounded-2xl border border-gray-100 bg-white px-4 py-3.5 shadow-xs dark:border-gray-800 dark:bg-[#141414]">
+                <div className="flex items-center justify-between w-full text-left">
+                  <div className="flex items-center gap-3 flex-1">
+                    <div className="bg-[#16A34A05] dark:bg-[#16A34A10] p-1.5 rounded-lg">
+                      <MapPin className="h-5 w-5 text-[#16A34A]" />
+                    </div>
                     <div className="flex-1">
-                        <div className="flex flex-col">
-                          <p className="text-sm md:text-base text-gray-800 dark:text-gray-200">
-                            Delivery at{" "}
-                            <span className="font-semibold">
-                              {deliveryAddressMode === "current" ? "Current location" : "Location"}
-                            </span>
-                          </p>
-                          {deliveryAddressMode === "current" ? (
-                            <div className="mt-1">
-                              {currentLocationLoading || !currentLocationAddress ? (
-                                <p className="text-xs md:text-sm text-gray-500 dark:text-gray-400 animate-pulse">
-                                  Finding your current address...
-                                </p>
-                              ) : (
-                                <p className="text-xs md:text-sm text-gray-500 dark:text-gray-400 line-clamp-2">
-                                  {formatFullAddress(currentLocationAddress) ||
-                                    currentLocationAddress?.formattedAddress ||
-                                    currentLocationAddress?.address ||
-                                    "Add delivery address"}
-                                </p>
-                              )}
-                              <div className="mt-1 flex items-center gap-2">
-                                 <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] md:text-[11px] font-semibold bg-[#16A34A05] text-[#16A34A] dark:bg-[#16A34A10] dark:text-[#16A34A] border border-[#16A34A]/30">
-                                   GPS enabled
-                                 </span>
-                              </div>
+                      <div className="flex flex-col">
+                        <p className="text-sm md:text-base text-gray-800 dark:text-gray-200">
+                          Delivery at{" "}
+                          <span className="font-semibold">
+                            {deliveryAddressMode === "current" ? "Current location" : "Location"}
+                          </span>
+                        </p>
+                        {deliveryAddressMode === "current" ? (
+                          <div className="mt-1">
+                            {currentLocationLoading || !currentLocationAddress ? (
+                              <p className="text-xs md:text-sm text-gray-500 dark:text-gray-400 animate-pulse">
+                                Finding your current address...
+                              </p>
+                            ) : (
+                              <p className="text-xs md:text-sm text-gray-500 dark:text-gray-400 line-clamp-2">
+                                {formatFullAddress(currentLocationAddress) ||
+                                  currentLocationAddress?.formattedAddress ||
+                                  currentLocationAddress?.address ||
+                                  "Add delivery address"}
+                              </p>
+                            )}
+                            <div className="mt-1 flex items-center gap-2">
+                              <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] md:text-[11px] font-semibold bg-[#16A34A05] text-[#16A34A] dark:bg-[#16A34A10] dark:text-[#16A34A] border border-[#16A34A]/30">
+                                GPS enabled
+                              </span>
                             </div>
-                          ) : (
-                            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 line-clamp-2 pr-4">
-                              {defaultAddress ? (formatFullAddress(defaultAddress) || defaultAddress?.formattedAddress || defaultAddress?.address || "Add delivery address") : "Add delivery address"}
-                            </p>
-                          )}
-                        </div>
-                        {!hasSavedAddress && (
-                           <p className="text-sm text-[#16A34A] mt-2 font-medium">
-                             Select a delivery location to continue
-                           </p>
+                          </div>
+                        ) : (
+                          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 line-clamp-2 pr-4">
+                            {defaultAddress ? (formatFullAddress(defaultAddress) || defaultAddress?.formattedAddress || defaultAddress?.address || "Add delivery address") : "Add delivery address"}
+                          </p>
                         )}
-                        {/* Address Selection Buttons */}
-                        <div className="flex flex-wrap gap-2 mt-3">
-                          {["Home", "Work", "Other"].map((label) => {
-                            const normalizedLabel = normalizeAddressLabel(label)
-                            const addressExists = addresses.some(addr => normalizeAddressLabel(addr.label) === normalizedLabel)
+                      </div>
+                      {!hasSavedAddress && (
+                        <p className="text-sm text-[#16A34A] mt-2 font-medium">
+                          Select a delivery location to continue
+                        </p>
+                      )}
+                      {/* Address Selection Buttons */}
+                      <div className="flex flex-wrap gap-2 mt-3">
+                        {["Home", "Work", "Other"].map((label) => {
+                          const normalizedLabel = normalizeAddressLabel(label)
+                          const addressExists = addresses.some(addr => normalizeAddressLabel(addr.label) === normalizedLabel)
+                          return (
+                            <button
+                              key={label}
+                              onClick={(e) => {
+                                e.preventDefault()
+                                e.stopPropagation()
+                                handleSelectAddressByLabel(label)
+                              }}
+                              disabled={!addressExists}
+                              className={`text-xs px-4 py-1.5 rounded-full font-semibold transition-all ${addressExists
+                                ? 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-gray-800 dark:text-gray-300'
+                                : 'bg-gray-50 text-gray-400 border border-gray-100 cursor-not-allowed dark:bg-gray-900'
+                                }`}
+                            >
+                              {label}
+                            </button>
+                          )
+                        })}
+                      </div>
+                      {addresses.length > 0 && (
+                        <div className="mt-4 space-y-3">
+                          {addresses.map((address) => {
+                            const addressId = getAddressId(address)
+                            const isSelected = addressId && addressId === selectedAddressId
                             return (
                               <button
-                                key={label}
+                                key={addressId || `${address.label}-${address.street}-${address.city}`}
+                                type="button"
                                 onClick={(e) => {
                                   e.preventDefault()
                                   e.stopPropagation()
-                                  handleSelectAddressByLabel(label)
+                                  handleSelectSavedAddress(address)
                                 }}
-                                disabled={!addressExists}
-                                className={`text-xs px-4 py-1.5 rounded-full font-semibold transition-all ${addressExists
-                                  ? 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-gray-800 dark:text-gray-300'
-                                  : 'bg-gray-50 text-gray-400 border border-gray-100 cursor-not-allowed dark:bg-gray-900'
+                                className={`w-full text-left rounded-xl border-2 p-3 transition-colors ${isSelected
+                                  ? "border-[#16A34A] bg-[#16A34A05] dark:bg-[#16A34A]/5"
+                                  : "border-slate-100 dark:border-gray-800 hover:border-slate-200"
                                   }`}
                               >
-                                {label}
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
+                                      {getDisplayAddressLabel(address.label)}
+                                    </p>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 mt-1">
+                                      {formatFullAddress(address) || address.address || "Address details"}
+                                    </p>
+                                  </div>
+                                  {isSelected && (
+                                    <span className="text-[10px] bg-[#16A34A] text-white px-2 py-0.5 rounded uppercase font-bold tracking-wider whitespace-nowrap">
+                                      Selected
+                                    </span>
+                                  )}
+                                </div>
                               </button>
                             )
                           })}
                         </div>
-                        {addresses.length > 0 && (
-                          <div className="mt-4 space-y-3">
-                            {addresses.map((address) => {
-                              const addressId = getAddressId(address)
-                              const isSelected = addressId && addressId === selectedAddressId
-                              return (
-                                <button
-                                  key={addressId || `${address.label}-${address.street}-${address.city}`}
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.preventDefault()
-                                    e.stopPropagation()
-                                    handleSelectSavedAddress(address)
-                                  }}
-                                   className={`w-full text-left rounded-xl border-2 p-3 transition-colors ${isSelected
-                                     ? "border-[#16A34A] bg-[#16A34A05] dark:bg-[#16A34A]/5"
-                                     : "border-slate-100 dark:border-gray-800 hover:border-slate-200"
-                                     }`}
-                                >
-                                  <div className="flex items-start justify-between gap-3">
-                                    <div className="min-w-0">
-                                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
-                                        {getDisplayAddressLabel(address.label)}
-                                      </p>
-                                      <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 mt-1">
-                                        {formatFullAddress(address) || address.address || "Address details"}
-                                      </p>
-                                    </div>
-                                    {isSelected && (
-                                       <span className="text-[10px] bg-[#16A34A] text-white px-2 py-0.5 rounded uppercase font-bold tracking-wider whitespace-nowrap">
-                                         Selected
-                                       </span>
-                                    )}
-                                  </div>
-                                </button>
-                              )
-                            })}
-                          </div>
-                        )}
+                      )}
                     </div>
                   </div>
                   <button
                     type="button"
-                     onClick={openLocationSelector}
-                     className="p-2 text-[#16A34A] bg-[#16A34A05] rounded-full hover:bg-[#16A34A10] transition-colors dark:bg-[#16A34A15] dark:hover:bg-[#16A34A20]"
-                     aria-label="Open location selector"
-                   >
-                     <ChevronRight className="h-5 w-5" />
-                   </button>
+                    onClick={openLocationSelector}
+                    className="p-2 text-[#16A34A] bg-[#16A34A05] rounded-full hover:bg-[#16A34A10] transition-colors dark:bg-[#16A34A15] dark:hover:bg-[#16A34A20]"
+                    aria-label="Open location selector"
+                  >
+                    <ChevronRight className="h-5 w-5" />
+                  </button>
                 </div>
               </div>
 
@@ -2512,7 +2614,7 @@ function Cart() {
                   <button
                     type="button"
                     onClick={() => setIsEditingRecipient((prev) => !prev)}
-                     className="text-[#16A34A] text-xs md:text-sm font-semibold whitespace-nowrap"
+                    className="text-[#16A34A] text-xs md:text-sm font-semibold whitespace-nowrap"
                   >
                     {isEditingRecipient ? "Done" : "Change"}
                   </button>
@@ -2534,7 +2636,7 @@ function Cart() {
                           }))
                         }
                         placeholder="Enter recipient name"
-                         className="w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#111111] px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:border-[#16A34A]"
+                        className="w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#111111] px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:border-[#16A34A]"
                       />
                     </div>
                     <div>
@@ -2551,7 +2653,7 @@ function Cart() {
                           }))
                         }
                         placeholder="Enter recipient phone"
-                         className="w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#111111] px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:border-[#16A34A]"
+                        className="w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#111111] px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:border-[#16A34A]"
                       />
                     </div>
                     <p className="text-[11px] text-gray-500 dark:text-gray-400">
@@ -2560,8 +2662,45 @@ function Cart() {
                   </div>
                 )}
               </div>
+
+              {/* Order size & large-cart delivery notice */}
+              <div className="rounded-2xl border border-gray-100 bg-white px-4 py-3.5 shadow-xs dark:border-gray-800 dark:bg-[#141414]">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-50 dark:bg-orange-950/30">
+                      <Bike className="h-5 w-5 text-[#23361A] dark:text-orange-400" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-gray-900 dark:text-white">Items in your cart</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                        {cartCount} item{cartCount === 1 ? "" : "s"} total (qty incl. variants)
+                      </p>
+                    </div>
+                  </div>
+                  <span className="shrink-0 rounded-xl bg-gray-100 dark:bg-gray-800 px-3 py-1.5 text-lg font-extrabold text-gray-900 dark:text-white tabular-nums">
+                    {cartCount}
+                  </span>
+                </div>
+
+                {isLargeCart && (
+                  <div className="mt-3 rounded-xl border-2 border-amber-300/70 bg-gradient-to-r from-amber-50 via-orange-50 to-amber-50 dark:from-amber-950/30 dark:via-orange-950/20 dark:to-amber-950/30 dark:border-amber-600/40 p-3.5">
+                    <div className="flex items-start gap-2.5">
+                      <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                      <div className="space-y-1.5">
+                        <p className="text-sm font-bold text-amber-900 dark:text-amber-100">
+                          Large order — delivery update
+                        </p>
+                        <p className="text-xs leading-relaxed text-amber-900/90 dark:text-amber-100/90">
+                          Your cart has more than {LARGE_CART_ITEM_THRESHOLD} items. If one delivery partner cannot complete the order, our system may automatically assign up to two partners — this depends entirely on partner availability. Estimated delivery time may be different than usual.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Bill Details */}
-              <div className="rounded-3xl border border-gray-100 bg-white px-4 md:px-6 py-5 shadow-sm dark:border-gray-800 dark:bg-[#141414]">
+              <div className="rounded-2xl border border-gray-100 bg-white px-4 py-3.5 shadow-xs dark:border-gray-800 dark:bg-[#141414]">
                 <button
                   onClick={() => setShowBillDetails(!showBillDetails)}
                   className="flex items-center justify-between w-full"
@@ -2587,24 +2726,17 @@ function Cart() {
                 </button>
 
                 {showBillDetails && (
-                  <div className="mt-4 pt-4 border-t border-dashed border-gray-200 dark:border-gray-800 space-y-3">
+                  <div className="mt-3 pt-3 border-t border-dashed border-gray-200 dark:border-gray-800 space-y-2">
                     <div className="flex justify-between items-center text-sm">
                       <span className="text-gray-600 dark:text-gray-400">Item Total</span>
-                      <div className="flex items-center gap-2">
-                        {deliveryFeeBreakdown?.isSplitOrder && (
-                          <span className="bg-blue-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-tighter">
-                            Special Order
-                          </span>
-                        )}
-                        <span className="text-gray-800 dark:text-gray-200 font-medium">{RUPEE_SYMBOL}{subtotal.toFixed(2)}</span>
-                      </div>
+                      <span className="text-gray-800 dark:text-gray-200 font-medium">{RUPEE_SYMBOL}{subtotal.toFixed(2)}</span>
                     </div>
 
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-600 dark:text-gray-400">Delivery Fee</span>
-                       <span className={deliveryFee === 0 ? "text-[#16A34A] font-medium" : "text-gray-800 dark:text-gray-200 font-medium"}>
-                         {deliveryFee === 0 ? "FREE" : `${RUPEE_SYMBOL}${deliveryFee.toFixed(2)}`}
-                       </span>
+                      <span className={deliveryFee === 0 ? "text-[#16A34A] font-medium" : "text-gray-800 dark:text-gray-200 font-medium"}>
+                        {deliveryFee === 0 ? "FREE" : `${RUPEE_SYMBOL}${deliveryFee.toFixed(2)}`}
+                      </span>
                     </div>
                     {deliveryFeeBreakdownText && (
                       <div className="text-[11px] text-gray-500 dark:text-gray-400 -mt-1.5 ml-1 border-l-2 border-gray-100 pl-2">
@@ -2626,32 +2758,6 @@ function Cart() {
                         </div>
                       </div>
                     )}
-                    {deliveryFeeBreakdown?.isSplitOrder && (
-                      <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/40 rounded-lg p-2.5 -mx-1 mt-1">
-                        <div className="flex items-start gap-2">
-                          <Sparkles className="h-4 w-4 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
-                          <div>
-                            <p className="text-[11px] font-semibold text-blue-900 dark:text-blue-100">
-                              Special Order (Large Size)
-                            </p>
-                            <p className="text-[10px] text-blue-800 dark:text-blue-200 mt-0.5">
-                              This order requires split delivery for faster service.
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                    {Number((pricing?.freeDeliveryUpTo ?? feeSettings.freeDeliveryUpTo) || 0) > 0 && (
-                      <div className="-mt-1.5">
-                        <div className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-[#16A34A]/10 via-[#16A34A]/20 to-[#16A34A]/10 text-[#16A34A] border border-[#16A34A]/25 px-2.5 py-1 text-[11px] font-semibold shadow-sm animate-pulse">
-                          <Sparkles className="h-3 w-3" />
-                          <span>Free delivery at</span>
-                          <span className="text-[#15803D]">
-                            {RUPEE_SYMBOL}{Number((pricing?.freeDeliveryUpTo ?? feeSettings.freeDeliveryUpTo) || 0).toFixed(0)}+
-                          </span>
-                        </div>
-                      </div>
-                    )}
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-600 dark:text-gray-400">Platform Fee</span>
                       <span className="text-gray-800 dark:text-gray-200 font-medium">{RUPEE_SYMBOL}{platformFee.toFixed(2)}</span>
@@ -2665,10 +2771,10 @@ function Cart() {
                       <span className="text-gray-800 dark:text-gray-200 font-medium">{RUPEE_SYMBOL}{gstCharges.toFixed(2)}</span>
                     </div>
                     {discount > 0 && (
-                       <div className="flex justify-between text-sm text-[#16A34A] font-medium">
-                         <span>Coupon Discount</span>
-                         <span>-{RUPEE_SYMBOL}{discount.toFixed(2)}</span>
-                       </div>
+                      <div className="flex justify-between text-sm text-[#16A34A] font-medium">
+                        <span>Coupon Discount</span>
+                        <span>-{RUPEE_SYMBOL}{discount.toFixed(2)}</span>
+                      </div>
                     )}
 
                     {/* Platform Pricing Comparison - Bottom */}
@@ -2726,469 +2832,481 @@ function Cart() {
         walletBalance={walletBalance}
         isPlacingOrder={isPlacingOrder}
         hasSavedAddress={hasSavedAddress}
-        disabled={isPlacingOrder || (selectedPaymentMethod === "wallet" && walletBalance < total)}
+        disabled={
+          isPlacingOrder ||
+          isValidating ||
+          hasClosedRestaurants ||
+          (selectedPaymentMethod === "wallet" && walletBalance < total)
+        }
         onOpenPayment={() => setShowPaymentSheet(true)}
         onPlaceOrder={handlePlaceOrder}
       />
 
-          {/* Placing Order Modal */}
-          {showPlacingOrder && (
-            <div className="fixed inset-0 z-[60] h-screen w-screen overflow-hidden">
-              {/* Backdrop */}
-              <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+      <RestaurantUnavailableModal
+        open={showAvailabilityModal}
+        closedRestaurants={closedRestaurants}
+        onRemoveClosedItems={handleRemoveClosedRestaurantItems}
+        onContinueReviewing={handleContinueReviewingCart}
+      />
 
-              {/* Modal Sheet */}
-              <div
-                className="absolute bottom-0 left-0 right-0 bg-white rounded-t-3xl shadow-2xl overflow-hidden"
-                style={{ animation: 'slideUpModal 0.4s cubic-bezier(0.16, 1, 0.3, 1)' }}
-              >
-                <div className="px-6 py-8">
-                  {/* Title */}
-                  <h2 className="text-2xl font-bold text-gray-900 mb-6">Placing your order</h2>
+      {/* Placing Order Modal */}
+      {showPlacingOrder && (
+        <div className="fixed inset-0 z-[60] h-screen w-screen overflow-hidden">
+          {/* Backdrop */}
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
 
-                  {/* Payment Info */}
-                  <div className="flex items-center gap-4 mb-5">
-                    <div className="w-14 h-14 rounded-xl border border-gray-200 flex items-center justify-center bg-white shadow-sm">
-                      <CreditCard className="w-6 h-6 text-gray-600" />
-                    </div>
-                    <div>
-                      <p className="text-lg font-semibold text-gray-900">
-                        {selectedPaymentMethod === "razorpay"
-                          ? `Pay ${RUPEE_SYMBOL}${total.toFixed(2)} online (Razorpay)`
-                          : selectedPaymentMethod === "wallet"
-                            ? `Pay ${RUPEE_SYMBOL}${total.toFixed(2)} from Wallet`
-                            : `Pay on delivery (COD)`}
-                      </p>
-                    </div>
-                  </div>
+          {/* Modal Sheet */}
+          <div
+            className="absolute bottom-0 left-0 right-0 bg-white rounded-t-3xl shadow-2xl overflow-hidden"
+            style={{ animation: 'slideUpModal 0.4s cubic-bezier(0.16, 1, 0.3, 1)' }}
+          >
+            <div className="px-6 py-8">
+              {/* Title */}
+              <h2 className="text-2xl font-bold text-gray-900 mb-6">Placing your order</h2>
 
-                  {/* Delivery Address */}
-                  <div className="flex items-center gap-4 mb-8">
-                    <div className="w-14 h-14 rounded-xl border border-gray-200 flex items-center justify-center bg-gray-50">
-                      <svg className="w-7 h-7 text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                        <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                        <path d="M9 22V12h6v10" />
-                      </svg>
-                    </div>
-                    <div>
-                      <p className="text-lg font-semibold text-gray-900">Delivering to Location</p>
-                      <p className="text-sm text-gray-600 mt-1">
-                        {defaultAddress ? (formatFullAddress(defaultAddress) || defaultAddress?.formattedAddress || defaultAddress?.address || "Address") : "Add address"}
-                      </p>
-                      <p className="text-sm text-gray-500">
-                        {defaultAddress ? (formatFullAddress(defaultAddress) || "Address") : "Address"}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Progress Bar */}
-                  <div className="relative mb-6">
-                    <div className="h-2.5 bg-gray-200 rounded-full overflow-hidden">
-                      <div
-                         className="h-full bg-gradient-to-r from-[#16A34A] to-[#15803D] rounded-full transition-all duration-100 ease-linear"
-                        style={{
-                           width: `${orderProgress}%`,
-                           boxShadow: '0 0 10px rgba(126, 56, 102, 0.5)'
-                         }}
-                      />
-                    </div>
-                    {/* Animated shimmer effect */}
-                    <div
-                      className="absolute inset-0 h-2.5 rounded-full overflow-hidden pointer-events-none"
-                      style={{
-                        background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent)',
-                        animation: 'shimmer 1.5s infinite',
-                        width: `${orderProgress}%`
-                      }}
-                    />
-                  </div>
-
-                  {/* Cancel Button */}
-                   <button
-                    onClick={() => {
-                      setShowPlacingOrder(false)
-                      setIsPlacingOrder(false)
-                    }}
-                    className="w-full text-right"
-                  >
-                    <span className="text-[#16A34A] font-semibold text-base hover:text-[#15803D] transition-colors">
-                      CANCEL
-                    </span>
-                  </button>
+              {/* Payment Info */}
+              <div className="flex items-center gap-4 mb-5">
+                <div className="w-14 h-14 rounded-xl border border-gray-200 flex items-center justify-center bg-white shadow-sm">
+                  <CreditCard className="w-6 h-6 text-gray-600" />
                 </div>
-              </div>
-            </div>
-          )}
-
-          {/* Savings Congratulations Page */}
-          {showSavingsCongrats && (
-            <div
-              className="fixed inset-0 z-[70] bg-gradient-to-br from-green-50 to-emerald-50 dark:from-[#0a1a0a] dark:to-[#0a2a0a] flex flex-col items-center justify-center h-screen w-screen overflow-hidden"
-              style={{ animation: 'fadeIn 0.3s ease-out' }}
-            >
-              {/* Confetti Animation */}
-              <div className="absolute inset-0 overflow-hidden pointer-events-none">
-                {[...Array(40)].map((_, i) => (
-                  <div
-                    key={i}
-                    className="absolute w-2 h-2 rounded-full"
-                    style={{
-                      left: `${Math.random() * 100}%`,
-                      top: `-10%`,
-                      backgroundColor: ['#22c55e', '#10b981', '#34d399', '#6ee7b7'][Math.floor(Math.random() * 4)],
-                      animation: `confettiFall ${2.5 + Math.random() * 1.5}s linear ${Math.random() * 1}s infinite`,
-                      transform: `rotate(${Math.random() * 360}deg)`,
-                    }}
-                  />
-                ))}
-              </div>
-
-              {/* Content */}
-              <div className="relative z-10 flex flex-col items-center px-6 py-12">
-                {/* Trophy/Congrats Icon */}
-                <div
-                  className="mb-8"
-                  style={{ animation: 'bounce 0.8s ease-in-out infinite' }}
-                >
-                  <div className="w-24 h-24 bg-gradient-to-br from-yellow-400 to-yellow-500 rounded-full flex items-center justify-center shadow-2xl shadow-yellow-300/60 dark:shadow-yellow-900/40">
-                    <span className="text-5xl">🎉</span>
-                  </div>
-                </div>
-
-                {/* Congratulations Text */}
-                <h1 className="text-4xl md:text-5xl font-bold text-gray-900 dark:text-white mb-4 text-center">
-                  Congratulations!
-                </h1>
-
-                {/* Savings Amount */}
-                <div className="text-center">
-                  <p className="text-gray-600 dark:text-gray-300 text-lg mb-2">You saved approx</p>
-                  <div className="text-5xl md:text-6xl font-bold text-green-600 dark:text-green-400 mb-4">
-                    {RUPEE_SYMBOL}{congratsSavingsAmount.toFixed(0)}
-                  </div>
-                  <p className="text-gray-600 dark:text-gray-400 text-base">
-                    {congratsSavingsPercentage}% cheaper than other platforms
+                <div>
+                  <p className="text-lg font-semibold text-gray-900">
+                    {selectedPaymentMethod === "razorpay"
+                      ? `Pay ${RUPEE_SYMBOL}${total.toFixed(2)} online (Razorpay)`
+                      : selectedPaymentMethod === "wallet"
+                        ? `Pay ${RUPEE_SYMBOL}${total.toFixed(2)} from Wallet`
+                        : `Pay on delivery (COD)`}
                   </p>
                 </div>
+              </div>
 
-                {/* Items breakdown */}
-                {congratsSavingsItems.length > 0 && (
-                  <div className="mt-8 max-w-sm bg-white dark:bg-[#1a1a1a] rounded-lg p-4 border border-green-200 dark:border-green-900/50">
-                    <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 text-center">Savings on your items:</p>
-                    <div className="space-y-2">
-                      {congratsSavingsItems.slice(0, 3).map((item, idx) => (
-                        <div key={idx} className="flex justify-between text-sm">
-                          <span className="text-gray-600 dark:text-gray-400">{item.name}</span>
-                          <span className="font-semibold text-green-600 dark:text-green-400">-{RUPEE_SYMBOL}{item.savings.toFixed(0)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+              {/* Delivery Address */}
+              <div className="flex items-center gap-4 mb-8">
+                <div className="w-14 h-14 rounded-xl border border-gray-200 flex items-center justify-center bg-gray-50">
+                  <svg className="w-7 h-7 text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                    <path d="M9 22V12h6v10" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-lg font-semibold text-gray-900">Delivering to Location</p>
+                  <p className="text-sm text-gray-600 mt-1">
+                    {defaultAddress ? (formatFullAddress(defaultAddress) || defaultAddress?.formattedAddress || defaultAddress?.address || "Address") : "Add address"}
+                  </p>
+                  <p className="text-sm text-gray-500">
+                    {defaultAddress ? (formatFullAddress(defaultAddress) || "Address") : "Address"}
+                  </p>
+                </div>
+              </div>
+
+              {/* Progress Bar */}
+              <div className="relative mb-6">
+                <div className="h-2.5 bg-gray-200 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-[#16A34A] to-[#15803D] rounded-full transition-all duration-100 ease-linear"
+                    style={{
+                      width: `${orderProgress}%`,
+                      boxShadow: '0 0 10px rgba(126, 56, 102, 0.5)'
+                    }}
+                  />
+                </div>
+                {/* Animated shimmer effect */}
+                <div
+                  className="absolute inset-0 h-2.5 rounded-full overflow-hidden pointer-events-none"
+                  style={{
+                    background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent)',
+                    animation: 'shimmer 1.5s infinite',
+                    width: `${orderProgress}%`
+                  }}
+                />
+              </div>
+
+              {/* Cancel Button */}
+              <button
+                onClick={() => {
+                  setShowPlacingOrder(false)
+                  setIsPlacingOrder(false)
+                }}
+                className="w-full text-right"
+              >
+                <span className="text-[#16A34A] font-semibold text-base hover:text-[#15803D] transition-colors">
+                  CANCEL
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Savings Congratulations Page */}
+      {showSavingsCongrats && (
+        <div
+          className="fixed inset-0 z-[70] bg-gradient-to-br from-green-50 to-emerald-50 dark:from-[#0a1a0a] dark:to-[#0a2a0a] flex flex-col items-center justify-center h-screen w-screen overflow-hidden"
+          style={{ animation: 'fadeIn 0.3s ease-out' }}
+        >
+          {/* Confetti Animation */}
+          <div className="absolute inset-0 overflow-hidden pointer-events-none">
+            {[...Array(40)].map((_, i) => (
+              <div
+                key={i}
+                className="absolute w-2 h-2 rounded-full"
+                style={{
+                  left: `${Math.random() * 100}%`,
+                  top: `-10%`,
+                  backgroundColor: ['#22c55e', '#10b981', '#34d399', '#6ee7b7'][Math.floor(Math.random() * 4)],
+                  animation: `confettiFall ${2.5 + Math.random() * 1.5}s linear ${Math.random() * 1}s infinite`,
+                  transform: `rotate(${Math.random() * 360}deg)`,
+                }}
+              />
+            ))}
+          </div>
+
+          {/* Content */}
+          <div className="relative z-10 flex flex-col items-center px-6 py-12">
+            {/* Trophy/Congrats Icon */}
+            <div
+              className="mb-8"
+              style={{ animation: 'bounce 0.8s ease-in-out infinite' }}
+            >
+              <div className="w-24 h-24 bg-gradient-to-br from-yellow-400 to-yellow-500 rounded-full flex items-center justify-center shadow-2xl shadow-yellow-300/60 dark:shadow-yellow-900/40">
+                <span className="text-5xl">🎉</span>
               </div>
             </div>
-          )}
 
-          {/* Order Success Celebration Page */}
-          {showOrderSuccess && (
-            <div
-              className="fixed inset-0 z-[70] bg-white dark:bg-[#0a0a0a] flex flex-col items-center justify-center h-screen w-screen overflow-hidden"
-              style={{ animation: 'fadeIn 0.3s ease-out' }}
-            >
-              {/* Confetti Background */}
-              <div className="absolute inset-0 overflow-hidden pointer-events-none">
-                {/* Animated confetti pieces */}
-                {[...Array(50)].map((_, i) => (
-                  <div
-                    key={i}
-                    className="absolute w-3 h-3 rounded-sm"
-                    style={{
-                      left: `${Math.random() * 100}%`,
-                      top: `-10%`,
-                      backgroundColor: ['#16A34A', '#3b82f6', '#f59e0b', '#ef4444', '#15803D', '#ec4899'][Math.floor(Math.random() * 6)],
-                      animation: `confettiFall ${2 + Math.random() * 2}s linear ${Math.random() * 2}s infinite`,
-                      transform: `rotate(${Math.random() * 360}deg)`,
-                    }}
-                  />
-                ))}
+            {/* Congratulations Text */}
+            <h1 className="text-4xl md:text-5xl font-bold text-gray-900 dark:text-white mb-4 text-center">
+              Congratulations!
+            </h1>
+
+            {/* Savings Amount */}
+            <div className="text-center">
+              <p className="text-gray-600 dark:text-gray-300 text-lg mb-2">You saved approx</p>
+              <div className="text-5xl md:text-6xl font-bold text-green-600 dark:text-green-400 mb-4">
+                {RUPEE_SYMBOL}{congratsSavingsAmount.toFixed(0)}
               </div>
+              <p className="text-gray-600 dark:text-gray-400 text-base">
+                {congratsSavingsPercentage}% cheaper than other platforms
+              </p>
+            </div>
 
-              {/* Success Content */}
-              <div className="relative z-10 flex flex-col items-center px-6">
-                {/* Success Tick Circle */}
-                <div
-                  className="relative mb-8"
-                  style={{ animation: 'scaleIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.2s both' }}
+            {/* Items breakdown */}
+            {congratsSavingsItems.length > 0 && (
+              <div className="mt-8 max-w-sm bg-white dark:bg-[#1a1a1a] rounded-lg p-4 border border-green-200 dark:border-green-900/50">
+                <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 text-center">Savings on your items:</p>
+                <div className="space-y-2">
+                  {congratsSavingsItems.slice(0, 3).map((item, idx) => (
+                    <div key={idx} className="flex justify-between text-sm">
+                      <span className="text-gray-600 dark:text-gray-400">{item.name}</span>
+                      <span className="font-semibold text-green-600 dark:text-green-400">-{RUPEE_SYMBOL}{item.savings.toFixed(0)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Order Success Celebration Page */}
+      {showOrderSuccess && (
+        <div
+          className="fixed inset-0 z-[70] bg-white dark:bg-[#0a0a0a] flex flex-col items-center justify-center h-screen w-screen overflow-hidden"
+          style={{ animation: 'fadeIn 0.3s ease-out' }}
+        >
+          {/* Confetti Background */}
+          <div className="absolute inset-0 overflow-hidden pointer-events-none">
+            {/* Animated confetti pieces */}
+            {[...Array(50)].map((_, i) => (
+              <div
+                key={i}
+                className="absolute w-3 h-3 rounded-sm"
+                style={{
+                  left: `${Math.random() * 100}%`,
+                  top: `-10%`,
+                  backgroundColor: ['#16A34A', '#3b82f6', '#f59e0b', '#ef4444', '#15803D', '#ec4899'][Math.floor(Math.random() * 6)],
+                  animation: `confettiFall ${2 + Math.random() * 2}s linear ${Math.random() * 2}s infinite`,
+                  transform: `rotate(${Math.random() * 360}deg)`,
+                }}
+              />
+            ))}
+          </div>
+
+          {/* Success Content */}
+          <div className="relative z-10 flex flex-col items-center px-6">
+            {/* Success Tick Circle */}
+            <div
+              className="relative mb-8"
+              style={{ animation: 'scaleIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.2s both' }}
+            >
+              {/* Outer ring animation */}
+              <div
+                className="absolute inset-0 w-32 h-32 rounded-full border-4 border-green-500 dark:border-green-400"
+                style={{
+                  animation: 'ringPulse 1.5s ease-out infinite',
+                  opacity: 0.3
+                }}
+              />
+              {/* Main circle */}
+              <div className="w-32 h-32 bg-gradient-to-br from-green-500 to-green-600 dark:from-green-500 dark:to-emerald-500 rounded-full flex items-center justify-center shadow-2xl shadow-green-200/60 dark:shadow-green-900/40">
+                <svg
+                  className="w-16 h-16 text-white"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{ animation: 'checkDraw 0.5s ease-out 0.5s both' }}
                 >
-                  {/* Outer ring animation */}
-                  <div
-                    className="absolute inset-0 w-32 h-32 rounded-full border-4 border-green-500 dark:border-green-400"
-                    style={{
-                      animation: 'ringPulse 1.5s ease-out infinite',
-                      opacity: 0.3
-                    }}
-                  />
-                  {/* Main circle */}
-                  <div className="w-32 h-32 bg-gradient-to-br from-green-500 to-green-600 dark:from-green-500 dark:to-emerald-500 rounded-full flex items-center justify-center shadow-2xl shadow-green-200/60 dark:shadow-green-900/40">
-                    <svg
-                      className="w-16 h-16 text-white"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="3"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      style={{ animation: 'checkDraw 0.5s ease-out 0.5s both' }}
-                    >
-                      <path d="M5 12l5 5L19 7" className="check-path" />
-                    </svg>
+                  <path d="M5 12l5 5L19 7" className="check-path" />
+                </svg>
+              </div>
+              {/* Sparkles */}
+              {[...Array(6)].map((_, i) => (
+                <div
+                  key={i}
+                  className="absolute w-2 h-2 bg-yellow-400 dark:bg-yellow-300 rounded-full"
+                  style={{
+                    top: '50%',
+                    left: '50%',
+                    animation: `sparkle 0.6s ease-out ${0.3 + i * 0.1}s both`,
+                    transform: `rotate(${i * 60}deg) translateY(-80px)`,
+                  }}
+                />
+              ))}
+            </div>
+
+            {/* Location Info */}
+            <div
+              className="text-center"
+              style={{ animation: 'slideUp 0.5s ease-out 0.6s both' }}
+            >
+              <div className="flex items-center justify-center gap-2 mb-2">
+                <div className="w-5 h-5 text-red-500 dark:text-red-400">
+                  <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" />
+                  </svg>
+                </div>
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                  {defaultAddress?.city || "Your Location"}
+                </h2>
+              </div>
+              <p className="text-gray-500 dark:text-gray-400 text-base">
+                {defaultAddress ? (formatFullAddress(defaultAddress) || defaultAddress?.formattedAddress || defaultAddress?.address || "Delivery Address") : "Delivery Address"}
+              </p>
+            </div>
+
+            {/* Order Placed Message */}
+            <div
+              className="mt-12 text-center"
+              style={{ animation: 'slideUp 0.5s ease-out 0.8s both' }}
+            >
+              <h3 className="text-3xl font-bold text-[#16A34A] dark:text-[#B4D957] mb-2">Order Placed!</h3>
+              <p className="text-gray-600 dark:text-gray-300">Your delicious food is on its way</p>
+              {orderSuccessSavingsAmount > 0 && (
+                <p className="mt-2 text-sm text-[#16A34A] dark:text-[#B4D957]">
+                  You save approx {RUPEE_SYMBOL}{orderSuccessSavingsAmount.toFixed(0)} on this order
+                </p>
+              )}
+            </div>
+
+            {/* Platform Pricing Savings Celebration */}
+            {platformPricingSavings.hasPlatformPricing && platformPricingSavings.totalSavings > 0 && (
+              <motion.div
+                className="mt-8 w-full max-w-sm bg-gradient-to-br from-[#16A34A]/10 to-[#16A34A]/5 dark:from-[#16A34A]/20 dark:to-[#16A34A]/10 border border-[#16A34A]/30 rounded-2xl p-4"
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.6, delay: 1.0 }}
+              >
+                <div className="flex items-center justify-center gap-2 mb-3">
+                  <Sparkles className="h-5 w-5 text-[#16A34A]" />
+                  <span className="font-bold text-[#16A34A]">You Saved on this Order</span>
+                </div>
+                <div className="text-center space-y-1">
+                  <div className="text-4xl font-black text-[#16A34A]">
+                    {RUPEE_SYMBOL}{platformPricingSavings.totalSavings.toFixed(0)}
                   </div>
-                  {/* Sparkles */}
-                  {[...Array(6)].map((_, i) => (
-                    <div
-                      key={i}
-                      className="absolute w-2 h-2 bg-yellow-400 dark:bg-yellow-300 rounded-full"
-                      style={{
-                        top: '50%',
-                        left: '50%',
-                        animation: `sparkle 0.6s ease-out ${0.3 + i * 0.1}s both`,
-                        transform: `rotate(${i * 60}deg) translateY(-80px)`,
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    {platformPricingSavings.savingsPercentage}% cheaper than other platforms
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
+                    By ordering with us instead of Swiggy, Zomato, & others
+                  </p>
+                </div>
+              </motion.div>
+            )}
+
+            {/* Action Button */}
+            <button
+              onClick={handleGoToOrders}
+              className="mt-10 bg-[#16A34A] hover:bg-[#15803D] text-white font-semibold py-4 px-12 rounded-xl shadow-lg shadow-[#16A34A]/20 dark:shadow-[#16A34A]/40 transition-all hover:shadow-xl hover:scale-105"
+              style={{ animation: 'slideUp 0.5s ease-out 1s both' }}
+            >
+              Track Your Order
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Payment Selection Bottom Sheet */}
+      <AnimatePresence>
+        {showPaymentSheet && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowPaymentSheet(false)}
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100]"
+            />
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 30, stiffness: 350 }}
+              className="fixed bottom-0 left-0 right-0 bg-white dark:bg-[#1a1a1a] rounded-t-[2rem] z-[101] shadow-2xl overflow-hidden max-h-[82vh] md:max-h-[60vh] flex flex-col"
+              style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
+            >
+              <div className="p-5 md:p-6 flex flex-col h-full min-h-0">
+                {/* Compact Drag handle */}
+                <div className="w-10 h-1 bg-gray-200 dark:bg-gray-800 rounded-full mx-auto mb-5" />
+
+                <div className="flex items-center justify-between mb-5">
+                  <div>
+                    <h2 className="text-xl font-extrabold text-gray-900 dark:text-white leading-none">Payment Method</h2>
+                    <p className="text-[11px] font-bold text-gray-400 uppercase tracking-tighter mt-1">Select how you want to pay</p>
+                  </div>
+                  <button
+                    onClick={() => setShowPaymentSheet(false)}
+                    className="w-8 h-8 flex items-center justify-center bg-gray-100 dark:bg-gray-800 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                  >
+                    <X className="w-4 h-4 text-gray-500" />
+                  </button>
+                </div>
+
+                <div className="space-y-3 overflow-y-auto pr-1 custom-scrollbar pb-4 flex-1 min-h-0">
+                  {[
+                    {
+                      id: 'razorpay',
+                      name: 'Online Payment',
+                      description: 'UPI, Cards, Netbanking',
+                      icon: <Zap className="w-5 h-5" />,
+                      color: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-400',
+                      selectedColor: 'bg-emerald-500 text-white',
+                      badge: 'SECURE'
+                    },
+                    {
+                      id: 'wallet',
+                      name: 'Quick Wallet',
+                      description: 'Pay from your wallet',
+                      icon: <Wallet className="w-5 h-5" />,
+                      color: 'bg-blue-50 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400',
+                      selectedColor: 'bg-blue-500 text-white',
+                      subInfo: `Bal: ${RUPEE_SYMBOL}${walletBalance.toFixed(0)}`,
+                      disabled: walletBalance < total,
+                      disabledText: 'Low Balance'
+                    },
+                    {
+                      id: 'cash',
+                      name: 'Cash on Delivery',
+                      description: 'Pay when order arrives',
+                      icon: <Banknote className="w-5 h-5" />,
+                      color: 'bg-orange-50 text-#15803D dark:bg-orange-900/40 dark:text-orange-400',
+                      selectedColor: 'bg-[#16A34A] text-white'
+                    }
+                  ].map((option) => (
+                    <button
+                      key={option.id}
+                      onClick={() => {
+                        if (!option.disabled) {
+                          setSelectedPaymentMethod(option.id)
+                          setShowPaymentSheet(false)
+                        }
                       }}
-                    />
+                      className={`w-full flex items-center justify-between p-4 rounded-2xl border-2 transition-all duration-300 group ${selectedPaymentMethod === option.id
+                        ? 'border-[#16A34A] bg-[#16A34A] shadow-lg shadow-[#16A34A]/30'
+                        : 'border-gray-100 dark:border-gray-800/80 bg-white dark:bg-[#222222] hover:border-[#16A34A]/30 dark:hover:border-[#16A34A]/30 shadow-sm'
+                        } ${option.disabled ? 'opacity-40 grayscale-[0.8] cursor-not-allowed' : 'cursor-pointer active:scale-[0.98]'}`}
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className={`w-11 h-11 rounded-xl flex items-center justify-center transition-all duration-300 ${selectedPaymentMethod === option.id
+                          ? 'bg-white/20 text-white'
+                          : option.color
+                          }`}>
+                          {option.icon}
+                        </div>
+                        <div className="text-left">
+                          <div className="flex items-center gap-2">
+                            <span className={`text-sm font-black tracking-tight leading-none transition-colors ${selectedPaymentMethod === option.id ? 'text-white' : 'text-gray-900 dark:text-gray-100'
+                              }`}>
+                              {option.name}
+                            </span>
+                            {option.badge && (
+                              <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-full shadow-sm tracking-wider ${selectedPaymentMethod === option.id
+                                ? 'bg-white/20 text-white'
+                                : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                                }`}>
+                                {option.badge}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <p className={`text-[11px] font-bold transition-colors ${selectedPaymentMethod === option.id ? 'text-white/80' : 'text-gray-400'
+                              }`}>
+                              {option.description}
+                            </p>
+                            {option.subInfo && !option.disabled && (
+                              <>
+                                <span className={`w-1 h-1 rounded-full ${selectedPaymentMethod === option.id ? 'bg-white/40' : 'bg-orange-300 dark:bg-orange-700'
+                                  }`} />
+                                <p className={`text-[10px] font-black uppercase tracking-tighter transition-colors ${selectedPaymentMethod === option.id ? 'text-white' : 'text-green-600 dark:text-green-500'
+                                  }`}>
+                                  {option.subInfo}
+                                </p>
+                              </>
+                            )}
+                          </div>
+                          {option.disabled && (
+                            <p className="text-[9px] font-black text-red-500 mt-1 uppercase tracking-wide">
+                              {option.disabledText}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all duration-300 ${selectedPaymentMethod === option.id
+                        ? 'bg-white border-white'
+                        : 'border-gray-200 dark:border-gray-700'
+                        }`}>
+                        {selectedPaymentMethod === option.id && <Check className="w-3.5 h-3.5 text-[#16A34A]" strokeWidth={4} />}
+                      </div>
+                    </button>
                   ))}
                 </div>
 
-                {/* Location Info */}
                 <div
-                  className="text-center"
-                  style={{ animation: 'slideUp 0.5s ease-out 0.6s both' }}
+                  className="mt-auto pt-4 border-t border-gray-100 dark:border-gray-800 flex items-center gap-4 bg-white dark:bg-[#1a1a1a]"
+                  style={{ paddingBottom: "max(0.25rem, env(safe-area-inset-bottom, 0px))" }}
                 >
-                  <div className="flex items-center justify-center gap-2 mb-2">
-                    <div className="w-5 h-5 text-red-500 dark:text-red-400">
-                      <svg viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" />
-                      </svg>
-                    </div>
-                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
-                      {defaultAddress?.city || "Your Location"}
-                    </h2>
+                  <div className="flex-shrink-0">
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest leading-none mb-1">Total Pay</p>
+                    <p className="text-xl font-black text-[#16A34A] tabular-nums">{RUPEE_SYMBOL}{total.toFixed(0)}</p>
                   </div>
-                  <p className="text-gray-500 dark:text-gray-400 text-base">
-                    {defaultAddress ? (formatFullAddress(defaultAddress) || defaultAddress?.formattedAddress || defaultAddress?.address || "Delivery Address") : "Delivery Address"}
-                  </p>
-                </div>
-
-                {/* Order Placed Message */}
-                 <div
-                  className="mt-12 text-center"
-                  style={{ animation: 'slideUp 0.5s ease-out 0.8s both' }}
-                >
-                  <h3 className="text-3xl font-bold text-[#16A34A] dark:text-[#B4D957] mb-2">Order Placed!</h3>
-                  <p className="text-gray-600 dark:text-gray-300">Your delicious food is on its way</p>
-                  {orderSuccessSavingsAmount > 0 && (
-                    <p className="mt-2 text-sm text-[#16A34A] dark:text-[#B4D957]">
-                      You save approx {RUPEE_SYMBOL}{orderSuccessSavingsAmount.toFixed(0)} on this order
-                    </p>
-                  )}
-                </div>
-
-                {/* Platform Pricing Savings Celebration */}
-                {platformPricingSavings.hasPlatformPricing && platformPricingSavings.totalSavings > 0 && (
-                  <motion.div
-                    className="mt-8 w-full max-w-sm bg-gradient-to-br from-[#16A34A]/10 to-[#16A34A]/5 dark:from-[#16A34A]/20 dark:to-[#16A34A]/10 border border-[#16A34A]/30 rounded-2xl p-4"
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{ duration: 0.6, delay: 1.0 }}
+                  <Button
+                    onClick={() => setShowPaymentSheet(false)}
+                    className="flex-1 bg-[#16A34A] hover:bg-[#15803D] text-white h-11 rounded-xl text-sm font-bold shadow-lg shadow-[#16A34A]/20 transition-all active:scale-[0.98]"
                   >
-                    <div className="flex items-center justify-center gap-2 mb-3">
-                      <Sparkles className="h-5 w-5 text-[#16A34A]" />
-                      <span className="font-bold text-[#16A34A]">You Saved on this Order</span>
-                    </div>
-                    <div className="text-center space-y-1">
-                      <div className="text-4xl font-black text-[#16A34A]">
-                        {RUPEE_SYMBOL}{platformPricingSavings.totalSavings.toFixed(0)}
-                      </div>
-                      <p className="text-sm text-gray-600 dark:text-gray-400">
-                        {platformPricingSavings.savingsPercentage}% cheaper than other platforms
-                      </p>
-                      <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
-                        By ordering with us instead of Swiggy, Zomato, & others
-                      </p>
-                    </div>
-                  </motion.div>
-                )}
-
-                {/* Action Button */}
-                 <button
-                  onClick={handleGoToOrders}
-                  className="mt-10 bg-[#16A34A] hover:bg-[#15803D] text-white font-semibold py-4 px-12 rounded-xl shadow-lg shadow-[#16A34A]/20 dark:shadow-[#16A34A]/40 transition-all hover:shadow-xl hover:scale-105"
-                  style={{ animation: 'slideUp 0.5s ease-out 1s both' }}
-                >
-                  Track Your Order
-                </button>
+                    Confirm Order
+                  </Button>
+                </div>
               </div>
-            </div>
-          )}
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
-          {/* Payment Selection Bottom Sheet */}
-          <AnimatePresence>
-            {showPaymentSheet && (
-              <>
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  onClick={() => setShowPaymentSheet(false)}
-                  className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100]"
-                />
-                <motion.div
-                  initial={{ y: "100%" }}
-                  animate={{ y: 0 }}
-                  exit={{ y: "100%" }}
-                  transition={{ type: "spring", damping: 30, stiffness: 350 }}
-                  className="fixed bottom-0 left-0 right-0 bg-white dark:bg-[#1a1a1a] rounded-t-[2rem] z-[101] shadow-2xl overflow-hidden max-h-[82vh] md:max-h-[60vh] flex flex-col"
-                  style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
-                >
-                  <div className="p-5 md:p-6 flex flex-col h-full min-h-0">
-                    {/* Compact Drag handle */}
-                    <div className="w-10 h-1 bg-gray-200 dark:bg-gray-800 rounded-full mx-auto mb-5" />
-
-                    <div className="flex items-center justify-between mb-5">
-                      <div>
-                        <h2 className="text-xl font-extrabold text-gray-900 dark:text-white leading-none">Payment Method</h2>
-                        <p className="text-[11px] font-bold text-gray-400 uppercase tracking-tighter mt-1">Select how you want to pay</p>
-                      </div>
-                      <button
-                        onClick={() => setShowPaymentSheet(false)}
-                        className="w-8 h-8 flex items-center justify-center bg-gray-100 dark:bg-gray-800 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-                      >
-                        <X className="w-4 h-4 text-gray-500" />
-                      </button>
-                    </div>
-
-                    <div className="space-y-3 overflow-y-auto pr-1 custom-scrollbar pb-4 flex-1 min-h-0">
-                      {[
-                        {
-                          id: 'razorpay',
-                          name: 'Online Payment',
-                          description: 'UPI, Cards, Netbanking',
-                          icon: <Zap className="w-5 h-5" />,
-                          color: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-400',
-                          selectedColor: 'bg-emerald-500 text-white',
-                          badge: 'SECURE'
-                        },
-                        {
-                          id: 'wallet',
-                          name: 'Quick Wallet',
-                          description: 'Pay from your wallet',
-                          icon: <Wallet className="w-5 h-5" />,
-                          color: 'bg-blue-50 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400',
-                          selectedColor: 'bg-blue-500 text-white',
-                          subInfo: `Bal: ${RUPEE_SYMBOL}${walletBalance.toFixed(0)}`,
-                          disabled: walletBalance < total,
-                          disabledText: 'Low Balance'
-                        },
-                        {
-                          id: 'cash',
-                          name: 'Cash on Delivery',
-                          description: 'Pay when order arrives',
-                          icon: <Banknote className="w-5 h-5" />,
-                          color: 'bg-orange-50 text-#15803D dark:bg-orange-900/40 dark:text-orange-400',
-                          selectedColor: 'bg-[#16A34A] text-white'
-                        }
-                      ].map((option) => (
-                        <button
-                          key={option.id}
-                          onClick={() => {
-                            if (!option.disabled) {
-                              setSelectedPaymentMethod(option.id)
-                              setShowPaymentSheet(false)
-                            }
-                          }}
-                           className={`w-full flex items-center justify-between p-4 rounded-2xl border-2 transition-all duration-300 group ${selectedPaymentMethod === option.id
-                               ? 'border-[#16A34A] bg-[#16A34A] shadow-lg shadow-[#16A34A]/30'
-                               : 'border-gray-100 dark:border-gray-800/80 bg-white dark:bg-[#222222] hover:border-[#16A34A]/30 dark:hover:border-[#16A34A]/30 shadow-sm'
-                             } ${option.disabled ? 'opacity-40 grayscale-[0.8] cursor-not-allowed' : 'cursor-pointer active:scale-[0.98]'}`}
-                        >
-                          <div className="flex items-center gap-4">
-                            <div className={`w-11 h-11 rounded-xl flex items-center justify-center transition-all duration-300 ${selectedPaymentMethod === option.id
-                                ? 'bg-white/20 text-white'
-                                : option.color
-                              }`}>
-                              {option.icon}
-                            </div>
-                            <div className="text-left">
-                              <div className="flex items-center gap-2">
-                                <span className={`text-sm font-black tracking-tight leading-none transition-colors ${selectedPaymentMethod === option.id ? 'text-white' : 'text-gray-900 dark:text-gray-100'
-                                  }`}>
-                                  {option.name}
-                                </span>
-                                {option.badge && (
-                                  <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-full shadow-sm tracking-wider ${selectedPaymentMethod === option.id
-                                      ? 'bg-white/20 text-white'
-                                      : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                                    }`}>
-                                    {option.badge}
-                                  </span>
-                                )}
-                              </div>
-                              <div className="flex items-center gap-1.5 mt-1">
-                                <p className={`text-[11px] font-bold transition-colors ${selectedPaymentMethod === option.id ? 'text-white/80' : 'text-gray-400'
-                                  }`}>
-                                  {option.description}
-                                </p>
-                                {option.subInfo && !option.disabled && (
-                                  <>
-                                    <span className={`w-1 h-1 rounded-full ${selectedPaymentMethod === option.id ? 'bg-white/40' : 'bg-orange-300 dark:bg-orange-700'
-                                      }`} />
-                                    <p className={`text-[10px] font-black uppercase tracking-tighter transition-colors ${selectedPaymentMethod === option.id ? 'text-white' : 'text-green-600 dark:text-green-500'
-                                      }`}>
-                                      {option.subInfo}
-                                    </p>
-                                  </>
-                                )}
-                              </div>
-                              {option.disabled && (
-                                <p className="text-[9px] font-black text-red-500 mt-1 uppercase tracking-wide">
-                                  {option.disabledText}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-
-                          <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all duration-300 ${selectedPaymentMethod === option.id
-                              ? 'bg-white border-white'
-                              : 'border-gray-200 dark:border-gray-700'
-                            }`}>
-                             {selectedPaymentMethod === option.id && <Check className="w-3.5 h-3.5 text-[#16A34A]" strokeWidth={4} />}
-                           </div>
-                        </button>
-                      ))}
-                    </div>
-
-                    <div
-                      className="mt-auto pt-4 border-t border-gray-100 dark:border-gray-800 flex items-center gap-4 bg-white dark:bg-[#1a1a1a]"
-                      style={{ paddingBottom: "max(0.25rem, env(safe-area-inset-bottom, 0px))" }}
-                    >
-                      <div className="flex-shrink-0">
-                         <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest leading-none mb-1">Total Pay</p>
-                         <p className="text-xl font-black text-[#16A34A] tabular-nums">{RUPEE_SYMBOL}{total.toFixed(0)}</p>
-                       </div>
-                       <Button
-                        onClick={() => setShowPaymentSheet(false)}
-                        className="flex-1 bg-[#16A34A] hover:bg-[#15803D] text-white h-11 rounded-xl text-sm font-bold shadow-lg shadow-[#16A34A]/20 transition-all active:scale-[0.98]"
-                      >
-                        Confirm Order
-                      </Button>
-                    </div>
-                  </div>
-                </motion.div>
-              </>
-            )}
-          </AnimatePresence>
-
-          {/* Animation Styles */}
-          <style>{`
+      {/* Animation Styles */}
+      <style>{`
         @keyframes fadeInBackdrop {
           from { opacity: 0; }
           to { opacity: 1; }

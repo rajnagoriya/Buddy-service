@@ -76,9 +76,9 @@ export default function MenuSectionBlock({
 
   if (isRecommended) {
     return (
-      <div id={sectionId} className="scroll-mt-24 space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg sm:text-xl font-extrabold text-gray-900 dark:text-white tracking-tight">
+      <div id={sectionId} className="scroll-mt-24 space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-base sm:text-lg font-bold text-gray-900 dark:text-white tracking-tight">
             {displayName}
           </h2>
           <button
@@ -98,15 +98,15 @@ export default function MenuSectionBlock({
         )}
 
         {isExpanded && loadingMenuItems && (
-          <div className="flex gap-3 overflow-hidden animate-pulse">
-            <div className="h-52 w-[172px] rounded-2xl bg-gray-100 dark:bg-gray-800 shrink-0" />
-            <div className="h-52 w-[172px] rounded-2xl bg-gray-100 dark:bg-gray-800 shrink-0" />
+          <div className="flex gap-2 overflow-hidden animate-pulse">
+            <div className="h-44 w-[148px] rounded-xl bg-gray-100 dark:bg-gray-800 shrink-0" />
+            <div className="h-44 w-[148px] rounded-xl bg-gray-100 dark:bg-gray-800 shrink-0" />
           </div>
         )}
 
         {isExpanded && sectionItems.length > 0 && (
-          <div className="overflow-x-auto scrollbar-hide -mx-4 px-4 pb-1">
-            <div className="flex items-stretch gap-3 w-max">
+          <div className="overflow-x-auto scrollbar-hide -mx-4 px-4 pb-0.5">
+            <div className="flex items-stretch gap-2 w-max">
               {sectionItems.map((item) => (
                 <DishCardWrapper
                   key={item.id}
@@ -133,33 +133,33 @@ export default function MenuSectionBlock({
   return (
     <div
       id={sectionId}
-      className="scroll-mt-24 rounded-3xl border border-gray-100 dark:border-gray-800 bg-white dark:bg-[#141414] shadow-sm overflow-hidden"
+      className="scroll-mt-24 rounded-2xl border border-gray-100 dark:border-gray-800 bg-white dark:bg-[#141414] shadow-sm overflow-hidden"
     >
       <button
         type="button"
         onClick={() => onToggleExpand(originalIndex)}
-        className="w-full flex items-center gap-3 p-4 sm:p-5 text-left bg-gradient-to-r from-gray-50/80 to-white dark:from-[#1a1a1a] dark:to-[#141414] border-b border-gray-100 dark:border-gray-800 hover:from-green-50/40 dark:hover:from-green-950/10 transition-colors"
+        className="w-full flex items-center gap-2.5 px-3 py-2.5 sm:px-3.5 sm:py-3 text-left bg-gradient-to-r from-gray-50/80 to-white dark:from-[#1a1a1a] dark:to-[#141414] border-b border-gray-100 dark:border-gray-800 hover:from-green-50/40 dark:hover:from-green-950/10 transition-colors"
         aria-expanded={isExpanded}
       >
         {sectionImage ? (
           <img
             src={sectionImage}
             alt=""
-            className="h-12 w-12 sm:h-14 sm:w-14 rounded-2xl object-cover border border-gray-200 dark:border-gray-700 shrink-0"
+            className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl object-cover border border-gray-200 dark:border-gray-700 shrink-0"
             onError={(e) => {
               e.currentTarget.style.display = "none"
             }}
           />
         ) : (
-          <div className="h-12 w-12 sm:h-14 sm:w-14 rounded-2xl bg-green-50 dark:bg-green-950/30 flex items-center justify-center shrink-0">
-            <Utensils className="h-5 w-5 text-[#16A34A]" />
+          <div className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl bg-green-50 dark:bg-green-950/30 flex items-center justify-center shrink-0">
+            <Utensils className="h-4 w-4 text-[#16A34A]" />
           </div>
         )}
         <div className="min-w-0 flex-1">
-          <h2 className="text-base sm:text-lg font-extrabold text-gray-900 dark:text-white tracking-tight truncate">
+          <h2 className="text-sm sm:text-base font-bold text-gray-900 dark:text-white tracking-tight truncate">
             {displayName}
           </h2>
-          <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mt-0.5">
+          <p className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
             {count} {count === 1 ? "item" : "items"}
             {section?.subtitle ? ` · ${section.subtitle}` : ""}
           </p>
@@ -171,8 +171,8 @@ export default function MenuSectionBlock({
 
       {isExpanded && loadingMenuItems && (
         <div className="divide-y divide-gray-100 dark:divide-gray-800 animate-pulse">
-          <div className="h-28 bg-gray-50 dark:bg-gray-900/50" />
-          <div className="h-28 bg-gray-50 dark:bg-gray-900/50" />
+          <div className="h-[4.5rem] bg-gray-50 dark:bg-gray-900/50" />
+          <div className="h-[4.5rem] bg-gray-50 dark:bg-gray-900/50" />
         </div>
       )}
 
@@ -209,8 +209,8 @@ export default function MenuSectionBlock({
 
           return (
             <div key={subIndex} className="border-t border-gray-100 dark:border-gray-800">
-              <div className="px-4 py-2.5 bg-gray-50/60 dark:bg-gray-900/40">
-                <h3 className="text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">
+              <div className="px-3 py-1.5 bg-gray-50/60 dark:bg-gray-900/40">
+                <h3 className="text-[10px] font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">
                   {subsection?.name || subsection?.title || "More"}
                 </h3>
               </div>

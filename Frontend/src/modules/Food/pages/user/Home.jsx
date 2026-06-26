@@ -43,6 +43,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import Footer from "@food/components/user/Footer";
 import AddToCartButton from "@food/components/user/AddToCartButton";
 import StickyCartCard from "@food/components/user/StickyCartCard";
+import RestaurantChainDistanceBadge from "@food/components/user/RestaurantChainDistanceBadge";
+import { getLastRestaurantFromCart } from "@food/utils/restaurantRadius";
 import OrderTrackingCard from "@food/components/user/OrderTrackingCard";
 import {
   CategoryChipRowSkeleton,
@@ -1142,6 +1144,10 @@ export default function Home() {
     getDefaultAddress,
   } = profileContext;
   const { addToCart, cart } = useCart();
+  const lastCartRestaurant = useMemo(
+    () => getLastRestaurantFromCart(cart),
+    [cart],
+  );
   const { location, loading, requestLocation } = useLocation();
   const {
     zoneId,
@@ -1606,37 +1612,7 @@ export default function Home() {
           const userLng = currentLocation?.longitude;
 
           // Transform API data to match expected format
-          const normalizeCityValue = (value) =>
-            String(value || "")
-              .trim()
-              .split(",")[0]
-              .toLowerCase()
-              .replace(/[^a-z0-9\s]/g, "")
-              .replace(/\s+/g, " ")
-              .trim();
-
-          const strictCityRestaurants = restaurantsArray.filter((restaurant) => {
-            if (!hasUsableUserCity) return true;
-
-            const cityCandidates = [
-              restaurant?.city,
-              restaurant?.location?.city,
-              restaurant?.address?.city,
-              restaurant?.onboarding?.step1?.city,
-              restaurant?.onboarding?.step1?.location?.city,
-            ];
-
-            const restaurantCity = cityCandidates
-              .map((candidate) => normalizeCityValue(candidate))
-              .find(Boolean);
-
-            if (!restaurantCity) return false;
-
-            const userCity = normalizeCityValue(currentLocation?.city);
-            return restaurantCity === userCity;
-          });
-
-          const transformedRestaurants = strictCityRestaurants
+          const transformedRestaurants = restaurantsArray
             .filter((restaurant) => {
               const name = (restaurant.restaurantName || restaurant.name || "").toLowerCase()
               return true
@@ -1713,11 +1689,22 @@ export default function Home() {
               ]);
               const profileImageUrl = profileImageCandidates[0] || "";
 
+              const menuImageCandidates = extractImages(
+                Array.isArray(restaurant.menuImages) ? restaurant.menuImages : [],
+              );
+              const featuredItemImages = extractImages(
+                (Array.isArray(restaurant.featuredItems) ? restaurant.featuredItems : []).map(
+                  (item) => item?.image,
+                ),
+              );
+
               const allImages = Array.from(
                 new Set(
                   [
                     ...coverImages,
                     ...profileImageCandidates,
+                    ...menuImageCandidates,
+                    ...featuredItemImages,
                   ].filter(Boolean),
                 ),
               );
@@ -2223,6 +2210,10 @@ export default function Home() {
           : [restaurant?.coverImages]
         ).filter(Boolean),
         restaurant?.profileImage,
+        ...(Array.isArray(restaurant?.menuImages) ? restaurant.menuImages : []),
+        ...(Array.isArray(restaurant?.featuredItems)
+          ? restaurant.featuredItems.map((item) => item?.image)
+          : []),
       ]);
       const image = imageCandidates[0] || foodImages[0];
 
@@ -2693,52 +2684,7 @@ export default function Home() {
 
                 {HeroBannerSection}
 
-                <div className="food-mobile-filters-row">
-                  <div className="food-mobile-filter-chip food-mobile-filter-chip--toggle">
-                    <span>Veg</span>
-                    <Switch
-                      checked={vegMode}
-                      onCheckedChange={handleVegModeChange}
-                      className="scale-[0.72]"
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsFilterOpen(true)}
-                    className="food-mobile-filter-chip"
-                  >
-                    <SlidersHorizontal className="h-3.5 w-3.5" />
-                    Filters
-                  </button>
-                  {[
-                    { id: "delivery-under-30", label: "Under 30 mins" },
-                    { id: "delivery-under-45", label: "Under 45 mins" },
-                    { id: "distance-under-1km", label: "Under 1 km", icon: MapPin },
-                  ].map((filter) => {
-                    const Icon = filter.icon;
-                    const isActive = activeFilters.has(filter.id);
-                    return (
-                      <button
-                        key={filter.id}
-                        type="button"
-                        onClick={() => {
-                          const nextFilters = new Set(activeFilters);
-                          if (nextFilters.has(filter.id)) {
-                            nextFilters.delete(filter.id);
-                          } else {
-                            nextFilters.add(filter.id);
-                          }
-                          setActiveFilters(nextFilters);
-                          void applyFiltersAndRefetch(nextFilters, sortBy, selectedCuisine);
-                        }}
-                        className={`food-mobile-filter-chip${isActive ? " is-active" : ""}`}
-                      >
-                        {Icon && <Icon className="h-3.5 w-3.5" />}
-                        {filter.label}
-                      </button>
-                    );
-                  })}
-                </div>
+              
               </motion.div>
             ) : (
               <motion.div
@@ -2805,12 +2751,16 @@ export default function Home() {
                           className="h-40 sm:h-28 md:h-32"
                           roundedClass="rounded-t-[20px]"
                         />
+                        <RestaurantChainDistanceBadge
+                          lastCartRestaurant={lastCartRestaurant}
+                          restaurant={restaurant}
+                        />
                         <div className={`absolute bottom-2 left-2 px-2 py-0.5 rounded-lg ${Number(restaurant.rating) > 0 ? "bg-black/80 backdrop-blur-md text-white font-medium" : "bg-gray-200/90 text-gray-600 font-medium"} text-[10px] shadow-lg border border-white/10`}>
                           {Number(restaurant.rating) > 0 ? Number(restaurant.rating).toFixed(1) : "NEW"}
                         </div>
                       </div>
-                      <div className="p-2.5">
-                        <p className="text-sm font-semibold text-foreground truncate">
+                      <div className="p-2.5 min-h-[3.25rem]">
+                        <p className="text-sm font-semibold text-foreground line-clamp-2 leading-snug break-words">
                           {restaurant.name}
                         </p>
                         <p className="text-[11px] text-primary font-semibold mt-1 flex items-center gap-1">
@@ -2990,6 +2940,11 @@ export default function Home() {
                                 />
                               </Button>
                             </div>
+
+                            <RestaurantChainDistanceBadge
+                              lastCartRestaurant={lastCartRestaurant}
+                              restaurant={restaurant}
+                            />
                           </div>
 
                           {/* Content Section */}
@@ -2998,25 +2953,17 @@ export default function Home() {
                               {/* Restaurant Name & Rating */}
                               <div className="flex items-start justify-between gap-2 mb-2 lg:mb-3">
                                 <div className="flex-1 min-w-0">
-                                  <h3 className="text-base sm:text-lg font-bold text-foreground line-clamp-1 leading-tight group-hover:text-primary transition-colors">
+                                  <h3 className="text-base sm:text-lg font-bold text-foreground line-clamp-2 leading-tight group-hover:text-primary transition-colors break-words">
                                     {restaurant.name}
                                   </h3>
-                                  <div className="flex flex-wrap items-center gap-2 mt-2 min-h-[24px]">
-                                    <span
-                                      className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${availability.isOpen ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
-                                      {availability.isOpen
-                                        ? "Open now"
-                                        : "Offline"}
-                                    </span>
-                                    {hasClosingCountdown && (
-                                      <div className="flex items-center gap-1 text-[9px] sm:text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
-                                        <Timer className="h-3 w-3 flex-shrink-0" strokeWidth={3} />
-                                        <span>
-                                          Closes in {closingCountdown}
-                                        </span>
-                                      </div>
-                                    )}
-                                  </div>
+                                  {hasClosingCountdown && (
+                                    <div className="flex items-center gap-1 mt-2 text-[9px] sm:text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+                                      <Timer className="h-3 w-3 flex-shrink-0" strokeWidth={3} />
+                                      <span>
+                                        Closes in {closingCountdown}
+                                      </span>
+                                    </div>
+                                  )}
                                 </div>
                                 <div className={`flex-shrink-0 min-w-[52px] justify-center ${Number(restaurant.rating) > 0 ? "bg-primary" : "bg-muted"} text-primary-foreground px-2.5 sm:px-3 py-1 rounded-2xl flex items-center gap-1 shadow-sm`}>
                                   <span className="text-xs sm:text-sm font-bold">

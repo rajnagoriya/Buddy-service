@@ -4,9 +4,11 @@ import { useCart } from "@food/context/CartContext"
 import { isModuleAuthenticated } from "@food/utils/auth"
 import { useNavigate, useLocation } from "react-router-dom"
 import { toast } from "sonner"
+import { useAddToCartFeedback } from "@food/hooks/useAddToCartFeedback"
 
 export default function AddToCartButton({ item, className = "" }) {
   const { addToCart, isInCart, getCartItem, updateQuantity } = useCart()
+  const handleAddToCartFeedback = useAddToCartFeedback()
   const inCart = isInCart(item.id)
   const cartItem = getCartItem(item.id)
   const navigate = useNavigate()
@@ -22,7 +24,8 @@ export default function AddToCartButton({ item, className = "" }) {
       return
     }
 
-    addToCart(item)
+    const result = addToCart(item)
+    handleAddToCartFeedback(result, "Cannot add this item to cart.", item.restaurant || "")
   }
 
   const handleIncrease = (e) => {

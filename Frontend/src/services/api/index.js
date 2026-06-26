@@ -2175,6 +2175,16 @@ export const userAPI = {
     apiClient.post("/food/user/wallet/topup/verify", body ?? {}, {
       contextModule: "user",
     }),
+  /** GET /food/user/cart (Bearer USER) */
+  getCart: () => apiClient.get("/food/user/cart", { contextModule: "user" }),
+  /** PUT /food/user/cart (Bearer USER) */
+  syncCart: (body) =>
+    apiClient.put("/food/user/cart", body ?? {}, { contextModule: "user" }),
+  /** POST /food/user/cart/validate-restaurants (Bearer USER) */
+  validateCartRestaurants: (body) =>
+    apiClient.post("/food/user/cart/validate-restaurants", body ?? {}, {
+      contextModule: "user",
+    }),
   /** GET /food/user/addresses (Bearer USER). Deduped + short-cached. */
   getAddresses: (() => {
     let inFlight = null;
@@ -2328,6 +2338,10 @@ export const uploadAPI = {
 };
 /** Order API (user app – Bearer USER token). Minimal calls: single create/verify, list/details cached by caller. */
 export const orderAPI = {
+  validateRestaurantChain: (payload) =>
+    apiClient.post("/food/orders/validate-restaurant-chain", payload ?? {}, {
+      contextModule: "user",
+    }),
   calculateOrder: (payload) =>
     apiClient.post("/food/orders/calculate", payload ?? {}, {
       contextModule: "user",
