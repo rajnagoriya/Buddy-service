@@ -4,10 +4,33 @@ import { DeliverySupportTicket } from '../models/supportTicket.model.js';
 import { DeliveryBonusTransaction } from '../../admin/models/deliveryBonusTransaction.model.js';
 import { FoodEarningAddon } from '../../admin/models/earningAddon.model.js';
 import { FoodOrder } from '../../orders/models/order.model.js';
-import { uploadImageBuffer } from '../../../../services/cloudinary.service.js';
 import { ValidationError, ConflictError } from '../../../../core/auth/errors.js';
 import { getDeliveryCashLimitSettings } from '../../admin/services/admin.service.js';
+import {
+    replaceCloudinaryImage,
+    uploadFoodImage,
+} from '../../services/foodImage.service.js';
+
+const applyPartnerImageUpload = async (partner, field, file, folder) => {
+    const asset = await replaceCloudinaryImage({
+        buffer: file.buffer,
+        folder,
+        oldPublicId: partner.imagePublicIds?.[field],
+        oldUrl: partner[field],
+        mimeType: file.mimetype,
+    });
+    partner[field] = asset.url;
+    partner.imagePublicIds = {
+        ...(partner.imagePublicIds || {}),
+        [field]: asset.publicId,
+    };
+};
 import { FoodDeliveryWithdrawal } from '../models/foodDeliveryWithdrawal.model.js';
+
+const uploadPartnerImage = async (file, folder) => {
+    const asset = await uploadFoodImage(file, folder);
+    return asset;
+};
 
 export const registerDeliveryPartner = async (payload, files) => {
     const { 
@@ -22,7 +45,6 @@ export const registerDeliveryPartner = async (payload, files) => {
         if (existing.status !== 'rejected') {
             throw new ValidationError('Delivery partner with this phone already exists');
         }
-        // If rejected, delete the old record so they can start fresh with same phone
         await FoodDeliveryPartner.deleteMany({ phone });
     }
 
@@ -40,22 +62,28 @@ export const registerDeliveryPartner = async (payload, files) => {
         }
     }
 
+    const imagePublicIds = {};
     const images = {};
 
     if (files?.profilePhoto?.[0]) {
-        images.profilePhoto = await uploadImageBuffer(files.profilePhoto[0].buffer, 'food/delivery/profile');
+        const asset = await uploadPartnerImage(files.profilePhoto[0], 'food/delivery/profile');
+        images.profilePhoto = asset.url;
+        imagePublicIds.profilePhoto = asset.publicId;
     }
     if (files?.aadharPhoto?.[0]) {
-        images.aadharPhoto = await uploadImageBuffer(files.aadharPhoto[0].buffer, 'food/delivery/aadhar');
+        const asset = await uploadPartnerImage(files.aadharPhoto[0], 'food/delivery/aadhar');
+        images.aadharPhoto = asset.url;
+        imagePublicIds.aadharPhoto = asset.publicId;
     }
     if (files?.panPhoto?.[0]) {
-        images.panPhoto = await uploadImageBuffer(files.panPhoto[0].buffer, 'food/delivery/pan');
+        const asset = await uploadPartnerImage(files.panPhoto[0], 'food/delivery/pan');
+        images.panPhoto = asset.url;
+        imagePublicIds.panPhoto = asset.publicId;
     }
     if (files?.drivingLicensePhoto?.[0]) {
-        images.drivingLicensePhoto = await uploadImageBuffer(
-            files.drivingLicensePhoto[0].buffer,
-            'food/delivery/license'
-        );
+        const asset = await uploadPartnerImage(files.drivingLicensePhoto[0], 'food/delivery/license');
+        images.drivingLicensePhoto = asset.url;
+        imagePublicIds.drivingLicensePhoto = asset.publicId;
     }
 
     const partner = await FoodDeliveryPartner.create({
@@ -73,6 +101,7 @@ export const registerDeliveryPartner = async (payload, files) => {
         panNumber,
         aadharNumber,
         status: 'pending',
+        imagePublicIds,
         ...images
     });
 
@@ -158,7 +187,7 @@ export const updateDeliveryPartnerProfile = async (userId, payload, files) => {
     let updatedDocsRequiringReapproval = false;
 
     if (files?.profilePhoto?.[0]) {
-        partner.profilePhoto = await uploadImageBuffer(files.profilePhoto[0].buffer, 'food/delivery/profile');
+        await applyPartnerImageUpload(partner, 'profilePhoto', files.profilePhoto[0], 'food/delivery/profile');
     }
 
     await partner.save();
@@ -211,8 +240,18 @@ export const updateDeliveryPartnerProfilePhotoBase64 = async (userId, payload) =
     if (buffer.length > 8 * 1024 * 1024) {
         throw new ValidationError('Image too large (max 8MB)');
     }
-    // uploadImageBuffer expects raw bytes; mimeType is ignored by current implementation, but buffer is valid.
-    partner.profilePhoto = await uploadImageBuffer(buffer, 'food/delivery/profile');
+    const asset = await replaceCloudinaryImage({
+        buffer,
+        folder: 'food/delivery/profile',
+        oldPublicId: partner.imagePublicIds?.profilePhoto,
+        oldUrl: partner.profilePhoto,
+        mimeType,
+    });
+    partner.profilePhoto = asset.url;
+    partner.imagePublicIds = {
+        ...(partner.imagePublicIds || {}),
+        profilePhoto: asset.publicId,
+    };
     await partner.save();
     return partner.toObject();
 };
@@ -256,7 +295,7 @@ export const updateDeliveryPartnerBankDetails = async (userId, payload, files) =
     }
 
     if (files?.upiQrCode?.[0]) {
-        partner.upiQrCode = await uploadImageBuffer(files.upiQrCode[0].buffer, 'food/delivery/upi');
+        await applyPartnerImageUpload(partner, 'upiQrCode', files.upiQrCode[0], 'food/delivery/upi');
     }
 
     await partner.save();

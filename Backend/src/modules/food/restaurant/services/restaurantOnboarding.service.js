@@ -1,10 +1,22 @@
 import mongoose from "mongoose";
 import { FoodRestaurant } from "../models/restaurant.model.js";
 import {
-  uploadImageBuffer,
   uploadFileBuffer,
 } from "../../../../services/cloudinary.service.js";
+import {
+  replaceCloudinaryImage,
+  setRestaurantImageField,
+  uploadFoodImage,
+} from "../../services/foodImage.service.js";
 import { ValidationError } from "../../../../core/auth/errors.js";
+import {
+  ensureDraftRestaurantForPhone,
+  assertOnboardingContactUniqueness,
+  normalizeRestaurantPhone,
+  mapDuplicateKeyError,
+} from "./restaurantCreation.service.js";
+
+export { ensureDraftRestaurantForPhone };
 
 const ONBOARDING_STATUSES = new Set([
   "NOT_STARTED",
@@ -15,15 +27,7 @@ const ONBOARDING_STATUSES = new Set([
   "REJECTED",
 ]);
 
-const normalizePhone = (value) => {
-  const digits = String(value || "")
-    .replace(/\D/g, "")
-    .slice(-15);
-  return {
-    digits: digits || "",
-    last10: digits ? digits.slice(-10) : "",
-  };
-};
+const normalizePhone = normalizeRestaurantPhone;
 
 const normalizeRestaurantTime = (value) => {
   const raw = String(value || "").trim();
@@ -185,54 +189,25 @@ export const getOnboardingProgress = async (restaurantId) => {
   return buildOnboardingPayload(doc);
 };
 
-export const ensureDraftRestaurantForPhone = async (phone) => {
-  const { digits, last10 } = normalizePhone(phone);
-  if (!last10) throw new ValidationError("Phone is invalid");
-
-  const phoneCandidates = [phone, digits, last10].filter(Boolean);
-  const existing = await FoodRestaurant.findOne({
-    $or: [
-      { ownerPhone: { $in: phoneCandidates } },
-      { ownerPhoneDigits: digits },
-      { ownerPhoneLast10: last10 },
-      { primaryContactNumber: { $in: phoneCandidates } },
-    ],
-  });
-
-  if (existing) return existing;
-
-  return FoodRestaurant.create({
-    restaurantName: DRAFT_PLACEHOLDER_NAME,
-    ownerName: DRAFT_PLACEHOLDER_NAME,
-    ownerPhone: digits,
-    ownerPhoneDigits: digits,
-    ownerPhoneLast10: last10,
-    pureVegRestaurant: false,
-    onboardingStatus: "IN_PROGRESS",
-    currentStep: 1,
-    completedSteps: [],
-    status: "pending",
-    onboarding: {
-      step1: { ownerPhone: digits, primaryContactNumber: digits },
-      step2: {},
-      step3: {},
-    },
-  });
-};
-
-const uploadStepFiles = async (stepNumber, files = {}) => {
-  const uploaded = {};
+const uploadStepFiles = async (stepNumber, files = {}, restaurant = null) => {
+  const uploaded = { imagePublicIds: {} };
   if (stepNumber === 2) {
     if (files?.profileImage?.[0]) {
-      uploaded.profileImage = await uploadImageBuffer(
-        files.profileImage[0].buffer,
-        "food/restaurants/profile",
-      );
+      const asset = restaurant
+        ? await replaceCloudinaryImage({
+            buffer: files.profileImage[0].buffer,
+            folder: "food/restaurants/profile",
+            oldPublicId: restaurant.imagePublicIds?.profileImage,
+            oldUrl: restaurant.profileImage,
+            mimeType: files.profileImage[0].mimetype,
+          })
+        : await uploadFoodImage(files.profileImage[0], "food/restaurants/profile");
+      setRestaurantImageField(uploaded, "profileImage", asset, uploaded.imagePublicIds);
     }
     if (files?.menuImages?.length) {
       uploaded.menuImages = await Promise.all(
         files.menuImages.map((file) =>
-          uploadImageBuffer(file.buffer, "food/restaurants/menu"),
+          uploadFoodImage(file, "food/restaurants/menu"),
         ),
       );
     }
@@ -249,22 +224,40 @@ const uploadStepFiles = async (stepNumber, files = {}) => {
   }
   if (stepNumber === 3) {
     if (files?.panImage?.[0]) {
-      uploaded.panImage = await uploadImageBuffer(
-        files.panImage[0].buffer,
-        "food/restaurants/pan",
-      );
+      const asset = restaurant
+        ? await replaceCloudinaryImage({
+            buffer: files.panImage[0].buffer,
+            folder: "food/restaurants/pan",
+            oldPublicId: restaurant.imagePublicIds?.panImage,
+            oldUrl: restaurant.panImage,
+            mimeType: files.panImage[0].mimetype,
+          })
+        : await uploadFoodImage(files.panImage[0], "food/restaurants/pan");
+      setRestaurantImageField(uploaded, "panImage", asset, uploaded.imagePublicIds);
     }
     if (files?.gstImage?.[0]) {
-      uploaded.gstImage = await uploadImageBuffer(
-        files.gstImage[0].buffer,
-        "food/restaurants/gst",
-      );
+      const asset = restaurant
+        ? await replaceCloudinaryImage({
+            buffer: files.gstImage[0].buffer,
+            folder: "food/restaurants/gst",
+            oldPublicId: restaurant.imagePublicIds?.gstImage,
+            oldUrl: restaurant.gstImage,
+            mimeType: files.gstImage[0].mimetype,
+          })
+        : await uploadFoodImage(files.gstImage[0], "food/restaurants/gst");
+      setRestaurantImageField(uploaded, "gstImage", asset, uploaded.imagePublicIds);
     }
     if (files?.fssaiImage?.[0]) {
-      uploaded.fssaiImage = await uploadImageBuffer(
-        files.fssaiImage[0].buffer,
-        "food/restaurants/fssai",
-      );
+      const asset = restaurant
+        ? await replaceCloudinaryImage({
+            buffer: files.fssaiImage[0].buffer,
+            folder: "food/restaurants/fssai",
+            oldPublicId: restaurant.imagePublicIds?.fssaiImage,
+            oldUrl: restaurant.fssaiImage,
+            mimeType: files.fssaiImage[0].mimetype,
+          })
+        : await uploadFoodImage(files.fssaiImage[0], "food/restaurants/fssai");
+      setRestaurantImageField(uploaded, "fssaiImage", asset, uploaded.imagePublicIds);
     }
   }
   return uploaded;
@@ -300,10 +293,20 @@ export const saveOnboardingStep = async (restaurantId, stepNumber, payload, file
     throw new ValidationError("Complete previous onboarding steps first");
   }
 
-  const uploads = await uploadStepFiles(step, files);
+  const uploads = await uploadStepFiles(step, files, restaurant);
   const onboarding = restaurant.onboarding || {};
 
   if (step === 1) {
+    const nextOwnerPhone = normalizePhone(
+      payload.ownerPhone || restaurant.ownerPhone,
+    ).digits;
+    const nextOwnerEmail = String(payload.ownerEmail || "").trim().toLowerCase();
+
+    await assertOnboardingContactUniqueness(restaurantId, {
+      ownerPhone: nextOwnerPhone,
+      ownerEmail: nextOwnerEmail,
+    });
+
     const latNum = toFiniteNumber(payload.latitude ?? payload.location?.latitude);
     const lngNum = toFiniteNumber(payload.longitude ?? payload.location?.longitude);
     const zoneId =
@@ -315,8 +318,8 @@ export const saveOnboardingStep = async (restaurantId, stepNumber, payload, file
       String(payload.restaurantName || "").trim() || restaurant.restaurantName;
     restaurant.ownerName =
       String(payload.ownerName || "").trim() || restaurant.ownerName;
-    restaurant.ownerEmail = String(payload.ownerEmail || "").trim();
-    restaurant.ownerPhone = normalizePhone(payload.ownerPhone || restaurant.ownerPhone).digits;
+    restaurant.ownerEmail = nextOwnerEmail;
+    restaurant.ownerPhone = nextOwnerPhone;
     restaurant.primaryContactNumber = normalizePhone(
       payload.primaryContactNumber || payload.ownerPhone || restaurant.primaryContactNumber,
     ).digits;
@@ -380,6 +383,12 @@ export const saveOnboardingStep = async (restaurantId, stepNumber, payload, file
     if (uploads.profileImage) restaurant.profileImage = uploads.profileImage;
     if (uploads.menuImages?.length) restaurant.menuImages = uploads.menuImages;
     if (uploads.menuPdf) restaurant.menuPdf = uploads.menuPdf;
+    if (uploads.imagePublicIds && Object.keys(uploads.imagePublicIds).length) {
+      restaurant.imagePublicIds = {
+        ...(restaurant.imagePublicIds || {}),
+        ...uploads.imagePublicIds,
+      };
+    }
 
     onboarding.step2 = {
       cuisines,
@@ -417,6 +426,12 @@ export const saveOnboardingStep = async (restaurantId, stepNumber, payload, file
     if (uploads.panImage) restaurant.panImage = uploads.panImage;
     if (uploads.gstImage) restaurant.gstImage = uploads.gstImage;
     if (uploads.fssaiImage) restaurant.fssaiImage = uploads.fssaiImage;
+    if (uploads.imagePublicIds && Object.keys(uploads.imagePublicIds).length) {
+      restaurant.imagePublicIds = {
+        ...(restaurant.imagePublicIds || {}),
+        ...uploads.imagePublicIds,
+      };
+    }
 
     onboarding.step3 = {
       pan: {
@@ -457,7 +472,13 @@ export const saveOnboardingStep = async (restaurantId, stepNumber, payload, file
     restaurant.adminRemarks = undefined;
   }
 
-  await restaurant.save();
+  try {
+    await restaurant.save();
+  } catch (err) {
+    const mapped = mapDuplicateKeyError(err);
+    if (mapped) throw mapped;
+    throw err;
+  }
   return buildOnboardingPayload(restaurant.toObject());
 };
 
@@ -490,7 +511,13 @@ export const submitOnboarding = async (restaurantId, payload, files) => {
   restaurant.rejectionReason = undefined;
   restaurant.adminRemarks = undefined;
 
-  await restaurant.save();
+  try {
+    await restaurant.save();
+  } catch (err) {
+    const mapped = mapDuplicateKeyError(err);
+    if (mapped) throw mapped;
+    throw err;
+  }
 
   try {
     const { notifyAdminsSafely } = await import(

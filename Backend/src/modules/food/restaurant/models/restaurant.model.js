@@ -55,10 +55,12 @@ const restaurantSchema = new mongoose.Schema(
     ownerEmail: {
       type: String,
       trim: true,
+      lowercase: true,
     },
     ownerPhone: {
       type: String,
       trim: true,
+      required: true,
     },
     // Normalized fields for fast lookup + uniqueness guarantees.
     // These are derived from restaurantName/ownerPhone at write time.
@@ -176,18 +178,22 @@ const restaurantSchema = new mongoose.Schema(
       trim: true,
     },
     menuImages: {
-      type: [String],
+      type: [mongoose.Schema.Types.Mixed],
       default: [],
     },
     menuPdf: {
       type: String,
     },
     coverImages: {
-      type: [String],
+      type: [mongoose.Schema.Types.Mixed],
       default: [],
     },
     profileImage: {
       type: String,
+    },
+    imagePublicIds: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
     },
     fcmTokens: {
       type: [String],
@@ -264,6 +270,16 @@ const restaurantSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    profileReviewStatus: {
+      type: String,
+      enum: ["pending"],
+      default: undefined,
+      index: true,
+    },
+    pendingProfile: {
+      type: mongoose.Schema.Types.Mixed,
+      default: undefined,
+    },
     onboardingStatus: {
       type: String,
       enum: [
@@ -315,6 +331,10 @@ const restaurantSchema = new mongoose.Schema(
 );
 
 restaurantSchema.pre("validate", function normalizeDerivedFields(next) {
+  if (typeof this.ownerEmail === "string" && !this.ownerEmail.trim()) {
+    this.ownerEmail = undefined;
+  }
+
   const name =
     typeof this.restaurantName === "string" ? this.restaurantName : "";
   const normalizedName = name.trim().toLowerCase().replace(/\s+/g, " ");
@@ -434,6 +454,19 @@ restaurantSchema.pre("validate", function normalizeDerivedFields(next) {
 });
 
 restaurantSchema.index({ ownerPhone: 1 });
+restaurantSchema.index({ ownerPhoneLast10: 1 }, {
+  unique: true,
+  partialFilterExpression: {
+    ownerPhoneLast10: { $type: "string", $ne: "" },
+  },
+});
+restaurantSchema.index({ ownerEmail: 1 }, {
+  unique: true,
+  sparse: true,
+  partialFilterExpression: {
+    ownerEmail: { $type: "string", $ne: "" },
+  },
+});
 restaurantSchema.index({ restaurantName: 1 });
 restaurantSchema.index({ restaurantNameNormalized: 1 });
 restaurantSchema.index({ city: 1 });

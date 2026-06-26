@@ -95,6 +95,10 @@ const deliveryPartnerSchema = new mongoose.Schema(
         bankName: { type: String },
         upiId: { type: String },
         upiQrCode: { type: String },
+        imagePublicIds: {
+            type: mongoose.Schema.Types.Mixed,
+            default: {},
+        },
         availabilityStatus: {
             type: String,
             enum: ['online', 'offline'],

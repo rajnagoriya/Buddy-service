@@ -1,5 +1,8 @@
 import { FoodDiningBanner } from '../models/diningBanner.model.js';
-import { v2 as cloudinary } from 'cloudinary';
+import {
+    deleteFoodImageAsset,
+    uploadFoodImage,
+} from '../../services/foodImage.service.js';
 
 export const listDiningBanners = async () => {
     return FoodDiningBanner.find().sort({ sortOrder: 1, createdAt: -1 }).lean();
@@ -14,24 +17,14 @@ export const createDiningBannersFromFiles = async (files, meta = {}) => {
 
     for (const file of files) {
         try {
-            const uploadResult = await new Promise((resolve, reject) => {
-                const stream = cloudinary.uploader.upload_stream(
-                    { folder: 'food/dining-banners', resource_type: 'image' },
-                    (error, result) => {
-                        if (error) return reject(error);
-                        return resolve(result);
-                    }
-                );
-                stream.end(file.buffer);
-            });
+            const asset = await uploadFoodImage(file, 'food/dining-banners');
 
             const banner = await FoodDiningBanner.create({
-                imageUrl: uploadResult.secure_url,
-                publicId: uploadResult.public_id,
+                imageUrl: asset.url,
+                publicId: asset.publicId,
                 title: meta.title,
                 ctaText: meta.ctaText,
                 ctaLink: meta.ctaLink,
-                diningType: meta.diningType,
                 sortOrder: meta.sortOrder ?? 0,
                 isActive: true,
             });
@@ -51,14 +44,7 @@ export const deleteDiningBanner = async (id) => {
         return { deleted: false };
     }
 
-    if (doc.publicId) {
-        try {
-            await cloudinary.uploader.destroy(doc.publicId);
-        } catch {
-            // ignore cloudinary deletion errors
-        }
-    }
-
+    await deleteFoodImageAsset({ publicId: doc.publicId, url: doc.imageUrl });
     await doc.deleteOne();
     return { deleted: true };
 };
@@ -80,4 +66,3 @@ export const toggleDiningBannerStatus = async (id, isActive) => {
     ).lean();
     return updated;
 };
-

@@ -58,6 +58,8 @@ router.get('/reports/transactions', adminController.getTransactionReport);
 router.get('/reports/tax', adminController.getTaxReport);
 router.get('/reports/tax/:id', adminController.getTaxReportDetail);
 router.get('/restaurants/pending', adminController.getPendingRestaurants);
+router.get('/restaurants/check-phone', adminController.checkRestaurantPhone);
+router.get('/restaurants/check-email', adminController.checkRestaurantEmail);
 router.get('/restaurants/reviews', adminController.getRestaurantReviews);
 router.get('/restaurants/:id/menu-pdf', adminController.getRestaurantMenuPdfDownloadUrl);
 router.get('/restaurants/:id/download-menu-pdf', adminController.downloadRestaurantMenuPdf);

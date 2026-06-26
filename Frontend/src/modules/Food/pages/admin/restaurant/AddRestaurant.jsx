@@ -9,6 +9,7 @@ import { Button } from "@food/components/ui/button"
 import { adminAPI, uploadAPI, zoneAPI } from "@food/api"
 import { toast } from "sonner"
 import { EMAIL_REGEX } from "@/shared/utils/emailValidation"
+import { invalidateApprovedRestaurantsCache } from "@food/utils/adminRestaurantCache"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => { console.warn(...args) }
 const debugError = (...args) => { console.error(...args) }
@@ -154,6 +155,41 @@ const clearAllFilesFromDB = async () => {
   }
 }
 
+const DIETARY_OPTIONS = [
+  { value: "veg", label: "Veg" },
+  { value: "non_veg", label: "Non veg" },
+  { value: "mixed", label: "Mixed" },
+]
+
+function DietTypeIcon({ type, size = "sm", className = "" }) {
+  const box = size === "lg" ? "h-5 w-5" : "h-4 w-4"
+  const dot = size === "lg" ? "h-2.5 w-2.5" : "h-2 w-2"
+
+  if (type === "mixed") {
+    return (
+      <div className={`flex flex-shrink-0 items-center gap-0.5 ${className}`}>
+        <div className={`${box} flex items-center justify-center rounded-sm border-2 border-green-600 bg-green-50`}>
+          <div className={`${dot} rounded-full bg-green-600`} />
+        </div>
+        <div className={`${box} flex items-center justify-center rounded-sm border-2 border-red-600 bg-red-50`}>
+          <div className={`${dot} rounded-full bg-red-600`} />
+        </div>
+      </div>
+    )
+  }
+
+  const isVeg = type === "veg"
+  return (
+    <div
+      className={`${box} flex flex-shrink-0 items-center justify-center rounded-sm border-2 ${className} ${
+        isVeg ? "border-green-600 bg-green-50" : "border-red-600 bg-red-50"
+      }`}
+    >
+      <div className={`${dot} rounded-full ${isVeg ? "bg-green-600" : "bg-red-600"}`} />
+    </div>
+  )
+}
+
 export default function AddRestaurant() {
   const navigate = useNavigate()
   const [step, setStep] = useState(1)
@@ -163,11 +199,13 @@ export default function AddRestaurant() {
   const [zones, setZones] = useState([])
   const [zonesLoading, setZonesLoading] = useState(false)
   const [isHydrated, setIsHydrated] = useState(false)
+  const [phoneAvailability, setPhoneAvailability] = useState("idle")
+  const [emailAvailability, setEmailAvailability] = useState("idle")
 
   // Step 1: Basic Info
   const [step1, setStep1] = useState({
     restaurantName: "",
-    pureVegRestaurant: null,
+    dietaryType: null,
     ownerName: "",
     ownerEmail: "",
     ownerPhone: "",
@@ -414,7 +452,7 @@ export default function AddRestaurant() {
   const validateStep1 = () => {
     const errors = []
     if (!step1.restaurantName?.trim()) errors.push("Restaurant name is required")
-    if (typeof step1.pureVegRestaurant !== "boolean") errors.push("Please select whether restaurant is pure veg")
+    if (!step1.dietaryType) errors.push("Please select restaurant type")
     if (!step1.ownerName?.trim()) errors.push("Owner name is required")
     if (step1.ownerName?.trim() && (!NAME_REGEX.test(step1.ownerName.trim()) || !hasLetters(step1.ownerName))) {
       errors.push("Owner name must contain valid characters")
@@ -514,6 +552,16 @@ export default function AddRestaurant() {
       return
     }
 
+    if (step === 1 && phoneAvailability === "taken") {
+      toast.error("Phone number already registered")
+      return
+    }
+
+    if (step === 1 && emailAvailability === "taken") {
+      toast.error("Email already registered")
+      return
+    }
+
     if (step < 3) {
       setStep(step + 1)
     } else {
@@ -569,7 +617,7 @@ export default function AddRestaurant() {
       const payload = {
         // Step 1
         restaurantName: step1.restaurantName,
-        pureVegRestaurant: step1.pureVegRestaurant,
+        pureVegRestaurant: step1.dietaryType === 'veg',
         ownerName: step1.ownerName,
         ownerEmail: step1.ownerEmail,
         ownerPhone: step1.ownerPhone,
@@ -608,6 +656,9 @@ export default function AddRestaurant() {
       const data = response?.data?.data ?? response?.data
       if (response?.data?.success !== false && data) {
         await clearPersistedFormData()
+        // Invalidate the restaurant list cache so RestaurantsList re-fetches
+        // fresh data (including the newly created restaurant) on navigation
+        invalidateApprovedRestaurantsCache()
         toast.success("Restaurant created successfully!")
         setShowSuccessDialog(true)
         setTimeout(() => {
@@ -656,6 +707,70 @@ export default function AddRestaurant() {
       cancelled = true
     }
   }, [step])
+
+  const handleCheckPhone = async () => {
+    const phone = step1.ownerPhone?.trim()
+    if (!phone || !PHONE_REGEX.test(phone)) {
+      setFormErrors((prev) => ({ ...prev, ownerPhone: "Please enter a valid 10-digit phone number" }))
+      return
+    }
+
+    setPhoneAvailability("checking")
+    try {
+      const response = await adminAPI.checkRestaurantPhone(phone)
+      const available = response?.data?.data?.available ?? response?.data?.available
+      setPhoneAvailability(available ? "available" : "taken")
+      setFormErrors((prev) => {
+        const next = { ...prev }
+        if (!available) {
+          next.ownerPhone = "Phone number already registered"
+        } else {
+          delete next.ownerPhone
+        }
+        return next
+      })
+      if (available) {
+        toast.success("Phone number is available!")
+      } else {
+        toast.error("Phone number already registered")
+      }
+    } catch {
+      setPhoneAvailability("idle")
+      toast.error("Failed to check phone availability")
+    }
+  }
+
+  const handleCheckEmail = async () => {
+    const email = step1.ownerEmail?.trim()
+    if (!email || !EMAIL_REGEX.test(email)) {
+      setFormErrors((prev) => ({ ...prev, ownerEmail: "Please enter a valid email address" }))
+      return
+    }
+
+    setEmailAvailability("checking")
+    try {
+      const response = await adminAPI.checkRestaurantEmail(email)
+      const available = response?.data?.data?.available ?? response?.data?.available
+      setEmailAvailability(available ? "available" : "taken")
+      setFormErrors((prev) => {
+        const next = { ...prev }
+        if (!available) {
+          next.ownerEmail = "Email already registered"
+        } else {
+          delete next.ownerEmail
+        }
+        return next
+      })
+      if (available) {
+        toast.success("Email is available!")
+      } else {
+        toast.error("Email already registered")
+      }
+    } catch {
+      setEmailAvailability("idle")
+      toast.error("Failed to check email availability")
+    }
+  }
 
   // Initialize Google Places Autocomplete for Step 1 location search.
   useEffect(() => {
@@ -875,38 +990,39 @@ export default function AddRestaurant() {
         <div className="space-y-4">
           <div>
             <Label className="text-xs text-gray-700">Restaurant name*</Label>
-            <Input
-              value={step1.restaurantName || ""}
-              onChange={(e) => setStep1({ ...step1, restaurantName: e.target.value })}
-              className="mt-1 bg-white text-sm text-black placeholder-black"
-              placeholder="Customers will see this name"
-            />
+            <div className="mt-1 flex items-center gap-2">
+              {step1.dietaryType ? (
+                <DietTypeIcon type={step1.dietaryType} size="lg" />
+              ) : null}
+              <Input
+                value={step1.restaurantName || ""}
+                onChange={(e) => setStep1({ ...step1, restaurantName: e.target.value })}
+                className="bg-white text-sm text-black placeholder-black flex-1"
+                placeholder="Customers will see this name"
+              />
+            </div>
           </div>
           <div>
-            <Label className="text-xs text-gray-700">Pure veg restaurant?*</Label>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setStep1({ ...step1, pureVegRestaurant: true })}
-                className={`px-3 py-1.5 text-xs rounded-full border ${
-                  step1.pureVegRestaurant === true
-                    ? "bg-green-600 text-white border-green-600"
-                    : "bg-white text-gray-700 border-gray-200"
-                }`}
-              >
-                Yes, Pure Veg
-              </button>
-              <button
-                type="button"
-                onClick={() => setStep1({ ...step1, pureVegRestaurant: false })}
-                className={`px-3 py-1.5 text-xs rounded-full border ${
-                  step1.pureVegRestaurant === false
-                    ? "bg-gray-900 text-white border-gray-900"
-                    : "bg-white text-gray-700 border-gray-200"
-                }`}
-              >
-                No, Mixed Menu
-              </button>
+            <Label className="text-xs text-gray-700">Restaurant type*</Label>
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              {DIETARY_OPTIONS.map((option) => {
+                const selected = step1.dietaryType === option.value
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setStep1({ ...step1, dietaryType: option.value })}
+                    className={`flex h-11 items-center justify-center gap-2 rounded-xl border-2 px-2 text-xs font-semibold transition-colors ${
+                      selected
+                        ? "border-primary-orange bg-primary-orange text-white"
+                        : "border-gray-200 bg-white text-gray-700"
+                    }`}
+                  >
+                    <DietTypeIcon type={option.value} />
+                    {option.label}
+                  </button>
+                )
+              })}
             </div>
             <p className="text-[11px] text-gray-500 mt-1">
               This helps users filter restaurants by dietary preference.
@@ -929,24 +1045,56 @@ export default function AddRestaurant() {
           </div>
           <div>
             <Label className="text-xs text-gray-700">Email address*</Label>
-            <Input
-              type="email"
-              value={step1.ownerEmail || ""}
-              onChange={(e) => setStep1({ ...step1, ownerEmail: e.target.value })}
-              className="mt-1 bg-white text-sm text-black placeholder-black"
-              placeholder="owner@example.com"
-            />
+            <div className="flex gap-2">
+              <Input
+                type="email"
+                value={step1.ownerEmail || ""}
+                onChange={(e) => {
+                  setStep1({ ...step1, ownerEmail: e.target.value })
+                  setEmailAvailability("idle")
+                  if (formErrors.ownerEmail) {
+                    setFormErrors((prev) => { const next = {...prev}; delete next.ownerEmail; return next; })
+                  }
+                }}
+                className="mt-1 bg-white text-sm text-black placeholder-black flex-1"
+                placeholder="owner@example.com"
+              />
+              <Button type="button" onClick={handleCheckEmail} disabled={emailAvailability === "checking" || emailAvailability === "available"} className="mt-1 bg-black text-white px-4">
+                {emailAvailability === "checking" ? <Loader2 className="w-4 h-4 animate-spin" /> : "Save"}
+              </Button>
+            </div>
+            {formErrors.ownerEmail ? (
+              <p className="mt-1 text-[11px] text-red-600">{formErrors.ownerEmail}</p>
+            ) : emailAvailability === "available" ? (
+              <p className="mt-1 text-[11px] text-green-600">Email is available</p>
+            ) : null}
           </div>
           <div>
             <Label className="text-xs text-gray-700">Phone number*</Label>
-            <Input
-              value={step1.ownerPhone || ""}
-              onChange={(e) => setStep1({ ...step1, ownerPhone: sanitizeDigits(e.target.value).slice(0, 10) })}
-              className="mt-1 bg-white text-sm text-black placeholder-black"
-              placeholder="10-digit mobile number"
-              inputMode="numeric"
-              maxLength={10}
-            />
+            <div className="flex gap-2">
+              <Input
+                value={step1.ownerPhone || ""}
+                onChange={(e) => {
+                  setStep1({ ...step1, ownerPhone: sanitizeDigits(e.target.value).slice(0, 10) })
+                  setPhoneAvailability("idle")
+                  if (formErrors.ownerPhone) {
+                    setFormErrors((prev) => { const next = {...prev}; delete next.ownerPhone; return next; })
+                  }
+                }}
+                className="mt-1 bg-white text-sm text-black placeholder-black flex-1"
+                placeholder="10-digit mobile number"
+                inputMode="numeric"
+                maxLength={10}
+              />
+              <Button type="button" onClick={handleCheckPhone} disabled={phoneAvailability === "checking" || phoneAvailability === "available"} className="mt-1 bg-black text-white px-4">
+                {phoneAvailability === "checking" ? <Loader2 className="w-4 h-4 animate-spin" /> : "Save"}
+              </Button>
+            </div>
+            {formErrors.ownerPhone ? (
+              <p className="mt-1 text-[11px] text-red-600">{formErrors.ownerPhone}</p>
+            ) : phoneAvailability === "available" ? (
+              <p className="mt-1 text-[11px] text-green-600">Phone number is available</p>
+            ) : null}
           </div>
         </div>
       </section>
@@ -1460,7 +1608,10 @@ export default function AddRestaurant() {
           </Button>
           <Button
             onClick={handleNext}
-            disabled={isSubmitting}
+            disabled={
+              isSubmitting ||
+              (step === 1 && (phoneAvailability !== "available" || emailAvailability !== "available"))
+            }
             className="text-sm bg-black text-white px-6"
           >
             {step === 3 ? (isSubmitting ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Creating... </> : "Create Restaurant") : isSubmitting ? "Saving..." : "Continue"}

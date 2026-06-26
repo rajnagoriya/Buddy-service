@@ -3,6 +3,7 @@ import { Navigate, useLocation } from "react-router-dom";
 import Loader from "@food/components/Loader";
 import { isModuleAuthenticated } from "@food/utils/auth";
 import { restaurantAPI } from "@food/api";
+import { resolveRestaurantOnboardingStatus } from "@food/utils/onboardingUtils";
 
 let guardCache = null;
 
@@ -41,7 +42,7 @@ if (typeof window !== "undefined" && !window.__restaurantGuardWired) {
 }
 
 function resolveRedirect(onboarding, mode, pathname, locationState = {}) {
-  const status = String(onboarding?.onboardingStatus || "").toUpperCase();
+  const status = resolveRestaurantOnboardingStatus(onboarding);
   const currentStep =
     onboarding?.rejectionStep || onboarding?.currentStep || 1;
 
@@ -118,7 +119,7 @@ export default function RestaurantAccessGuard({ children, mode = "dashboard" }) 
         );
 
         if (redirectTo) {
-          const status = String(onboarding?.onboardingStatus || "").toUpperCase();
+          const status = resolveRestaurantOnboardingStatus(onboarding);
           setState({
             kind: "redirect",
             to: redirectTo,
@@ -126,7 +127,7 @@ export default function RestaurantAccessGuard({ children, mode = "dashboard" }) 
               status === "REJECTED"
                 ? {
                     isRejected: true,
-                    rejectionReason: onboarding?.adminRemarks || "",
+                    rejectionReason: onboarding?.adminRemarks || onboarding?.rejectionReason || "",
                     rejectionStep:
                       onboarding?.rejectionStep || onboarding?.currentStep || 1,
                   }
