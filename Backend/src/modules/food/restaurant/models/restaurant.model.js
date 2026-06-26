@@ -178,18 +178,22 @@ const restaurantSchema = new mongoose.Schema(
       trim: true,
     },
     menuImages: {
-      type: [String],
+      type: [mongoose.Schema.Types.Mixed],
       default: [],
     },
     menuPdf: {
       type: String,
     },
     coverImages: {
-      type: [String],
+      type: [mongoose.Schema.Types.Mixed],
       default: [],
     },
     profileImage: {
       type: String,
+    },
+    imagePublicIds: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
     },
     fcmTokens: {
       type: [String],
@@ -265,6 +269,16 @@ const restaurantSchema = new mongoose.Schema(
     pendingUpdateReason: {
       type: String,
       trim: true,
+    },
+    profileReviewStatus: {
+      type: String,
+      enum: ["pending"],
+      default: undefined,
+      index: true,
+    },
+    pendingProfile: {
+      type: mongoose.Schema.Types.Mixed,
+      default: undefined,
     },
     onboardingStatus: {
       type: String,

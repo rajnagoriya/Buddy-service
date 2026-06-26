@@ -3,8 +3,10 @@ import { ValidationError } from '../../../../core/auth/errors.js';
 import { FoodCategory } from '../../admin/models/category.model.js';
 import { FoodItem } from '../../admin/models/food.model.js';
 import { FoodRestaurant } from '../models/restaurant.model.js';
+import { deleteFoodImageAsset } from '../../services/foodImage.service.js';
 import {
     backfillLegacyCategoryWorkflow,
+    categoryAllowsFoodType,
     GLOBAL_CATEGORY_FILTER,
     normalizeCategoryFoodTypeScope,
     serializeCategoryForResponse,
@@ -304,14 +306,18 @@ export async function deleteRestaurantCategory(restaurantId, id) {
         throw new ValidationError('Invalid category id');
     }
 
-    const category = await FoodCategory.findOne({ _id: id, restaurantId: context.restaurantId }).select('_id').lean();
-    if (!category?._id) return null;
+    const existing = await FoodCategory.findOne({ _id: id, restaurantId: context.restaurantId }).lean();
+    if (!existing?._id) return null;
 
     const inUse = await FoodItem.countDocuments({ categoryId: id, restaurantId: context.restaurantId });
     if (inUse > 0) {
         throw new ValidationError('Cannot delete category while it has items');
     }
 
-    const deleted = await FoodCategory.findOneAndDelete({ _id: id, restaurantId: context.restaurantId }).lean();
-    return deleted ? { id } : null;
+    await deleteFoodImageAsset({
+        publicId: existing.imagePublicId,
+        url: existing.image,
+    });
+    await FoodCategory.findOneAndDelete({ _id: id, restaurantId: context.restaurantId });
+    return { id };
 }

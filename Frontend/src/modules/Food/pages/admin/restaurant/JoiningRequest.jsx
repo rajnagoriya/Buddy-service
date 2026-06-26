@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from "react"
 import { 
   Search, Filter, Eye, Check, X, UtensilsCrossed, ArrowUpDown, Loader2,
-  FileText, Image as ImageIcon, ExternalLink, CreditCard, Calendar, Star, Building2, User, Phone, Mail, MapPin, Clock, MoreVertical, XCircle
+  FileText, Image as ImageIcon, ExternalLink, CreditCard, Calendar, Star, Building2, User, Phone, Mail, MapPin, Clock, MoreVertical, XCircle, RefreshCw
 } from "lucide-react"
 import { adminAPI, restaurantAPI } from "@food/api"
 import { 
@@ -12,7 +12,9 @@ import {
   DropdownMenuSeparator, 
   DropdownMenuTrigger 
 } from "@food/components/ui/dropdown-menu"
-import { fetchPendingRestaurantsCached, invalidatePendingRequestsCache } from "@food/utils/adminRestaurantCache"
+import { fetchPendingRestaurantsCached, invalidateApprovedRestaurantsCache, invalidatePendingRequestsCache } from "@food/utils/adminRestaurantCache"
+import ProfileChangeReviewPanel from "@food/components/admin/restaurant/ProfileChangeReviewPanel"
+import { DAY_NAMES, formatTime12Hour as formatOutletTime12Hour } from "@food/utils/outletTimingsUtils"
 
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
@@ -76,6 +78,7 @@ export default function JoiningRequest() {
   const [rejectionReason, setRejectionReason] = useState("")
   const [showDetailsModal, setShowDetailsModal] = useState(false)
   const [restaurantDetails, setRestaurantDetails] = useState(null)
+  const [outletTimings, setOutletTimings] = useState(null)
   const [loadingDetails, setLoadingDetails] = useState(false)
   const [showFilterDialog, setShowFilterDialog] = useState(false)
   const [filters, setFilters] = useState({
@@ -89,7 +92,7 @@ export default function JoiningRequest() {
 
   // Fetch restaurant join requests
   useEffect(() => {
-    fetchRequests()
+    fetchRequests(true)
   }, [])
 
   const fetchRequests = async (force = false) => {
@@ -99,7 +102,12 @@ export default function JoiningRequest() {
 
       const response = await fetchPendingRestaurantsCached({ force })
       const list = response?.data?.data || []
-      setPendingRequests(list.filter((r) => r.status?.toLowerCase() === "pending"))
+      setPendingRequests(
+        list.filter(
+          (r) =>
+            r.status?.toLowerCase() === "pending" || r.profileReviewStatus === "pending",
+        ),
+      )
       setRejectedRequests(list.filter((r) => r.status?.toLowerCase() === "rejected"))
     } catch (err) {
       debugError("Error fetching restaurant requests:", err)
@@ -226,6 +234,7 @@ export default function JoiningRequest() {
         // Soft update: Remove from pending state and clear cached pending requests
         setPendingRequests((prev) => prev.filter((r) => r._id !== request._id))
         invalidatePendingRequestsCache()
+        invalidateApprovedRestaurantsCache()
         
         alert(`Successfully approved ${request.restaurantName}'s join request!`)
       } catch (err) {
@@ -288,57 +297,71 @@ export default function JoiningRequest() {
     setShowDetailsModal(true)
     setLoadingDetails(true)
     setRestaurantDetails(null)
+    setOutletTimings(null)
     
     try {
+      let details = null
       // First, use fullData if available (has all details from API)
       if (request.fullData) {
         debugLog("Using fullData from request:", request.fullData)
-        setRestaurantDetails(request.fullData)
-        setLoadingDetails(false)
-        return
-      }
-      
-      // Try to fetch full restaurant details from API
-      const restaurantId = request._id || request.id
-      let response = null
-      
-      if (restaurantId) {
-        try {
-          // Try admin API first
-          if (adminAPI.getRestaurantById) {
-            response = await adminAPI.getRestaurantById(restaurantId)
+        details = request.fullData
+      } else {
+        // Try to fetch full restaurant details from API
+        const restaurantId = request._id || request.id
+        let response = null
+        
+        if (restaurantId) {
+          try {
+            // Try admin API first
+            if (adminAPI.getRestaurantById) {
+              response = await adminAPI.getRestaurantById(restaurantId)
+            }
+          } catch (err) {
+            debugLog("Admin API failed, trying restaurant API:", err)
           }
-        } catch (err) {
-          debugLog("Admin API failed, trying restaurant API:", err)
+          
+          // Fallback to regular restaurant API
+          if (!response || !response?.data?.success) {
+            try {
+              response = await restaurantAPI.getRestaurantById(restaurantId)
+            } catch (err) {
+              debugLog("Restaurant API also failed:", err)
+            }
+          }
         }
         
-        // Fallback to regular restaurant API
-        if (!response || !response?.data?.success) {
-          try {
-            response = await restaurantAPI.getRestaurantById(restaurantId)
-          } catch (err) {
-            debugLog("Restaurant API also failed:", err)
+        // Check response structure
+        if (response?.data?.success) {
+          const data = response.data.data
+          if (data?.restaurant) {
+            details = data.restaurant
+          } else if (data) {
+            details = data
+          } else {
+            details = request
           }
+        } else {
+          details = request
         }
       }
-      
-      // Check response structure
-      if (response?.data?.success) {
-        const data = response.data.data
-        if (data?.restaurant) {
-          setRestaurantDetails(data.restaurant)
-        } else if (data) {
-          setRestaurantDetails(data)
-        } else {
-          setRestaurantDetails(request)
+
+      setRestaurantDetails(details)
+
+      const restaurantId = details?._id || details?.id || request._id || request.id
+      if (restaurantId) {
+        try {
+          const timingsRes = await restaurantAPI.getOutletTimingsByRestaurantId(restaurantId)
+          const timings =
+            timingsRes?.data?.data?.outletTimings ||
+            timingsRes?.data?.outletTimings ||
+            null
+          setOutletTimings(timings)
+        } catch (err) {
+          debugLog("Failed to load outlet timings:", err)
         }
-      } else {
-        // Use the request data we already have
-        setRestaurantDetails(request)
       }
     } catch (err) {
       debugError("Error fetching restaurant details:", err)
-      // Use the request data we already have
       setRestaurantDetails(request)
     } finally {
       setLoadingDetails(false)
@@ -349,6 +372,7 @@ export default function JoiningRequest() {
     setShowDetailsModal(false)
     setSelectedRequest(null)
     setRestaurantDetails(null)
+    setOutletTimings(null)
   }
 
   const getNormalizedImageUrl = (image) => {
@@ -473,6 +497,16 @@ export default function JoiningRequest() {
                   </span>
                 )}
               </button>
+
+              {/* Refresh Button */}
+              <button
+                onClick={() => fetchRequests(true)}
+                className="w-full sm:w-auto px-3.5 py-2 text-xs sm:text-sm font-medium rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 flex items-center justify-center gap-1.5 transition-all shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:shadow-sm"
+                title="Refresh Requests"
+              >
+                <RefreshCw className="w-4 h-4 text-slate-500" />
+                <span>Refresh</span>
+              </button>
             </div>
           </div>
 
@@ -585,15 +619,20 @@ export default function JoiningRequest() {
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex flex-col gap-1 items-start">
                           <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                            request.status?.toLowerCase() === "pending"
+                            request.profileReviewStatus === "pending"
+                              ? "bg-violet-100 text-violet-700"
+                              : request.status?.toLowerCase() === "pending"
                               ? "bg-blue-100 text-blue-700"
                               : "bg-red-100 text-red-700"
                           }`}>
-                            {request.status}
+                            {request.profileReviewStatus === "pending"
+                              ? "Re-review"
+                              : request.status}
                           </span>
-                          {request.status?.toLowerCase() === "pending" && request.pendingUpdateReason && (
+                          {(request.profileReviewStatus === "pending" || request.status?.toLowerCase() === "pending") &&
+                            (request.pendingUpdateReason || request.pendingProfile?.pendingUpdateReason) && (
                             <span className="text-[10px] font-semibold text-slate-500 italic ml-1">
-                              • {request.pendingUpdateReason}
+                              • {request.pendingUpdateReason || request.pendingProfile?.pendingUpdateReason}
                             </span>
                           )}
                         </div>
@@ -892,6 +931,8 @@ export default function JoiningRequest() {
 
                 return (
                   <div className="space-y-5">
+                    <ProfileChangeReviewPanel restaurant={r} />
+
                     {/* Restaurant Basic Info */}
                     <div className="flex items-start gap-4 pb-4 border-b border-slate-100">
                       <a
@@ -1064,10 +1105,30 @@ export default function JoiningRequest() {
                         <div className="space-y-2.5">
                           {(openingTime || closingTime) && (
                             <div className="p-2.5 rounded-xl bg-slate-50/50 border border-slate-100 shadow-none">
-                              <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-0.5">Opening / Closing Hours</p>
+                              <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-0.5">Default Hours</p>
                               <p className="text-sm font-semibold text-slate-800">
                                 {formatTime12Hour(openingTime)} – {formatTime12Hour(closingTime)}
                               </p>
+                            </div>
+                          )}
+                          {outletTimings && (
+                            <div className="p-2.5 rounded-xl bg-slate-50/50 border border-slate-100 shadow-none">
+                              <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-1.5">Weekly schedule</p>
+                              <div className="space-y-1">
+                                {DAY_NAMES.map((day) => {
+                                  const slot = outletTimings[day]
+                                  if (!slot) return null
+                                  const label = slot.isOpen === false
+                                    ? "Closed"
+                                    : `${formatOutletTime12Hour(slot.openingTime)} – ${formatOutletTime12Hour(slot.closingTime)}`
+                                  return (
+                                    <div key={day} className="flex items-center justify-between text-xs">
+                                      <span className="font-medium text-slate-600">{day.slice(0, 3)}</span>
+                                      <span className={`font-semibold ${slot.isOpen === false ? "text-slate-400" : "text-slate-800"}`}>{label}</span>
+                                    </div>
+                                  )
+                                })}
+                              </div>
                             </div>
                           )}
                           {r?.estimatedDeliveryTime && (

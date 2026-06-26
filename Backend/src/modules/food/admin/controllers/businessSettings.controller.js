@@ -1,6 +1,6 @@
 import { FoodBusinessSettings } from '../models/businessSettings.model.js';
 import { sendResponse } from '../../../../utils/response.js';
-import { uploadImageBufferDetailed } from '../../../../services/cloudinary.service.js';
+import { replaceCloudinaryImage } from '../../services/foodImage.service.js';
 
 export async function getBusinessSettings(req, res, next) {
     try {
@@ -83,17 +83,29 @@ export async function updateBusinessSettings(req, res, next) {
         // Handle file uploads
         if (req.files) {
             if (req.files.logo) {
-                const logoResult = await uploadImageBufferDetailed(req.files.logo[0].buffer, 'business/logos');
+                const logoResult = await replaceCloudinaryImage({
+                    buffer: req.files.logo[0].buffer,
+                    folder: 'business/logos',
+                    oldPublicId: settings.logo?.publicId,
+                    oldUrl: settings.logo?.url,
+                    mimeType: req.files.logo[0].mimetype,
+                });
                 settings.logo = {
-                    url: logoResult.secure_url,
-                    publicId: logoResult.public_id
+                    url: logoResult.url,
+                    publicId: logoResult.publicId,
                 };
             }
             if (req.files.favicon) {
-                const faviconResult = await uploadImageBufferDetailed(req.files.favicon[0].buffer, 'business/favicons');
+                const faviconResult = await replaceCloudinaryImage({
+                    buffer: req.files.favicon[0].buffer,
+                    folder: 'business/favicons',
+                    oldPublicId: settings.favicon?.publicId,
+                    oldUrl: settings.favicon?.url,
+                    mimeType: req.files.favicon[0].mimetype,
+                });
                 settings.favicon = {
-                    url: faviconResult.secure_url,
-                    publicId: faviconResult.public_id
+                    url: faviconResult.url,
+                    publicId: faviconResult.publicId,
                 };
             }
         }

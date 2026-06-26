@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import { Search, Download, ChevronDown, Eye, Settings, ArrowUpDown, Loader2, X, MapPin, Phone, Mail, Clock, Star, Building2, User, FileText, CreditCard, Calendar, Image as ImageIcon, ExternalLink, ShieldX, AlertTriangle, Trash2, Plus, MoreVertical, CheckCircle2, XCircle } from "lucide-react"
+import { Search, Download, ChevronDown, Eye, Settings, ArrowUpDown, Loader2, X, MapPin, Phone, Mail, Clock, Star, Building2, User, FileText, CreditCard, Calendar, Image as ImageIcon, ExternalLink, ShieldX, AlertTriangle, Trash2, Plus, MoreVertical, CheckCircle2, XCircle, RefreshCw } from "lucide-react"
 import { adminAPI, restaurantAPI, uploadAPI } from "@food/api"
 import { clearModuleAuth } from "@food/utils/auth"
 import {
@@ -143,18 +143,24 @@ const normalizeFileUrl = (file) => {
 }
 
 const getPrimaryRestaurantImage = (restaurant, fallback = "") => {
+  const profileImg = normalizeImageUrl(restaurant?.profileImage)
+  if (profileImg) return profileImg
+
+  const logoImg = normalizeImageUrl(restaurant?.logo)
+  if (logoImg) return logoImg
+
+  const restaurantImg = normalizeImageUrl(restaurant?.restaurantImage)
+  if (restaurantImg) return restaurantImg
+
   const coverImages = Array.isArray(restaurant?.coverImages) ? restaurant.coverImages : []
   const firstCoverImage = coverImages.map(normalizeImageUrl).find(Boolean)
   if (firstCoverImage) return firstCoverImage
+
   const menuImages = Array.isArray(restaurant?.menuImages) ? restaurant.menuImages : []
   const firstMenuImage = menuImages.map(normalizeImageUrl).find(Boolean)
   if (firstMenuImage) return firstMenuImage
-  return (
-    normalizeImageUrl(restaurant?.profileImage) ||
-    normalizeImageUrl(restaurant?.logo) ||
-    normalizeImageUrl(restaurant?.restaurantImage) ||
-    fallback
-  )
+
+  return fallback
 }
 
 
@@ -177,6 +183,8 @@ export default function RestaurantsList() {
   const [deleteConfirmDialog, setDeleteConfirmDialog] = useState(null) // { restaurant }
   const [deleting, setDeleting] = useState(false)
   const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" })
+  const [refreshKey, setRefreshKey] = useState(0)
+  const isInitialFetchRef = useRef(true)
   const [isEditingDetails, setIsEditingDetails] = useState(false)
   const [savingDetails, setSavingDetails] = useState(false)
   const [detailsForm, setDetailsForm] = useState({
@@ -294,7 +302,10 @@ export default function RestaurantsList() {
         setLoading(true)
         setError(null)
 
-        const response = await fetchApprovedRestaurantsCached(buildListParams())
+        const force = isInitialFetchRef.current || refreshKey > 0
+        if (isInitialFetchRef.current) isInitialFetchRef.current = false
+
+        const response = await fetchApprovedRestaurantsCached(buildListParams(), { force })
 
         if (cancelled) return
 
@@ -330,7 +341,7 @@ export default function RestaurantsList() {
 
     fetchRestaurants()
     return () => { cancelled = true }
-  }, [page, debouncedSearch, filters.all, filters.zoneId, zones.length, navigate])
+  }, [page, debouncedSearch, filters.all, filters.zoneId, zones.length, navigate, refreshKey])
 
   const [searchParams] = useSearchParams()
   const restaurantIdFromUrl = searchParams.get("restaurantId")
@@ -825,6 +836,46 @@ export default function RestaurantsList() {
     try {
       setSavingDetails(true)
 
+      // Validate Phone & Email Uniqueness
+      const source = getDetailsEditSource()
+      const originalOwnerPhone = source?.ownerPhone || source?.phone || ""
+      const originalOwnerEmail = source?.ownerEmail || ""
+      const originalEmail = source?.email || source?.ownerEmail || ""
+
+      const newOwnerPhone = detailsForm.ownerPhone.trim()
+      const newOwnerEmail = detailsForm.ownerEmail.trim()
+      const newEmail = detailsForm.email.trim()
+
+      if (newOwnerPhone && newOwnerPhone !== originalOwnerPhone) {
+        const phoneRes = await adminAPI.checkRestaurantPhone(newOwnerPhone)
+        const phoneAvailable = phoneRes?.data?.data?.available ?? phoneRes?.data?.available
+        if (!phoneAvailable) {
+          alert("Owner phone number is already registered to another restaurant.")
+          setSavingDetails(false)
+          return
+        }
+      }
+
+      if (newOwnerEmail && newOwnerEmail !== originalOwnerEmail) {
+        const emailRes = await adminAPI.checkRestaurantEmail(newOwnerEmail)
+        const emailAvailable = emailRes?.data?.data?.available ?? emailRes?.data?.available
+        if (!emailAvailable) {
+          alert("Owner email is already registered to another restaurant.")
+          setSavingDetails(false)
+          return
+        }
+      }
+
+      if (newEmail && newEmail !== newOwnerEmail && newEmail !== originalEmail) {
+        const emailRes = await adminAPI.checkRestaurantEmail(newEmail)
+        const emailAvailable = emailRes?.data?.data?.available ?? emailRes?.data?.available
+        if (!emailAvailable) {
+          alert("Restaurant email is already registered to another restaurant.")
+          setSavingDetails(false)
+          return
+        }
+      }
+
       let profileImage = undefined
       if (profileImageFile) {
         const uploadRes = await uploadAPI.uploadMedia(profileImageFile, {
@@ -1243,6 +1294,19 @@ export default function RestaurantsList() {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+
+              {/* Refresh Button */}
+              <button
+                onClick={() => {
+                  invalidateApprovedRestaurantsCache()
+                  setRefreshKey(k => k + 1)
+                }}
+                className="shrink-0 px-2.5 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm font-medium rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-1.5 transition-all shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:shadow-sm"
+                title="Refresh List"
+              >
+                <RefreshCw className="w-4 h-4" />
+                <span className="hidden min-[400px]:inline">Refresh</span>
+              </button>
 
               {/* Add Restaurant Button */}
               <button

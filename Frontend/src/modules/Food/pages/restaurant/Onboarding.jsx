@@ -36,12 +36,23 @@ import { clearModuleAuth, clearAuthData } from "@food/utils/auth"
 import { invalidateRestaurantAccessGuardCache } from "@food/components/restaurant/RestaurantAccessGuard"
 import { ImageSourcePicker } from "@food/components/ImageSourcePicker"
 import { EMAIL_REGEX } from "@/shared/utils/emailValidation"
+import { DAY_NAMES, getDefaultDays } from "@food/utils/outletTimingsUtils"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
 
 
 const daysOfWeek = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+const DAY_ABBREV = {
+  Monday: "Mon",
+  Tuesday: "Tue",
+  Wednesday: "Wed",
+  Thursday: "Thu",
+  Friday: "Fri",
+  Saturday: "Sat",
+  Sunday: "Sun",
+}
 
 const DRAFT_NAME_VALUES = new Set([
   "",
@@ -502,6 +513,37 @@ const timeStringToMinutes = (value) => {
   return hours * 60 + minutes
 }
 
+const deriveLegacyFromOutletTimings = (outletTimings = {}) => {
+  const openDays = []
+  let openingTime = ""
+  let closingTime = ""
+  for (const day of DAY_NAMES) {
+    const slot = outletTimings[day]
+    if (slot?.isOpen !== false) {
+      openDays.push(DAY_ABBREV[day])
+      if (!openingTime && slot?.openingTime) {
+        openingTime = slot.openingTime
+        closingTime = slot.closingTime || ""
+      }
+    }
+  }
+  return { openDays, openingTime, closingTime }
+}
+
+const outletTimingsFromLegacy = (openDays = [], openingTime = "", closingTime = "") => {
+  const days = getDefaultDays()
+  for (const day of DAY_NAMES) {
+    const abbrev = DAY_ABBREV[day]
+    const isOpen = openDays.includes(abbrev) || openDays.includes(day)
+    days[day] = {
+      isOpen,
+      openingTime: normalizeTimeValue(openingTime) || "09:00",
+      closingTime: normalizeTimeValue(closingTime) || "22:00",
+    }
+  }
+  return days
+}
+
 const formatTime12Hour = (timeStr) => {
   if (!timeStr || typeof timeStr !== "string" || !timeStr.includes(":")) return "--:-- --"
   const [h, m] = timeStr.split(":").map(Number)
@@ -684,6 +726,7 @@ export default function RestaurantOnboarding() {
     openingTime: "",
     closingTime: "",
     openDays: [],
+    outletTimings: getDefaultDays(),
   })
 
   const [step3, setStep3] = useState({
@@ -745,14 +788,22 @@ export default function RestaurantOnboarding() {
         (isUploadableFile(step2.menuPdf) ||
           (step2.menuPdf?.url && typeof step2.menuPdf.url === "string") ||
           (typeof step2.menuPdf === "string" && step2.menuPdf.trim()))
+      const openDayCount = DAY_NAMES.filter((day) => step2.outletTimings?.[day]?.isOpen !== false).length
+      const hasValidDayTimes = DAY_NAMES.every((day) => {
+        const slot = step2.outletTimings?.[day]
+        if (slot?.isOpen === false) return true
+        return (
+          timeStringToMinutes(slot?.openingTime) !== null &&
+          timeStringToMinutes(slot?.closingTime) !== null
+        )
+      })
       return (
         (step2.cuisines || []).length > 0 &&
         hasMenuImages &&
         hasProfileImage &&
         hasMenuPdf &&
-        timeStringToMinutes(step2.openingTime) !== null &&
-        timeStringToMinutes(step2.closingTime) !== null &&
-        (step2.openDays || []).length > 0 &&
+        openDayCount > 0 &&
+        hasValidDayTimes &&
         Boolean(step2.estimatedDeliveryTime?.trim())
       )
     }
@@ -1114,6 +1165,11 @@ export default function RestaurantOnboarding() {
             openingTime: normalizeTimeValue(s2.openingTime || apiData?.openingTime),
             closingTime: normalizeTimeValue(s2.closingTime || apiData?.closingTime),
             openDays: s2.openDays || apiData?.openDays || [],
+            outletTimings: s2.outletTimings || outletTimingsFromLegacy(
+              s2.openDays || apiData?.openDays || [],
+              s2.openingTime || apiData?.openingTime,
+              s2.closingTime || apiData?.closingTime,
+            ),
           }))
 
           setStep3(prev => ({
@@ -1161,13 +1217,17 @@ export default function RestaurantOnboarding() {
               }))
             }
             if (localData.step2) {
-              // Note: Files/Images must be re-hydrated from IndexedDB (handled below)
-              setStep2(prev => ({ 
-                ...prev, 
+              setStep2(prev => ({
+                ...prev,
                 ...localData.step2,
                 openingTime: normalizeTimeValue(localData.step2.openingTime),
                 closingTime: normalizeTimeValue(localData.step2.closingTime),
-              }));
+                outletTimings: localData.step2.outletTimings || outletTimingsFromLegacy(
+                  localData.step2.openDays || [],
+                  localData.step2.openingTime,
+                  localData.step2.closingTime,
+                ),
+              }))
             }
             if (localData.step3) {
               setStep3(prev => ({ ...prev, ...localData.step3 }));
@@ -1463,23 +1523,28 @@ export default function RestaurantOnboarding() {
       }
     }
 
-    if (!step2.openingTime?.trim()) {
-      errors.push("Opening time is required")
+    const openDayCount = DAY_NAMES.filter((day) => step2.outletTimings?.[day]?.isOpen !== false).length
+    if (openDayCount === 0) {
+      errors.push("Please keep at least one day open")
     }
-    if (!step2.closingTime?.trim()) {
-      errors.push("Closing time is required")
-    }
-    const openingMinutes = timeStringToMinutes(step2.openingTime)
-    const closingMinutes = timeStringToMinutes(step2.closingTime)
-    if (openingMinutes !== null && closingMinutes !== null) {
-      if (openingMinutes === closingMinutes) {
-        errors.push("Opening time and closing time cannot be same")
-      } else if (closingMinutes < openingMinutes) {
-        errors.push("Closing time cannot be less than opening time")
+    for (const day of DAY_NAMES) {
+      const slot = step2.outletTimings?.[day]
+      if (slot?.isOpen === false) continue
+      if (!slot?.openingTime?.trim()) {
+        errors.push(`${day}: opening time is required`)
       }
-    }
-    if (!step2.openDays || step2.openDays.length === 0) {
-      errors.push("Please select at least one open day")
+      if (!slot?.closingTime?.trim()) {
+        errors.push(`${day}: closing time is required`)
+      }
+      const openingMinutes = timeStringToMinutes(slot?.openingTime)
+      const closingMinutes = timeStringToMinutes(slot?.closingTime)
+      if (openingMinutes !== null && closingMinutes !== null) {
+        if (openingMinutes === closingMinutes) {
+          errors.push(`${day}: opening and closing time cannot be the same`)
+        } else if (closingMinutes < openingMinutes) {
+          errors.push(`${day}: closing time cannot be before opening time`)
+        }
+      }
     }
     if (!step2.estimatedDeliveryTime?.trim()) {
       errors.push("Estimated delivery time is required")
@@ -1629,11 +1694,12 @@ export default function RestaurantOnboarding() {
   }
 
   const appendStep2ToFormData = (formData) => {
+    const legacyTimings = deriveLegacyFromOutletTimings(step2.outletTimings)
     formData.append("cuisines", (step2.cuisines || []).join(","))
     formData.append("estimatedDeliveryTime", (step2.estimatedDeliveryTime || "").trim())
-    formData.append("openingTime", normalizeTimeValue(step2.openingTime) || "")
-    formData.append("closingTime", normalizeTimeValue(step2.closingTime) || "")
-    formData.append("openDays", (step2.openDays || []).join(","))
+    formData.append("openingTime", normalizeTimeValue(legacyTimings.openingTime) || "")
+    formData.append("closingTime", normalizeTimeValue(legacyTimings.closingTime) || "")
+    formData.append("openDays", (legacyTimings.openDays || []).join(","))
 
     const menuFiles = (step2.menuImages || []).filter((f) => isUploadableFile(f))
     menuFiles.forEach((file) => formData.append("menuImages", file))
@@ -1717,6 +1783,11 @@ export default function RestaurantOnboarding() {
         const formData = new FormData()
         appendStep2ToFormData(formData)
         const res = await restaurantAPI.saveOnboardingStep(2, formData)
+        try {
+          await restaurantAPI.saveOutletTimings(step2.outletTimings)
+        } catch (err) {
+          debugWarn("Failed to save outlet timings:", err)
+        }
         const nextAllowed = Math.min(
           3,
           Math.max(3, Number(res?.data?.data?.onboarding?.currentStep) || 3),
@@ -1747,6 +1818,7 @@ export default function RestaurantOnboarding() {
             resolveMenuPdfForProfileUpdate(step2.menuPdf),
           ])
 
+          const legacyTimings = deriveLegacyFromOutletTimings(step2.outletTimings)
           const updatePayload = {
             restaurantName: step1.restaurantName || "",
             dietaryType: step1.dietaryType || "",
@@ -1770,9 +1842,9 @@ export default function RestaurantOnboarding() {
             },
             cuisines: Array.isArray(step2.cuisines) ? step2.cuisines : [],
             estimatedDeliveryTime: (step2.estimatedDeliveryTime || "").trim(),
-            openingTime: normalizeTimeValue(step2.openingTime) || "",
-            closingTime: normalizeTimeValue(step2.closingTime) || "",
-            openDays: Array.isArray(step2.openDays) ? step2.openDays : [],
+            openingTime: normalizeTimeValue(legacyTimings.openingTime) || "",
+            closingTime: normalizeTimeValue(legacyTimings.closingTime) || "",
+            openDays: Array.isArray(legacyTimings.openDays) ? legacyTimings.openDays : [],
             menuImages: menuImagesPayload,
             profileImage: profileImagePayload || "",
             panNumber: step3.panNumber || "",
@@ -1797,6 +1869,11 @@ export default function RestaurantOnboarding() {
           }
 
           await restaurantAPI.updateProfile(updatePayload)
+          try {
+            await restaurantAPI.saveOutletTimings(step2.outletTimings)
+          } catch (err) {
+            debugWarn("Failed to save outlet timings:", err)
+          }
 
           clearOnboardingFromLocalStorage()
           clearOnboardingFileCache()
@@ -1810,6 +1887,11 @@ export default function RestaurantOnboarding() {
         const formData = new FormData()
         appendStep3ToFormData(formData)
         await restaurantAPI.submitOnboarding(formData)
+        try {
+          await restaurantAPI.saveOutletTimings(step2.outletTimings)
+        } catch (err) {
+          debugWarn("Failed to save outlet timings:", err)
+        }
 
         clearOnboardingFromLocalStorage()
         clearOnboardingFileCache()
@@ -1847,13 +1929,23 @@ export default function RestaurantOnboarding() {
 
 
 
-  const toggleDay = (day) => {
+  const updateOutletDay = (day, patch) => {
     setStep2((prev) => {
-      const exists = prev.openDays.includes(day)
-      if (exists) {
-        return { ...prev, openDays: prev.openDays.filter((d) => d !== day) }
+      const outletTimings = {
+        ...(prev.outletTimings || getDefaultDays()),
+        [day]: {
+          ...(prev.outletTimings?.[day] || getDefaultDays()[day]),
+          ...patch,
+        },
       }
-      return { ...prev, openDays: [...prev.openDays, day] }
+      const legacy = deriveLegacyFromOutletTimings(outletTimings)
+      return {
+        ...prev,
+        outletTimings,
+        openDays: legacy.openDays,
+        openingTime: legacy.openingTime,
+        closingTime: legacy.closingTime,
+      }
     })
   }
 
@@ -2669,22 +2761,50 @@ export default function RestaurantOnboarding() {
 
       <OnboardingSection title="Timings & hours">
         <div className="space-y-3">
-          <Label className="text-xs text-gray-700">Outlet timings</Label>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <TimeSelector
-              label="Opening time"
-              value={step2.openingTime || ""}
-              onChange={(val) => {
-                setStep2((prev) => ({ ...prev, openingTime: normalizeTimeValue(val) || "" }))
-              }}
-            />
-            <TimeSelector
-              label="Closing time"
-              value={step2.closingTime || ""}
-              onChange={(val) => {
-                setStep2((prev) => ({ ...prev, closingTime: normalizeTimeValue(val) || "" }))
-              }}
-            />
+          <Label className="text-xs text-gray-700">Weekly outlet timings</Label>
+          <p className="text-[11px] text-gray-500">
+            Set opening and closing hours for each day.
+          </p>
+          <div className="space-y-2">
+            {DAY_NAMES.map((day) => {
+              const slot = step2.outletTimings?.[day] || getDefaultDays()[day]
+              const isOpen = slot?.isOpen !== false
+              return (
+                <div key={day} className="rounded-xl border border-gray-100 bg-gray-50/60 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-medium text-gray-900">{day}</span>
+                    <button
+                      type="button"
+                      disabled={!isEditing}
+                      onClick={() => updateOutletDay(day, { isOpen: !isOpen })}
+                      className={`rounded-full px-3 py-1 text-[11px] font-semibold ${
+                        isOpen ? "bg-primary-orange text-white" : "bg-gray-200 text-gray-700"
+                      } ${!isEditing ? "opacity-70 cursor-not-allowed" : ""}`}
+                    >
+                      {isOpen ? "Open" : "Closed"}
+                    </button>
+                  </div>
+                  {isOpen ? (
+                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <TimeSelector
+                        label="Opens"
+                        value={slot.openingTime || ""}
+                        onChange={(val) => {
+                          updateOutletDay(day, { openingTime: normalizeTimeValue(val) || "" })
+                        }}
+                      />
+                      <TimeSelector
+                        label="Closes"
+                        value={slot.closingTime || ""}
+                        onChange={(val) => {
+                          updateOutletDay(day, { closingTime: normalizeTimeValue(val) || "" })
+                        }}
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              )
+            })}
           </div>
           <div>
             <Label className="text-xs text-gray-700">Estimated delivery time*</Label>
@@ -2696,33 +2816,6 @@ export default function RestaurantOnboarding() {
               className={onboardingInputClass}
               placeholder="e.g., 25-30 mins"
             />
-          </div>
-        </div>
-
-        {/* Open days in a calendar-like grid */}
-        <div className="space-y-2">
-          <Label className="text-xs text-gray-700 flex items-center gap-1.5">
-            <CalendarIcon className="w-3.5 h-3.5 text-gray-800" />
-            <span>Open days</span>
-          </Label>
-          <p className="text-[11px] text-gray-500">
-            Select the days your restaurant accepts delivery orders.
-          </p>
-          <div className="mt-1 grid grid-cols-7 gap-1.5 sm:gap-2">
-            {daysOfWeek.map((day) => {
-              const active = step2.openDays.includes(day)
-              return (
-                <button
-                  key={day}
-                  type="button"
-                  onClick={() => toggleDay(day)}
-                  className={`aspect-square flex items-center justify-center rounded-md text-[11px] font-medium ${active ? "bg-primary-orange text-white" : "bg-gray-100 text-gray-800"
-                    }`}
-                >
-                  {day.charAt(0)}
-                </button>
-              )
-            })}
           </div>
         </div>
       </OnboardingSection>
