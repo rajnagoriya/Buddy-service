@@ -691,33 +691,33 @@ export default function Category() {
   return (
     <div className="min-h-screen bg-slate-50 p-4 lg:p-6">
       {/* ── Header ── */}
-      <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="mb-3 sm:mb-6 rounded-xl sm:rounded-2xl border border-slate-200 bg-white p-3 sm:p-6 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">Categories</h1>
-            <p className="mt-1 max-w-xl text-sm text-slate-500">
+            <h1 className="text-lg sm:text-2xl font-extrabold text-slate-900 tracking-tight">Categories</h1>
+            <p className="hidden sm:block text-sm text-slate-500 mt-1">
               Admin categories are global. Restaurant categories go through approval before going live.
             </p>
             {/* Split threshold */}
-            <div className="mt-4 flex items-center gap-3 rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-2.5">
+            <div className="mt-3 sm:mt-4 flex flex-col min-[450px]:flex-row min-[450px]:items-center gap-2 rounded-xl border border-blue-100 bg-blue-50/60 p-2 sm:py-2.5 sm:px-4">
               <div className="min-w-0">
-                <span className="text-xs font-bold uppercase tracking-wider text-blue-700">
+                <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-blue-700">
                   Split Order Threshold
                 </span>
-                <p className="text-[11px] text-blue-500">Items count after which order sharing is allowed</p>
+                <p className="hidden sm:block text-[11px] text-blue-500">Items count after which order sharing is allowed</p>
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <input
                   type="number"
                   value={splitThreshold}
                   onChange={(e) => setSplitThreshold(parseInt(e.target.value) || 1)}
-                  className="w-20 rounded-lg border border-blue-200 bg-white px-2 py-1 text-sm font-bold outline-none focus:border-blue-500"
+                  className="w-16 sm:w-20 rounded-lg border border-blue-200 bg-white px-2 py-1 text-xs sm:text-sm font-bold outline-none focus:border-blue-500"
                   min="1"
                 />
                 <button
                   onClick={handleUpdateThreshold}
                   disabled={isSavingThreshold}
-                  className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                  className="rounded-lg bg-blue-600 px-2.5 py-1 sm:px-3 sm:py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
                 >
                   {isSavingThreshold ? "Saving..." : "Update"}
                 </button>
@@ -725,36 +725,39 @@ export default function Category() {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 w-full sm:w-auto justify-end mt-2 sm:mt-0">
             <button
               onClick={() => fetchCategories(1, true)}
               disabled={loading}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1.5 sm:px-3.5 sm:py-2 text-xs sm:text-sm font-medium text-slate-700 hover:bg-slate-50 shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:shadow-sm transition-all cursor-pointer disabled:opacity-50"
+              title="Refresh List"
             >
-              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-              Refresh
+              <RefreshCw className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${loading ? "animate-spin" : ""}`} />
+              <span className="hidden sm:inline">Refresh</span>
             </button>
             <button
               onClick={handleExportPDF}
               disabled={categories.length === 0}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1.5 sm:px-3.5 sm:py-2 text-xs sm:text-sm font-medium text-slate-700 hover:bg-slate-50 shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:shadow-sm transition-all cursor-pointer disabled:opacity-50"
+              title="Export PDF"
             >
-              <Download className="h-4 w-4" />
-              Export
+              <Download className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+              <span className="hidden sm:inline">Export</span>
             </button>
             <button
               onClick={() => { setEditingCategory(null); setFormData(defaultFormData); setSelectedImageFile(null); setImagePreview(null); setIsModalOpen(true) }}
-              className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-blue-600 px-2.5 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-semibold text-white hover:bg-blue-700 shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:shadow-md transition-all cursor-pointer"
             >
-              <Plus className="h-4 w-4" />
-              Add Category
+              <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+              <span className="hidden min-[400px]:inline">Add Category</span>
+              <span className="min-[400px]:hidden">Add</span>
             </button>
           </div>
         </div>
       </div>
 
       {/* ── Stats cards ── */}
-      <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="mb-3 sm:mb-6 grid grid-cols-3 gap-2 sm:gap-5">
         {[
           { label: "Total", value: totalCount, icon: <Folder className="h-5 w-5" />, color: "slate" },
           { label: "Active", value: activeCount, icon: <CheckCircle2 className="h-5 w-5" />, color: "emerald" },
@@ -762,13 +765,13 @@ export default function Category() {
         ].map(({ label, value, icon, color }) => (
           <div
             key={label}
-            className={`flex items-center justify-between rounded-2xl border bg-white p-5 shadow-sm transition-shadow hover:shadow-md border-${color}-100`}
+            className={`flex items-center justify-between rounded-xl sm:rounded-2xl border bg-white p-2.5 sm:p-5 shadow-[0_1px_3px_rgba(0,0,0,0.02),0_10px_20px_-10px_rgba(0,0,0,0.03)] border-${color}-100 transition-shadow duration-300 hover:shadow-md`}
           >
-            <div>
-              <p className={`text-xs font-semibold uppercase tracking-wider text-${color}-500`}>{label}</p>
-              <h3 className={`mt-1 text-2xl font-bold text-${color}-700`}>{value}</h3>
+            <div className="min-w-0">
+              <p className={`text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-${color}-500 truncate mb-0.5 sm:mb-1`}>{label}</p>
+              <h3 className={`text-xl sm:text-3xl font-extrabold text-${color}-700 tracking-tight`}>{value}</h3>
             </div>
-            <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-${color}-50 text-${color}-500`}>
+            <div className={`hidden sm:flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-${color}-50 text-${color}-500 border border-${color}-100/50`}>
               {icon}
             </div>
           </div>
@@ -776,11 +779,14 @@ export default function Category() {
       </div>
 
       {/* ── Filter bar ── */}
-      <div className="mb-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-        {/* Row 1: Visibility + Status + Pending filters */}
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="mb-3 sm:mb-4 rounded-xl sm:rounded-2xl border border-slate-200 bg-white p-3 sm:px-4 sm:py-3 shadow-sm">
+        {/* Row 1: Visibility + Status + Pending filters (Horizontally scrollable on mobile) */}
+        <div 
+          className="flex items-center gap-2 overflow-x-auto pb-2 -mx-3 px-3 sm:mx-0 sm:px-0 scrollbar-none"
+          style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+        >
           {/* All / Global pills */}
-          <div className="flex items-center gap-1 rounded-xl border border-slate-200 p-1">
+          <div className="flex shrink-0 items-center gap-1 rounded-xl border border-slate-200 p-1">
             <button
               type="button"
               onClick={() => handleFilterMode("all")}
@@ -803,7 +809,7 @@ export default function Category() {
           </div>
 
           {/* Status pills: Active / Inactive */}
-          <div className="flex items-center gap-1 rounded-xl border border-slate-200 p-1">
+          <div className="flex shrink-0 items-center gap-1 rounded-xl border border-slate-200 p-1">
             <button
               type="button"
               onClick={() => setStatusFilter("all")}
@@ -839,7 +845,7 @@ export default function Category() {
           <button
             type="button"
             onClick={() => setShowPendingOnly((p) => !p)}
-            className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold transition-colors ${
+            className={`inline-flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold transition-colors ${
               showPendingOnly
                 ? "border-amber-300 bg-amber-50 text-amber-700"
                 : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
@@ -851,22 +857,23 @@ export default function Category() {
         </div>
 
         {/* Row 2: Restaurant filter + Search */}
-        <div className="mt-2.5 flex flex-wrap items-center gap-2">
-          {/* Restaurant dropdown */}
-          <RestaurantDropdown
-            value={selectedRestaurantId}
-            valueName={selectedRestaurantName}
-            onChange={handleRestaurantSelect}
-            onClear={handleRestaurantClear}
-          />
+        <div className="mt-2 sm:mt-2.5 flex flex-col sm:flex-row sm:items-center gap-2">
+          {/* Restaurant Dropdown & Active restaurant chip */}
+          <div className="flex items-center gap-2 shrink-0">
+            <RestaurantDropdown
+              value={selectedRestaurantId}
+              valueName={selectedRestaurantName}
+              onChange={handleRestaurantSelect}
+              onClear={handleRestaurantClear}
+            />
 
-          {/* Active restaurant chip */}
-          {filterMode === "restaurant" && selectedRestaurantName && (
-            <div className="inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700">
-              <Building2 className="h-3.5 w-3.5" />
-              {selectedRestaurantName}
-            </div>
-          )}
+            {filterMode === "restaurant" && selectedRestaurantName && (
+              <div className="inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 max-w-[150px] truncate">
+                <Building2 className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{selectedRestaurantName}</span>
+              </div>
+            )}
+          </div>
 
           {/* Search */}
           <div className="relative min-w-[180px] flex-1">
@@ -891,138 +898,234 @@ export default function Category() {
         </div>
       </div>
 
-      {/* ── Table ── */}
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="min-w-full">
-            <thead className="border-b border-slate-200 bg-slate-50/80">
-              <tr>
-                <th className="px-5 py-4 text-left text-[11px] font-bold uppercase tracking-wider text-slate-500 w-[30%]">Category</th>
-                <th className="px-4 py-4 text-left text-[11px] font-bold uppercase tracking-wider text-slate-500 w-[18%]">Owner</th>
-                <th className="px-4 py-4 text-center text-[11px] font-bold uppercase tracking-wider text-slate-500 w-[10%]">Diet</th>
-                <th className="px-4 py-4 text-center text-[11px] font-bold uppercase tracking-wider text-slate-500 w-[10%]">Status</th>
-                <th className="px-4 py-4 text-left text-[11px] font-bold uppercase tracking-wider text-slate-500 w-[15%]">Approval</th>
-                <th className="px-5 py-4 text-right text-[11px] font-bold uppercase tracking-wider text-slate-500 w-[8%]">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {loading && categories.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="py-20 text-center">
-                    <Loader2 className="mx-auto h-8 w-8 animate-spin text-blue-500" />
-                    <p className="mt-2 text-sm text-slate-500">Loading categories...</p>
-                  </td>
-                </tr>
-              ) : !loading && categories.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="py-20 text-center">
-                    <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100">
-                      <Folder className="h-7 w-7 text-slate-400" />
-                    </div>
-                    <p className="font-semibold text-slate-700">No categories found</p>
-                    <p className="mt-1 text-sm text-slate-400">
-                      {filterMode === "global"
-                        ? "No global categories yet."
-                        : filterMode === "restaurant"
-                          ? `No categories for ${selectedRestaurantName}.`
-                          : "Try a different search or add a new category."}
-                    </p>
-                  </td>
-                </tr>
-              ) : (
-                categories.map((category) => {
-                  const catId = String(category?.id || category?._id || "")
-                  const creatorName =
-                    category?.createdByRestaurant?.name || category?.restaurant?.name || "Admin"
-                  const approvalStatus = category?.approvalStatus || "pending"
-
-                  return (
-                    <tr key={catId} className="align-middle transition-colors hover:bg-slate-50/60">
-                      {/* Category */}
-                      <td className="px-5 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 shrink-0 overflow-hidden rounded-xl border border-slate-100 bg-slate-100">
-                            {category?.image ? (
-                              <img src={category.image} alt={category.name} className="h-full w-full object-cover" />
-                            ) : (
-                              <div className="flex h-full w-full items-center justify-center text-sm font-bold text-slate-400">
-                                {String(category?.name || "C").slice(0, 1).toUpperCase()}
-                              </div>
-                            )}
-                          </div>
-                          <div className="min-w-0">
-                            <p className="truncate font-semibold text-slate-900">{category?.name || "—"}</p>
-                            <p className="truncate text-xs text-slate-400">
-                              {[category?.type, `${category?.itemCount || 0} items`].filter(Boolean).join(" · ")}
-                            </p>
-                          </div>
-                        </div>
-                      </td>
-
-                      {/* Owner */}
-                      <td className="px-4 py-4">
-                        <p className="text-sm font-medium text-slate-800">{creatorName}</p>
-                        {category?.isGlobal ? (
-                          <span className="mt-1 inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-700">
-                            <Globe className="h-3 w-3" />
-                            Global
-                          </span>
-                        ) : (
-                          <span className="mt-1 text-xs text-slate-400">Private</span>
-                        )}
-                      </td>
-
-                      {/* Diet */}
-                      <td className="px-4 py-4 text-center">
-                        <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold ${scopeBadgeClass(category?.foodTypeScope)}`}>
-                          {category?.foodTypeScope || "Both"}
-                        </span>
-                      </td>
-
-                      {/* Status toggle */}
-                      <td className="px-4 py-4 text-center">
-                        <button
-                          onClick={() => handleToggleStatus(catId)}
-                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${category?.status !== false ? "bg-blue-600" : "bg-slate-300"}`}
-                          title={category?.status !== false ? "Deactivate" : "Activate"}
-                        >
-                          <span
-                            className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${category?.status !== false ? "translate-x-6" : "translate-x-1"}`}
-                          />
-                        </button>
-                      </td>
-
-                      {/* Approval badge */}
-                      <td className="px-4 py-4">
-                        <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${approvalBadgeClass(approvalStatus)}`}>
-                          {approvalStatus === "approved" && <BadgeCheck className="h-3 w-3" />}
-                          {approvalStatus.charAt(0).toUpperCase() + approvalStatus.slice(1)}
-                        </span>
-                        {category?.rejectionReason && (
-                          <p className="mt-1 max-w-[160px] text-[11px] text-rose-500 leading-4">
-                            {category.rejectionReason}
-                          </p>
-                        )}
-                      </td>
-
-                      {/* Three-dot actions */}
-                      <td className="px-5 py-4 text-right">
-                        <RowActions
-                          category={category}
-                          onEdit={handleEdit}
-                          onDelete={handleDelete}
-                          onApprove={handleApprove}
-                          onReject={handleReject}
-                          onMakeGlobal={handleMakeGlobal}
-                          onToggleStatus={handleToggleStatus}
-                        />
-                      </td>
+      {/* ── Table Card ── */}
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm p-3 sm:p-6">
+        <div className="w-full">
+          {loading && categories.length === 0 ? (
+            <div className="py-20 text-center">
+              <Loader2 className="mx-auto h-8 w-8 animate-spin text-blue-500" />
+              <p className="mt-2 text-sm text-slate-500">Loading categories...</p>
+            </div>
+          ) : !loading && categories.length === 0 ? (
+            <div className="py-20 text-center">
+              <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100">
+                <Folder className="h-7 w-7 text-slate-400" />
+              </div>
+              <p className="font-semibold text-slate-700">No categories found</p>
+              <p className="mt-1 text-sm text-slate-400">
+                {filterMode === "global"
+                  ? "No global categories yet."
+                  : filterMode === "restaurant"
+                    ? `No categories for ${selectedRestaurantName}.`
+                    : "Try a different search or add a new category."}
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* Desktop/Tablet Table Layout */}
+              <div className="hidden md:block overflow-x-auto rounded-xl border border-slate-150">
+                <table className="w-full border-collapse">
+                  <thead className="bg-slate-50/80 border-b border-slate-150 sticky top-0 backdrop-blur-md z-10">
+                    <tr>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider w-[6%]">SL</th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider w-[26%]">Category</th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider w-[22%]">Owner</th>
+                      <th className="px-6 py-4 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider w-[12%]">Diet</th>
+                      <th className="px-6 py-4 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider w-[12%]">Status</th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider w-[16%]">Approval</th>
+                      <th className="px-6 py-4 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider w-[6%]">Actions</th>
                     </tr>
-                  )
-                })
-              )}
-            </tbody>
-          </table>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-slate-100">
+                    {categories.map((category, index) => {
+                      const catId = String(category?.id || category?._id || "")
+                      const creatorName =
+                        category?.createdByRestaurant?.name || category?.restaurant?.name || "Admin"
+                      const approvalStatus = category?.approvalStatus || "pending"
+
+                      return (
+                        <tr key={catId} className="hover:bg-slate-50/70 transition-colors">
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500 font-medium">
+                            {(catPage - 1) * PAGE_SIZE + index + 1}
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-3">
+                              <div className="h-10 w-10 shrink-0 overflow-hidden rounded-xl border border-slate-100 bg-slate-100">
+                                {category?.image ? (
+                                  <img src={category.image} alt={category.name} className="h-full w-full object-cover" />
+                                ) : (
+                                  <div className="flex h-full w-full items-center justify-center text-sm font-bold text-slate-400">
+                                    {String(category?.name || "C").slice(0, 1).toUpperCase()}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="min-w-0">
+                                <p className="truncate font-semibold text-slate-900">{category?.name || "—"}</p>
+                                <p className="truncate text-xs text-slate-400 mt-0.5">
+                                  {[category?.type, `${category?.itemCount || 0} items`].filter(Boolean).join(" · ")}
+                                </p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <p className="text-sm font-medium text-slate-800">{creatorName}</p>
+                            {category?.isGlobal ? (
+                              <span className="mt-1 inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-700">
+                                <Globe className="h-3 w-3" />
+                                Global
+                              </span>
+                            ) : (
+                              <span className="mt-1 text-xs text-slate-400 block">Private</span>
+                            )}
+                          </td>
+                          <td className="px-6 py-4 text-center">
+                            <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold ${scopeBadgeClass(category?.foodTypeScope)}`}>
+                              {category?.foodTypeScope || "Both"}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-center">
+                            <button
+                              onClick={() => handleToggleStatus(catId)}
+                              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${category?.status !== false ? "bg-blue-600" : "bg-slate-300"}`}
+                              title={category?.status !== false ? "Deactivate" : "Activate"}
+                            >
+                              <span
+                                className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${category?.status !== false ? "translate-x-6" : "translate-x-1"}`}
+                              />
+                            </button>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${approvalBadgeClass(approvalStatus)}`}>
+                              {approvalStatus === "approved" && <BadgeCheck className="h-3 w-3" />}
+                              {approvalStatus.charAt(0).toUpperCase() + approvalStatus.slice(1)}
+                            </span>
+                            {category?.rejectionReason && (
+                              <p className="mt-1 max-w-[160px] text-[11px] text-rose-500 leading-4">
+                                {category.rejectionReason}
+                              </p>
+                            )}
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <RowActions
+                              category={category}
+                              onEdit={handleEdit}
+                              onDelete={handleDelete}
+                              onApprove={handleApprove}
+                              onReject={handleReject}
+                              onMakeGlobal={handleMakeGlobal}
+                              onToggleStatus={handleToggleStatus}
+                            />
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Mobile compact table */}
+              <div className="md:hidden -mx-1 overflow-x-auto rounded-lg border border-slate-150">
+                <table className="w-full min-w-[540px] border-collapse text-xs">
+                  <thead className="bg-slate-50 border-b border-slate-150">
+                    <tr>
+                      <th className="px-2 py-2 text-left font-semibold text-slate-500 uppercase tracking-wide w-[5%]">#</th>
+                      <th className="px-2 py-2 text-left font-semibold text-slate-500 uppercase tracking-wide w-[30%]">Category</th>
+                      <th className="px-2 py-2 text-left font-semibold text-slate-500 uppercase tracking-wide w-[22%]">Owner</th>
+                      <th className="px-2 py-2 text-center font-semibold text-slate-500 uppercase tracking-wide w-[12%]">Diet</th>
+                      <th className="px-2 py-2 text-center font-semibold text-slate-500 uppercase tracking-wide w-[12%]">Status</th>
+                      <th className="px-2 py-2 text-left font-semibold text-slate-500 uppercase tracking-wide w-[14%]">Approval</th>
+                      <th className="px-2 py-2 text-right font-semibold text-slate-500 uppercase tracking-wide w-[5%]">Act</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-slate-100">
+                    {categories.map((category, index) => {
+                      const catId = String(category?.id || category?._id || "")
+                      const creatorName =
+                        category?.createdByRestaurant?.name || category?.restaurant?.name || "Admin"
+                      const approvalStatus = category?.approvalStatus || "pending"
+
+                      return (
+                        <tr key={catId} className="hover:bg-slate-50/70">
+                          <td className="px-2 py-2.5 text-slate-500 font-medium whitespace-nowrap">
+                            {(catPage - 1) * PAGE_SIZE + index + 1}
+                          </td>
+                          <td className="px-2 py-2.5">
+                            <div className="flex items-center gap-2 min-w-[130px]">
+                              <div className="h-8 w-8 shrink-0 overflow-hidden rounded-lg border border-slate-100 bg-slate-100">
+                                {category?.image ? (
+                                  <img src={category.image} alt={category.name} className="h-full w-full object-cover" />
+                                ) : (
+                                  <div className="flex h-full w-full items-center justify-center text-[10px] font-bold text-slate-400">
+                                    {String(category?.name || "C").slice(0, 1).toUpperCase()}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="min-w-0">
+                                <p className="truncate font-semibold text-slate-900 leading-tight">{category?.name || "—"}</p>
+                                <p className="truncate text-[10px] text-slate-400 mt-0.5">
+                                  {[category?.type, `${category?.itemCount || 0} items`].filter(Boolean).join(" · ")}
+                                </p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-2 py-2.5 min-w-[90px]">
+                            <p className="font-medium text-slate-800 truncate max-w-[85px] leading-tight">{creatorName}</p>
+                            {category?.isGlobal ? (
+                              <span className="inline-flex items-center gap-0.5 rounded-full border border-sky-100 bg-sky-50 px-1.5 py-0.2 text-[9px] font-semibold text-sky-700 mt-0.5">
+                                Global
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-slate-400 block mt-0.5">Private</span>
+                            )}
+                          </td>
+                          <td className="px-2 py-2.5 text-center whitespace-nowrap">
+                            <span className={`inline-flex rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${scopeBadgeClass(category?.foodTypeScope)}`}>
+                              {category?.foodTypeScope || "Both"}
+                            </span>
+                          </td>
+                          <td className="px-2 py-2.5 text-center whitespace-nowrap">
+                            <button
+                              onClick={() => handleToggleStatus(catId)}
+                              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${category?.status !== false ? "bg-blue-600" : "bg-slate-300"}`}
+                              title={category?.status !== false ? "Deactivate" : "Activate"}
+                            >
+                              <span
+                                className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${category?.status !== false ? "translate-x-5" : "translate-x-1"}`}
+                              />
+                            </button>
+                          </td>
+                          <td className="px-2 py-2.5 whitespace-nowrap">
+                            <div className="flex flex-col gap-0.5">
+                              <span className={`inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[9px] font-semibold w-fit ${approvalBadgeClass(approvalStatus)}`}>
+                                {approvalStatus === "approved" && <BadgeCheck className="h-2.5 w-2.5" />}
+                                {approvalStatus.charAt(0).toUpperCase() + approvalStatus.slice(1)}
+                              </span>
+                              {category?.rejectionReason && (
+                                <p className="max-w-[100px] truncate text-[9px] text-rose-500" title={category.rejectionReason}>
+                                  {category.rejectionReason}
+                                </p>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-2 py-2.5 text-right whitespace-nowrap">
+                            <RowActions
+                              category={category}
+                              onEdit={handleEdit}
+                              onDelete={handleDelete}
+                              onApprove={handleApprove}
+                              onReject={handleReject}
+                              onMakeGlobal={handleMakeGlobal}
+                              onToggleStatus={handleToggleStatus}
+                            />
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </div>
 
         {/* Pagination */}

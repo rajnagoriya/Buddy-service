@@ -1,7 +1,6 @@
 import { useNavigate, useLocation } from "react-router-dom"
 import { useMemo, useState, useEffect } from "react"
 import { BOTTOM_NAV_TABS, findActiveNavItem } from "@food/utils/restaurantNavConfig"
-import useNotificationInbox from "@food/hooks/useNotificationInbox"
 import { useRestaurantNotifications } from "@food/hooks/useRestaurantNotifications"
 
 export default function BottomNavOrders() {
@@ -30,7 +29,6 @@ export default function BottomNavOrders() {
     return () => window.removeEventListener("resize", handleWindowResize)
   }, [])
 
-  const { unreadCount } = useNotificationInbox("restaurant", { limit: 20, pollMs: 60 * 1000 })
   const { newOrder } = useRestaurantNotifications()
 
   const tabs = useMemo(() => BOTTOM_NAV_TABS, [])
@@ -46,8 +44,7 @@ export default function BottomNavOrders() {
         {tabs.map((tab) => {
           const Icon = tab.icon
           const isActive = activeTab === tab.id
-          const showBadge =
-            (tab.id === "orders" && newOrder) || (tab.id === "more" && unreadCount > 0)
+          const showBadge = tab.id === "orders" && newOrder
 
           return (
             <button

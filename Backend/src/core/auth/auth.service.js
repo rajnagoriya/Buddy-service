@@ -8,6 +8,7 @@ import {
   ensureDraftRestaurantForPhone,
   resolveOnboardingStatus,
 } from "../../modules/food/restaurant/services/restaurantOnboarding.service.js";
+import { isRestaurantBanned } from "../../modules/food/restaurant/utils/restaurantBan.util.js";
 import { FoodDeliveryPartner } from "../../modules/food/delivery/models/deliveryPartner.model.js";
 import { FoodReferralSettings } from "../../modules/food/admin/models/referralSettings.model.js";
 import { FoodReferralLog } from "../../modules/food/admin/models/referralLog.model.js";
@@ -418,6 +419,10 @@ export const verifyRestaurantOtpAndLogin = async (phone, otp, fcmToken, platform
   let activeRestaurant = restaurant;
   if (!activeRestaurant) {
     activeRestaurant = await ensureDraftRestaurantForPhone(phone);
+  }
+
+  if (isRestaurantBanned(activeRestaurant)) {
+    throw new AuthError('Your restaurant account has been banned. Please contact support.');
   }
 
   // Update FCM token if provided

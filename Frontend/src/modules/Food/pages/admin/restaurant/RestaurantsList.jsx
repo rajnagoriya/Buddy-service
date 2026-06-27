@@ -14,6 +14,7 @@ import {
   parseApprovedRestaurantsResponse,
   prefetchRestaurantDetail,
 } from "@food/utils/adminRestaurantCache"
+import { isRestaurantBanned } from "@food/utils/restaurantBan"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { exportRestaurantsToPDF } from "@food/components/admin/restaurants/restaurantsExportUtils"
 import { getGoogleMapsApiKey } from "@food/utils/googleMapsApiKey"
@@ -63,27 +64,30 @@ const mapRestaurantRow = (restaurant, index, zonesList = []) => ({
   ownerPhone: restaurant.ownerPhone || restaurant.phone || "N/A",
   zone: zoneLabelFromRestaurant(restaurant, zonesList),
   approvalStatus: normalizeApprovalStatus(restaurant),
-  isActive: restaurant.isActive !== false,
+  isActive: normalizeApprovalStatus(restaurant) !== "banned" && restaurant.isActive !== false,
   rating: restaurant.ratings?.average || restaurant.rating || 0,
   logo: getPrimaryRestaurantImage(restaurant, PLACEHOLDER_40),
   originalData: restaurant,
 })
 
 const normalizeApprovalStatus = (restaurant) => {
+  if (isRestaurantBanned(restaurant)) return "banned"
   const raw = String(restaurant?.status || "").trim().toLowerCase()
-  if (raw === "approved" || raw === "pending" || raw === "rejected") return raw
+  if (raw === "approved" || raw === "pending" || raw === "rejected" || raw === "banned") return raw
   return "pending"
 }
 
 const approvalStatusLabel = (status) => {
   if (status === "approved") return "Approved"
   if (status === "rejected") return "Rejected"
+  if (status === "banned") return "Banned"
   return "Pending"
 }
 
 const approvalStatusBadgeClass = (status) => {
   if (status === "approved") return "bg-emerald-100 text-emerald-700"
   if (status === "rejected") return "bg-rose-100 text-rose-700"
+  if (status === "banned") return "bg-slate-200 text-slate-800"
   return "bg-amber-100 text-amber-700"
 }
 
@@ -1056,7 +1060,9 @@ export default function RestaurantsList() {
 
   // Handle ban/unban restaurant
   const handleBanRestaurant = (restaurant) => {
-    const isBanned = !restaurant.isActive
+    const isBanned =
+      restaurant.approvalStatus === "banned" ||
+      isRestaurantBanned(restaurant.originalData || restaurant)
     setBanConfirmDialog({
       restaurant,
       action: isBanned ? 'unban' : 'ban'
@@ -1079,7 +1085,11 @@ export default function RestaurantsList() {
     setRestaurants((prev) =>
       prev.map((r) =>
         r.id === restaurant.id || r._id === restaurant._id
-          ? { ...r, isActive: newStatus }
+          ? {
+              ...r,
+              isActive: newStatus,
+              approvalStatus: newStatus ? "approved" : "banned",
+            }
           : r,
       ),
     )
@@ -1488,19 +1498,15 @@ export default function RestaurantsList() {
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap">
                               <div className="flex flex-col gap-1.5">
-                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border w-fit ${
-                                  restaurant.approvalStatus === "approved" 
-                                    ? "bg-emerald-50 text-emerald-700 border-emerald-200/40" 
-                                    : restaurant.approvalStatus === "rejected" 
-                                      ? "bg-rose-50 text-rose-700 border-rose-200/40" 
-                                      : "bg-amber-50 text-amber-700 border-amber-200/40"
-                                }`}>
+                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border w-fit ${approvalStatusBadgeClass(restaurant.approvalStatus)}`}>
                                   <span className={`w-1.5 h-1.5 rounded-full ${
-                                    restaurant.approvalStatus === "approved" 
-                                      ? "bg-emerald-500" 
-                                      : restaurant.approvalStatus === "rejected" 
-                                        ? "bg-rose-500" 
-                                        : "bg-amber-500"
+                                    restaurant.approvalStatus === "approved"
+                                      ? "bg-emerald-500"
+                                      : restaurant.approvalStatus === "rejected"
+                                        ? "bg-rose-500"
+                                        : restaurant.approvalStatus === "banned"
+                                          ? "bg-slate-600"
+                                          : "bg-amber-500"
                                   }`}></span>
                                   {approvalStatusLabel(restaurant.approvalStatus)}
                                 </span>
@@ -1640,13 +1646,7 @@ export default function RestaurantsList() {
                             <td className="px-2 py-2.5 text-slate-600 whitespace-nowrap">{restaurant.zone}</td>
                             <td className="px-2 py-2.5 whitespace-nowrap">
                               <div className="flex flex-col gap-1">
-                                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium border w-fit ${
-                                  restaurant.approvalStatus === "approved"
-                                    ? "bg-emerald-50 text-emerald-700 border-emerald-200/40"
-                                    : restaurant.approvalStatus === "rejected"
-                                      ? "bg-rose-50 text-rose-700 border-rose-200/40"
-                                      : "bg-amber-50 text-amber-700 border-amber-200/40"
-                                }`}>
+                                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium border w-fit ${approvalStatusBadgeClass(restaurant.approvalStatus)}`}>
                                   {approvalStatusLabel(restaurant.approvalStatus)}
                                 </span>
                                 <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium border w-fit ${

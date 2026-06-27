@@ -65,12 +65,20 @@ export async function listRestaurantCategories(restaurantId, query = {}) {
     const includeInactive = query.includeInactive === 'true' || query.includeInactive === '1';
     const withCounts = query.withCounts === 'true' || query.withCounts === '1';
     const compact = query.compact === 'true' || query.compact === '1';
+    const ownedOnly = query.ownedOnly === 'true' || query.ownedOnly === '1';
     const zoneIdRaw = typeof query.zoneId === 'string' ? query.zoneId.trim() : context.zoneId;
 
     const filter = {};
     if (!includeInactive) filter.isActive = true;
 
-    const visibilityFilter = compact
+    const visibilityFilter = ownedOnly
+        ? {
+            $or: [
+                { restaurantId: context.restaurantId },
+                { createdByRestaurantId: context.restaurantId }
+            ]
+        }
+        : compact
         ? {
             $or: [
                 {
@@ -158,7 +166,18 @@ export async function listRestaurantCategories(restaurantId, query = {}) {
         })
     );
 
-    return { categories, total, page, limit };
+    let summary = null;
+    if (ownedOnly) {
+        const activeFilter = { ...filter, isActive: true };
+        const inactiveFilter = { ...filter, isActive: false };
+        const [active, inactive] = await Promise.all([
+            FoodCategory.countDocuments(activeFilter),
+            FoodCategory.countDocuments(inactiveFilter)
+        ]);
+        summary = { active, inactive };
+    }
+
+    return { categories, total, page, limit, ...(summary ? { summary } : {}) };
 }
 
 export async function listPublicCategories(query = {}) {

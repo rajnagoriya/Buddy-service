@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useRef, useState, useEffect } from "react"
 import { useNavigate, Link, useLocation } from "react-router-dom"
 import { Loader2, Phone } from "lucide-react"
 import { toast } from "sonner"
@@ -17,6 +17,16 @@ export default function RestaurantLogin() {
   const [phone, setPhone] = useState(() => sessionStorage.getItem("restaurantLoginPhone") || "")
   const [loading, setLoading] = useState(false)
   const submitting = useRef(false)
+
+  useEffect(() => {
+    if (location.state?.banned) {
+      toast.error(
+        location.state?.message ||
+          "Your restaurant account has been banned. Please contact support.",
+      )
+      navigate(location.pathname, { replace: true, state: {} })
+    }
+  }, [location.pathname, location.state, navigate])
 
   const validatePhone = (num) => {
     const digits = num.replace(/\D/g, "")
