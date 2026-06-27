@@ -220,6 +220,15 @@ export default function RestaurantOTP() {
     } catch (err) {
       const message = err?.response?.data?.message || "Invalid OTP. Please try again."
 
+      if (/banned/i.test(message)) {
+        sessionStorage.removeItem("restaurantAuthData")
+        navigate("/food/restaurant/login", {
+          replace: true,
+          state: { banned: true, message },
+        })
+        return
+      }
+
       if (/pending approval/i.test(message)) {
         const pendingPhone = authData?.phone || authData?.email || contactInfo
         setRestaurantPendingPhone(pendingPhone)

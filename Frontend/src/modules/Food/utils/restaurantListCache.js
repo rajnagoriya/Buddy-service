@@ -16,8 +16,26 @@ function stableStringify(value) {
 }
 
 export function normalizeRestaurantListParams(params = {}) {
-  const normalized = { limit: 1000, ...params }
+  const scopeHome = String(params.scope || "").toLowerCase() === "home";
+  const maxLimit = scopeHome ? 15 : 100;
+  const defaultLimit = scopeHome ? 12 : 20;
+
+  const normalized = {
+    page: 1,
+    limit: defaultLimit,
+    ...params,
+  }
   delete normalized._ts
+
+  if (normalized.page != null) {
+    normalized.page = Math.max(1, parseInt(normalized.page, 10) || 1)
+  }
+  if (normalized.limit != null) {
+    normalized.limit = Math.min(
+      Math.max(parseInt(normalized.limit, 10) || defaultLimit, 1),
+      maxLimit,
+    )
+  }
 
   if (normalized.lat != null && Number.isFinite(Number(normalized.lat))) {
     normalized.lat = Math.round(Number(normalized.lat) * 1000) / 1000

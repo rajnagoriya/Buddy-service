@@ -61,8 +61,13 @@ import {
     saveOnboardingStepController,
     submitOnboardingController,
 } from '../controllers/restaurantOnboarding.controller.js';
-
-import { cacheResponse, invalidateCache } from '../../../../middleware/cache.js';
+import { cacheResponse } from '../../../../middleware/cache.js';
+import {
+    withFoodCacheInvalidation,
+    invalidateAfterRestaurantProfileUpdate,
+    invalidateAfterRestaurantMenuMutation,
+    invalidateAfterRestaurantCategoryMutation,
+} from '../../utils/foodCacheInvalidation.js';
 
 const router = express.Router();
 
@@ -72,6 +77,10 @@ const requireRestaurant = (req, res, next) => {
     }
     next();
 };
+
+const invProfile = withFoodCacheInvalidation(invalidateAfterRestaurantProfileUpdate);
+const invMenu = withFoodCacheInvalidation(invalidateAfterRestaurantMenuMutation);
+const invCategory = withFoodCacheInvalidation(invalidateAfterRestaurantCategoryMutation);
 
 const uploadFields = upload.fields([
     { name: 'profileImage', maxCount: 1 },
@@ -93,7 +102,6 @@ const onboardingUploadFields = upload.fields([
 
 router.post('/register', uploadFields, registerRestaurantController);
 
-// Onboarding draft + submit (authenticated restaurant)
 router.get('/onboarding', authMiddleware, requireRestaurant, getOnboardingProgressController);
 router.put(
     '/onboarding/step/:step',
@@ -110,34 +118,21 @@ router.post(
     submitOnboardingController
 );
 
-// Public: approved restaurants list (for user app)
 router.get('/restaurants', cacheResponse(300, 'restaurants'), listApprovedRestaurantsController);
 router.get('/restaurants/:id', cacheResponse(600, 'restaurant_detail'), getApprovedRestaurantController);
 router.get('/restaurants/:id/menu', cacheResponse(600, 'restaurant_menu'), getPublicRestaurantMenuController);
 router.get('/restaurants/:id/outlet-timings', cacheResponse(600, 'restaurant_timings'), getOutletTimingsByRestaurantIdController);
 router.get('/offers', cacheResponse(300, 'offers'), listPublicOffersController);
-// Public: categories list (zone-aware; returns zone categories + global)
 router.get('/categories/public', cacheResponse(600, 'categories'), listCategoriesController);
 
-// Restaurant dashboard/profile (Bearer token + RESTAURANT role)
 router.get('/current', authMiddleware, requireRestaurant, getCurrentRestaurantController);
-router.patch('/profile', authMiddleware, requireRestaurant, async (req, res, next) => {
-    // Invalidate caches when profile is updated
-    await invalidateCache('restaurants:*');
-    await invalidateCache('restaurant_detail:*');
-    next();
-}, updateRestaurantProfileController);
-router.patch('/availability', authMiddleware, requireRestaurant, async (req, res, next) => {
-    await invalidateCache('restaurants:*');
-    next();
-}, updateRestaurantAcceptingOrdersController);
-router.patch('/profile', authMiddleware, requireRestaurant, updateRestaurantProfileController);
-router.patch('/availability', authMiddleware, requireRestaurant, updateRestaurantAcceptingOrdersController);
-router.patch('/dining-settings', authMiddleware, requireRestaurant, updateCurrentRestaurantDiningSettingsController);
+router.patch('/profile', authMiddleware, requireRestaurant, invProfile, updateRestaurantProfileController);
+router.patch('/availability', authMiddleware, requireRestaurant, invProfile, updateRestaurantAcceptingOrdersController);
+router.patch('/dining-settings', authMiddleware, requireRestaurant, invProfile, updateCurrentRestaurantDiningSettingsController);
 router.post('/dining-settings/request', authMiddleware, requireRestaurant, createDiningRequestController);
 router.get('/dining-settings/pending', authMiddleware, requireRestaurant, getPendingDiningRequestController);
 router.get('/outlet-timings', authMiddleware, requireRestaurant, getCurrentRestaurantOutletTimingsController);
-router.put('/outlet-timings', authMiddleware, requireRestaurant, upsertCurrentRestaurantOutletTimingsController);
+router.put('/outlet-timings', authMiddleware, requireRestaurant, invMenu, upsertCurrentRestaurantOutletTimingsController);
 router.get('/finance', authMiddleware, requireRestaurant, getRestaurantFinanceController);
 router.post('/withdraw', authMiddleware, requireRestaurant, createWithdrawalRequestController);
 router.get('/withdrawals', authMiddleware, requireRestaurant, listMyWithdrawalsController);
@@ -146,11 +141,7 @@ router.post(
     authMiddleware,
     requireRestaurant,
     upload.single('file'),
-    async (req, res, next) => {
-        await invalidateCache('restaurants:*');
-        await invalidateCache('restaurant_detail:*');
-        next();
-    },
+    invProfile,
     uploadRestaurantProfileImageController
 );
 router.post(
@@ -158,10 +149,7 @@ router.post(
     authMiddleware,
     requireRestaurant,
     upload.single('file'),
-    async (req, res, next) => {
-        await invalidateCache('restaurant_menu:*');
-        next();
-    },
+    invMenu,
     uploadRestaurantMenuImageController
 );
 router.post(
@@ -169,10 +157,7 @@ router.post(
     authMiddleware,
     requireRestaurant,
     upload.array('files', 20),
-    async (req, res, next) => {
-        await invalidateCache('restaurant_detail:*');
-        next();
-    },
+    invProfile,
     uploadRestaurantCoverImagesController
 );
 router.post(
@@ -180,81 +165,52 @@ router.post(
     authMiddleware,
     requireRestaurant,
     upload.array('files', 20),
-    async (req, res, next) => {
-        await invalidateCache('restaurant_menu:*');
-        next();
-    },
+    invMenu,
     uploadRestaurantMenuImagesController
 );
 
-// Categories (restaurant dashboard). Read-only for item creation, CRUD for Menu Categories page.
 router.get('/categories', authMiddleware, requireRestaurant, listCategoriesController);
-router.post('/categories', authMiddleware, requireRestaurant, createCategoryController);
-router.patch('/categories/:id', authMiddleware, requireRestaurant, updateCategoryController);
-router.delete('/categories/:id', authMiddleware, requireRestaurant, deleteCategoryController);
+router.post('/categories', authMiddleware, requireRestaurant, invCategory, createCategoryController);
+router.patch('/categories/:id', authMiddleware, requireRestaurant, invCategory, updateCategoryController);
+router.delete('/categories/:id', authMiddleware, requireRestaurant, invCategory, deleteCategoryController);
 
-// Menu (restaurant dashboard) - only fields needed by UI
 router.get('/menu', authMiddleware, requireRestaurant, getMenuController);
-router.patch('/menu', authMiddleware, requireRestaurant, async (req, res, next) => {
-    await invalidateCache('restaurant_menu:*');
-    next();
-}, updateMenuController);
+router.patch('/menu', authMiddleware, requireRestaurant, invMenu, updateMenuController);
 
-// Feedback (restaurant dashboard)
 router.post('/feedback-experience', authMiddleware, requireRestaurant, feedbackExperienceController.createFeedbackExperience);
 
-// Public: restaurant add-ons (user app)
 router.get('/restaurants/:id/addons', cacheResponse(600, 'restaurant_addons'), getPublicRestaurantAddonsController);
 
-// Foods (restaurant creates/updates items -> stored in food_items collection)
-router.post('/foods', authMiddleware, requireRestaurant, async (req, res, next) => {
-    await invalidateCache('restaurant_menu:*');
-    next();
-}, createRestaurantFoodController);
-router.post('/foods/bulk', authMiddleware, requireRestaurant, async (req, res, next) => {
-    await invalidateCache('restaurant_menu:*');
-    next();
-}, bulkCreateRestaurantFoodController);
-router.patch('/foods/:id', authMiddleware, requireRestaurant, async (req, res, next) => {
-    await invalidateCache('restaurant_menu:*');
-    next();
-}, updateRestaurantFoodController);
+router.post('/foods', authMiddleware, requireRestaurant, invMenu, createRestaurantFoodController);
+router.post('/foods/bulk', authMiddleware, requireRestaurant, invMenu, bulkCreateRestaurantFoodController);
+router.patch('/foods/:id', authMiddleware, requireRestaurant, invMenu, updateRestaurantFoodController);
 
-// Add-ons (restaurant dashboard) - approval handled by admin
 router.get('/addons', authMiddleware, requireRestaurant, listAddonsController);
-router.post('/addons', authMiddleware, requireRestaurant, createAddonController);
-router.patch('/addons/:id', authMiddleware, requireRestaurant, updateAddonController);
-router.delete('/addons/:id', authMiddleware, requireRestaurant, deleteAddonController);
+router.post('/addons', authMiddleware, requireRestaurant, invMenu, createAddonController);
+router.patch('/addons/:id', authMiddleware, requireRestaurant, invMenu, updateAddonController);
+router.delete('/addons/:id', authMiddleware, requireRestaurant, invMenu, deleteAddonController);
 
-// Orders (restaurant dashboard)
 router.get('/orders', authMiddleware, requireRestaurant, orderController.listOrdersRestaurantController);
 router.get('/orders/:orderId', authMiddleware, requireRestaurant, orderController.getOrderByIdRestaurantController);
 router.patch('/orders/:orderId/status', authMiddleware, requireRestaurant, orderController.updateOrderStatusRestaurantController);
 router.post('/orders/:orderId/resend-notification', authMiddleware, requireRestaurant, orderController.resendDeliveryNotificationRestaurantController);
 router.post('/orders/:orderId/delay', authMiddleware, requireRestaurant, orderController.reportOrderDelayController);
 
-// Complaints (restaurant dashboard)
 router.get('/complaints', authMiddleware, requireRestaurant, getRestaurantComplaintsController);
 router.post('/support/tickets', authMiddleware, requireRestaurant, createRestaurantSupportTicketController);
 router.get('/support/tickets', authMiddleware, requireRestaurant, listRestaurantSupportTicketsController);
 
-// Download menu PDF (restaurant can download their own, admin can download any)
 router.get('/download-menu-pdf/:id', authMiddleware, (req, res, next) => {
-    // Allow ADMIN users to download any restaurant's PDF, or RESTAURANT users to download their own
     const isAdmin = req.user?.role === 'ADMIN';
     const isOwner = req.user?.userId === req.params.id;
-    
+
     if (!isAdmin && !isOwner) {
         return sendError(res, 403, 'You can only download your own restaurant menu PDF');
     }
-    
-    // Call the download function
+
     downloadRestaurantMenuPdf(req, res, next);
 });
 
-// Delete account (Bearer RESTAURANT)
 router.delete('/account', authMiddleware, requireRestaurant, deleteRestaurantAccountController);
 
 export default router;
-
-

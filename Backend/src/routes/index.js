@@ -24,6 +24,7 @@ import masterProfileRoutes from '../core/profile/profile.routes.js';
 import identityRoutes from '../core/identity/identity.routes.js';
 import driverOnboardingRoutes from '../core/identity/driverOnboarding.routes.js';
 import driverModeRoutes from '../core/identity/driverMode.routes.js';
+import { cacheResponse } from '../middleware/cache.js';
 
 const router = express.Router();
 
@@ -56,8 +57,8 @@ router.use('/v1/food/restaurant', restaurantRoutes);
 // Landing & hero-banners for Food user app (paths start with /food/hero-banners/...)
 router.use('/v1/food', landingRoutes);
 router.use('/v1/food/search', searchRoutes);
-router.get('/v1/food/dining/categories/public', getPublicDiningCategories);
-router.get('/v1/food/dining/restaurants/public', getPublicDiningRestaurants);
+router.get('/v1/food/dining/categories/public', cacheResponse(300, 'food_dining'), getPublicDiningCategories);
+router.get('/v1/food/dining/restaurants/public', cacheResponse(120, 'food_dining'), getPublicDiningRestaurants);
 router.use('/v1/uploads', uploadRoutes);
 
 // Mark business-settings/public as truly public (must be before protected admin block)

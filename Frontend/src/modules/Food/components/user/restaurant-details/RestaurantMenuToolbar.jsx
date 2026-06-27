@@ -17,7 +17,7 @@ export default function RestaurantMenuToolbar({
 }) {
   return (
     <div className="sticky top-0 z-30 bg-white/90 backdrop-blur-xl border-b border-gray-100 dark:bg-[#0a0a0a]/90 dark:border-gray-800">
-      <div className="max-w-7xl mx-auto px-4 py-3 space-y-3">
+      <div className="max-w-7xl mx-auto px-3 py-2 space-y-2">
         {/* Fulfillment pills */}
         <div className="flex justify-center">
           <div className="inline-flex items-center rounded-2xl bg-gray-100 dark:bg-gray-800/80 p-1 gap-0.5">

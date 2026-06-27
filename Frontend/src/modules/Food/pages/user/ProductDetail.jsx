@@ -13,6 +13,7 @@ import ScrollReveal from "@food/components/user/ScrollReveal"
 import { useCart } from "@food/context/CartContext"
 import { useOrders } from "@food/context/OrdersContext"
 import { Button } from "@food/components/ui/button"
+import { useAddToCartFeedback } from "@food/hooks/useAddToCartFeedback"
 import { Badge } from "@food/components/ui/badge"
 import { Textarea } from "@food/components/ui/textarea"
 import { Label } from "@food/components/ui/label"
@@ -97,6 +98,7 @@ export default function ProductDetail() {
   const goBack = useAppBackNavigation()
   const product = productsData[parseInt(id)]
   const { addToCart, isInCart, getCartItem, updateQuantity } = useCart()
+  const handleAddToCartFeedback = useAddToCartFeedback()
   const { getAllOrders } = useOrders()
   const [quantity, setQuantity] = useState(1)
   const [showReviewForm, setShowReviewForm] = useState(false)
@@ -144,8 +146,11 @@ export default function ProductDetail() {
 
       for (let i = 0; i < quantity; i++) {
         const result = addToCart(enrichedProduct)
-        if (result?.ok === false) {
-          alert(result.error || "Cannot add item from different restaurant. Please clear cart first.")
+        if (!handleAddToCartFeedback(
+          result,
+          "Cannot add item from different restaurant. Please clear cart first.",
+          enrichedProduct.restaurant || product.restaurant || "",
+        )) {
           break
         }
       }

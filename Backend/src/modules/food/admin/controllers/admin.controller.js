@@ -1164,6 +1164,44 @@ export async function createRestaurant(req, res, next) {
     }
 }
 
+export async function checkRestaurantPhone(req, res, next) {
+    try {
+        const phone = String(req.query.phone || req.query.phoneNumber || '').trim();
+        if (!phone) {
+            return res.status(422).json({
+                success: false,
+                message: 'Phone number is required',
+            });
+        }
+        const result = await adminService.checkRestaurantPhoneForAdmin(phone);
+        return res.status(200).json({
+            success: true,
+            data: result,
+        });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function checkRestaurantEmail(req, res, next) {
+    try {
+        const email = String(req.query.email || '').trim();
+        if (!email) {
+            return res.status(422).json({
+                success: false,
+                message: 'Email address is required',
+            });
+        }
+        const result = await adminService.checkRestaurantEmailForAdmin(email);
+        return res.status(200).json({
+            success: true,
+            data: result,
+        });
+    } catch (error) {
+        next(error);
+    }
+}
+
 export async function rejectRestaurant(req, res, next) {
     try {
         const { id } = req.params;

@@ -19,6 +19,7 @@ const foodSchema = new mongoose.Schema(
         price: { type: Number, required: true, min: 0 },
         variants: { type: [foodVariantSchema], default: [] },
         image: { type: String, trim: true, default: '' },
+        imagePublicId: { type: String, trim: true, default: '' },
         foodType: { type: String, enum: ['Veg', 'Non-Veg'], default: 'Non-Veg' },
         isAvailable: { type: Boolean, default: true, index: true },
         preparationTime: { type: String, trim: true, default: '' },
@@ -38,5 +39,7 @@ foodSchema.index({ restaurantId: 1, createdAt: -1 });
 foodSchema.index({ approvalStatus: 1, createdAt: -1 });
 foodSchema.index({ approvalStatus: 1, requestedAt: -1 });
 foodSchema.index({ restaurantId: 1, approvalStatus: 1, createdAt: -1 });
+foodSchema.index({ approvalStatus: 1, name: 1 });
+foodSchema.index({ name: 'text', description: 'text' }, { weights: { name: 10, description: 2 } });
 
 export const FoodItem = mongoose.model('FoodItem', foodSchema);

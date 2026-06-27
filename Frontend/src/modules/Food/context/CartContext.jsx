@@ -1,28 +1,15 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react"
+import { createContext, useContext, useEffect, useMemo, useState, useRef, useCallback } from "react"
 import { buildCartLineId } from "@food/utils/foodVariants"
-import { adminAPI } from "@food/api"
+import { adminAPI, userAPI } from "@food/api"
+import { API_BASE_URL } from "@food/api/config"
+import { buildRestaurantMetaFromCart } from "@food/hooks/useCartRestaurantValidation"
 
-const geoDistanceMeters = (lat1, lng1, lat2, lng2) => {
-  if (
-    typeof lat1 !== "number" ||
-    typeof lng1 !== "number" ||
-    typeof lat2 !== "number" ||
-    typeof lng2 !== "number"
-  ) {
-    return Number.POSITIVE_INFINITY
-  }
-  const R = 6371e3 // Earth's radius in meters
-  const dLat = (lat2 - lat1) * (Math.PI / 180)
-  const dLng = (lng2 - lng1) * (Math.PI / 180)
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1 * (Math.PI / 180)) *
-    Math.cos(lat2 * (Math.PI / 180)) *
-    Math.sin(dLng / 2) *
-    Math.sin(dLng / 2)
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-  return R * c
-}
+import {
+  getLastRestaurantFromCart,
+  validateChainRestaurantRadius,
+  CHAIN_RADIUS_VALIDATION_MESSAGE,
+} from "@food/utils/restaurantRadius"
+
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -58,6 +45,20 @@ const defaultCartContext = {
   replaceCart: () => {
     debugWarn('CartProvider not available - replaceCart called');
   },
+  restaurantMeta: [],
+  setRestaurantMeta: () => {
+    debugWarn('CartProvider not available - setRestaurantMeta called');
+  },
+  removeItemsByRestaurantIds: () => {
+    debugWarn('CartProvider not available - removeItemsByRestaurantIds called');
+  },
+  updateCartItem: () => {
+    debugWarn('CartProvider not available - updateCartItem called');
+  },
+  flushCartSave: () => {
+    debugWarn('CartProvider not available - flushCartSave called');
+  },
+  cartSyncStatus: 'idle',
 }
 
 const CartContext = createContext(defaultCartContext)
@@ -163,6 +164,27 @@ const resolveCartEntryId = (items, itemId, variantId = "") => {
   return preferredId
 }
 
+const CART_SAVE_DEBOUNCE_MS = 2500
+
+const isFoodUserAuthenticated = () => {
+  if (typeof window === "undefined") return false
+  return (
+    localStorage.getItem("user_authenticated") === "true" ||
+    !!localStorage.getItem("user_accessToken")
+  )
+}
+
+const loadRestaurantMetaFromStorage = () => {
+  if (typeof window === "undefined") return []
+  try {
+    const saved = localStorage.getItem("cartRestaurantMeta")
+    const parsed = saved ? JSON.parse(saved) : []
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
 export function CartProvider({ children }) {
   // Safe init (works with SSR and bad JSON)
   const [cart, setCart] = useState(() => {
@@ -175,6 +197,192 @@ export function CartProvider({ children }) {
       return []
     }
   })
+
+  const [restaurantMeta, setRestaurantMeta] = useState(loadRestaurantMetaFromStorage)
+  const [cartSyncStatus, setCartSyncStatus] = useState("idle")
+
+  const saveDebounceRef = useRef(null)
+  const saveInFlightRef = useRef(null)
+  const saveQueuedRef = useRef(false)
+  const skipServerSyncRef = useRef(false)
+  const hasRestoredFromServerRef = useRef(false)
+  const cartRef = useRef(cart)
+  const restaurantMetaRef = useRef(restaurantMeta)
+
+  useEffect(() => {
+    cartRef.current = cart
+  }, [cart])
+
+  useEffect(() => {
+    restaurantMetaRef.current = restaurantMeta
+  }, [restaurantMeta])
+
+  useEffect(() => {
+    setRestaurantMeta((prev) => buildRestaurantMetaFromCart(cart, prev))
+  }, [cart])
+
+  const buildCartPayload = useCallback(() => {
+    const items = normalizeCartData(cartRef.current)
+    const meta = buildRestaurantMetaFromCart(items, restaurantMetaRef.current)
+    return { items, restaurantMeta: meta }
+  }, [])
+
+  const flushCartSave = useCallback(async () => {
+    if (typeof window === "undefined") return
+    if (!isFoodUserAuthenticated() || skipServerSyncRef.current) return
+
+    if (saveInFlightRef.current) {
+      saveQueuedRef.current = true
+      return saveInFlightRef.current
+    }
+
+    const payload = buildCartPayload()
+    setCartSyncStatus("syncing")
+
+    const request = userAPI
+      .syncCart(payload)
+      .then(() => {
+        setCartSyncStatus("idle")
+      })
+      .catch((err) => {
+        debugError("Failed to sync cart:", err)
+        setCartSyncStatus("error")
+      })
+      .finally(() => {
+        saveInFlightRef.current = null
+        if (saveQueuedRef.current) {
+          saveQueuedRef.current = false
+          flushCartSave()
+        }
+      })
+
+    saveInFlightRef.current = request
+    return request
+  }, [buildCartPayload])
+
+  const scheduleCartSave = useCallback(() => {
+    if (!isFoodUserAuthenticated() || skipServerSyncRef.current) return
+    if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current)
+    saveDebounceRef.current = setTimeout(() => {
+      saveDebounceRef.current = null
+      flushCartSave()
+    }, CART_SAVE_DEBOUNCE_MS)
+  }, [flushCartSave])
+
+  const flushCartSaveKeepalive = useCallback(() => {
+    if (!isFoodUserAuthenticated() || skipServerSyncRef.current) return
+    const token = localStorage.getItem("user_accessToken")
+    if (!token) return
+
+    const baseURL =
+      API_BASE_URL ||
+      (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL
+        ? String(import.meta.env.VITE_API_BASE_URL).replace(/\/$/, "")
+        : "/api/v1")
+
+    const payload = buildCartPayload()
+    try {
+      fetch(`${baseURL}/food/user/cart`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+        keepalive: true,
+      }).catch(() => {})
+    } catch {
+      // ignore
+    }
+  }, [buildCartPayload])
+
+  const restoreCartFromServer = useCallback(async () => {
+    if (!isFoodUserAuthenticated()) return
+    skipServerSyncRef.current = true
+    try {
+      const res = await userAPI.getCart()
+      const data = res?.data?.data
+      const serverItems = Array.isArray(data?.items) ? normalizeCartData(data.items) : []
+      const serverMeta = Array.isArray(data?.restaurantMeta) ? data.restaurantMeta : []
+      const localItems = normalizeCartData(cartRef.current)
+
+      if (serverItems.length > 0) {
+        setCart(serverItems)
+      } else if (localItems.length > 0) {
+        scheduleCartSave()
+      }
+
+      if (serverMeta.length > 0) {
+        setRestaurantMeta(serverMeta)
+      }
+    } catch (err) {
+      debugError("Failed to restore cart from server:", err)
+    } finally {
+      skipServerSyncRef.current = false
+      hasRestoredFromServerRef.current = true
+    }
+  }, [scheduleCartSave])
+
+  useEffect(() => {
+    if (!isFoodUserAuthenticated()) return
+    if (hasRestoredFromServerRef.current) return
+    restoreCartFromServer()
+  }, [])
+
+  useEffect(() => {
+    const handleAuthRefresh = () => {
+      if (!isFoodUserAuthenticated()) return
+      hasRestoredFromServerRef.current = false
+      restoreCartFromServer()
+    }
+
+    const handleStorage = (event) => {
+      if (event.key === "user_accessToken" || event.key === "user_authenticated") {
+        handleAuthRefresh()
+      }
+    }
+
+    window.addEventListener("storage", handleStorage)
+    window.addEventListener("userAuthChanged", handleAuthRefresh)
+    return () => {
+      window.removeEventListener("storage", handleStorage)
+      window.removeEventListener("userAuthChanged", handleAuthRefresh)
+    }
+  }, [restoreCartFromServer])
+
+  useEffect(() => {
+    scheduleCartSave()
+    return () => {
+      if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current)
+    }
+  }, [cart, restaurantMeta, scheduleCartSave])
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        if (saveDebounceRef.current) {
+          clearTimeout(saveDebounceRef.current)
+          saveDebounceRef.current = null
+        }
+        flushCartSave()
+      }
+    }
+
+    const handleBeforeUnload = () => {
+      if (saveDebounceRef.current) {
+        clearTimeout(saveDebounceRef.current)
+        saveDebounceRef.current = null
+      }
+      flushCartSaveKeepalive()
+    }
+
+    window.addEventListener("visibilitychange", handleVisibilityChange)
+    window.addEventListener("beforeunload", handleBeforeUnload)
+    return () => {
+      window.removeEventListener("visibilitychange", handleVisibilityChange)
+      window.removeEventListener("beforeunload", handleBeforeUnload)
+    }
+  }, [flushCartSave, flushCartSaveKeepalive])
 
   // Track last add event for animation
   const [lastAddEvent, setLastAddEvent] = useState(null)
@@ -197,15 +405,15 @@ export function CartProvider({ children }) {
   // Persist to localStorage whenever cart changes
   useEffect(() => {
     try {
-      // Only save if we have items or user is authenticated to avoid cluttering localStorage for every guest visitor
-      const isAuthenticated = localStorage.getItem("user_authenticated") === "true" || !!localStorage.getItem("user_accessToken");
+      const isAuthenticated = isFoodUserAuthenticated()
       if (cart.length > 0 || isAuthenticated) {
         localStorage.setItem("cart", JSON.stringify(normalizeCartData(cart)))
       }
+      localStorage.setItem("cartRestaurantMeta", JSON.stringify(restaurantMeta))
     } catch {
       // ignore storage errors (private mode, quota, etc.)
     }
-  }, [cart])
+  }, [cart, restaurantMeta])
 
   const addToCart = (item, sourcePosition = null) => {
     const safeCart = normalizeCartData(cart)
@@ -238,26 +446,28 @@ export function CartProvider({ children }) {
           return { ok: false, error: message, code: 'MULTI_ORDER_DISABLED' }
         }
 
-        // Capacity Check (Max 2)
-        if (uniqueRestaurants.length >= 2) {
-          const message = `You can only order from a maximum of 2 restaurants at once.`
-          return { ok: false, error: message, code: 'MAX_RESTAURANTS_EXCEEDED' }
-        }
+        const lastRestaurant = getLastRestaurantFromCart(safeCart)
+        const chainCheck = validateChainRestaurantRadius(
+          {
+            latitude: lastRestaurant?.lat,
+            longitude: lastRestaurant?.lng,
+            restaurantId: lastRestaurant?.restaurantId,
+          },
+          {
+            latitude: item?.latitude,
+            longitude: item?.longitude,
+            restaurantId: newItemRestaurantId,
+          },
+        )
 
-        // Distance Check
-        if (adminSettings?.multiOrderMaxDistance) {
-          const firstRestaurant = uniqueRestaurants[0]
-          if (firstRestaurant?.lat && firstRestaurant?.lng && item?.latitude && item?.longitude) {
-            const distMeters = geoDistanceMeters(
-              firstRestaurant.lat, firstRestaurant.lng,
-              item.latitude, item.longitude
-            )
-            const maxMeters = (Number(adminSettings.multiOrderMaxDistance) || 3) * 1000
-            
-            if (distMeters > maxMeters) {
-              const message = `This restaurant is too far from "${firstRestaurant.name}". Multi-restaurant orders must be within ${adminSettings.multiOrderMaxDistance}km.`
-              return { ok: false, error: message, code: 'RESTAURANTS_TOO_FAR' }
-            }
+        if (!chainCheck.skipped && !chainCheck.valid) {
+          return {
+            ok: false,
+            error: CHAIN_RADIUS_VALIDATION_MESSAGE,
+            code: 'RESTAURANT_CHAIN_RADIUS',
+            distanceKm: chainCheck.distanceKm,
+            lastRestaurantId: lastRestaurant?.restaurantId,
+            newRestaurantId: newItemRestaurantId,
           }
         }
       }
@@ -406,6 +616,38 @@ export function CartProvider({ children }) {
 
   const clearCart = () => setCart([])
 
+  const removeItemsByRestaurantIds = (restaurantIds = []) => {
+    const idSet = new Set((Array.isArray(restaurantIds) ? restaurantIds : []).map(String))
+    if (idSet.size === 0) return
+    setCart((prev) =>
+      normalizeCartData(prev).filter((item) => !idSet.has(String(item.restaurantId || ""))),
+    )
+    setRestaurantMeta((prev) =>
+      (Array.isArray(prev) ? prev : []).filter((entry) => !idSet.has(String(entry.restaurantId || ""))),
+    )
+  }
+
+  const updateCartItem = (itemId, updates = {}) => {
+    setCart((prev) => {
+      const safePrev = normalizeCartData(prev)
+      const resolvedItemId = resolveCartEntryId(safePrev, itemId, updates.variantId || "")
+      return safePrev.map((item) => {
+        if (item.id !== resolvedItemId) return item
+        const nextVariantId = updates.variantId ?? item.variantId
+        const nextLineId = buildCartLineId(item.itemId || item.productId || item.id, nextVariantId)
+        return normalizeCartData([
+          {
+            ...item,
+            ...updates,
+            id: nextLineId,
+            lineItemId: nextLineId,
+            variantId: nextVariantId,
+          },
+        ])[0]
+      })
+    })
+  }
+
   const replaceCart = (items) => {
     const normalizedItems = normalizeCartData(items).filter((item) => {
       const quantity = Number(item?.quantity)
@@ -510,8 +752,14 @@ export function CartProvider({ children }) {
       clearCart,
       cleanCartForRestaurant,
       replaceCart,
+      restaurantMeta,
+      setRestaurantMeta,
+      removeItemsByRestaurantIds,
+      updateCartItem,
+      flushCartSave,
+      cartSyncStatus,
     }),
-    [cart, cartForAnimation, lastAddEvent, lastRemoveEvent]
+    [cart, cartForAnimation, lastAddEvent, lastRemoveEvent, restaurantMeta, cartSyncStatus]
   )
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>

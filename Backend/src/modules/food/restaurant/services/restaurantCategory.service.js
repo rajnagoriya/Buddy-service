@@ -3,8 +3,10 @@ import { ValidationError } from '../../../../core/auth/errors.js';
 import { FoodCategory } from '../../admin/models/category.model.js';
 import { FoodItem } from '../../admin/models/food.model.js';
 import { FoodRestaurant } from '../models/restaurant.model.js';
+import { deleteFoodImageAsset } from '../../services/foodImage.service.js';
 import {
     backfillLegacyCategoryWorkflow,
+    categoryAllowsFoodType,
     GLOBAL_CATEGORY_FILTER,
     normalizeCategoryFoodTypeScope,
     serializeCategoryForResponse,
@@ -63,12 +65,20 @@ export async function listRestaurantCategories(restaurantId, query = {}) {
     const includeInactive = query.includeInactive === 'true' || query.includeInactive === '1';
     const withCounts = query.withCounts === 'true' || query.withCounts === '1';
     const compact = query.compact === 'true' || query.compact === '1';
+    const ownedOnly = query.ownedOnly === 'true' || query.ownedOnly === '1';
     const zoneIdRaw = typeof query.zoneId === 'string' ? query.zoneId.trim() : context.zoneId;
 
     const filter = {};
     if (!includeInactive) filter.isActive = true;
 
-    const visibilityFilter = compact
+    const visibilityFilter = ownedOnly
+        ? {
+            $or: [
+                { restaurantId: context.restaurantId },
+                { createdByRestaurantId: context.restaurantId }
+            ]
+        }
+        : compact
         ? {
             $or: [
                 {
@@ -156,7 +166,18 @@ export async function listRestaurantCategories(restaurantId, query = {}) {
         })
     );
 
-    return { categories, total, page, limit };
+    let summary = null;
+    if (ownedOnly) {
+        const activeFilter = { ...filter, isActive: true };
+        const inactiveFilter = { ...filter, isActive: false };
+        const [active, inactive] = await Promise.all([
+            FoodCategory.countDocuments(activeFilter),
+            FoodCategory.countDocuments(inactiveFilter)
+        ]);
+        summary = { active, inactive };
+    }
+
+    return { categories, total, page, limit, ...(summary ? { summary } : {}) };
 }
 
 export async function listPublicCategories(query = {}) {
@@ -304,14 +325,18 @@ export async function deleteRestaurantCategory(restaurantId, id) {
         throw new ValidationError('Invalid category id');
     }
 
-    const category = await FoodCategory.findOne({ _id: id, restaurantId: context.restaurantId }).select('_id').lean();
-    if (!category?._id) return null;
+    const existing = await FoodCategory.findOne({ _id: id, restaurantId: context.restaurantId }).lean();
+    if (!existing?._id) return null;
 
     const inUse = await FoodItem.countDocuments({ categoryId: id, restaurantId: context.restaurantId });
     if (inUse > 0) {
         throw new ValidationError('Cannot delete category while it has items');
     }
 
-    const deleted = await FoodCategory.findOneAndDelete({ _id: id, restaurantId: context.restaurantId }).lean();
-    return deleted ? { id } : null;
+    await deleteFoodImageAsset({
+        publicId: existing.imagePublicId,
+        url: existing.image,
+    });
+    await FoodCategory.findOneAndDelete({ _id: id, restaurantId: context.restaurantId });
+    return { id };
 }

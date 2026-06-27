@@ -180,7 +180,7 @@ export function getMe(module = "user") {
 }
 
 // ---- /me in-flight + short cache (per module) ----
-const ME_CACHE_MS = 3000;
+const ME_CACHE_MS = 60 * 1000;
 const meCache = new Map(); // module -> { at, res }
 const meInFlight = new Map(); // module -> Promise
 

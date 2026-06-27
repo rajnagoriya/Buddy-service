@@ -1,11 +1,12 @@
-import { useState, useEffect, useRef } from "react"
+import { forwardRef, useState, useEffect, useRef, useImperativeHandle } from "react"
 import { MapPin, Search, Save, Loader2 } from "lucide-react"
+import { toast } from "sonner"
 import RestaurantSubPageShell from "@food/components/restaurant/panel/RestaurantSubPageShell"
 import { PanelSurface } from "@food/components/restaurant/panel/panelUi"
 import { RESTAURANT_BASE } from "@food/utils/restaurantNavConfig"
 import { restaurantAPI, zoneAPI } from "@food/api"
 import { getGoogleMapsApiKey } from "@food/utils/googleMapsApiKey"
-import { Loader } from "@googlemaps/js-api-loader"
+import { loadFoodGoogleMaps } from "@food/utils/googleMapsLoader"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -50,16 +51,50 @@ const getSavedLocationCoords = (location) => {
   return { lat, lng }
 }
 
-export default function ZoneSetup() {
+const parseAddressComponents = (comps = []) => {
+  const get = (types) =>
+    comps.find((c) => types.some((t) => c.types?.includes(t)))?.long_name || ""
+  const route = get(["route"])
+  const streetNumber = get(["street_number"])
+  return {
+    area:
+      get(["sublocality_level_1", "sublocality", "neighborhood"]) || get(["locality"]),
+    city: get(["locality"]) || get(["administrative_area_level_2"]),
+    state: get(["administrative_area_level_1"]),
+    pincode: get(["postal_code"]),
+    addressLine1: [streetNumber, route].filter(Boolean).join(" ").trim(),
+  }
+}
+
+const parseGeocoderResult = (result, lat, lng) => {
+  const address = result?.formatted_address || `${lat.toFixed(6)}, ${lng.toFixed(6)}`
+  const parsed = parseAddressComponents(result?.address_components || [])
+  return { lat, lng, address, ...parsed }
+}
+
+const getCityFromZone = (zone) => {
+  if (!zone) return ""
+  return String(zone.serviceLocation || zone.zoneName || zone.name || "")
+    .trim()
+    .replace(/\s+zone$/i, "")
+    .replace(/\s+region$/i, "")
+    .trim()
+}
+
+const getZoneId = (zone) => String(zone?._id || zone?.id || "")
+
+export default forwardRef(function ZoneSetup({ embedded = false, mapActive = true }, ref) {
   const mapRef = useRef(null)
   const mapInstanceRef = useRef(null)
   const markerRef = useRef(null)
   const autocompleteInputRef = useRef(null)
   const autocompleteRef = useRef(null)
   const geocoderRef = useRef(null)
+  const mapInitializedRef = useRef(false)
   
   const [googleMapsApiKey, setGoogleMapsApiKey] = useState("")
   const [mapLoading, setMapLoading] = useState(true)
+  const [mapError, setMapError] = useState("")
   const [saving, setSaving] = useState(false)
   const [restaurantData, setRestaurantData] = useState(null)
   const [locationSearch, setLocationSearch] = useState("")
@@ -70,12 +105,31 @@ export default function ZoneSetup() {
   const [isInZone, setIsInZone] = useState(false)
   const [checkingZone, setCheckingZone] = useState(false)
   const polygonRefs = useRef([])
+  const savedSnapshotRef = useRef(null)
 
   useEffect(() => {
     fetchRestaurantData()
     fetchZones()
-    loadGoogleMaps()
   }, [])
+
+  useEffect(() => {
+    if (embedded && !mapActive) {
+      setMapLoading(false)
+      return undefined
+    }
+
+    if (mapInitializedRef.current && mapInstanceRef.current && window.google?.maps) {
+      window.google.maps.event.trigger(mapInstanceRef.current, "resize")
+      setMapLoading(false)
+      return undefined
+    }
+
+    let cancelled = false
+    loadGoogleMaps(() => cancelled)
+    return () => {
+      cancelled = true
+    }
+  }, [embedded, mapActive])
 
   const fetchZones = async () => {
     try {
@@ -91,30 +145,26 @@ export default function ZoneSetup() {
   useEffect(() => {
     if (!mapLoading && mapInstanceRef.current && autocompleteInputRef.current && window.google?.maps?.places && !autocompleteRef.current) {
       const autocomplete = new window.google.maps.places.Autocomplete(autocompleteInputRef.current, {
-        componentRestrictions: { country: 'in' } // Restrict to India
+        componentRestrictions: { country: "in" },
+        fields: ["formatted_address", "address_components", "geometry"],
       })
       
-      autocomplete.addListener('place_changed', () => {
+      autocomplete.addListener("place_changed", () => {
         const place = autocomplete.getPlace()
         if (place.geometry && place.geometry.location && mapInstanceRef.current) {
           const location = place.geometry.location
           const lat = location.lat()
           const lng = location.lng()
+          const parsed = parseGeocoderResult(place, lat, lng)
           
-          // Center map on selected location
           mapInstanceRef.current.setCenter(location)
-          mapInstanceRef.current.setZoom(17) // Zoom in when location is selected
+          mapInstanceRef.current.setZoom(17)
           
-          // Set the search input value
-          const address = place.formatted_address || place.name || ""
-          setLocationSearch(address)
-          setSelectedAddress(address)
-          
-          // Update marker position
-          updateMarker(lat, lng, address)
-          
-          // Set selected location
-          setSelectedLocation({ lat, lng, address })
+          setLocationSearch(parsed.address)
+          setSelectedAddress(parsed.address)
+          setSelectedLocation(parsed)
+          updateMarker(lat, lng, parsed.address)
+          checkLocationInZone(lat, lng)
         }
       })
       
@@ -140,23 +190,28 @@ export default function ZoneSetup() {
         if ((!existingAddress || isCoordinates) && geocoderRef.current) {
           geocoderRef.current.geocode({ location: { lat, lng } }, (results, status) => {
             if (status === "OK" && results[0]) {
-              const address = results[0].formatted_address
-              setLocationSearch(address)
-              setSelectedAddress(address)
-              setSelectedLocation({ lat, lng, address })
-              updateMarker(lat, lng, address)
+              const parsed = parseGeocoderResult(results[0], lat, lng)
+              setLocationSearch(parsed.address)
+              setSelectedAddress(parsed.address)
+              setSelectedLocation(parsed)
+              updateMarker(lat, lng, parsed.address)
+              checkLocationInZone(lat, lng)
             } else {
+              const fallback = { lat, lng, address: existingAddress }
               setLocationSearch(existingAddress)
               setSelectedAddress(existingAddress)
-              setSelectedLocation({ lat, lng, address: existingAddress })
+              setSelectedLocation(fallback)
               updateMarker(lat, lng, existingAddress)
+              checkLocationInZone(lat, lng)
             }
           })
         } else {
+          const parsed = parseGeocoderResult({ formatted_address: existingAddress }, lat, lng)
           setLocationSearch(existingAddress)
           setSelectedAddress(existingAddress)
-          setSelectedLocation({ lat, lng, address: existingAddress })
+          setSelectedLocation(parsed)
           updateMarker(lat, lng, existingAddress)
+          checkLocationInZone(lat, lng)
         }
       }
     }
@@ -166,9 +221,10 @@ export default function ZoneSetup() {
     try {
       setCheckingZone(true)
       const response = await zoneAPI.detectZone(lat, lng)
-      const detected = response?.data?.data?.zone || response?.data?.zone
+      const payload = response?.data?.data || response?.data || {}
+      const detected = payload.zone || null
       
-      if (detected) {
+      if (detected && (payload.status === "IN_SERVICE" || payload.zoneId)) {
         setCurrentZone(detected)
         setIsInZone(true)
       } else {
@@ -248,90 +304,82 @@ export default function ZoneSetup() {
       const data = response?.data?.data?.restaurant || response?.data?.restaurant
       if (data) {
         setRestaurantData(data)
+        const coords = getSavedLocationCoords(data.location)
+        if (coords) {
+          savedSnapshotRef.current = {
+            lat: coords.lat,
+            lng: coords.lng,
+            zoneId: String(data.zoneId || ""),
+          }
+        }
       }
     } catch (error) {
       debugError("Error fetching restaurant data:", error)
     }
   }
 
-  const loadGoogleMaps = async () => {
+  const reportMapError = (message) => {
+    setMapError(message)
+    setMapLoading(false)
+    if (embedded) {
+      toast.error(message)
+    } else {
+      alert(message)
+    }
+  }
+
+  const loadGoogleMaps = async (isCancelled = () => false) => {
     try {
+      setMapError("")
       debugLog("?? Starting Google Maps load...")
       
-      // Fetch API key from database
-      let apiKey = null
-      try {
-        apiKey = await getGoogleMapsApiKey()
-        debugLog("?? API Key received:", apiKey ? `Yes (${apiKey.substring(0, 10)}...)` : "No")
+      const apiKey = await getGoogleMapsApiKey()
+      if (isCancelled()) return
+
+      debugLog("?? API Key received:", apiKey ? `Yes (${apiKey.substring(0, 10)}...)` : "No")
         
-        if (!apiKey || apiKey.trim() === "") {
-          debugError("? API key is empty or not found in database")
-          setMapLoading(false)
-          alert("Google Maps API key not found in database. Please contact administrator to add the API key in admin panel.")
-          return
-        }
-      } catch (apiKeyError) {
-        debugError("? Error fetching API key from database:", apiKeyError)
-        setMapLoading(false)
-        alert("Failed to fetch Google Maps API key from database. Please check your connection or contact administrator.")
+      if (!apiKey || apiKey.trim() === "") {
+        reportMapError(
+          embedded
+            ? "Google Maps API key is missing. Set VITE_GOOGLE_MAPS_API_KEY in Frontend/.env"
+            : "Google Maps API key not found. Please contact administrator to add the API key in admin panel."
+        )
         return
       }
       
       setGoogleMapsApiKey(apiKey)
-      
-      // Wait for Google Maps to be loaded from main.jsx if it's loading
-      let retries = 0
-      const maxRetries = 100 // Wait up to 10 seconds
-      
-      debugLog("?? Waiting for Google Maps to load from main.jsx...")
-      while (!window.google && retries < maxRetries) {
-        await new Promise(resolve => setTimeout(resolve, 100))
-        retries++
-      }
 
-      // Wait for mapRef to be available (retry mechanism)
       let refRetries = 0
-      const maxRefRetries = 50 // Wait up to 5 seconds for ref
+      const maxRefRetries = 50
       while (!mapRef.current && refRetries < maxRefRetries) {
-        await new Promise(resolve => setTimeout(resolve, 100))
+        await new Promise((resolve) => setTimeout(resolve, 100))
         refRetries++
+        if (isCancelled()) return
       }
 
       if (!mapRef.current) {
-        debugError("? mapRef.current is still null after waiting")
-        setMapLoading(false)
-        alert("Failed to initialize map container. Please refresh the page.")
+        reportMapError("Failed to initialize map container. Please try opening the Zone setup tab again.")
         return
       }
 
-      // If Google Maps is already loaded, use it directly
-      if (window.google && window.google.maps) {
-        debugLog("? Google Maps already loaded from main.jsx, initializing map...")
-        initializeMap(window.google)
+      const google = await loadFoodGoogleMaps()
+      if (isCancelled()) return
+
+      if (!google?.maps) {
+        reportMapError("Failed to load Google Maps. Check your API key and enabled APIs.")
         return
       }
 
-      // If Google Maps is not loaded yet and we have an API key, use Loader as fallback
-      if (apiKey) {
-        debugLog("?? Google Maps not loaded from main.jsx, loading with Loader...")
-        const loader = new Loader({
-          apiKey: apiKey,
-          version: "weekly",
-          libraries: ["places"]
-        })
-
-        const google = await loader.load()
-        debugLog("? Google Maps loaded via Loader, initializing map...")
-        initializeMap(google)
-      } else {
-        debugError("? No API key available")
-        setMapLoading(false)
-        alert("Google Maps API key not found. Please contact administrator.")
-      }
+      debugLog("? Google Maps loaded, initializing map...")
+      initializeMap(google)
     } catch (error) {
+      if (isCancelled()) return
       debugError("? Error loading Google Maps:", error)
-      setMapLoading(false)
-      alert(`Failed to load Google Maps: ${error.message}. Please refresh the page or contact administrator.`)
+      reportMapError(
+        embedded
+          ? (error.message || "Failed to load Google Maps")
+          : `Failed to load Google Maps: ${error.message}. Please refresh the page or contact administrator.`
+      )
     }
   }
 
@@ -367,6 +415,7 @@ export default function ZoneSetup() {
 
       mapInstanceRef.current = map
       geocoderRef.current = new google.maps.Geocoder()
+      mapInitializedRef.current = true
       debugLog("? Map and Geocoder initialized successfully")
 
       // Add click listener to place marker
@@ -378,28 +427,27 @@ export default function ZoneSetup() {
         if (geocoderRef.current) {
           geocoderRef.current.geocode({ location: { lat, lng } }, (results, status) => {
             if (status === "OK" && results[0]) {
-              const address = results[0].formatted_address
-              setLocationSearch(address)
-              setSelectedAddress(address)
-              setSelectedLocation({ lat, lng, address })
-              updateMarker(lat, lng, address)
+              const parsed = parseGeocoderResult(results[0], lat, lng)
+              setLocationSearch(parsed.address)
+              setSelectedAddress(parsed.address)
+              setSelectedLocation(parsed)
+              updateMarker(lat, lng, parsed.address)
               checkLocationInZone(lat, lng)
             } else {
-              // Fallback to coordinates if geocoding fails
-              const address = `${lat.toFixed(6)}, ${lng.toFixed(6)}`
-              setLocationSearch(address)
-              setSelectedAddress(address)
-              setSelectedLocation({ lat, lng, address })
-              updateMarker(lat, lng, address)
+              const parsed = { lat, lng, address: `${lat.toFixed(6)}, ${lng.toFixed(6)}` }
+              setLocationSearch(parsed.address)
+              setSelectedAddress(parsed.address)
+              setSelectedLocation(parsed)
+              updateMarker(lat, lng, parsed.address)
               checkLocationInZone(lat, lng)
             }
           })
         } else {
-          const address = `${lat.toFixed(6)}, ${lng.toFixed(6)}`
-          setLocationSearch(address)
-          setSelectedAddress(address)
-          setSelectedLocation({ lat, lng, address })
-          updateMarker(lat, lng, address)
+          const parsed = { lat, lng, address: `${lat.toFixed(6)}, ${lng.toFixed(6)}` }
+          setLocationSearch(parsed.address)
+          setSelectedAddress(parsed.address)
+          setSelectedLocation(parsed)
+          updateMarker(lat, lng, parsed.address)
           checkLocationInZone(lat, lng)
         }
       })
@@ -408,8 +456,11 @@ export default function ZoneSetup() {
       debugLog("? Map loading complete")
     } catch (error) {
       debugError("? Error in initializeMap:", error)
-      setMapLoading(false)
-      alert("Failed to initialize map. Please refresh the page.")
+      reportMapError(
+        embedded
+          ? "Failed to initialize map. Please close and reopen this tab."
+          : "Failed to initialize map. Please refresh the page."
+      )
     }
   }
 
@@ -453,27 +504,26 @@ export default function ZoneSetup() {
       if (geocoderRef.current) {
         geocoderRef.current.geocode({ location: { lat: newLat, lng: newLng } }, (results, status) => {
           if (status === "OK" && results[0]) {
-            const newAddress = results[0].formatted_address
-            setLocationSearch(newAddress)
-            setSelectedAddress(newAddress)
-            setSelectedLocation({ lat: newLat, lng: newLng, address: newAddress })
+            const parsed = parseGeocoderResult(results[0], newLat, newLng)
+            setLocationSearch(parsed.address)
+            setSelectedAddress(parsed.address)
+            setSelectedLocation(parsed)
             
-            // Update info window content if open
             if (infoWindow) {
               infoWindow.setContent(`
                 <div style="padding: 8px; max-width: 250px;">
                   <strong>Restaurant Location</strong><br/>
-                  <small>${newAddress}</small>
+                  <small>${parsed.address}</small>
                 </div>
               `)
             }
 
             checkLocationInZone(newLat, newLng)
           } else {
-            const newAddress = `${newLat.toFixed(6)}, ${newLng.toFixed(6)}`
-            setLocationSearch(newAddress)
-            setSelectedAddress(newAddress)
-            setSelectedLocation({ lat: newLat, lng: newLng, address: newAddress })
+            const parsed = { lat: newLat, lng: newLng, address: `${newLat.toFixed(6)}, ${newLng.toFixed(6)}` }
+            setLocationSearch(parsed.address)
+            setSelectedAddress(parsed.address)
+            setSelectedLocation(parsed)
             checkLocationInZone(newLat, newLng)
           }
         })
@@ -511,57 +561,93 @@ export default function ZoneSetup() {
     return parts.length > 0 ? parts.join(", ") : ""
   }
 
-  const handleSaveLocation = async () => {
+  const hasUnsavedChanges = () => {
+    if (!selectedLocation) return false
+    const saved = savedSnapshotRef.current
+    if (!saved) return true
+    const zoneChanged = getZoneId(currentZone) !== String(saved.zoneId || "")
+    const latChanged = Math.abs(selectedLocation.lat - saved.lat) > 0.000001
+    const lngChanged = Math.abs(selectedLocation.lng - saved.lng) > 0.000001
+    return zoneChanged || latChanged || lngChanged
+  }
+
+  const save = async () => {
     if (!selectedLocation) {
-      alert("Please select a location on the map first")
-      return
+      toast.error("Please select a location on the map first")
+      return false
     }
 
-    if (!isInZone) {
-      const confirmSave = window.confirm("The selected location is outside all active service zones. Your restaurant may not receive orders in this location. Do you still want to save?")
-      if (!confirmSave) return
+    if (!isInZone || !currentZone) {
+      toast.error("Selected location is outside our service zone")
+      return false
     }
 
     try {
       setSaving(true)
       
-      const { lat, lng, address } = selectedLocation
+      const { lat, lng, address, area, city: geoCity, state, pincode, addressLine1 } = selectedLocation
+      const zoneId = getZoneId(currentZone)
+      const city = getCityFromZone(currentZone) || geoCity || ""
+      const zoneArea = area || currentZone.zoneName || currentZone.name || ""
       
-      // Update restaurant location
       const response = await restaurantAPI.updateProfile({
+        zoneSelectionUpdate: true,
+        zoneId,
+        city,
+        area: zoneArea,
         location: {
           ...(restaurantData?.location || {}),
           latitude: lat,
           longitude: lng,
-          coordinates: [lng, lat], // GeoJSON format: [longitude, latitude]
-          formattedAddress: address
-        }
+          coordinates: [lng, lat],
+          formattedAddress: address,
+          address,
+          addressLine1: addressLine1 || undefined,
+          area: zoneArea,
+          city,
+          state: state || undefined,
+          pincode: pincode || undefined,
+        },
       })
 
       if (response?.data?.data?.restaurant) {
-        setRestaurantData(response.data.data.restaurant)
-        alert("Location saved successfully!")
-        
-        // Refresh the page to update navbar
-        window.location.reload()
-      } else {
-        throw new Error("Failed to save location")
+        const updated = response.data.data.restaurant
+        setRestaurantData(updated)
+        savedSnapshotRef.current = { lat, lng, zoneId }
+        if (embedded) {
+          toast.success("Zone and location saved")
+        } else {
+          toast.success("Zone and location saved")
+          window.location.reload()
+        }
+        return true
       }
+      throw new Error("Failed to save location")
     } catch (error) {
       debugError("Error saving location:", error)
-      alert(error.response?.data?.message || "Failed to save location. Please try again.")
+      toast.error(error.response?.data?.message || "Failed to save location. Please try again.")
+      return false
     } finally {
       setSaving(false)
     }
   }
 
-  return (
-    <RestaurantSubPageShell
-      title="Zone setup"
-      subtitle="Set your restaurant location on the map"
-      backTo={`${RESTAURANT_BASE}/explore`}
-      contentClassName="max-w-7xl w-full"
-    >
+  useImperativeHandle(
+    ref,
+    () => ({
+      save,
+      hasUnsavedChanges: hasUnsavedChanges(),
+    }),
+    [selectedLocation, currentZone, isInZone, restaurantData?.zoneId],
+  )
+
+  const handleSaveLocation = () => save()
+
+  const zoneContent = (
+    <>
+        <p className="text-xs text-gray-500">
+          Pin your exact outlet location on the map. City and pincode are set from the selected point when it falls inside a service zone.
+        </p>
         <PanelSurface className="mb-6 p-4">
           <div className="flex items-center gap-3">
             <div className="flex-1 relative">
@@ -575,32 +661,39 @@ export default function ZoneSetup() {
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
               />
             </div>
-            <button
-              onClick={handleSaveLocation}
-              disabled={!selectedLocation || saving}
-              className="flex items-center gap-2 px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
-            >
-              {saving ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  <span>Saving...</span>
-                </>
-              ) : (
-                <>
-                  <Save className="w-5 h-5" />
-                  <span>Save Location</span>
-                </>
-              )}
-            </button>
+            {!embedded && (
+              <button
+                onClick={handleSaveLocation}
+                disabled={!selectedLocation || saving || !isInZone}
+                className="flex items-center gap-2 px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+              >
+                {saving ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-5 h-5" />
+                    <span>Save Location</span>
+                  </>
+                )}
+              </button>
+            )}
           </div>
           {selectedLocation && (
-            <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg">
+            <div className={`mt-3 p-3 rounded-lg border ${isInZone ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"}`}>
               <p className="text-sm text-gray-700">
                 <strong>Selected Location:</strong> {selectedAddress}
               </p>
               <p className="text-xs text-gray-500 mt-1">
                 Coordinates: {selectedLocation.lat.toFixed(6)}, {selectedLocation.lng.toFixed(6)}
               </p>
+              {(selectedLocation.city || selectedLocation.pincode) && (
+                <p className="text-xs text-gray-600 mt-1">
+                  {[selectedLocation.city, selectedLocation.state, selectedLocation.pincode].filter(Boolean).join(" · ")}
+                </p>
+              )}
             </div>
           )}
         </PanelSurface>
@@ -615,12 +708,12 @@ export default function ZoneSetup() {
               </div>
               <div>
                 <h3 className={`text-sm font-bold ${isInZone ? "text-green-900" : "text-red-900"}`}>
-                  {checkingZone ? "Checking service zone..." : isInZone ? `Operating in ${currentZone?.name || "Service Zone"}` : "Outside Service Area"}
+                  {checkingZone ? "Checking service zone..." : isInZone ? `In service zone: ${currentZone?.zoneName || currentZone?.name || "Active zone"}` : "Out of service zone"}
                 </h3>
                 <p className={`text-xs ${isInZone ? "text-green-700" : "text-red-700"}`}>
                   {isInZone 
-                    ? "Your selected location is within a serviced area. You can proceed with this setup."
-                    : "Orders cannot be placed from this location as it's outside all active zones."}
+                    ? `City: ${getCityFromZone(currentZone) || selectedLocation?.city || "—"}${selectedLocation?.pincode ? ` · Pincode: ${selectedLocation.pincode}` : ""}`
+                    : "This location is outside all active service zones. Move the pin or search for an address inside a highlighted zone."}
                 </p>
               </div>
             </div>
@@ -629,20 +722,42 @@ export default function ZoneSetup() {
         )}
 
         <PanelSurface className="relative overflow-hidden p-0">
-          {/* Always render the map div, show loading overlay on top */}
-          <div ref={mapRef} className="w-full h-[600px]" style={{ minHeight: '600px' }} />
+          {mapError && !mapLoading && (
+            <div className="border-b border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {mapError}
+            </div>
+          )}
+          <div
+            ref={mapRef}
+            className={`w-full ${embedded ? "h-[360px]" : "h-[600px]"}`}
+            style={{ minHeight: embedded ? "360px" : "600px" }}
+          />
           {mapLoading && (
             <div className="absolute inset-0 bg-white flex items-center justify-center z-10">
               <div className="text-center">
                 <Loader2 className="w-8 h-8 animate-spin text-red-600 mx-auto mb-2" />
                 <p className="text-gray-600">Loading map...</p>
-                <p className="text-xs text-gray-400 mt-2">If this takes too long, please refresh the page</p>
               </div>
             </div>
           )}
         </PanelSurface>
+    </>
+  )
+
+  if (embedded) {
+    return <div className="w-full">{zoneContent}</div>
+  }
+
+  return (
+    <RestaurantSubPageShell
+      title="Zone setup"
+      subtitle="Set your restaurant location on the map"
+      backTo={`${RESTAURANT_BASE}/explore`}
+      contentClassName="max-w-7xl w-full"
+    >
+      {zoneContent}
     </RestaurantSubPageShell>
   )
-}
+})
 
 

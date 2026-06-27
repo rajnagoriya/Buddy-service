@@ -73,7 +73,7 @@ export const ImageSourcePicker = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-sm w-[calc(100%-2rem)] rounded-2xl p-0 overflow-hidden">
+      <DialogContent className="max-w-sm w-[calc(100%-2rem)] rounded-2xl p-0 overflow-hidden top-1/2 left-1/2 bottom-auto translate-x-[-50%] translate-y-[-50%] data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95">
         <DialogHeader className="p-5 pb-3">
           <DialogTitle className="text-lg font-bold text-gray-900">{title}</DialogTitle>
           <DialogDescription className="text-sm text-gray-500">

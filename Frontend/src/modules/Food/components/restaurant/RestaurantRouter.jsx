@@ -1,6 +1,7 @@
 import { Suspense, lazy } from "react"
 import { Routes, Route, Navigate } from "react-router-dom"
 import ProtectedRoute from "@food/components/ProtectedRoute"
+import { RestaurantSessionProvider } from "@food/context/RestaurantSessionContext"
 import RestaurantAccessGuard from "./RestaurantAccessGuard"
 import Loader from "@food/components/Loader"
 import RestaurantPanelLayout from "./RestaurantPanelLayout"
@@ -67,6 +68,7 @@ const onboardingGuard = (element) => (
 export default function RestaurantRouter() {
   return (
     <div className="restaurant-theme">
+      <RestaurantSessionProvider>
       <Suspense fallback={<Loader />}>
         <Routes>
           {/* Auth Routes */}
@@ -123,6 +125,7 @@ export default function RestaurantRouter() {
           </Route>
         </Routes>
       </Suspense>
+      </RestaurantSessionProvider>
     </div>
   )
 }

@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef, Component, useMemo } from "react"
+import { useState, useEffect, useRef, Component, useMemo, useCallback } from "react"
 import { createPortal } from "react-dom"
+import { normalizePagination } from "@food/utils/pagination"
 import { motion, AnimatePresence } from "framer-motion"
 import { useParams, useNavigate, useSearchParams } from "react-router-dom"
 import { restaurantAPI, diningAPI, orderAPI } from "@food/api"
@@ -58,7 +59,11 @@ import {
   getFoodVariants,
   hasFoodVariants,
 } from "@food/utils/foodVariants"
-import fssaiLogo from "@food/assets/fssai.png"
+import {
+  getRestaurantFssaiImage,
+  getRestaurantFssaiNumber,
+  resolveFoodItemImage,
+} from "@food/utils/common"
 import { RestaurantDetailSkeleton } from "@food/components/ui/loading-skeletons"
 import {
   RestaurantHero,
@@ -72,6 +77,7 @@ import MenuSectionBlock, {
   MenuEmptyComingSoon,
   MenuEmptyNoMatches,
   RestaurantFssaiBadge,
+  FssaiLogoImage,
   FloatingMenuFab,
 } from "@food/components/user/restaurant-details/MenuSectionBlock"
 
@@ -99,6 +105,44 @@ const mergeMenuSections = (existingSections, newSections) => {
 const FOOD_IMAGE_FALLBACK = "https://picsum.photos/seed/food-fallback/800/600"
 const RUPEE_SYMBOL = "\u20B9"
 const RESTAURANT_DETAILS_FILTERS_STORAGE_KEY = "food-restaurant-details-filters"
+const BACKEND_ORIGIN = API_BASE_URL.replace(/\/api\/?$/, "")
+
+const normalizeMenuItem = (item = {}) => {
+  const isRecommended =
+    item.isRecommended === true ||
+    item.isRecommended === 1 ||
+    String(item.isRecommended) === "true"
+  const isSpicy =
+    item.isSpicy === true ||
+    item.isSpicy === 1 ||
+    String(item.isSpicy) === "true"
+  let foodType = item.foodType || "Non-Veg"
+  if (typeof foodType === "string") {
+    if (foodType.toLowerCase() === "veg") foodType = "Veg"
+    else if (
+      foodType.toLowerCase() === "non-veg" ||
+      foodType.toLowerCase() === "nonveg"
+    ) {
+      foodType = "Non-Veg"
+    }
+  }
+
+  return {
+    ...item,
+    id: String(item.id || item._id || `${Date.now()}-${Math.random()}`),
+    name: item.name || "Unnamed Item",
+    image: resolveFoodItemImage(item, BACKEND_ORIGIN),
+    foodType,
+    isVeg: foodType === "Veg",
+    price: getFoodDisplayPrice(item),
+    variants: getFoodVariants(item),
+    variations: getFoodVariants(item),
+    isAvailable: item.isAvailable !== false,
+    isRecommended,
+    isSpicy,
+    description: typeof item.description === "string" ? item.description : "",
+  }
+}
 
 function RestaurantDetailsContent() {
   const { slug } = useParams()
@@ -168,12 +212,19 @@ function RestaurantDetailsContent() {
   const [selectedMenuCategory, setSelectedMenuCategory] = useState("all")
   const dishCardRefs = useRef({})
 
-  const [menuPage, setMenuPage] = useState(1)
-  const [hasMoreMenu, setHasMoreMenu] = useState(false)
+  const [menuPagination, setMenuPagination] = useState({
+    page: 1,
+    limit: 15,
+    total: 0,
+    totalPages: 0,
+    hasNextPage: false,
+    hasPreviousPage: false,
+  });
   const [loadingMoreMenu, setLoadingMoreMenu] = useState(false)
   const menuLookupIdsRef = useRef([])
   const resolvedMenuLookupIdRef = useRef(null)
   const currentMenuPageRef = useRef(1)
+  const menuLoadMoreRef = useRef(null)
 
   const getLineItemIdForDish = (item, variant = null) =>
     buildCartLineId(item?.id || item?._id || "", variant?.id || variant?._id || "")
@@ -187,10 +238,18 @@ function RestaurantDetailsContent() {
   const getDishQuantity = (item, preferredVariantId = "") => {
     const variants = getFoodVariants(item)
     if (variants.length > 0 && !preferredVariantId) {
-      return variants.reduce((sum, variant) => {
+      const activeVariants = variants.map(variant => {
         const lineItemId = getLineItemIdForDish(item, variant)
-        return sum + (quantities[lineItemId] || 0)
-      }, 0)
+        return quantities[lineItemId] || 0
+      }).filter(qty => qty > 0)
+
+      if (activeVariants.length === 0) return 0
+      if (activeVariants.length > 1) {
+        // Different variants exist in cart, return 1 as requested
+        return 1
+      }
+      // Only one variant exists, return its quantity
+      return activeVariants[0]
     }
 
     const variant = getVariantForDish(item, preferredVariantId)
@@ -313,11 +372,11 @@ function RestaurantDetailsContent() {
     return () => clearInterval(intervalId)
   }, [])
 
-  const loadMoreMenu = async () => {
-    if (loadingMoreMenu || !hasMoreMenu || !resolvedMenuLookupIdRef.current) return
+  const loadMoreMenu = useCallback(async () => {
+    if (loadingMoreMenu || !menuPagination.hasNextPage || !resolvedMenuLookupIdRef.current) return
 
     setLoadingMoreMenu(true)
-    const nextPage = currentMenuPageRef.current + 1
+    const nextPage = menuPagination.page + 1
     debugLog('? Fetching menu page:', nextPage)
 
     try {
@@ -334,32 +393,6 @@ function RestaurantDetailsContent() {
           return Object.values(value).filter((entry) => entry && typeof entry === "object")
         }
 
-        const normalizeItem = (item = {}) => {
-          const isRecommended = item.isRecommended === true || item.isRecommended === 1 || String(item.isRecommended) === "true"
-          const isSpicy = item.isSpicy === true || item.isSpicy === 1 || String(item.isSpicy) === "true"
-          let foodType = item.foodType || "Non-Veg"
-          if (typeof foodType === 'string') {
-            if (foodType.toLowerCase() === 'veg') foodType = 'Veg'
-            else if (foodType.toLowerCase() === 'non-veg' || foodType.toLowerCase() === 'nonveg') foodType = 'Non-Veg'
-          }
-          const isVeg = foodType === 'Veg'
-
-          return {
-            ...item,
-            id: String(item.id || item._id || `${Date.now()}-${Math.random()}`),
-            name: item.name || "Unnamed Item",
-            foodType,
-            isVeg,
-            price: getFoodDisplayPrice(item),
-            variants: getFoodVariants(item),
-            variations: getFoodVariants(item),
-            isAvailable: item.isAvailable !== false,
-            isRecommended,
-            isSpicy,
-            description: typeof item.description === "string" ? item.description : "",
-          }
-        }
-
         const newMenuSections = toArray(newRawSections)
           .map((section, sectionIndex) => ({
             ...section,
@@ -368,12 +401,12 @@ function RestaurantDetailsContent() {
             name: section.name || section.title || "Unnamed Section",
             itemCount: Number(section.itemCount) || toArray(section.items).length,
             sortOrder: Number(section.sortOrder) || 0,
-            items: toArray(section.items).map(normalizeItem),
+            items: toArray(section.items).map(normalizeMenuItem),
             subsections: toArray(section.subsections).map((subsection, subsectionIndex) => ({
               ...subsection,
               id: String(subsection.id || subsection._id || `subsection-${sectionIndex}-${subsectionIndex}`),
               name: subsection.name || "Unnamed Subsection",
-              items: toArray(subsection.items).map(normalizeItem),
+              items: toArray(subsection.items).map(normalizeMenuItem),
             })),
           }))
 
@@ -386,27 +419,38 @@ function RestaurantDetailsContent() {
           }
         })
 
-        const pagination = response.data.data.menu.pagination || {}
-        setHasMoreMenu(pagination.hasMore === true)
-        setMenuPage(nextPage)
-        currentMenuPageRef.current = nextPage
+        const pagination = normalizePagination(response.data.data.menu.pagination)
+        setMenuPagination(pagination)
+        currentMenuPageRef.current = pagination.page
       }
     } catch (error) {
       debugError('? Error fetching more menu items:', error)
     } finally {
       setLoadingMoreMenu(false)
     }
-  }
+  }, [loadingMoreMenu, menuPagination.hasNextPage, menuPagination.page])
 
   useEffect(() => {
-    const handleScroll = () => {
-      if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 300) {
+    if (!menuPagination.hasNextPage || loadingMoreMenu) return
+    const target = menuLoadMoreRef.current
+    if (!target || typeof window === 'undefined') return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const [entry] = entries
+        if (!entry?.isIntersecting) return
         loadMoreMenu()
-      }
-    }
-    window.addEventListener('scroll', handleScroll)
-    return () => window.removeEventListener('scroll', handleScroll)
-  }, [hasMoreMenu, loadingMoreMenu])
+      },
+      {
+        root: null,
+        rootMargin: '300px 0px',
+        threshold: 0.01,
+      },
+    )
+
+    observer.observe(target)
+    return () => observer.disconnect()
+  }, [menuPagination.hasNextPage, loadingMoreMenu, loadMoreMenu])
 
   useEffect(() => {
     if (restaurant) {
@@ -787,6 +831,18 @@ function RestaurantDetailsContent() {
             menuSections: [],
             // Onboarding data including FSSAI license
             onboarding: actualRestaurant?.onboarding || apiRestaurant?.onboarding || null,
+            fssaiNumber:
+              actualRestaurant?.fssaiNumber ||
+              apiRestaurant?.fssaiNumber ||
+              actualRestaurant?.onboarding?.step3?.fssai?.registrationNumber ||
+              apiRestaurant?.onboarding?.step3?.fssai?.registrationNumber ||
+              "",
+            fssaiImage:
+              actualRestaurant?.fssaiImage ||
+              apiRestaurant?.fssaiImage ||
+              actualRestaurant?.onboarding?.step3?.fssai?.image ||
+              apiRestaurant?.onboarding?.step3?.fssai?.image ||
+              null,
             // Availability fields for grayscale styling
             isActive: actualRestaurant?.isActive !== false, // Default to true if not specified
             isAcceptingOrders: actualRestaurant?.isAcceptingOrders !== false, // Default to true if not specified
@@ -893,38 +949,19 @@ function RestaurantDetailsContent() {
                   ].map(normalize).filter(Boolean)
                 )
 
-                const FETCH_LIMIT = 100
-                const firstResponse = await orderAPI.getOrders({ limit: FETCH_LIMIT, page: 1 })
-                let allOrders = []
-                let totalPages = 1
+                const ORDERS_CHECK_LIMIT = 30
+                const ordersResponse = await orderAPI.getOrders({ limit: ORDERS_CHECK_LIMIT, page: 1 })
+                let recentOrders = []
 
-                if (firstResponse?.data?.success && firstResponse?.data?.data?.orders) {
-                  allOrders = firstResponse.data.data.orders || []
-                  totalPages = firstResponse.data.data?.pagination?.pages || 1
-                } else if (firstResponse?.data?.orders) {
-                  allOrders = firstResponse.data.orders || []
-                  totalPages = firstResponse.data?.pagination?.pages || 1
-                } else if (Array.isArray(firstResponse?.data?.data)) {
-                  allOrders = firstResponse.data.data || []
+                if (ordersResponse?.data?.success && ordersResponse?.data?.data?.orders) {
+                  recentOrders = ordersResponse.data.data.orders || []
+                } else if (ordersResponse?.data?.orders) {
+                  recentOrders = ordersResponse.data.orders || []
+                } else if (Array.isArray(ordersResponse?.data?.data)) {
+                  recentOrders = ordersResponse.data.data || []
                 }
 
-                if (totalPages > 1) {
-                  const pagePromises = []
-                  for (let p = 2; p <= totalPages; p += 1) {
-                    pagePromises.push(orderAPI.getOrders({ limit: FETCH_LIMIT, page: p }))
-                  }
-
-                  const pageResponses = await Promise.all(pagePromises)
-                  const remainingOrders = pageResponses.flatMap((resp) => {
-                    if (resp?.data?.success && resp?.data?.data?.orders) return resp.data.data.orders || []
-                    if (resp?.data?.orders) return resp.data.orders || []
-                    if (Array.isArray(resp?.data?.data)) return resp.data.data || []
-                    return []
-                  })
-                  allOrders = [...allOrders, ...remainingOrders]
-                }
-
-                hasPreviousOrderForRestaurant = allOrders.some((order) => {
+                hasPreviousOrderForRestaurant = recentOrders.some((order) => {
                   const orderRestaurantField = order?.restaurantId
                   const candidateIds = [
                     order?.restaurantId,
@@ -987,33 +1024,6 @@ function RestaurantDetailsContent() {
                   if (!value || typeof value !== "object") return []
                   return Object.values(value).filter((entry) => entry && typeof entry === "object")
                 }
-                const normalizeItem = (item = {}) => {
-                  const isRecommended = item.isRecommended === true || item.isRecommended === 1 || String(item.isRecommended) === "true"
-                  const isSpicy = item.isSpicy === true || item.isSpicy === 1 || String(item.isSpicy) === "true"
-                  let foodType = item.foodType || "Non-Veg"
-                  if (typeof foodType === 'string') {
-                    if (foodType.toLowerCase() === 'veg') foodType = 'Veg'
-                    else if (foodType.toLowerCase() === 'non-veg' || foodType.toLowerCase() === 'nonveg') foodType = 'Non-Veg'
-                  }
-
-                  // Derive isVeg strictly from foodType
-                  const isVeg = foodType === 'Veg'
-
-                  return {
-                    ...item,
-                    id: String(item.id || item._id || `${Date.now()}-${Math.random()}`),
-                    name: item.name || "Unnamed Item",
-                    foodType,
-                    isVeg, // Explicitly set isVeg
-                    price: getFoodDisplayPrice(item),
-                    variants: getFoodVariants(item),
-                    variations: getFoodVariants(item),
-                    isAvailable: item.isAvailable !== false,
-                    isRecommended,
-                    isSpicy,
-                    description: typeof item.description === "string" ? item.description : "",
-                  }
-                }
                 const menuSections = toArray(rawSections)
                   .map((section, sectionIndex) => ({
                   ...section,
@@ -1022,12 +1032,12 @@ function RestaurantDetailsContent() {
                   name: section.name || section.title || "Unnamed Section",
                   itemCount: Number(section.itemCount) || toArray(section.items).length,
                   sortOrder: Number(section.sortOrder) || 0,
-                  items: toArray(section.items).map(normalizeItem),
+                  items: toArray(section.items).map(normalizeMenuItem),
                   subsections: toArray(section.subsections).map((subsection, subsectionIndex) => ({
                     ...subsection,
                     id: String(subsection.id || subsection._id || `subsection-${sectionIndex}-${subsectionIndex}`),
                     name: subsection.name || "Unnamed Subsection",
-                    items: toArray(subsection.items).map(normalizeItem),
+                    items: toArray(subsection.items).map(normalizeMenuItem),
                   })),
                 }))
                   .sort((a, b) => a.sortOrder - b.sortOrder)
@@ -1130,10 +1140,9 @@ function RestaurantDetailsContent() {
                   })
                   .filter(Boolean)
 
-                 const pagination = menuResponse.data.data.menu.pagination || {}
-                setHasMoreMenu(pagination.hasMore === true)
-                setMenuPage(1)
-                currentMenuPageRef.current = 1
+                 const pagination = normalizePagination(menuResponse.data.data.menu.pagination)
+                setMenuPagination(pagination)
+                currentMenuPageRef.current = pagination.page
 
                 setRestaurant(prev => ({
                   ...prev,
@@ -2358,7 +2367,7 @@ function RestaurantDetailsContent() {
           />
 
           {/* Menu Items Section */}
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-5">
+          <div className="max-w-7xl mx-auto px-3 sm:px-4 py-3 space-y-3">
             {restaurant?.menuSections && Array.isArray(restaurant.menuSections) && (
               <>
                 {filteredSections.length === 0 && !hasActiveMenuFilters && !loadingMenuItems && (
@@ -2417,6 +2426,13 @@ function RestaurantDetailsContent() {
                     <span className="ml-3 text-sm text-gray-500">Loading more items...</span>
                   </div>
                 )}
+                {menuPagination.hasNextPage && (
+                  <div
+                    ref={menuLoadMoreRef}
+                    className="h-1 w-full"
+                    aria-hidden="true"
+                  />
+                )}
               </>
             )}
           </div>
@@ -2424,13 +2440,14 @@ function RestaurantDetailsContent() {
       </div>
 
       <RestaurantFssaiBadge
-        registrationNumber={restaurant?.onboarding?.step3?.fssai?.registrationNumber}
-        logoSrc={fssaiLogo}
+        registrationNumber={getRestaurantFssaiNumber(restaurant)}
+        logoSrc={getRestaurantFssaiImage(restaurant, BACKEND_ORIGIN)}
       />
 
       <FloatingMenuFab
         hidden={showFilterSheet || showMenuSheet || showMenuOptionsSheet}
         onClick={() => setShowMenuSheet(true)}
+        hasCart={cart && cart.length > 0}
       />
 
       {/* Menu Categories Bottom Sheet - Rendered via Portal */}
@@ -2962,7 +2979,7 @@ function RestaurantDetailsContent() {
                   </div>
 
                   {/* Image Section */}
-                  <div className="relative w-full h-64 overflow-hidden rounded-t-3xl">
+                  <div className="relative w-full h-48 overflow-hidden rounded-t-2xl">
                     {selectedItem.image ? (
                       <img
                         src={selectedItem.image}
@@ -2998,27 +3015,27 @@ function RestaurantDetailsContent() {
                   </div>
 
                   {/* Content Section */}
-                  <div className="flex-1 overflow-y-auto px-4 py-4">
-                    {/* Item Name and Indicator */}
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex items-center gap-2 flex-1">
-                        <div className={`h-5 w-5 rounded border-2 ${selectedItem.foodType === "Veg" ? "border-green-600 bg-green-50" : "border-red-600 bg-red-50"} dark:border-gray-600 dark:bg-gray-900/30 flex items-center justify-center flex-shrink-0`}>
-                          <div className={`h-2.5 w-2.5 rounded-full ${selectedItem.foodType === "Veg" ? "bg-green-600" : "bg-red-600"}`} />
+                  <div className="flex-1 overflow-y-auto px-3 py-3">
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                        <div className={`h-4 w-4 rounded border-2 ${selectedItem.foodType === "Veg" ? "border-green-600 bg-green-50" : "border-red-600 bg-red-50"} dark:border-gray-600 dark:bg-gray-900/30 flex items-center justify-center flex-shrink-0`}>
+                          <div className={`h-2 w-2 rounded-full ${selectedItem.foodType === "Veg" ? "bg-green-600" : "bg-red-600"}`} />
                         </div>
-                        <h2 className="text-xl font-bold text-gray-900 dark:text-white">
+                        <h2 className="text-base font-semibold text-gray-900 dark:text-white leading-tight">
                           {selectedItem.name}
                         </h2>
                       </div>
                     </div>
 
-                    {/* Description */}
-                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-4 leading-relaxed">
-                      {selectedItem.description}
-                    </p>
+                    {selectedItem.description ? (
+                      <p className="text-xs text-gray-600 dark:text-gray-400 mb-2 leading-snug line-clamp-3">
+                        {selectedItem.description}
+                      </p>
+                    ) : null}
 
                     {/* Highly Reordered Progress Bar */}
                     {isRecommendedItem(selectedItem) && (
-                      <div className="flex items-center gap-2 mb-4">
+                      <div className="flex items-center gap-2 mb-2">
                         <div className="flex-1 h-0.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
                           <div className="h-full bg-green-500 dark:bg-green-400 rounded-full" style={{ width: '50%' }} />
                         </div>
@@ -3030,21 +3047,21 @@ function RestaurantDetailsContent() {
 
                     {/* Not Eligible for Coupons */}
                     {selectedItem.notEligibleForCoupons && (
-                      <p className="text-xs text-gray-500 dark:text-gray-400 font-medium mb-4">
+                      <p className="text-[10px] text-gray-500 dark:text-gray-400 font-medium mb-2">
                         NOT ELIGIBLE FOR COUPONS
                       </p>
                     )}
 
                     {hasFoodVariants(selectedItem) && (
-                      <div className="mb-4">
-                        <p className="text-sm font-semibold text-gray-900 dark:text-white mb-2">Choose a variant</p>
-                        <div className="flex flex-wrap gap-2">
+                      <div className="mb-2">
+                        <p className="text-xs font-semibold text-gray-900 dark:text-white mb-1.5">Choose a variant</p>
+                        <div className="flex flex-wrap gap-1.5">
                           {getFoodVariants(selectedItem).map((variant) => (
                             <button
                               key={variant.id}
                               type="button"
                               onClick={() => setSelectedVariantId(variant.id)}
-                              className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${String(selectedVariantId || "") === String(variant.id)
+                              className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${String(selectedVariantId || "") === String(variant.id)
                                   ? "border-red-500 bg-red-50 text-red-600 dark:border-red-400 dark:bg-red-900/30 dark:text-red-200"
                                   : "border-gray-200 bg-white text-gray-700 dark:border-gray-700 dark:bg-[#2a2a2a] dark:text-gray-300"
                                 }`}
@@ -3058,10 +3075,9 @@ function RestaurantDetailsContent() {
                   </div>
 
                   {/* Bottom Action Bar */}
-                  <div className="border-t border-gray-200 dark:border-gray-800 px-4 py-4 bg-white dark:bg-[#1a1a1a]">
-                    <div className="flex items-center gap-4">
-                      {/* Quantity Selector */}
-                      <div className={`flex items-center gap-3 border-2 rounded-lg px-3 h-[44px] bg-white dark:bg-[#2a2a2a] ${shouldShowGrayscale
+                  <div className="border-t border-gray-200 dark:border-gray-800 px-3 py-3 bg-white dark:bg-[#1a1a1a]">
+                    <div className="flex items-center gap-2.5">
+                      <div className={`flex items-center gap-2 border rounded-lg px-2.5 h-10 bg-white dark:bg-[#2a2a2a] ${shouldShowGrayscale
                         ? 'border-gray-300 dark:border-gray-700 opacity-50'
                         : 'border-gray-300 dark:border-gray-700'
                         }`}>
@@ -3082,9 +3098,9 @@ function RestaurantDetailsContent() {
                             : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white disabled:text-gray-300 dark:disabled:text-gray-600 disabled:cursor-not-allowed'
                             }`}
                         >
-                          <Minus className="h-5 w-5" />
+                          <Minus className="h-4 w-4" />
                         </button>
-                        <span className={`text-lg font-semibold min-w-[2rem] text-center ${shouldShowGrayscale
+                        <span className={`text-sm font-semibold min-w-[1.5rem] text-center ${shouldShowGrayscale
                           ? 'text-gray-400 dark:text-gray-600'
                           : 'text-gray-900 dark:text-white'
                           }`}>
@@ -3107,13 +3123,12 @@ function RestaurantDetailsContent() {
                             : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
                           }
                         >
-                          <Plus className="h-5 w-5" />
+                          <Plus className="h-4 w-4" />
                         </button>
                       </div>
 
-                      {/* Add Item Button */}
                       <Button
-                        className={`flex-1 h-[44px] rounded-lg font-semibold flex items-center justify-center gap-2 ${shouldShowGrayscale
+                        className={`flex-1 h-10 rounded-lg text-sm font-semibold flex items-center justify-center gap-1.5 ${shouldShowGrayscale
                           ? 'bg-gray-300 dark:bg-gray-700 text-gray-500 dark:text-gray-600 cursor-not-allowed opacity-50'
                           : 'bg-[#16A34A] hover:bg-[#15803D] text-white'
                           }`}
@@ -3506,13 +3521,11 @@ function RestaurantDetailsContent() {
                     </div>
 
                     {/* FSSAI License Information */}
-                    {restaurant?.onboarding?.step3?.fssai?.registrationNumber && (
+                    {getRestaurantFssaiNumber(restaurant) && (
                       <div className="mt-4 px-2 pt-4 border-t border-gray-100 dark:border-gray-800 flex items-center gap-3 opacity-80 mb-2">
                         <div className="h-8 w-14 flex items-center justify-center bg-white rounded p-1 border border-gray-100">
-                          <img
-                            src={fssaiLogo}
-                            alt="FSSAI"
-                            className="h-full w-auto object-contain"
+                          <FssaiLogoImage
+                            src={getRestaurantFssaiImage(restaurant, BACKEND_ORIGIN)}
                           />
                         </div>
                         <div className="flex-1">
@@ -3520,7 +3533,7 @@ function RestaurantDetailsContent() {
                             Lic. No.
                           </p>
                           <p className="text-xs font-semibold text-gray-700 dark:text-gray-300">
-                            {restaurant?.onboarding?.step3?.fssai?.registrationNumber}
+                            {getRestaurantFssaiNumber(restaurant)}
                           </p>
                         </div>
                       </div>

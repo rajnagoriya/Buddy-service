@@ -10,8 +10,26 @@ import * as diningAdminController from '../../dining/controllers/diningAdmin.con
 import * as orderController from '../../orders/controllers/order.controller.js';
 import { getAdminPageController, upsertAdminPageController } from '../controllers/pageContent.controller.js';
 import { upload } from '../../../../middleware/upload.js';
+import {
+    withFoodCacheInvalidation,
+    invalidateAfterAdminRestaurantMutation,
+    invalidateAfterAdminCategoryMutation,
+    invalidateAfterAdminFoodMutation,
+    invalidateAfterAdminAddonMutation,
+    invalidateAfterOfferMutation,
+    invalidateAfterZoneMutation,
+    invalidateAfterDiningAdminMutation,
+} from '../../utils/foodCacheInvalidation.js';
 
 const router = express.Router();
+
+const invRestaurant = withFoodCacheInvalidation(invalidateAfterAdminRestaurantMutation);
+const invCategory = withFoodCacheInvalidation(invalidateAfterAdminCategoryMutation);
+const invFood = withFoodCacheInvalidation(invalidateAfterAdminFoodMutation);
+const invAddon = withFoodCacheInvalidation(invalidateAfterAdminAddonMutation);
+const invOffer = withFoodCacheInvalidation(invalidateAfterOfferMutation);
+const invZone = withFoodCacheInvalidation(invalidateAfterZoneMutation);
+const invDining = withFoodCacheInvalidation(invalidateAfterDiningAdminMutation);
 
 // ----- Public Business Settings (No Admin Required) -----
 router.get('/business-settings/public', businessSettingsController.getBusinessSettings);
@@ -58,6 +76,8 @@ router.get('/reports/transactions', adminController.getTransactionReport);
 router.get('/reports/tax', adminController.getTaxReport);
 router.get('/reports/tax/:id', adminController.getTaxReportDetail);
 router.get('/restaurants/pending', adminController.getPendingRestaurants);
+router.get('/restaurants/check-phone', adminController.checkRestaurantPhone);
+router.get('/restaurants/check-email', adminController.checkRestaurantEmail);
 router.get('/restaurants/reviews', adminController.getRestaurantReviews);
 router.get('/restaurants/:id/menu-pdf', adminController.getRestaurantMenuPdfDownloadUrl);
 router.get('/restaurants/:id/download-menu-pdf', adminController.downloadRestaurantMenuPdf);
@@ -65,14 +85,14 @@ router.get('/restaurants/:id', adminController.getRestaurantById);
 router.get('/restaurants/:id/analytics', adminController.getRestaurantAnalytics);
 router.get('/restaurants/:id/menu', adminController.getRestaurantMenuById);
 router.get('/restaurants/:id/menu-pdf', adminController.getRestaurantMenuPdfDownloadUrl);
-router.post('/restaurants', adminController.createRestaurant);
-router.patch('/restaurants/:id', adminController.updateRestaurantById);
-router.patch('/restaurants/:id/status', adminController.updateRestaurantStatus);
-router.patch('/restaurants/:id/location', adminController.updateRestaurantLocation);
-router.patch('/restaurants/:id/menu', adminController.updateRestaurantMenuById);
-router.patch('/restaurants/:id/approve', adminController.approveRestaurant);
-router.patch('/restaurants/:id/reject', adminController.rejectRestaurant);
-router.delete('/restaurants/:id', adminController.deleteRestaurant);
+router.post('/restaurants', invRestaurant, adminController.createRestaurant);
+router.patch('/restaurants/:id', invRestaurant, adminController.updateRestaurantById);
+router.patch('/restaurants/:id/status', invRestaurant, adminController.updateRestaurantStatus);
+router.patch('/restaurants/:id/location', invRestaurant, adminController.updateRestaurantLocation);
+router.patch('/restaurants/:id/menu', invRestaurant, adminController.updateRestaurantMenuById);
+router.patch('/restaurants/:id/approve', invRestaurant, adminController.approveRestaurant);
+router.patch('/restaurants/:id/reject', invRestaurant, adminController.rejectRestaurant);
+router.delete('/restaurants/:id', invRestaurant, adminController.deleteRestaurant);
 
 // ----- Restaurant Commission -----
 router.get('/restaurant-commissions/bootstrap', adminController.getRestaurantCommissionBootstrap);
@@ -85,35 +105,34 @@ router.patch('/restaurant-commissions/:id/toggle', adminController.toggleRestaur
 
 // ----- Categories -----
 router.get('/categories', adminController.getCategories);
-router.post('/categories', adminController.createCategory);
-router.patch('/categories/:id', adminController.updateCategory);
-router.delete('/categories/:id', adminController.deleteCategory);
-router.patch('/categories/:id/toggle', adminController.toggleCategoryStatus);
-router.patch('/categories/:id/approve', adminController.approveCategory);
-router.patch('/categories/:id/reject', adminController.rejectCategory);
-router.patch('/categories/:id/make-global', adminController.makeCategoryGlobal);
+router.post('/categories', invCategory, adminController.createCategory);
+router.patch('/categories/:id', invCategory, adminController.updateCategory);
+router.delete('/categories/:id', invCategory, adminController.deleteCategory);
+router.patch('/categories/:id/toggle', invCategory, adminController.toggleCategoryStatus);
+router.patch('/categories/:id/approve', invCategory, adminController.approveCategory);
+router.patch('/categories/:id/reject', invCategory, adminController.rejectCategory);
+router.patch('/categories/:id/make-global', invCategory, adminController.makeCategoryGlobal);
 
 // ----- Restaurant Add-ons Approval -----
 router.get('/addons', addonsApprovalController.getRestaurantAddons);
-router.patch('/addons/:id', addonsApprovalController.updateRestaurantAddon);
-router.patch('/addons/:id/approve', addonsApprovalController.approveRestaurantAddon);
-router.patch('/addons/:id/reject', addonsApprovalController.rejectRestaurantAddon);
+router.patch('/addons/:id', invAddon, addonsApprovalController.updateRestaurantAddon);
+router.patch('/addons/:id/approve', invAddon, addonsApprovalController.approveRestaurantAddon);
+router.patch('/addons/:id/reject', invAddon, addonsApprovalController.rejectRestaurantAddon);
 
 // ----- Foods -----
 router.get('/foods', adminController.getFoods);
-router.post('/foods', adminController.createFood);
-router.patch('/foods/:id', adminController.updateFood);
-router.delete('/foods/:id', adminController.deleteFood);
-// Food approval queue (pending items created by restaurants)
+router.post('/foods', invFood, adminController.createFood);
+router.patch('/foods/:id', invFood, adminController.updateFood);
+router.delete('/foods/:id', invFood, adminController.deleteFood);
 router.get('/foods/pending-approvals', foodApprovalController.getPendingFoodApprovals);
-router.patch('/foods/:id/approve', foodApprovalController.approveFoodItemController);
-router.patch('/foods/:id/reject', foodApprovalController.rejectFoodItemController);
+router.patch('/foods/:id/approve', invFood, foodApprovalController.approveFoodItemController);
+router.patch('/foods/:id/reject', invFood, foodApprovalController.rejectFoodItemController);
 
 // ----- Offers & Coupons -----
 router.get('/offers', adminController.getAllOffers);
-router.post('/offers', adminController.createAdminOffer);
-router.patch('/offers/:id/cart-visibility', adminController.updateAdminOfferCartVisibility);
-router.delete('/offers/:id', adminController.deleteAdminOffer);
+router.post('/offers', invOffer, adminController.createAdminOffer);
+router.patch('/offers/:id/cart-visibility', invOffer, adminController.updateAdminOfferCartVisibility);
+router.delete('/offers/:id', invOffer, adminController.deleteAdminOffer);
 
 // ----- Feedback Experience (Admin) -----
 router.get('/feedback-experiences', feedbackExperienceController.getFeedbackExperiences);
@@ -188,20 +207,20 @@ router.patch('/delivery/:id/reject', adminController.rejectDeliveryPartner);
 // ----- Zones -----
 router.get('/zones', adminController.getZones);
 router.get('/zones/:id', adminController.getZoneById);
-router.post('/zones', adminController.createZone);
-router.patch('/zones/:id', adminController.updateZone);
-router.delete('/zones/:id', adminController.deleteZone);
+router.post('/zones', invZone, adminController.createZone);
+router.patch('/zones/:id', invZone, adminController.updateZone);
+router.delete('/zones/:id', invZone, adminController.deleteZone);
 
 // ----- Dining -----
 router.get('/dining/categories', diningAdminController.getDiningCategories);
-router.post('/dining/categories', diningAdminController.createDiningCategory);
-router.patch('/dining/categories/:id', diningAdminController.updateDiningCategory);
-router.delete('/dining/categories/:id', diningAdminController.deleteDiningCategory);
+router.post('/dining/categories', invDining, diningAdminController.createDiningCategory);
+router.patch('/dining/categories/:id', invDining, diningAdminController.updateDiningCategory);
+router.delete('/dining/categories/:id', invDining, diningAdminController.deleteDiningCategory);
 router.get('/dining/restaurants', diningAdminController.getDiningRestaurants);
-router.patch('/dining/restaurants/:restaurantId', diningAdminController.updateDiningRestaurant);
+router.patch('/dining/restaurants/:restaurantId', invDining, diningAdminController.updateDiningRestaurant);
 router.get('/dining/requests', diningAdminController.listAllDiningRequests);
-router.patch('/dining/requests/:id/approve', diningAdminController.approveDiningRequest);
-router.patch('/dining/requests/:id/reject', diningAdminController.rejectDiningRequest);
+router.patch('/dining/requests/:id/approve', invDining, diningAdminController.approveDiningRequest);
+router.patch('/dining/requests/:id/reject', invDining, diningAdminController.rejectDiningRequest);
 
 // ----- Orders -----
 router.get('/orders', orderController.listOrdersAdminController);

@@ -1,15 +1,8 @@
-import { useEffect, useState } from "react"
 import { useNavigate, useLocation } from "react-router-dom"
 import { LogOut, Store, X } from "lucide-react"
 import { SIDEBAR_SECTIONS, findActiveNavItem } from "@food/utils/restaurantNavConfig"
-import { restaurantAPI } from "@food/api"
+import { useRestaurantSession } from "@food/context/RestaurantSessionContext"
 import useRestaurantLogout from "@food/hooks/useRestaurantLogout"
-
-const extractRestaurantPayload = (response) =>
-  response?.data?.data?.restaurant ||
-  response?.data?.restaurant ||
-  response?.data?.data ||
-  null
 
 const allSidebarItems = SIDEBAR_SECTIONS.flatMap((section) => section.items)
 
@@ -18,27 +11,12 @@ export default function RestaurantSidebar({ isOpen = false, onClose }) {
   const { pathname } = useLocation()
   const { logout } = useRestaurantLogout()
   const activeItem = findActiveNavItem(allSidebarItems, pathname)
-  const [ownerName, setOwnerName] = useState("Restaurant owner")
-  const [restaurantName, setRestaurantName] = useState("Partner panel")
+  const { restaurant } = useRestaurantSession()
 
-  useEffect(() => {
-    let mounted = true
-    restaurantAPI
-      .getCurrentRestaurant()
-      .then((res) => {
-        if (!mounted) return
-        const data = extractRestaurantPayload(res)
-        if (data?.restaurantName || data?.name) {
-          setRestaurantName(data.restaurantName || data.name)
-        }
-        const owner = data?.ownerName || data?.contactPerson || data?.owner?.name
-        if (owner) setOwnerName(owner)
-      })
-      .catch(() => {})
-    return () => {
-      mounted = false
-    }
-  }, [])
+  const restaurantName =
+    restaurant?.restaurantName || restaurant?.name || "Partner panel"
+  const ownerName =
+    restaurant?.ownerName || restaurant?.contactPerson || restaurant?.owner?.name || "Restaurant owner"
 
   const handleNavigate = (route) => {
     if (route !== pathname) navigate(route)

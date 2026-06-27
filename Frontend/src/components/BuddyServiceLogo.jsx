@@ -1,4 +1,4 @@
-import React from "react"
+import React from "react";
 
 export default function BuddyServiceLogo({ className = "w-40 h-40" }) {
   return (
@@ -21,12 +21,31 @@ export default function BuddyServiceLogo({ className = "w-40 h-40" }) {
       </defs>
 
       {/* Background Circle */}
-      <circle cx="100" cy="100" r="95" fill="url(#buddyGradient)" opacity="0.1" />
-      <circle cx="100" cy="100" r="95" stroke="url(#buddyGradient)" strokeWidth="2" opacity="0.3" />
+      <circle
+        cx="100"
+        cy="100"
+        r="95"
+        fill="url(#buddyGradient)"
+        opacity="0.1"
+      />
+      <circle
+        cx="100"
+        cy="100"
+        r="95"
+        stroke="url(#buddyGradient)"
+        strokeWidth="2"
+        opacity="0.3"
+      />
 
       {/* Main Logo Circle */}
       <circle cx="100" cy="100" r="85" fill="white" />
-      <circle cx="100" cy="100" r="85" stroke="url(#buddyGradient)" strokeWidth="3" />
+      <circle
+        cx="100"
+        cy="100"
+        r="85"
+        stroke="url(#buddyGradient)"
+        strokeWidth="3"
+      />
 
       {/* "B" Letter Design */}
       <g>
@@ -64,7 +83,13 @@ export default function BuddyServiceLogo({ className = "w-40 h-40" }) {
 
       {/* Decorative dots */}
       <circle cx="130" cy="65" r="4" fill="url(#buddyGradient)" opacity="0.4" />
-      <circle cx="128" cy="120" r="3.5" fill="url(#buddyGradient2)" opacity="0.4" />
+      <circle
+        cx="128"
+        cy="120"
+        r="3.5"
+        fill="url(#buddyGradient2)"
+        opacity="0.4"
+      />
     </svg>
-  )
+  );
 }

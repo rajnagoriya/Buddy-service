@@ -1,4 +1,5 @@
 import { restaurantAPI } from "@food/api"
+import { isRestaurantBanned } from "@food/utils/restaurantBan"
 
 const debugError = (...args) => {}
 
@@ -183,9 +184,12 @@ const buildOnboardingLikeDataFromRestaurant = (restaurant) => {
 
 export const resolveRestaurantOnboardingStatus = (restaurant) => {
   if (!restaurant) return "NOT_STARTED"
+  if (isRestaurantBanned(restaurant)) return "BANNED"
   const explicit = String(restaurant?.onboardingStatus || "").toUpperCase()
+  if (explicit === "BANNED") return "BANNED"
   if (explicit) return explicit
   if (restaurant?.status === "approved") return "APPROVED"
+  if (restaurant?.status === "banned") return "BANNED"
   if (restaurant?.status === "rejected") return "REJECTED"
   if (restaurant?.submittedAt || restaurant?.pendingUpdateReason === "New Registration") {
     return "SUBMITTED"

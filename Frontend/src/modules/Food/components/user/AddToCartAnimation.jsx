@@ -28,7 +28,10 @@ export default function AddToCartAnimation({
   linkTo = '/food/user/cart',
   dynamicBottom = null,
 }) {
-  const { items, itemCount, total, lastAddEvent, lastRemoveEvent } = useCart();
+  const { cart, items, itemCount, total, lastAddEvent, lastRemoveEvent } = useCart();
+  const displayItemCount = cart && Array.isArray(cart)
+    ? new Set(cart.map(item => String(item.itemId || item.productId || ''))).size
+    : itemCount;
   const location = useLocation();
   const navigate = useNavigate();
   const linkRef = useRef(null);
@@ -424,7 +427,7 @@ export default function AddToCartAnimation({
       )}
 
       <AnimatePresence>
-        {itemCount > 0 && !shouldHidePill && (
+        {displayItemCount > 0 && !shouldHidePill && (
           <motion.div
             initial={{ y: 60, opacity: 0, scale: 0.8 }}
             animate={{
@@ -442,7 +445,7 @@ export default function AddToCartAnimation({
             style={{
               position: 'fixed',
               bottom: dynamicBottom ? undefined : `${bottomOffset || 20}px`,
-              pointerEvents: 'auto',
+              pointerEvents: 'none',
             }}
             className={`left-0 right-0 z-[9999] flex justify-center px-4 pb-4 md:pb-6 transition-all duration-300 ease-in-out bg-transparent ${dynamicBottom || ''}`}
           >
@@ -495,7 +498,7 @@ export default function AddToCartAnimation({
               >
                 <span className="text-xs font-bold leading-tight drop-shadow-sm">View cart</span>
                 <span className="text-[10px] opacity-95 leading-tight font-medium">
-                  {itemCount} {itemCount === 1 ? 'item' : 'items'}
+                  {displayItemCount} {displayItemCount === 1 ? 'item' : 'items'}
                 </span>
               </motion.div>
 

@@ -3,7 +3,10 @@ import { ValidationError } from '../../../../core/auth/errors.js';
 import { FoodItem } from '../../admin/models/food.model.js';
 import { FoodCategory } from '../../admin/models/category.model.js';
 import { FoodRestaurant } from '../models/restaurant.model.js';
-import { uploadImageBuffer } from '../../../../services/cloudinary.service.js';
+import {
+    deleteFoodImageAsset,
+    uploadFoodImage,
+} from '../../services/foodImage.service.js';
 import {
     extractRawFoodVariants,
     getFoodDisplayPrice,
@@ -56,12 +59,14 @@ const downloadImageBuffer = async (url) => {
     }
 };
 
-const ensureCloudinaryImageUrl = async (value) => {
+const ensureCloudinaryImageAsset = async (value) => {
     const url = toStr(value);
-    if (!url) return '';
-    if (!shouldUploadImageUrl(url)) return url;
+    if (!url) return { url: '', publicId: '' };
+    if (!shouldUploadImageUrl(url)) {
+        return { url, publicId: '' };
+    }
     const buffer = await downloadImageBuffer(url);
-    return await uploadImageBuffer(buffer, IMAGE_UPLOAD_FOLDER);
+    return uploadFoodImage(buffer, IMAGE_UPLOAD_FOLDER);
 };
 
 const asyncPool = async (limit, items, iterator) => {
@@ -249,7 +254,8 @@ export async function createRestaurantFood(restaurantId, body = {}) {
     const { price, variants } = getCreateFoodPricing(body);
 
     const description = toStr(body.description);
-    const image = toStr(body.image);
+    const imageInput = toStr(body.image);
+    const imageAsset = imageInput ? await ensureCloudinaryImageAsset(imageInput) : { url: '', publicId: '' };
     const isAvailable = body.isAvailable !== false;
     const foodType = normalizeFoodType(body.foodType);
     const preparationTime = toStr(body.preparationTime);
@@ -263,7 +269,8 @@ export async function createRestaurantFood(restaurantId, body = {}) {
         description,
         price,
         variants,
-        image,
+        image: imageAsset.url,
+        imagePublicId: imageAsset.publicId,
         foodType,
         isAvailable,
         preparationTime,
@@ -308,7 +315,22 @@ export async function updateRestaurantFood(restaurantId, foodId, body = {}) {
         update.name = name;
     }
     if (body.description !== undefined) update.description = toStr(body.description);
-    if (body.image !== undefined) update.image = toStr(body.image);
+    if (body.image !== undefined) {
+        const nextImage = toStr(body.image);
+        if (nextImage !== existing.image) {
+            const imageAsset = nextImage
+                ? await ensureCloudinaryImageAsset(nextImage)
+                : { url: '', publicId: '' };
+            update.image = imageAsset.url;
+            update.imagePublicId = imageAsset.publicId;
+            if (existing.image || existing.imagePublicId) {
+                await deleteFoodImageAsset({
+                    publicId: existing.imagePublicId,
+                    url: existing.image,
+                });
+            }
+        }
+    }
     Object.assign(update, getUpdatedFoodPricing(existing, body));
     if (body.isAvailable !== undefined) update.isAvailable = body.isAvailable !== false;
     if (body.preparationTime !== undefined) update.preparationTime = toStr(body.preparationTime);
@@ -399,7 +421,9 @@ export async function bulkCreateFood(restaurantId, items = []) {
             });
 
             const { price: finalPrice, variants: finalVariants } = getCreateFoodPricing(item);
-            const imageUrl = await ensureCloudinaryImageUrl(item.image || item.imageUrl || item.photoUrl || item.photo);
+            const imageAsset = await ensureCloudinaryImageAsset(
+                item.image || item.imageUrl || item.photoUrl || item.photo
+            );
 
             processedItems.push({
                 restaurantId,
@@ -409,7 +433,8 @@ export async function bulkCreateFood(restaurantId, items = []) {
                 description: toStr(item.description),
                 price: finalPrice,
                 variants: finalVariants,
-                image: imageUrl,
+                image: imageAsset.url,
+                imagePublicId: imageAsset.publicId,
                 foodType,
                 isAvailable: item.isAvailable !== false,
                 preparationTime: toStr(item.preparationTime),

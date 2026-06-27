@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react"
-import { Eye, Loader2, Search, Trash2, Pencil } from "lucide-react"
+import { Eye, Loader2, Search, Trash2, Pencil, FolderOpen, CheckCircle2, XCircle, RotateCw } from "lucide-react"
 import { Switch } from "@food/components/ui/switch"
 import { adminAPI, uploadAPI } from "@food/api"
+import { getAdminAddonsCached, invalidateAdminAddonsCache } from "@food/utils/foodListingsCache"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@food/components/ui/dialog"
 
@@ -36,6 +37,7 @@ export default function AddonsList() {
   const [addons, setAddons] = useState([])
   const [loading, setLoading] = useState(true)
   const [submittingAction, setSubmittingAction] = useState(false)
+  const [refreshTrigger, setRefreshTrigger] = useState(0)
 
   const [selectedAddon, setSelectedAddon] = useState(null)
   const [showDetailModal, setShowDetailModal] = useState(false)
@@ -45,17 +47,23 @@ export default function AddonsList() {
   const [editImagePreview, setEditImagePreview] = useState("")
   const [editImageFile, setEditImageFile] = useState(null)
 
+  const handleRefresh = () => {
+    invalidateAdminAddonsCache()
+    setRefreshTrigger((prev) => prev + 1)
+  }
+
   useEffect(() => {
     const fetchAddons = async () => {
       try {
         setLoading(true)
-        const response = await adminAPI.getRestaurantAddons({
+        const params = {
           // only approved items should be visible in this list
           approvalStatus: "approved",
           search: searchQuery?.trim() ? searchQuery.trim() : undefined,
           limit: 200,
           page: 1,
-        })
+        }
+        const response = await getAdminAddonsCached(params, { force: refreshTrigger > 0 })
         const data = response?.data?.data?.addons || response?.data?.addons || []
         const approvedOnly = Array.isArray(data)
           ? data.filter((addon) => String(addon.approvalStatus || "").toLowerCase() === "approved")
@@ -72,7 +80,7 @@ export default function AddonsList() {
 
     const t = setTimeout(fetchAddons, 250)
     return () => clearTimeout(t)
-  }, [searchQuery])
+  }, [searchQuery, refreshTrigger])
 
   const filteredAddons = useMemo(() => {
     const result = Array.isArray(addons) ? [...addons] : []
@@ -135,6 +143,7 @@ export default function AddonsList() {
         image: imageUrl,
         images: imageUrl ? [imageUrl] : [],
       })
+      invalidateAdminAddonsCache()
       setAddons((prev) =>
         (prev || []).map((a) =>
           String(a.id || a._id) === String(id)
@@ -169,6 +178,7 @@ export default function AddonsList() {
     const id = pendingDelete?.id || pendingDelete?._id
     try {
       setSubmittingAction(true)
+      invalidateAdminAddonsCache()
       await adminAPI.rejectRestaurantAddon(String(id), "Deleted by admin")
       setAddons((prev) => (prev || []).filter((a) => String(a.id || a._id) !== String(id)))
       toast.success("Add-on deleted")
@@ -194,7 +204,16 @@ export default function AddonsList() {
             <div className="text-sm text-slate-500 mt-1">Manage add-ons submitted by restaurants.</div>
           </div>
 
-          <div className="flex items-center gap-2" />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleRefresh}
+              disabled={loading}
+              className="px-4 py-2.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-medium hover:bg-slate-50 inline-flex items-center gap-2 disabled:opacity-50"
+            >
+              <RotateCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+              <span>Refresh</span>
+            </button>
+          </div>
         </div>
 
         <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -210,6 +229,43 @@ export default function AddonsList() {
           </div>
           <div className="text-sm text-slate-600">
             Showing <span className="font-semibold">{countLabel}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Statistics Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm flex items-center justify-between hover:shadow-md transition-all">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total Addons</p>
+            <h3 className="text-2xl font-bold text-slate-900 mt-1">{filteredAddons.length}</h3>
+          </div>
+          <div className="h-10 w-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-600 shrink-0">
+            <FolderOpen className="h-5 w-5" />
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-emerald-100 p-5 shadow-sm flex items-center justify-between hover:shadow-md transition-all">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-emerald-600">Active</p>
+            <h3 className="text-2xl font-bold text-emerald-700 mt-1">
+              {filteredAddons.filter((a) => a.isAvailable !== false).length}
+            </h3>
+          </div>
+          <div className="h-10 w-10 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600 shrink-0">
+            <CheckCircle2 className="h-5 w-5" />
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-rose-100 p-5 shadow-sm flex items-center justify-between hover:shadow-md transition-all">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-rose-600">Deactive</p>
+            <h3 className="text-2xl font-bold text-rose-700 mt-1">
+              {filteredAddons.filter((a) => a.isAvailable === false).length}
+            </h3>
+          </div>
+          <div className="h-10 w-10 rounded-xl bg-rose-50 flex items-center justify-center text-rose-600 shrink-0">
+            <XCircle className="h-5 w-5" />
           </div>
         </div>
       </div>

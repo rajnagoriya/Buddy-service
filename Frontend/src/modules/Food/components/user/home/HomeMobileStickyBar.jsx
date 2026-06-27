@@ -68,7 +68,7 @@ export default function HomeMobileStickyBar({
           </AnimatePresence>
 
           <div className="food-mobile-sticky__filters">
-            <div
+            {/* <div
               ref={vegToggleAnchorRef}
               className="food-mobile-filter-chip food-mobile-filter-chip--toggle"
             >
@@ -80,7 +80,7 @@ export default function HomeMobileStickyBar({
                 }
                 className="scale-[0.72]"
               />
-            </div>
+            </div> */}
             <button type="button" className="food-mobile-filter-chip" onClick={onOpenFilters}>
               <SlidersHorizontal className="h-3.5 w-3.5" />
               Filters

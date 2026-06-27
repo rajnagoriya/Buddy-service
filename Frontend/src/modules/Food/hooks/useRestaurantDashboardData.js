@@ -1,13 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { restaurantAPI, diningAPI } from "@food/api"
-
-const extractRestaurantPayload = (response) =>
-  response?.data?.data?.restaurant ||
-  response?.data?.restaurant ||
-  response?.data?.data?.user ||
-  response?.data?.user ||
-  response?.data?.data ||
-  null
+import { useRestaurantSession } from "@food/context/RestaurantSessionContext"
 
 const normalizeOrderStatus = (status) => {
   const value = String(status || "").toLowerCase()
@@ -110,6 +103,7 @@ const initialState = {
 }
 
 export default function useRestaurantDashboardData({ pollMs = 60_000 } = {}) {
+  const { restaurant: sessionRestaurant } = useRestaurantSession()
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState(null)
@@ -120,17 +114,13 @@ export default function useRestaurantDashboardData({ pollMs = 60_000 } = {}) {
     else setRefreshing(true)
 
     try {
-      const [restaurantRes, ordersRes, financeRes, complaintsRes] = await Promise.allSettled([
-        restaurantAPI.getCurrentRestaurant(),
+      const [ordersRes, financeRes, complaintsRes] = await Promise.allSettled([
         restaurantAPI.getOrders({ page: 1, limit: 100 }),
         restaurantAPI.getFinance(),
         restaurantAPI.getComplaints({ page: 1, limit: 20 }),
       ])
 
-      const restaurant =
-        restaurantRes.status === "fulfilled"
-          ? extractRestaurantPayload(restaurantRes.value)
-          : null
+      const restaurant = sessionRestaurant
 
       const orders =
         ordersRes.status === "fulfilled"
@@ -191,7 +181,7 @@ export default function useRestaurantDashboardData({ pollMs = 60_000 } = {}) {
       setLoading(false)
       setRefreshing(false)
     }
-  }, [])
+  }, [sessionRestaurant])
 
   useEffect(() => {
     loadDashboard()
