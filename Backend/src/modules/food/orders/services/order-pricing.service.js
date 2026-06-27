@@ -8,8 +8,11 @@ import { FoodOfferUsage } from '../../admin/models/offerUsage.model.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { haversineKm } from './order.helpers.js';
 import { FoodDeliveryBoySettings } from '../../admin/models/deliveryBoySettings.model.js';
+import { validateRestaurantChainForItems } from './restaurant-chain-radius.service.js';
 export async function calculateOrderPricing(userId, dto) {
   const items = Array.isArray(dto.items) ? dto.items : [];
+
+  await validateRestaurantChainForItems(items);
   
   // Identify unique restaurants
   const restaurantIds = [...new Set(items.map(it => it.restaurantId).filter(Boolean))];

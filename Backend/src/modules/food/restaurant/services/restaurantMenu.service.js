@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { ValidationError } from '../../../../core/auth/errors.js';
+import { buildPaginationMeta } from '../../../../utils/helpers.js';
 import { FoodRestaurant } from '../models/restaurant.model.js';
 import { FoodItem } from '../../admin/models/food.model.js';
 import { FoodCategory } from '../../admin/models/category.model.js';
@@ -156,13 +157,7 @@ export async function getRestaurantMenu(restaurantId, query = {}) {
 
     return {
         ...menu,
-        pagination: {
-            totalItems,
-            page,
-            limit,
-            totalPages: Math.ceil(totalItems / limit),
-            hasMore: page * limit < totalItems
-        }
+        pagination: buildPaginationMeta({ page, limit, total: totalItems }),
     };
 }
 
@@ -250,13 +245,7 @@ export async function getPublicApprovedRestaurantMenu(restaurantIdOrSlug, query 
     return {
         sections: menu.sections,
         categories,
-        pagination: {
-            totalItems,
-            page,
-            limit,
-            totalPages: Math.ceil(totalItems / limit),
-            hasMore: page * limit < totalItems
-        }
+        pagination: buildPaginationMeta({ page, limit, total: totalItems }),
     };
 }
 

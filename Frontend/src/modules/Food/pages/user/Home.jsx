@@ -43,6 +43,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import Footer from "@food/components/user/Footer";
 import AddToCartButton from "@food/components/user/AddToCartButton";
 import StickyCartCard from "@food/components/user/StickyCartCard";
+import RestaurantChainDistanceBadge from "@food/components/user/RestaurantChainDistanceBadge";
+import { getLastRestaurantFromCart } from "@food/utils/restaurantRadius";
 import OrderTrackingCard from "@food/components/user/OrderTrackingCard";
 import {
   CategoryChipRowSkeleton,
@@ -91,6 +93,20 @@ import offerImage from "@food/assets/offerimage.png";
 import api, { publicGetOnce, restaurantAPI, adminAPI } from "@food/api";
 import { fetchRestaurantMenuCached } from "@food/utils/restaurantMenuCache";
 import { fetchRestaurantsCached } from "@food/utils/restaurantListCache";
+import {
+  buildRestaurantListParams,
+  buildRestaurantListQueryKey,
+  extractRestaurantListItems,
+  HOME_RESTAURANTS_PAGE_SIZE,
+  resolveUserListCity,
+} from "@food/utils/restaurantListParams";
+import { extractPagination } from "@food/utils/pagination";
+import {
+  recalculateRestaurantDistances,
+  sortRestaurantsForDisplay,
+  transformRestaurantApiList,
+} from "@food/utils/transformHomeRestaurantPage";
+import { useInfinitePagination } from "@food/hooks/useInfinitePagination";
 import { API_BASE_URL } from "@food/api/config";
 import OptimizedImage from "@food/components/OptimizedImage";
 import { getRestaurantAvailabilityStatus } from "@food/utils/restaurantAvailability";
@@ -519,8 +535,6 @@ export default function Home() {
     setRecommendedRestaurantsFromSettings,
   ] = useState([]);
   const [loadingLandingConfig, setLoadingLandingConfig] = useState(true);
-  const [restaurantsData, setRestaurantsData] = useState([]);
-  const [loadingRestaurants, setLoadingRestaurants] = useState(true);
   const [realCategories, setRealCategories] = useState([]);
   const [loadingRealCategories, setLoadingRealCategories] = useState(true);
   const [menuCategories, setMenuCategories] = useState([]);
@@ -528,11 +542,7 @@ export default function Home() {
   const [, setRestaurantDietMeta] = useState({});
   const [showAllCategoriesModal, setShowAllCategoriesModal] = useState(false);
   const [availabilityTick, setAvailabilityTick] = useState(Date.now());
-  const RESTAURANTS_BATCH_SIZE = 9;
-  const [visibleRestaurantCount, setVisibleRestaurantCount] = useState(
-    RESTAURANTS_BATCH_SIZE,
-  );
-  const restaurantLoadMoreRef = useRef(null);
+  const RESTAURANTS_BATCH_SIZE = HOME_RESTAURANTS_PAGE_SIZE;
   const publicCategoriesCacheRef = useRef(new Map());
   const publicCategoriesInFlightRef = useRef(new Map());
   const isHandlingSwitchOff = useRef(false);
@@ -551,16 +561,7 @@ export default function Home() {
   const activeHeroSlide =
     HERO_TEXT_SLIDES[festSlideIndex % HERO_TEXT_SLIDES.length];
 
-  // Stable list of restaurant ids for menu-category union so we don't refetch menus
-  // when `restaurantsData` changes for reasons like distance recalculation or outletTimings enrichment.
-  const menuUnionRestaurantIdsKey = useMemo(() => {
-    if (!Array.isArray(restaurantsData) || restaurantsData.length === 0) return "";
-    return restaurantsData
-      .map((r) => String(r?.restaurantId || r?.id || "").trim())
-      .filter(Boolean)
-      .sort()
-      .join(",");
-  }, [restaurantsData]);
+  // Stable list of restaurant ids for menu-category union — defined after pagination hook below.
 
   const normalizeImageUrl = useCallback(
     (imageUrl) => {
@@ -1109,7 +1110,6 @@ export default function Home() {
     sortBy: null,
     selectedCuisine: null,
   });
-  const [isLoadingFilterResults, setIsLoadingFilterResults] = useState(false);
   const [activeFilterTab, setActiveFilterTab] = useState("sort");
   const categoryScrollRef = useRef(null);
   const gsapAnimationsRef = useRef([]);
@@ -1117,7 +1117,6 @@ export default function Home() {
   const showBannerSkeleton = loadingBanners;
   const showCategorySkeleton = loadingRealCategories || loadingMenuCategories;
   const showExploreSkeleton = loadingLandingConfig;
-  const showRestaurantSkeleton = isLoadingFilterResults || loadingRestaurants;
   // Safely get profile context - handle case when ProfileProvider is not available
   let profileContext = null;
   try {
@@ -1142,6 +1141,10 @@ export default function Home() {
     getDefaultAddress,
   } = profileContext;
   const { addToCart, cart } = useCart();
+  const lastCartRestaurant = useMemo(
+    () => getLastRestaurantFromCart(cart),
+    [cart],
+  );
   const { location, loading, requestLocation } = useLocation();
   const {
     zoneId,
@@ -1381,13 +1384,18 @@ export default function Home() {
     effectiveZoneId,
   ]);
 
+  const homeListCity = useMemo(
+    () => resolveUserListCity(effectiveLocation),
+    [effectiveLocation?.city],
+  );
+
   const [restaurantsFetchReady, setRestaurantsFetchReady] = useState(false);
 
   useEffect(() => {
     const hasCoords =
       Number.isFinite(effectiveLocation?.latitude) &&
       Number.isFinite(effectiveLocation?.longitude);
-    if (hasCoords || effectiveZoneId) {
+    if (homeListCity || hasCoords || effectiveZoneId) {
       setRestaurantsFetchReady(true);
       return undefined;
     }
@@ -1397,6 +1405,7 @@ export default function Home() {
     }, 1200);
     return () => window.clearTimeout(timer);
   }, [
+    homeListCity,
     effectiveLocation?.latitude,
     effectiveLocation?.longitude,
     effectiveZoneId,
@@ -1440,7 +1449,6 @@ export default function Home() {
   const filterSectionRefs = useRef({});
   const [activeScrollSection, setActiveScrollSection] = useState("sort");
   const rightContentRef = useRef(null);
-  const restaurantsRequestSeqRef = useRef(0);
   const menuUnionRequestSeqRef = useRef(0);
 
   // Scroll tracking effect
@@ -1473,498 +1481,112 @@ export default function Home() {
     return () => observer.disconnect();
   }, [isFilterOpen]);
 
-  // Fetch restaurants from API with filters
-  const fetchRestaurants = useCallback(
-    async (filters = {}) => {
-      const requestSeq = ++restaurantsRequestSeqRef.current;
-      try {
-        setLoadingRestaurants(true);
+  const appliedFiltersRef = useRef(appliedFilters);
+  appliedFiltersRef.current = appliedFilters;
 
-        // Backend disconnected - new backend in progress. Skip health check.
-
-        // Build query parameters from filters
-        const params = {};
-        const currentLocation = effectiveLocationRef.current;
-        const currentZoneId = effectiveZoneIdRef.current;
-
-        // Always send user coordinates when available so backend can compute distance/sort.
-        if (
-          Number.isFinite(currentLocation?.latitude) &&
-          Number.isFinite(currentLocation?.longitude)
-        ) {
-          params.lat = currentLocation.latitude;
-          params.lng = currentLocation.longitude;
-        }
-
-        // Sort by
-        if (filters.sortBy) {
-          params.sortBy = filters.sortBy;
-        }
-
-        // Cuisine
-        if (filters.selectedCuisine) {
-          params.cuisine = filters.selectedCuisine;
-        }
-
-        // Rating filters
-        if (filters.activeFilters?.has("rating-45-plus")) {
-          params.minRating = 4.5;
-        } else if (filters.activeFilters?.has("rating-4-plus")) {
-          params.minRating = 4.0;
-        } else if (filters.activeFilters?.has("rating-35-plus")) {
-          params.minRating = 3.5;
-        }
-
-        // Delivery time filters
-        if (filters.activeFilters?.has("delivery-under-30")) {
-          params.maxDeliveryTime = 30;
-        } else if (filters.activeFilters?.has("delivery-under-45")) {
-          params.maxDeliveryTime = 45;
-        }
-
-        // Distance filters
-        if (filters.activeFilters?.has("distance-under-1km")) {
-          params.radiusKm = 1.0;
-        } else if (filters.activeFilters?.has("distance-under-2km")) {
-          params.radiusKm = 2.0;
-        }
-
-        // Price filters
-        if (filters.activeFilters?.has("price-under-200")) {
-          params.maxPrice = 200;
-        } else if (filters.activeFilters?.has("price-under-500")) {
-          params.maxPrice = 500;
-        }
-
-        // Offers filter
-        if (filters.activeFilters?.has("has-offers")) {
-          params.hasOffers = "true";
-        }
-
-        // Trust filters
-        if (filters.activeFilters?.has("top-rated")) {
-          params.topRated = "true";
-        } else if (filters.activeFilters?.has("trusted")) {
-          params.trusted = "true";
-        }
-
-        if (currentZoneId) {
-          params.zoneId = currentZoneId;
-        }
-
-        const normalizedUserCity = String(currentLocation?.city || "")
-          .trim()
-          .toLowerCase();
-        const hasUsableUserCity =
-          normalizedUserCity &&
-          normalizedUserCity !== "current location" &&
-          normalizedUserCity !== "unknown city" &&
-          normalizedUserCity !== "select location";
-        if (hasUsableUserCity) {
-          params.city = String(currentLocation.city).trim();
-        }
-
-        debugLog("Fetching restaurants with params:", params);
-        const response = await fetchRestaurantsCached(params);
-        debugLog("Restaurants API response:", response.data);
-
-        // If a newer request started, ignore this response to avoid races/flicker.
-        if (requestSeq !== restaurantsRequestSeqRef.current) return;
-
-        if (
-          response.data &&
-          response.data.success &&
-          response.data.data &&
-          response.data.data.restaurants
-        ) {
-          const restaurantsArray = response.data.data.restaurants;
-          debugLog(`Fetched ${restaurantsArray.length} restaurants from API`);
-
-          if (restaurantsArray.length === 0) {
-            debugWarn("No restaurants found in API response");
-            setRestaurantsData([]);
-            return;
-          }
-
-          // Calculate distance helper function
-          const calculateDistance = (lat1, lng1, lat2, lng2) => {
-            const R = 6371; // Earth's radius in kilometers
-            const dLat = ((lat2 - lat1) * Math.PI) / 180;
-            const dLng = ((lng2 - lng1) * Math.PI) / 180;
-            const a =
-              Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-              Math.cos((lat1 * Math.PI) / 180) *
-              Math.cos((lat2 * Math.PI) / 180) *
-              Math.sin(dLng / 2) *
-              Math.sin(dLng / 2);
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-            return R * c; // Distance in kilometers
-          };
-
-          // Get user coordinates
-          const userLat = currentLocation?.latitude;
-          const userLng = currentLocation?.longitude;
-
-          // Transform API data to match expected format
-          const normalizeCityValue = (value) =>
-            String(value || "")
-              .trim()
-              .split(",")[0]
-              .toLowerCase()
-              .replace(/[^a-z0-9\s]/g, "")
-              .replace(/\s+/g, " ")
-              .trim();
-
-          const strictCityRestaurants = restaurantsArray.filter((restaurant) => {
-            if (!hasUsableUserCity) return true;
-
-            const cityCandidates = [
-              restaurant?.city,
-              restaurant?.location?.city,
-              restaurant?.address?.city,
-              restaurant?.onboarding?.step1?.city,
-              restaurant?.onboarding?.step1?.location?.city,
-            ];
-
-            const restaurantCity = cityCandidates
-              .map((candidate) => normalizeCityValue(candidate))
-              .find(Boolean);
-
-            if (!restaurantCity) return false;
-
-            const userCity = normalizeCityValue(currentLocation?.city);
-            return restaurantCity === userCity;
-          });
-
-          const transformedRestaurants = strictCityRestaurants
-            .filter((restaurant) => {
-              const name = (restaurant.restaurantName || restaurant.name || "").toLowerCase()
-              return true
-            })
-            .map((restaurant, index) => {
-              // Use restaurant data if available, otherwise use defaults
-              const deliveryTime =
-                restaurant.estimatedDeliveryTime || "25-30 mins";
-
-              // Calculate distance from user to restaurant
-              let distance = restaurant.distance || "1.2 km";
-
-              // Get restaurant coordinates
-              const restaurantLocation = restaurant.location;
-              const restaurantLat =
-                restaurantLocation?.latitude ||
-                (restaurantLocation?.coordinates &&
-                  Array.isArray(restaurantLocation.coordinates)
-                  ? restaurantLocation.coordinates[1]
-                  : null);
-              const restaurantLng =
-                restaurantLocation?.longitude ||
-                (restaurantLocation?.coordinates &&
-                  Array.isArray(restaurantLocation.coordinates)
-                  ? restaurantLocation.coordinates[0]
-                  : null);
-
-              // Calculate distance if both user and restaurant coordinates are available
-              let distanceInKm = null;
-              if (
-                userLat &&
-                userLng &&
-                restaurantLat &&
-                restaurantLng &&
-                !isNaN(userLat) &&
-                !isNaN(userLng) &&
-                !isNaN(restaurantLat) &&
-                !isNaN(restaurantLng)
-              ) {
-                distanceInKm = calculateDistance(
-                  userLat,
-                  userLng,
-                  restaurantLat,
-                  restaurantLng,
-                );
-                // Format distance: show 1 decimal place if >= 1km, otherwise show in meters
-                if (distanceInKm >= 1) {
-                  distance = `${distanceInKm.toFixed(1)} km`;
-                } else {
-                  const distanceInMeters = Math.round(distanceInKm * 1000);
-                  distance = `${distanceInMeters} m`;
-                }
-              }
-
-              // Get first cuisine or default
-              const cuisine =
-                restaurant.cuisines && restaurant.cuisines.length > 0
-                  ? restaurant.cuisines[0]
-                  : "Multi-cuisine";
-
-              // Legacy-safe image extraction (supports old schema variants).
-              const coverImages = extractImages([
-                ...(Array.isArray(restaurant.coverImages) ? restaurant.coverImages : [restaurant.coverImages]).filter(Boolean),
-                restaurant.coverImage,
-              ]);
-
-              const profileImageCandidates = extractImages([
-                ...buildRestaurantImageCandidates(restaurant.profileImage),
-                ...buildRestaurantImageCandidates(
-                  restaurant.onboarding?.step2?.profileImageUrl,
-                ),
-                ...buildRestaurantImageCandidates(restaurant.image),
-                ...buildRestaurantImageCandidates(restaurant.imageUrl),
-              ]);
-              const profileImageUrl = profileImageCandidates[0] || "";
-
-              const allImages = Array.from(
-                new Set(
-                  [
-                    ...coverImages,
-                    ...profileImageCandidates,
-                  ].filter(Boolean),
-                ),
-              );
-
-              // Keep single image for backward compatibility
-              const image = allImages[0] || profileImageUrl || "";
-              const offerText = restaurant.offer || null;
-
-              return {
-                id: restaurant.restaurantId || restaurant._id,
-                mongoId: restaurant._id || null,
-                name: getRestaurantDisplayName(restaurant),
-                cuisine: cuisine,
-                cuisines: Array.isArray(restaurant.cuisines)
-                  ? restaurant.cuisines
-                  : [],
-                rating: Number(restaurant.rating) || 0,
-                deliveryTime:
-                  restaurant.deliveryTime ||
-                  restaurant.estimatedDeliveryTime ||
-                  (restaurant.estimatedDeliveryTimeMinutes
-                    ? `${restaurant.estimatedDeliveryTimeMinutes} mins`
-                    : deliveryTime),
-                distance: distance,
-                distanceInKm: distanceInKm, // Store numeric distance for sorting
-                image: image,
-                images: allImages, // Array of cover images for carousel (separate from menu images)
-                priceRange: restaurant.priceRange || "$$", // Use from API or default
-                featuredDish:
-                  restaurant.featuredDish ||
-                  (restaurant.cuisines && restaurant.cuisines.length > 0
-                    ? `${restaurant.cuisines[0]} Special`
-                    : "Special Dish"),
-                featuredPrice: restaurant.featuredPrice || 249, // Use from API or default
-                offer: offerText,
-                slug: restaurant.slug,
-                restaurantId: restaurant.restaurantId,
-                pureVegRestaurant: restaurant.pureVegRestaurant === true,
-                location: restaurant.location, // Store location for distance recalculation
-                isActive: restaurant.isActive !== false, // Default to true if not specified
-                isAcceptingOrders: restaurant.isAcceptingOrders !== false, // Default to true if not specified
-                openDays: Array.isArray(restaurant.openDays)
-                  ? restaurant.openDays
-                  : [],
-                deliveryTimings: restaurant.deliveryTimings || null,
-                outletTimings: restaurant.outletTimings || null,
-                openingTime: restaurant.openingTime || restaurant?.deliveryTimings?.openingTime || null,
-                closingTime: restaurant.closingTime || restaurant?.deliveryTimings?.closingTime || null,
-              };
-            },
-            );
-
-          const sortRestaurantsForDisplay = (restaurants) => {
-            if (!userLat || !userLng) return restaurants;
-            return [...restaurants].sort((a, b) => {
-              // Available restaurants first, then unavailable
-              const aAvailable = getRestaurantAvailabilityStatus(
-                a,
-                new Date(),
-                { ignoreOperationalStatus: true },
-              ).isOpen;
-              const bAvailable = getRestaurantAvailabilityStatus(
-                b,
-                new Date(),
-                { ignoreOperationalStatus: true },
-              ).isOpen;
-
-              if (aAvailable !== bAvailable) {
-                return aAvailable ? -1 : 1; // Available restaurants come first
-              }
-
-              // Apply secondary sort based on sortBy filter
-              if (filters.sortBy === "price-low") {
-                return (a.featuredPrice || 0) - (b.featuredPrice || 0);
-              }
-              if (filters.sortBy === "price-high") {
-                return (b.featuredPrice || 0) - (a.featuredPrice || 0);
-              }
-              if (filters.sortBy === "rating-high") {
-                return (b.rating || 0) - (a.rating || 0);
-              }
-              if (filters.sortBy === "rating-low") {
-                return (a.rating || 0) - (b.rating || 0);
-              }
-
-              // Default: sort by distance
-              const aDistance =
-                a.distanceInKm !== null ? a.distanceInKm : Infinity;
-              const bDistance =
-                b.distanceInKm !== null ? b.distanceInKm : Infinity;
-              return aDistance - bDistance;
-            });
-          };
-
-          debugLog(
-            "Transformed and sorted restaurants:",
-            transformedRestaurants,
-          );
-          startTransition(() => {
-            setRestaurantsData(sortRestaurantsForDisplay(transformedRestaurants));
-          });
-        } else {
-          debugWarn("Invalid API response structure:", response.data);
-          setRestaurantsData([]);
-        }
-      } catch (error) {
-        debugError("Error fetching restaurants:", error);
-        debugError("Error details:", error.response?.data || error.message);
-        // Don't set hardcoded data here - let the useMemo fallback handle it
-        // This way, if API succeeds later, it will show the real data
-        setRestaurantsData([]);
-      } finally {
-        if (requestSeq === restaurantsRequestSeqRef.current) {
-          setLoadingRestaurants(false);
-        }
-      }
-    },
-    [
-      extractImages,
-      buildRestaurantImageCandidates,
-    ],
+  const restaurantListQueryKey = useMemo(
+    () =>
+      buildRestaurantListQueryKey(
+        restaurantsLocationQueryKey,
+        appliedFilters,
+      ),
+    [restaurantsLocationQueryKey, appliedFilters],
   );
 
+  const fetchRestaurantPage = useCallback(
+    async (page) => {
+      const response = await fetchRestaurantsCached(
+        buildRestaurantListParams(
+          appliedFiltersRef.current,
+          effectiveLocationRef.current,
+          effectiveZoneIdRef.current,
+          page,
+          RESTAURANTS_BATCH_SIZE,
+        ),
+      );
+
+      const payload = response?.data?.data;
+      const restaurantsArray = extractRestaurantListItems(payload);
+
+      if (!response?.data?.success || !payload) {
+        throw new Error("Invalid restaurants response");
+      }
+
+      return {
+        items: transformRestaurantApiList(restaurantsArray, {
+          location: effectiveLocationRef.current,
+          filters: appliedFiltersRef.current,
+          extractImages,
+          buildRestaurantImageCandidates,
+        }),
+        pagination: extractPagination(payload),
+      };
+    },
+    [extractImages, buildRestaurantImageCandidates],
+  );
+
+  const {
+    items: restaurantsData,
+    pagination: restaurantsPagination,
+    hasNextPage: hasMoreRestaurants,
+    isLoading: loadingRestaurants,
+    isLoadingMore: loadingMoreRestaurants,
+    loadMoreRef: restaurantLoadMoreRef,
+    loadMore: loadMoreRestaurants,
+    updateItems: updateRestaurantsData,
+  } = useInfinitePagination({
+    queryKey: restaurantListQueryKey,
+    fetchPage: fetchRestaurantPage,
+    getItemId: (restaurant) => restaurant.id || restaurant.mongoId,
+    mergeItems: (base, incoming) =>
+      sortRestaurantsForDisplay(
+        [...base, ...incoming],
+        appliedFiltersRef.current,
+        effectiveLocationRef.current,
+      ),
+    enabled: restaurantsFetchReady && Boolean(homeListCity),
+    initialLimit: RESTAURANTS_BATCH_SIZE,
+  });
+
+  const showRestaurantSkeleton =
+    loadingRestaurants || (restaurantsFetchReady && !homeListCity);
+
+  const menuUnionRestaurantIdsKey = useMemo(() => {
+    if (!Array.isArray(restaurantsData) || restaurantsData.length === 0) {
+      return "";
+    }
+    return restaurantsData
+      .map((r) => String(r?.restaurantId || r?.id || "").trim())
+      .filter(Boolean)
+      .sort()
+      .join(",");
+  }, [restaurantsData]);
+
   const applyFiltersAndRefetch = useCallback(
-    async (
+    (
       nextActiveFilters = activeFilters,
       nextSortBy = sortBy,
       nextSelectedCuisine = selectedCuisine,
     ) => {
-      const nextFilterState = {
+      setAppliedFilters({
         activeFilters: new Set(nextActiveFilters),
         sortBy: nextSortBy,
         selectedCuisine: nextSelectedCuisine,
-      };
-
-      setAppliedFilters(nextFilterState);
-      setIsLoadingFilterResults(true);
-
-      try {
-        await fetchRestaurants(nextFilterState);
-      } catch (error) {
-        debugError("Error applying filters:", error);
-      } finally {
-        setIsLoadingFilterResults(false);
-      }
+      });
     },
-    [activeFilters, sortBy, selectedCuisine, fetchRestaurants],
+    [activeFilters, sortBy, selectedCuisine],
   );
 
-  // Fetch restaurants when filters or meaningful location context change.
-  useEffect(() => {
-    if (!restaurantsFetchReady) return;
-    fetchRestaurants(appliedFilters);
-  }, [
-    restaurantsFetchReady,
-    restaurantsLocationQueryKey,
-    appliedFilters,
-    fetchRestaurants,
-  ]);
-
-  // Recalculate distances when user location updates
   useEffect(() => {
     if (!effectiveLocation?.latitude || !effectiveLocation?.longitude) return;
-
-    setRestaurantsData((prevData) => {
-      if (!prevData || prevData.length === 0) return prevData;
-
-      const calculateDistance = (lat1, lng1, lat2, lng2) => {
-        const R = 6371; // Earth's radius in kilometers
-        const dLat = ((lat2 - lat1) * Math.PI) / 180;
-        const dLng = ((lng2 - lng1) * Math.PI) / 180;
-        const a =
-          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-          Math.cos((lat1 * Math.PI) / 180) *
-          Math.cos((lat2 * Math.PI) / 180) *
-          Math.sin(dLng / 2) *
-          Math.sin(dLng / 2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return R * c; // Distance in kilometers
-      };
-
-      const userLat = effectiveLocation.latitude;
-      const userLng = effectiveLocation.longitude;
-
-      let hasChanges = false;
-      const updatedRestaurants = prevData.map((restaurant) => {
-        if (!restaurant.location) return restaurant;
-
-        const restaurantLat =
-          restaurant.location?.latitude ||
-          (restaurant.location?.coordinates &&
-            Array.isArray(restaurant.location.coordinates)
-            ? restaurant.location.coordinates[1]
-            : null);
-        const restaurantLng =
-          restaurant.location?.longitude ||
-          (restaurant.location?.coordinates &&
-            Array.isArray(restaurant.location.coordinates)
-            ? restaurant.location.coordinates[0]
-            : null);
-
-        if (
-          !restaurantLat ||
-          !restaurantLng ||
-          isNaN(restaurantLat) ||
-          isNaN(restaurantLng)
-        ) {
-          return restaurant;
-        }
-
-        const distanceInKm = calculateDistance(
-          userLat,
-          userLng,
-          restaurantLat,
-          restaurantLng,
-        );
-        let calculatedDistance = null;
-
-        // Format distance: show 1 decimal place if >= 1km, otherwise show in meters
-        if (distanceInKm >= 1) {
-          calculatedDistance = `${distanceInKm.toFixed(1)} km`;
-        } else {
-          const distanceInMeters = Math.round(distanceInKm * 1000);
-          calculatedDistance = `${distanceInMeters} m`;
-        }
-
-        if (
-          restaurant.distance !== calculatedDistance ||
-          restaurant.distanceInKm !== distanceInKm
-        ) {
-          hasChanges = true;
-          return {
-            ...restaurant,
-            distance: calculatedDistance,
-            distanceInKm: distanceInKm, // Preserve numeric distance for sorting
-          };
-        }
-        return restaurant;
-      });
-
-      return hasChanges ? updatedRestaurants : prevData;
-    });
-
-    debugLog(
-      "?? Recalculated distances for all restaurants based on user location",
+    updateRestaurantsData((prev) =>
+      recalculateRestaurantDistances(prev, effectiveLocation),
     );
-  }, [effectiveLocation?.latitude, effectiveLocation?.longitude]);
+  }, [
+    effectiveLocation?.latitude,
+    effectiveLocation?.longitude,
+    updateRestaurantsData,
+  ]);
 
   // IMPORTANT:
   // Homepage should avoid eager N+1 menu requests. We only resolve menu metadata
@@ -1990,8 +1612,10 @@ export default function Home() {
         const categoryMap = new Map();
         const menuResponses = [];
 
-        for (let index = 0; index < restaurantIds.length; index += 4) {
-          const batchIds = restaurantIds.slice(index, index + 4);
+        for (let index = 0; index < Math.min(restaurantIds.length, RESTAURANTS_BATCH_SIZE * 2); index += 4) {
+          const batchIds = restaurantIds
+            .slice(0, RESTAURANTS_BATCH_SIZE * 2)
+            .slice(index, index + 4);
           const batchResponses = await Promise.all(
             batchIds.map(async (id) => {
               if (!id) return { id: null, menu: null };
@@ -2142,67 +1766,6 @@ export default function Home() {
     return (restaurantsData || []).filter(matchesVegMode);
   }, [restaurantsData, matchesVegMode]);
 
-  const restaurantLazyLoadResetKey = useMemo(() => {
-    const activeFilterKey = Array.from(activeFilters).sort().join("|");
-    return `${restaurantsData.length}:${activeFilterKey}:${selectedCuisine || ""}:${sortBy || ""}:${vegMode ? "1" : "0"}`;
-  }, [activeFilters, restaurantsData.length, selectedCuisine, sortBy, vegMode]);
-
-  const visibleRestaurants = useMemo(
-    () => filteredRestaurants.slice(0, visibleRestaurantCount),
-    [filteredRestaurants, visibleRestaurantCount],
-  );
-
-  const hasMoreRestaurants =
-    visibleRestaurantCount < filteredRestaurants.length;
-
-  const loadMoreRestaurants = useCallback(() => {
-    setVisibleRestaurantCount((previous) =>
-      Math.min(previous + RESTAURANTS_BATCH_SIZE, filteredRestaurants.length),
-    );
-  }, [filteredRestaurants.length, RESTAURANTS_BATCH_SIZE]);
-
-  useEffect(() => {
-    setVisibleRestaurantCount(
-      Math.min(RESTAURANTS_BATCH_SIZE, filteredRestaurants.length),
-    );
-  }, [restaurantLazyLoadResetKey, filteredRestaurants.length, RESTAURANTS_BATCH_SIZE]);
-
-  useEffect(() => {
-    if (visibleRestaurantCount <= filteredRestaurants.length) return;
-    setVisibleRestaurantCount(filteredRestaurants.length);
-  }, [filteredRestaurants.length, visibleRestaurantCount]);
-
-  useEffect(() => {
-    if (!hasMoreRestaurants) return;
-    if (showRestaurantSkeleton || loadingRestaurants || isLoadingFilterResults) return;
-    const target = restaurantLoadMoreRef.current;
-    if (!target || typeof window === "undefined") return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const [entry] = entries;
-        if (!entry?.isIntersecting) return;
-        startTransition(() => {
-          loadMoreRestaurants();
-        });
-      },
-      {
-        root: null,
-        rootMargin: "240px 0px",
-        threshold: 0.01,
-      },
-    );
-
-    observer.observe(target);
-    return () => observer.disconnect();
-  }, [
-    hasMoreRestaurants,
-    showRestaurantSkeleton,
-    loadingRestaurants,
-    isLoadingFilterResults,
-    loadMoreRestaurants,
-  ]);
-
   const recommendedForYouRestaurants = useMemo(() => {
     const idsInOrder = (recommendedRestaurantIds || []).map((id) => String(id));
     const hasIds = idsInOrder.length > 0;
@@ -2223,6 +1786,10 @@ export default function Home() {
           : [restaurant?.coverImages]
         ).filter(Boolean),
         restaurant?.profileImage,
+        ...(Array.isArray(restaurant?.menuImages) ? restaurant.menuImages : []),
+        ...(Array.isArray(restaurant?.featuredItems)
+          ? restaurant.featuredItems.map((item) => item?.image)
+          : []),
       ]);
       const image = imageCandidates[0] || foodImages[0];
 
@@ -2693,52 +2260,7 @@ export default function Home() {
 
                 {HeroBannerSection}
 
-                <div className="food-mobile-filters-row">
-                  <div className="food-mobile-filter-chip food-mobile-filter-chip--toggle">
-                    <span>Veg</span>
-                    <Switch
-                      checked={vegMode}
-                      onCheckedChange={handleVegModeChange}
-                      className="scale-[0.72]"
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsFilterOpen(true)}
-                    className="food-mobile-filter-chip"
-                  >
-                    <SlidersHorizontal className="h-3.5 w-3.5" />
-                    Filters
-                  </button>
-                  {[
-                    { id: "delivery-under-30", label: "Under 30 mins" },
-                    { id: "delivery-under-45", label: "Under 45 mins" },
-                    { id: "distance-under-1km", label: "Under 1 km", icon: MapPin },
-                  ].map((filter) => {
-                    const Icon = filter.icon;
-                    const isActive = activeFilters.has(filter.id);
-                    return (
-                      <button
-                        key={filter.id}
-                        type="button"
-                        onClick={() => {
-                          const nextFilters = new Set(activeFilters);
-                          if (nextFilters.has(filter.id)) {
-                            nextFilters.delete(filter.id);
-                          } else {
-                            nextFilters.add(filter.id);
-                          }
-                          setActiveFilters(nextFilters);
-                          void applyFiltersAndRefetch(nextFilters, sortBy, selectedCuisine);
-                        }}
-                        className={`food-mobile-filter-chip${isActive ? " is-active" : ""}`}
-                      >
-                        {Icon && <Icon className="h-3.5 w-3.5" />}
-                        {filter.label}
-                      </button>
-                    );
-                  })}
-                </div>
+              
               </motion.div>
             ) : (
               <motion.div
@@ -2783,11 +2305,16 @@ export default function Home() {
             <p className="food-landing-eyebrow mb-1">Curated for you</p>
             <h2 className="food-landing-title mb-3 sm:mb-4">Recommended</h2>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5">
               {recommendedForYouRestaurants.map((restaurant, index) => {
                 const restaurantSlug =
                   restaurant.slug ||
                   restaurant.name.toLowerCase().replace(/\s+/g, "-");
+                const recommendedAvailability = getRestaurantAvailabilityStatus(
+                  restaurant,
+                  new Date(availabilityTick),
+                );
+                const isRecommendedOffline = !recommendedAvailability.isOpen;
                 return (
                   <motion.div
                     key={`recommended-${restaurant.mongoId || restaurant.id || restaurantSlug}`}
@@ -2797,20 +2324,30 @@ export default function Home() {
                     transition={{ duration: 0.35, delay: index * 0.05 }}>
                     <Link
                       to={`/user/restaurants/${restaurantSlug}`}
-                      className="block rounded-[20px] overflow-hidden border border-gray-100 dark:border-gray-800 bg-white dark:bg-[#1a1a1a] shadow-sm hover:shadow-md transition-shadow">
+                      className={`block rounded-[20px] overflow-hidden border border-gray-100 dark:border-gray-800 bg-white dark:bg-[#1a1a1a] shadow-sm transition-shadow ${isRecommendedOffline ? "grayscale opacity-75" : "hover:shadow-md"}`}>
                       <div className="relative h-24 sm:h-28 md:h-32 bg-gray-50">
                         <RestaurantImageCarousel
                           restaurant={restaurant}
                           backendOrigin={BACKEND_ORIGIN}
-                          className="h-24 sm:h-28 md:h-32"
+                          className="h-40 sm:h-28 md:h-32"
                           roundedClass="rounded-t-[20px]"
+                        />
+                        {isRecommendedOffline && (
+                          <div
+                            className="absolute inset-0 z-[8] bg-white/35 dark:bg-black/35 pointer-events-none rounded-t-[20px]"
+                            aria-hidden="true"
+                          />
+                        )}
+                        <RestaurantChainDistanceBadge
+                          lastCartRestaurant={lastCartRestaurant}
+                          restaurant={restaurant}
                         />
                         <div className={`absolute bottom-2 left-2 px-2 py-0.5 rounded-lg ${Number(restaurant.rating) > 0 ? "bg-black/80 backdrop-blur-md text-white font-medium" : "bg-gray-200/90 text-gray-600 font-medium"} text-[10px] shadow-lg border border-white/10`}>
                           {Number(restaurant.rating) > 0 ? Number(restaurant.rating).toFixed(1) : "NEW"}
                         </div>
                       </div>
-                      <div className="p-2.5">
-                        <p className="text-sm font-semibold text-foreground truncate">
+                      <div className="p-2.5 min-h-[3.25rem]">
+                        <p className="text-sm font-semibold text-foreground line-clamp-2 leading-snug break-words">
                           {restaurant.name}
                         </p>
                         <p className="text-[11px] text-primary font-semibold mt-1 flex items-center gap-1">
@@ -2834,7 +2371,9 @@ export default function Home() {
           animate={{ opacity: 1 }}>
           <div className="food-landing-section mb-3 lg:mb-4">
             <p className="food-landing-eyebrow mb-1">
-              {filteredRestaurants.length} restaurants delivering to you
+              {restaurantsPagination.total > filteredRestaurants.length
+                ? `${filteredRestaurants.length} of ${restaurantsPagination.total} restaurants delivering to you`
+                : `${filteredRestaurants.length} restaurants delivering to you`}
             </p>
             <h2 className="food-landing-title">All restaurants</h2>
           </div>
@@ -2860,8 +2399,8 @@ export default function Home() {
               )}
             </AnimatePresence>
             <div
-              className={`grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5 lg:gap-6 food-landing-section pt-1 items-stretch ${isLoadingFilterResults || loadingRestaurants ? "opacity-50" : "opacity-100"} transition-opacity duration-300`}>
-              {visibleRestaurants.map((restaurant, index) => {
+              className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5 lg:gap-6 food-landing-section pt-1 items-stretch ${loadingRestaurants ? "opacity-50" : "opacity-100"} transition-opacity duration-300`}>
+              {filteredRestaurants.map((restaurant, index) => {
                 const nameStr =
                   typeof restaurant?.name === "string"
                     ? restaurant.name.trim()
@@ -2883,20 +2422,20 @@ export default function Home() {
                     restaurant.slug.trim()
                     ? restaurant.slug.trim()
                     : fallbackSlugSource.toLowerCase().replace(/\s+/g, "-");
-                const availability = getRestaurantAvailabilityStatus(
+                const availabilityStatus = getRestaurantAvailabilityStatus(
                   restaurant,
                   new Date(availabilityTick),
-                  { ignoreOperationalStatus: true },
                 );
-                const closingCountdown = availability.closingCountdownLabel
-                  ? availability.closingCountdownLabel.replace(/closes\s+in\s*/i, "")
+                const isRestaurantOffline = !availabilityStatus.isOpen;
+                const closingCountdown = availabilityStatus.closingCountdownLabel
+                  ? availabilityStatus.closingCountdownLabel.replace(/closes\s+in\s*/i, "")
                   : "";
                 const hasClosingCountdown =
-                  availability.isOpen &&
+                  availabilityStatus.isOpen &&
                   closingCountdown &&
-                  availability.openingTime &&
-                  availability.closingTime &&
-                  availability.minutesUntilClose <= 60;
+                  availabilityStatus.openingTime &&
+                  availabilityStatus.closingTime &&
+                  availabilityStatus.minutesUntilClose <= 60;
                 // Direct favorite check - isFavorite is already memoized in context
                 const favorite = isFavorite(restaurantSlug);
 
@@ -2934,7 +2473,7 @@ export default function Home() {
                       restaurantSlug ||
                       index
                     }
-                    className="h-full transform transition-all duration-300 hover:-translate-y-3 hover:scale-[1.02]"
+                    className={`h-full transform transition-all duration-300 ${isRestaurantOffline ? "" : "hover:-translate-y-3 hover:scale-[1.02]"}`}
                     style={{
                       perspective: 1000,
                       animation:
@@ -2947,19 +2486,22 @@ export default function Home() {
                         to={`/user/restaurants/${restaurantSlug}`}
                         className="h-full flex">
                         <Card
-                          className={`overflow-hidden gap-0 cursor-pointer border-0 dark:border-gray-800 group bg-white dark:bg-[#1a1a1a] border-background transition-all duration-500 py-0 rounded-[28px] flex flex-col h-full w-full relative shadow-[0_12px_40px_rgba(26,37,23,0.12)] hover:shadow-[0_30px_60px_rgba(26,37,23,0.20)] ${isOutOfService || !availability.isOpen
-                            ? "grayscale opacity-75"
-                            : ""
-                            }`}>
+                          className={`overflow-hidden gap-0 cursor-pointer border-0 dark:border-gray-800 group bg-white dark:bg-[#1a1a1a] border-background transition-all duration-500 py-0 rounded-[28px] flex flex-col h-full w-full relative shadow-[0_12px_40px_rgba(26,37,23,0.12)] ${isRestaurantOffline ? "grayscale opacity-75" : "hover:shadow-[0_30px_60px_rgba(26,37,23,0.20)]"}`}>
                           {/* Image Section with Carousel */}
                           <div className="relative">
                             <RestaurantImageCarousel
                               restaurant={restaurant}
                               priority={index < 3}
                               backendOrigin={BACKEND_ORIGIN}
-                              className="h-32 sm:h-40 md:h-48 lg:h-56"
+                              className="h-48 sm:h-40 md:h-48 lg:h-56"
                               roundedClass="rounded-t-[28px]"
                             />
+                            {isRestaurantOffline && (
+                              <div
+                                className="absolute inset-0 z-[8] bg-white/35 dark:bg-black/35 pointer-events-none rounded-t-[28px]"
+                                aria-hidden="true"
+                              />
+                            )}
 
                             {/* Featured Dish Badge - Top Left */}
                             <div className="absolute top-3 left-3 sm:top-4 sm:left-4 flex items-center z-10 transform transition-transform duration-300 group-hover:scale-105">
@@ -2990,6 +2532,11 @@ export default function Home() {
                                 />
                               </Button>
                             </div>
+
+                            <RestaurantChainDistanceBadge
+                              lastCartRestaurant={lastCartRestaurant}
+                              restaurant={restaurant}
+                            />
                           </div>
 
                           {/* Content Section */}
@@ -2998,25 +2545,17 @@ export default function Home() {
                               {/* Restaurant Name & Rating */}
                               <div className="flex items-start justify-between gap-2 mb-2 lg:mb-3">
                                 <div className="flex-1 min-w-0">
-                                  <h3 className="text-base sm:text-lg font-bold text-foreground line-clamp-1 leading-tight group-hover:text-primary transition-colors">
+                                  <h3 className="text-base sm:text-lg font-bold text-foreground line-clamp-2 leading-tight group-hover:text-primary transition-colors break-words">
                                     {restaurant.name}
                                   </h3>
-                                  <div className="flex flex-wrap items-center gap-2 mt-2 min-h-[24px]">
-                                    <span
-                                      className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${availability.isOpen ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
-                                      {availability.isOpen
-                                        ? "Open now"
-                                        : "Offline"}
-                                    </span>
-                                    {hasClosingCountdown && (
-                                      <div className="flex items-center gap-1 text-[9px] sm:text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
-                                        <Timer className="h-3 w-3 flex-shrink-0" strokeWidth={3} />
-                                        <span>
-                                          Closes in {closingCountdown}
-                                        </span>
-                                      </div>
-                                    )}
-                                  </div>
+                                  {hasClosingCountdown && (
+                                    <div className="flex items-center gap-1 mt-2 text-[9px] sm:text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+                                      <Timer className="h-3 w-3 flex-shrink-0" strokeWidth={3} />
+                                      <span>
+                                        Closes in {closingCountdown}
+                                      </span>
+                                    </div>
+                                  )}
                                 </div>
                                 <div className={`flex-shrink-0 min-w-[52px] justify-center ${Number(restaurant.rating) > 0 ? "bg-primary" : "bg-muted"} text-primary-foreground px-2.5 sm:px-3 py-1 rounded-2xl flex items-center gap-1 shadow-sm`}>
                                   <span className="text-xs sm:text-sm font-bold">
@@ -3071,8 +2610,9 @@ export default function Home() {
               <Button
                 variant="outline"
                 onClick={loadMoreRestaurants}
+                disabled={loadingMoreRestaurants}
                 className="text-sm font-medium border-gray-300 hover:border-gray-400">
-                Load more restaurants
+                {loadingMoreRestaurants ? "Loading..." : "Load more restaurants"}
               </Button>
             )}
             <div
@@ -3462,8 +3002,8 @@ export default function Home() {
                     ? "bg-[#0F172A] text-white hover:bg-[#15803D]"
                     : "bg-gray-200 text-gray-500"
                     }`}
-                  disabled={isLoadingFilterResults}>
-                  {isLoadingFilterResults
+                  disabled={loadingRestaurants}>
+                  {loadingRestaurants
                     ? "Loading..."
                     : activeFilters.size > 0 || sortBy || selectedCuisine
                       ? `Show results`

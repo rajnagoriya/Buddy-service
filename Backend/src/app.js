@@ -1,4 +1,5 @@
 import express from 'express';
+import compression from 'compression';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
@@ -15,6 +16,9 @@ const app = express();
 
 // Trust first proxy (essential for express-rate-limit if behind a proxy)
 app.set('trust proxy', 1);
+
+// Gzip/Brotli-compatible compression for JSON responses
+app.use(compression());
 
 // Request ID tracing (before other middlewares so all logs can use it)
 app.use(requestIdMiddleware);

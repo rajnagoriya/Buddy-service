@@ -9,11 +9,13 @@ import {
     cancelOrderController,
     submitOrderRatingsController,
     getOrderDropOtpUserController,
-    updateOrderInstructionsController
+    updateOrderInstructionsController,
+    validateRestaurantChainController,
 } from '../controllers/order.controller.js';
 
 const router = express.Router();
 
+router.post('/validate-restaurant-chain', validateRestaurantChainController);
 router.post('/calculate', calculateOrderController);
 router.post('/', createOrderController);
 router.post('/verify-payment', verifyPaymentController);

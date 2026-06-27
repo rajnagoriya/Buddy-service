@@ -3,6 +3,7 @@ import { useEffect, useState, createContext, useContext } from "react"
 import { ProfileProvider } from "@food/context/ProfileContext"
 import LocationPrompt from "./LocationPrompt"
 import { CartProvider } from "@food/context/CartContext"
+import { RestaurantChainRadiusModalProvider } from "@food/context/RestaurantChainRadiusModalContext"
 import { OrdersProvider } from "@food/context/OrdersContext"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
@@ -139,7 +140,8 @@ export default function UserLayout() {
   const hideFoodHeader =
     normalizedPath.includes("/address-selector") ||
     normalizedPath.includes("/cart") ||
-    normalizedPath.includes("/checkout")
+    normalizedPath.includes("/checkout") ||
+    isProfileRoot
 
   const isFoodHome =
     normalizedPath === "/" ||
@@ -151,6 +153,7 @@ export default function UserLayout() {
   return (
     <div className="min-h-screen bg-[var(--background)] dark:bg-[#0a0a0a] transition-colors duration-200">
       <CartProvider>
+        <RestaurantChainRadiusModalProvider>
         <ProfileProvider>
           <OrdersProvider>
             <SearchOverlayProvider>
@@ -163,11 +166,11 @@ export default function UserLayout() {
                 {showFoodMobileHeader && (
                   <div
                     className={`md:hidden z-[100] ${
-                      isFoodHome ? "fixed top-0 left-0 right-0 pointer-events-none" : "sticky top-0"
+                      (isFoodHome || normalizedPath === "/dining" || normalizedPath === "/user/dining" || normalizedPath === "/under-250" || normalizedPath === "/user/under-250") ? "fixed top-0 left-0 right-0 pointer-events-none" : "sticky top-0"
                     }`}
                   >
                     <div className="pointer-events-auto">
-                      <FoodUserHeader variant={isFoodHome ? "home" : undefined} />
+                      <FoodUserHeader variant={isFoodHome ? "home" : (normalizedPath.includes("/dining") ? "dining" : (normalizedPath.includes("/under-250") ? "under250" : undefined))} />
                     </div>
                   </div>
                 )}
@@ -180,6 +183,7 @@ export default function UserLayout() {
             </SearchOverlayProvider>
           </OrdersProvider>
         </ProfileProvider>
+        </RestaurantChainRadiusModalProvider>
       </CartProvider>
     </div>
   )

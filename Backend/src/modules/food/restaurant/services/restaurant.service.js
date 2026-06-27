@@ -7,6 +7,15 @@ import {
     uploadFoodImage,
 } from '../../services/foodImage.service.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
+import { buildPaginationOptions } from '../../../../utils/helpers.js';
+import {
+    buildRestaurantCityFilter,
+    emptyRestaurantListResponse,
+    formatRestaurantListResponse,
+    HOME_LIST_DEFAULT_LIMIT,
+    HOME_LIST_MAX_LIMIT,
+    isHomeRestaurantListScope,
+} from '../../shared/utils/restaurantListQuery.js';
 import mongoose from 'mongoose';
 import { FoodZone } from '../../admin/models/zone.model.js';
 import { FoodOffer } from '../../admin/models/offer.model.js';
@@ -1508,16 +1517,24 @@ export const uploadRestaurantMenuImages = async (restaurantId, files = []) => {
 };
 
 export const listApprovedRestaurants = async (query = {}) => {
-    const limit = Math.min(Math.max(parseInt(query.limit, 10) || 100, 1), 1000);
-    const page = Math.max(parseInt(query.page, 10) || 1, 1);
-    const skip = (page - 1) * limit;
+    const homeScope = isHomeRestaurantListScope(query);
+    const { page, limit, skip } = buildPaginationOptions(query, {
+        defaultLimit: homeScope ? HOME_LIST_DEFAULT_LIMIT : 20,
+        maxLimit: homeScope ? HOME_LIST_MAX_LIMIT : 100,
+    });
+
+    if (homeScope) {
+        const cityFilter = buildRestaurantCityFilter(query.city);
+        if (!cityFilter) {
+            return emptyRestaurantListResponse(page, limit);
+        }
+    }
 
     const filter = { status: 'approved' };
 
-    if (query.city && String(query.city).trim()) {
-        const city = String(query.city).trim().slice(0, 80);
-        const rx = { $regex: escapeRegex(city), $options: 'i' };
-        filter.$and = [...(filter.$and || []), { $or: [{ 'location.city': rx }, { city: rx }] }];
+    const cityFilter = buildRestaurantCityFilter(query.city);
+    if (cityFilter) {
+        filter.$and = [...(filter.$and || []), cityFilter];
     }
     if (query.area && String(query.area).trim()) {
         const area = String(query.area).trim().slice(0, 80);
@@ -1565,9 +1582,9 @@ export const listApprovedRestaurants = async (query = {}) => {
         }
     }
 
-    // Optional zone polygon filter (when restaurant.zoneId is not set yet).
+    // Zone filter applies to discovery views; home feed is scoped by city only.
     const zoneIdRaw = String(query.zoneId || '').trim();
-    if (zoneIdRaw && mongoose.Types.ObjectId.isValid(zoneIdRaw)) {
+    if (!homeScope && zoneIdRaw && mongoose.Types.ObjectId.isValid(zoneIdRaw)) {
         // Try fast path (precomputed restaurant.zoneId).
         filter.$or = [{ zoneId: new mongoose.Types.ObjectId(zoneIdRaw) }];
         const zoneDoc = await FoodZone.findOne({ _id: zoneIdRaw, isActive: true }).lean();
@@ -1678,7 +1695,7 @@ export const listApprovedRestaurants = async (query = {}) => {
                 outletTimings: outletTimingsMap.get(rid) || defaultOutletTimings
             };
         });
-        return { restaurants, total, page, limit };
+        return formatRestaurantListResponse(restaurants, { page, limit, total });
     }
 
     // Non-geo path: normal query + sort.
@@ -1756,7 +1773,7 @@ export const listApprovedRestaurants = async (query = {}) => {
         };
     });
 
-    return { restaurants, total, page, limit };
+    return formatRestaurantListResponse(restaurants, { page, limit, total });
 };
 
 export const getApprovedRestaurantByIdOrSlug = async (idOrSlug) => {

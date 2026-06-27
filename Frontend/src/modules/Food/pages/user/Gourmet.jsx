@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom"
 import { ArrowLeft, Star, Clock, Bookmark, BadgePercent, Utensils } from "lucide-react"
 import { Button } from "@food/components/ui/button"
 import { Card, CardContent } from "@food/components/ui/card"
-import api from "@food/api"
+import { landingAPI } from "@food/api"
 import useAppBackNavigation from "@food/hooks/useAppBackNavigation"
 import { toast } from "sonner"
 import { API_BASE_URL } from "@food/api/config"
@@ -46,7 +46,7 @@ export default function Gourmet() {
       try {
         setLoading(true)
         setError(null)
-        const response = await api.get('/food/hero-banners/gourmet/public')
+        const response = await landingAPI.getGourmetPublic()
         const data = response?.data?.data
         const list = data?.restaurants ?? (Array.isArray(data) ? data : [])
         setGourmetRestaurants(list)

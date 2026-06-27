@@ -31,12 +31,86 @@ const stub = () =>
     config: {},
   });
 
+function stableStringify(value) {
+  if (value === null || value === undefined) return String(value);
+  if (typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  const keys = Object.keys(value).sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(",")}}`;
+}
+
+function createInFlightCache({ ttlMs }) {
+  const inFlight = new Map();
+  const cached = new Map();
+
+  const getCached = (key) => {
+    const hit = cached.get(key);
+    if (!hit) return null;
+    if (Date.now() - hit.t > ttlMs) {
+      cached.delete(key);
+      return null;
+    }
+    return hit.v;
+  };
+
+  const getOrCreate = (key, factory) => {
+    const cachedValue = getCached(key);
+    if (cachedValue) return Promise.resolve(cachedValue);
+    if (inFlight.has(key)) return inFlight.get(key);
+    const p = Promise.resolve()
+      .then(factory)
+      .then((res) => {
+        cached.set(key, { t: Date.now(), v: res });
+        return res;
+      })
+      .finally(() => {
+        inFlight.delete(key);
+      });
+    inFlight.set(key, p);
+    return p;
+  };
+
+  const clear = (key) => {
+    if (key) {
+      cached.delete(key);
+      inFlight.delete(key);
+      return;
+    }
+    cached.clear();
+    inFlight.clear();
+  };
+
+  return { getOrCreate, clear };
+}
+
 /** Search API - unified search for user app */
+const foodSearchCache = createInFlightCache({ ttlMs: 30 * 1000 });
+const foodSearchCategoriesCache = createInFlightCache({ ttlMs: 5 * 60 * 1000 });
+
 export const searchAPI = {
-  unifiedSearch: (params = {}) =>
-    apiClient.get("/food/search/unified", { params }),
-  getAdminCategories: (params = {}) =>
-    apiClient.get("/food/search/categories/admin", { params }),
+  unifiedSearch: (params = {}, config = {}) => {
+    const { noCache, signal, ...axiosConfig } = config || {};
+    const keyParams = { ...params };
+    delete keyParams._ts;
+    if (noCache || signal) {
+      return apiClient.get("/food/search/unified", { params: keyParams, signal, ...axiosConfig });
+    }
+    const key = `search:${stableStringify(keyParams)}`;
+    return foodSearchCache.getOrCreate(key, () =>
+      apiClient.get("/food/search/unified", { params: keyParams, ...axiosConfig }),
+    );
+  },
+  getAdminCategories: (params = {}, config = {}) => {
+    const { noCache, ...axiosConfig } = config || {};
+    const keyParams = { ...params };
+    if (noCache) {
+      return apiClient.get("/food/search/categories/admin", { params: keyParams, ...axiosConfig });
+    }
+    const key = `search-categories:${stableStringify(keyParams)}`;
+    return foodSearchCategoriesCache.getOrCreate(key, () =>
+      apiClient.get("/food/search/categories/admin", { params: keyParams, ...axiosConfig }),
+    );
+  },
 };
 
 const createStubAPI = () =>
@@ -72,30 +146,7 @@ export const api = {
 };
 
 /** Single in-flight + short cache for user /auth/me - avoids duplicate calls. */
-let userMeInFlight = null;
-let userMeCached = null;
-let userMeCacheTime = 0;
-const USER_ME_CACHE_MS = 3000;
-
-const getUserMeOnce = () => {
-  const now = Date.now();
-  if (userMeCached && now - userMeCacheTime < USER_ME_CACHE_MS) {
-    return Promise.resolve(userMeCached);
-  }
-  if (!userMeInFlight) {
-    userMeInFlight = authService
-      .getMe("user")
-      .then((res) => {
-        userMeCached = res;
-        userMeCacheTime = Date.now();
-        return res;
-      })
-      .finally(() => {
-        userMeInFlight = null;
-      });
-  }
-  return userMeInFlight;
-};
+const getUserMeOnce = () => authService.getMe("user");
 
 /** Auth API - user OTP + admin login via new backend */
 export const authAPI = {
@@ -129,6 +180,7 @@ export const authAPI = {
   getCurrentUser: () => getUserMeOnce(),
   refreshToken: (token) => authService.refreshToken(token),
   logout: (refreshToken, fcmToken = null, platform = "web") => {
+    invalidateUserCartCache();
     const token =
       refreshToken ||
       (typeof localStorage !== "undefined"
@@ -339,10 +391,11 @@ export const adminAPI = {
     apiClient.get(`/food/admin/delivery/${id}`, { contextModule: "admin" }),
   updateDeliveryPartner: (id, body) =>
     apiClient.patch(`/food/admin/delivery/${id}`, body ?? {}, { contextModule: "admin" }),
-  getDeliveryBoySettings: () =>
-    apiClient.get('/food/admin/delivery-boy-settings', { contextModule: "admin" }),
-  updateDeliveryBoySettings: (body) =>
-    apiClient.put('/food/admin/delivery-boy-settings', body ?? {}, { contextModule: "admin" }),
+  getDeliveryBoySettings: (config = {}) => getDeliveryBoySettingsOnce(config),
+  updateDeliveryBoySettings: (body) => {
+    deliveryBoySettingsCache.clear("settings");
+    return apiClient.put('/food/admin/delivery-boy-settings', body ?? {}, { contextModule: "admin" });
+  },
   approveDeliveryPartner: (id) =>
     apiClient.patch(
       `/food/admin/delivery/${String(id)}/approve`,
@@ -1401,8 +1454,7 @@ export const restaurantAPI = {
   getRestaurants: (params = {}, config = {}) =>
     getPublicRestaurantsOnce(params, config),
   /** Public: get single approved restaurant by id or slug */
-  getRestaurantById: (id, config = {}) =>
-    apiClient.get(`/food/restaurant/restaurants/${String(id)}`, { ...config }),
+  getRestaurantById: (id, config = {}) => getPublicRestaurantDetailOnce(id, config),
   /** Public: get approved menu by restaurant id or slug */
   getMenuByRestaurantId: (id, config = {}) =>
     getPublicRestaurantMenuOnce(id, config),
@@ -1442,54 +1494,73 @@ export const restaurantAPI = {
     apiClient.delete("/food/restaurant/account", { contextModule: "restaurant" }),
 };
 
-function stableStringify(value) {
-  if (value === null || value === undefined) return String(value);
-  if (typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
-  const keys = Object.keys(value).sort();
-  return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(",")}}`;
-}
-
-function createInFlightCache({ ttlMs }) {
-  const inFlight = new Map();
-  const cached = new Map(); // key -> { t, v }
-
-  const getCached = (key) => {
-    const hit = cached.get(key);
-    if (!hit) return null;
-    if (Date.now() - hit.t > ttlMs) {
-      cached.delete(key);
-      return null;
-    }
-    return hit.v;
-  };
-
-  const getOrCreate = (key, factory) => {
-    const cachedValue = getCached(key);
-    if (cachedValue) return Promise.resolve(cachedValue);
-    if (inFlight.has(key)) return inFlight.get(key);
-    const p = Promise.resolve()
-      .then(factory)
-      .then((res) => {
-        cached.set(key, { t: Date.now(), v: res });
-        return res;
-      })
-      .finally(() => {
-        inFlight.delete(key);
-      });
-    inFlight.set(key, p);
-    return p;
-  };
-
-  return { getOrCreate };
-}
-
 // Public user-app endpoints can be called by multiple components/effects on refresh (and React StrictMode in dev).
 // A small in-flight + short TTL cache collapses duplicate requests without changing functionality.
 const publicRestaurantsCache = createInFlightCache({ ttlMs: 5 * 60 * 1000 });
 const publicRestaurantMenuCache = createInFlightCache({ ttlMs: 5 * 60 * 1000 });
 const publicRestaurantOutletTimingsCache = createInFlightCache({ ttlMs: 5 * 60 * 1000 });
+const publicRestaurantDetailCache = createInFlightCache({ ttlMs: 5 * 60 * 1000 });
+const publicBusinessSettingsCache = createInFlightCache({ ttlMs: 5 * 60 * 1000 });
+const deliveryBoySettingsCache = createInFlightCache({ ttlMs: 5 * 60 * 1000 });
+const userCartCache = createInFlightCache({ ttlMs: 15 * 1000 });
 const publicGenericGetCache = createInFlightCache({ ttlMs: 3000 });
+
+export const invalidatePublicBusinessSettingsCache = () => {
+  publicBusinessSettingsCache.clear("public");
+};
+
+export const getPublicBusinessSettingsOnce = (config = {}) => {
+  const { noCache } = config || {};
+  if (noCache) {
+    return apiClient.get(API_ENDPOINTS.ADMIN.BUSINESS_SETTINGS_PUBLIC);
+  }
+  return publicBusinessSettingsCache.getOrCreate("public", () =>
+    apiClient.get(API_ENDPOINTS.ADMIN.BUSINESS_SETTINGS_PUBLIC),
+  );
+};
+
+const getDeliveryBoySettingsOnce = (config = {}) => {
+  const { noCache } = config || {};
+  if (noCache) {
+    return apiClient.get("/food/admin/delivery-boy-settings", {
+      contextModule: "admin",
+    });
+  }
+  return deliveryBoySettingsCache.getOrCreate("settings", () =>
+    apiClient.get("/food/admin/delivery-boy-settings", {
+      contextModule: "admin",
+    }),
+  );
+};
+
+export const invalidateUserCartCache = () => {
+  userCartCache.clear("cart");
+};
+
+const getPublicRestaurantDetailOnce = (id, config = {}) => {
+  const safeId = String(id || "").trim();
+  const { noCache, ...axiosConfig } = config || {};
+  if (!safeId) {
+    return Promise.resolve({
+      data: { success: false, data: null },
+      status: 200,
+      statusText: "OK",
+      headers: {},
+      config: {},
+    });
+  }
+  if (noCache) {
+    return apiClient.get(`/food/restaurant/restaurants/${safeId}`, {
+      ...axiosConfig,
+    });
+  }
+  const key = `detail:${safeId}`;
+  return publicRestaurantDetailCache.getOrCreate(key, () =>
+    apiClient.get(`/food/restaurant/restaurants/${safeId}`, {
+      ...axiosConfig,
+    }),
+  );
+};
 
 export const publicGetOnce = (url, config = {}) => {
   const safeUrl = typeof url === "string" ? url.trim() : "";
@@ -1515,27 +1586,36 @@ export const publicGetOnce = (url, config = {}) => {
 
 const getPublicRestaurantsOnce = (params = {}, config = {}) => {
   const { noCache, ...axiosConfig } = config || {};
+  const scopeHome = String(params.scope || "").toLowerCase() === "home";
+  const maxLimit = scopeHome ? 15 : 100;
+  const defaultLimit = scopeHome ? 12 : 20;
+  const keyParams = { page: 1, limit: defaultLimit, ...params };
+  delete keyParams._ts;
+  if (keyParams.page != null) {
+    keyParams.page = Math.max(1, parseInt(keyParams.page, 10) || 1);
+  }
+  if (keyParams.limit != null) {
+    keyParams.limit = Math.min(
+      Math.max(parseInt(keyParams.limit, 10) || defaultLimit, 1),
+      maxLimit,
+    );
+  }
+  if (keyParams.lat != null && Number.isFinite(Number(keyParams.lat))) {
+    keyParams.lat = Math.round(Number(keyParams.lat) * 1000) / 1000;
+  }
+  if (keyParams.lng != null && Number.isFinite(Number(keyParams.lng))) {
+    keyParams.lng = Math.round(Number(keyParams.lng) * 1000) / 1000;
+  }
   if (noCache) {
     return apiClient.get("/food/restaurant/restaurants", {
-      params: { limit: 1000, ...params },
+      params: keyParams,
       ...axiosConfig,
     });
-  }
-  const keyParams = { limit: 1000, ...params };
-  // `_ts` is an explicit cache-buster in many call sites; ignore it for dedupe purposes.
-  if (keyParams && typeof keyParams === "object") {
-    delete keyParams._ts;
-    if (keyParams.lat != null && Number.isFinite(Number(keyParams.lat))) {
-      keyParams.lat = Math.round(Number(keyParams.lat) * 1000) / 1000;
-    }
-    if (keyParams.lng != null && Number.isFinite(Number(keyParams.lng))) {
-      keyParams.lng = Math.round(Number(keyParams.lng) * 1000) / 1000;
-    }
   }
   const key = `restaurants:${stableStringify(keyParams)}`;
   return publicRestaurantsCache.getOrCreate(key, () =>
     apiClient.get("/food/restaurant/restaurants", {
-      params: { limit: 1000, ...params },
+      params: keyParams,
       ...axiosConfig,
     }),
   );
@@ -1543,7 +1623,7 @@ const getPublicRestaurantsOnce = (params = {}, config = {}) => {
 
 const getPublicRestaurantMenuOnce = (id, config = {}) => {
   const safeId = String(id || "").trim();
-  const { noCache, ...axiosConfig } = config || {};
+  const { noCache, params, ...axiosConfig } = config || {};
   if (!safeId) {
     return Promise.resolve({
       data: { success: false, data: null },
@@ -1553,14 +1633,17 @@ const getPublicRestaurantMenuOnce = (id, config = {}) => {
       config: {},
     });
   }
+  const requestParams = params && typeof params === "object" ? params : undefined;
   if (noCache) {
     return apiClient.get(`/food/restaurant/restaurants/${safeId}/menu`, {
+      params: requestParams,
       ...axiosConfig,
     });
   }
-  const key = `menu:${safeId}`;
+  const key = `menu:${safeId}:${stableStringify(requestParams || { page: 1 })}`;
   return publicRestaurantMenuCache.getOrCreate(key, () =>
     apiClient.get(`/food/restaurant/restaurants/${safeId}/menu`, {
+      params: requestParams,
       ...axiosConfig,
     }),
   );
@@ -1593,6 +1676,30 @@ const getPublicRestaurantOutletTimingsOnce = (id, config = {}) => {
 };
 
 /** Session cache for restaurant /food/restaurant/current and /onboarding — one fetch per login. */
+/** Cached public landing/zone reads for Food user app. */
+export const landingAPI = {
+  getHeroBannersPublic: (config = {}) =>
+    publicGetOnce("/food/hero-banners/public", config),
+  getUnder250BannersPublic: (config = {}) =>
+    publicGetOnce("/food/hero-banners/under-250/public", config),
+  getDiningBannersPublic: (config = {}) =>
+    publicGetOnce("/food/hero-banners/dining/public", config),
+  getGourmetPublic: (config = {}) =>
+    publicGetOnce("/food/hero-banners/gourmet/public", config),
+  getExploreIconsPublic: (config = {}) =>
+    publicGetOnce("/food/explore-icons/public", config),
+  getLandingSettingsPublic: (config = {}) =>
+    publicGetOnce("/food/landing/settings/public", config),
+};
+
+const publicZonesCache = createInFlightCache({ ttlMs: 5 * 60 * 1000 });
+
+/** Single in-flight + short cache for restaurant /food/restaurant/current - prevents request storms. */
+let restaurantCurrentInFlight = null;
+let restaurantCurrentCached = null;
+let restaurantCurrentCacheTime = 0;
+const RESTAURANT_CURRENT_CACHE_MS = 3000;
+
 const getRestaurantCurrentOnce = () => {
   if (restaurantSessionCache.current) {
     return Promise.resolve(restaurantSessionCache.current);
@@ -2186,6 +2293,26 @@ export const userAPI = {
     apiClient.post("/food/user/wallet/topup/verify", body ?? {}, {
       contextModule: "user",
     }),
+  /** GET /food/user/cart (Bearer USER) */
+  getCart: (config = {}) => {
+    const { force = false } = config || {};
+    if (force) {
+      invalidateUserCartCache();
+    }
+    return userCartCache.getOrCreate("cart", () =>
+      apiClient.get("/food/user/cart", { contextModule: "user" }),
+    );
+  },
+  /** PUT /food/user/cart (Bearer USER) */
+  syncCart: (body) => {
+    invalidateUserCartCache();
+    return apiClient.put("/food/user/cart", body ?? {}, { contextModule: "user" });
+  },
+  /** POST /food/user/cart/validate-restaurants (Bearer USER) */
+  validateCartRestaurants: (body) =>
+    apiClient.post("/food/user/cart/validate-restaurants", body ?? {}, {
+      contextModule: "user",
+    }),
   /** GET /food/user/addresses (Bearer USER). Deduped + short-cached. */
   getAddresses: (() => {
     let inFlight = null;
@@ -2287,13 +2414,32 @@ export const userAPI = {
 export const locationAPI = createStubAPI();
 export const zoneAPI = {
   /** Public: detect active service zone for a lat/lng point. */
-  detectZone: (lat, lng) =>
-    apiClient.get("/food/zones/detect", {
-      params: { lat, lng },
-    }),
+  detectZone: (lat, lng, config = {}) => {
+    const { noCache, ...axiosConfig } = config || {};
+    const params = {
+      lat: Number.isFinite(Number(lat)) ? Math.round(Number(lat) * 1000) / 1000 : lat,
+      lng: Number.isFinite(Number(lng)) ? Math.round(Number(lng) * 1000) / 1000 : lng,
+    };
+    if (noCache) {
+      return apiClient.get("/food/zones/detect", { params, ...axiosConfig });
+    }
+    const key = `zoneDetect:${stableStringify(params)}`;
+    return publicZonesCache.getOrCreate(key, () =>
+      apiClient.get("/food/zones/detect", { params, ...axiosConfig }),
+    );
+  },
   /** Public: list active zones (for onboarding dropdowns). */
-  getPublicZones: (params = {}, config = {}) =>
-    apiClient.get("/food/zones/public", { params: params ?? {}, ...config }),
+  getPublicZones: (params = {}, config = {}) => {
+    const { noCache, ...axiosConfig } = config || {};
+    const keyParams = { ...(params || {}) };
+    if (noCache) {
+      return apiClient.get("/food/zones/public", { params: keyParams, ...axiosConfig });
+    }
+    const key = `zonesPublic:${stableStringify(keyParams)}`;
+    return publicZonesCache.getOrCreate(key, () =>
+      apiClient.get("/food/zones/public", { params: keyParams, ...axiosConfig }),
+    );
+  },
 };
 export const uploadAPI = {
   /**
@@ -2339,6 +2485,10 @@ export const uploadAPI = {
 };
 /** Order API (user app – Bearer USER token). Minimal calls: single create/verify, list/details cached by caller. */
 export const orderAPI = {
+  validateRestaurantChain: (payload) =>
+    apiClient.post("/food/orders/validate-restaurant-chain", payload ?? {}, {
+      contextModule: "user",
+    }),
   calculateOrder: (payload) =>
     apiClient.post("/food/orders/calculate", payload ?? {}, {
       contextModule: "user",
@@ -2365,6 +2515,18 @@ export const orderAPI = {
         typeof payload.meta === "object"
       ) {
         const meta = payload.meta;
+        const pagination = {
+          total: Number(meta.total || 0),
+          page: Number(meta.page || 1),
+          limit: Number(meta.limit || params.limit || 20),
+          totalPages: Number(meta.totalPages || 1),
+          hasNextPage: Boolean(
+            meta.hasNextPage ?? meta.page < (meta.totalPages || 1),
+          ),
+          hasPreviousPage: Boolean(
+            meta.hasPreviousPage ?? meta.hasPrevPage ?? meta.page > 1,
+          ),
+        };
         return {
           ...res,
           data: {
@@ -2372,12 +2534,25 @@ export const orderAPI = {
             data: {
               ...payload,
               orders: payload.data,
-              pagination: {
-                total: Number(meta.total || 0),
-                page: Number(meta.page || 1),
-                limit: Number(meta.limit || params.limit || 20),
-                pages: Number(meta.totalPages || 1),
-              },
+              pagination,
+            },
+          },
+        };
+      }
+
+      if (
+        payload &&
+        typeof payload === "object" &&
+        payload.pagination &&
+        Array.isArray(payload.data)
+      ) {
+        return {
+          ...res,
+          data: {
+            ...res.data,
+            data: {
+              ...payload,
+              orders: payload.data,
             },
           },
         };
@@ -2641,8 +2816,8 @@ export const diningAPI = {
   getRestaurants: (params = {}) =>
     apiClient.get("/food/dining/restaurants/public", { params }),
   getHeroBanners: () => apiClient.get("/food/hero-banners/dining/public"),
-  getRestaurantBySlug: (slug) =>
-    apiClient.get(`/food/restaurant/restaurants/${String(slug)}`),
+  getRestaurantBySlug: (slug, config = {}) =>
+    getPublicRestaurantDetailOnce(slug, config),
   getOfferBanners: () => Promise.resolve({ data: { success: true, data: [] } }),
   getStories: () => Promise.resolve({ data: { success: true, data: [] } }),
   getBankOffers: () => Promise.resolve({ data: { success: true, data: [] } }),

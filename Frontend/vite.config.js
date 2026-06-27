@@ -13,6 +13,10 @@ const servicesApi = path.resolve(__dirname, './src/services/api')
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  server: {
+    host: true, // Exposes the server to the local network (0.0.0.0)
+    port: 5173, // Optional: keeps it on the standard Vite port
+  },
   resolve: {
     alias: [
       { find: '@food/api/axios', replacement: path.resolve(servicesApi, 'axios.js') },

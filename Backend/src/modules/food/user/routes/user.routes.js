@@ -30,6 +30,11 @@ import {
     listMySupportTicketsController
 } from '../controllers/supportTicket.controller.js';
 import { deleteUserAccountController } from '../controllers/deleteAccount.controller.js';
+import {
+    getUserCartController,
+    syncUserCartController,
+    validateCartRestaurantsController
+} from '../controllers/userCart.controller.js';
 
 const router = express.Router();
 
@@ -53,6 +58,10 @@ router.get('/safety-emergency-reports', listMySafetyEmergencyReportsController);
 // Support tickets (Bearer USER)
 router.post('/support/ticket', createSupportTicketController);
 router.get('/support/my-tickets', listMySupportTicketsController);
+
+router.get('/cart', getUserCartController);
+router.put('/cart', syncUserCartController);
+router.post('/cart/validate-restaurants', validateCartRestaurantsController);
 
 router.get('/addresses', listAddressesController);
 router.post('/addresses', addAddressController);

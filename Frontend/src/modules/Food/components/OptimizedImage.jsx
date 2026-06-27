@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { motion } from 'framer-motion'
+import { buildCloudinarySrcSet, isCloudinaryUrl, optimizeCloudinaryUrl } from '@food/utils/cloudinaryImage'
 
 /**
  * OptimizedImage Component
@@ -36,9 +37,16 @@ const OptimizedImage = React.memo(({
   const supportsOptimization = (imageSrc) => {
     if (!imageSrc || typeof imageSrc !== 'string' || imageSrc === '') return false
     if (imageSrc.startsWith('data:') || imageSrc.startsWith('/')) return false
-    // Check if it's an external URL (http/https)
     return /^https?:\/\//.test(imageSrc)
   }
+
+  const optimizedSrc = useMemo(() => {
+    if (!src || !supportsOptimization(src)) return src
+    if (isCloudinaryUrl(src)) {
+      return optimizeCloudinaryUrl(src, { width: 800, format: 'auto', quality: 'auto' })
+    }
+    return src
+  }, [src])
 
   const appendImageParams = (imageSrc, params) => {
     try {
@@ -54,6 +62,10 @@ const OptimizedImage = React.memo(({
 
   // Generate responsive srcset
   const srcSet = useMemo(() => {
+    if (!src) return undefined
+    if (isCloudinaryUrl(src)) {
+      return buildCloudinarySrcSet(src, [400, 600, 800, 1200, 1600])
+    }
     if (!supportsOptimization(src)) return undefined
     const sizesArr = [400, 600, 800, 1200, 1600]
     return sizesArr
@@ -61,13 +73,9 @@ const OptimizedImage = React.memo(({
       .join(', ')
   }, [src])
 
-  // Generate WebP srcset
   const webPSrcSet = useMemo(() => {
-    if (!supportsOptimization(src)) return undefined
-    const sizesArr = [400, 600, 800, 1200, 1600]
-    return sizesArr
-      .map(size => `${appendImageParams(src, { w: size, q: 80, format: 'webp' })} ${size}w`)
-      .join(', ')
+    if (!src || !isCloudinaryUrl(src)) return undefined
+    return buildCloudinarySrcSet(src, [400, 600, 800, 1200, 1600])
   }, [src])
 
   // Intersection Observer for lazy loading
@@ -126,7 +134,7 @@ const OptimizedImage = React.memo(({
     )
   }
 
-  const imageSrc = hasError ? 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="300"%3E%3Crect fill="%23e5e7eb" width="400" height="300"/%3E%3Ctext fill="%23999" font-family="sans-serif" font-size="14" x="50%25" y="50%25" text-anchor="middle"%3EImage not found%3C/text%3E%3C/svg%3E' : src
+  const imageSrc = hasError ? 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="300"%3E%3Crect fill="%23e5e7eb" width="400" height="300"/%3E%3Ctext fill="%23999" font-family="sans-serif" font-size="14" x="50%25" y="50%25" text-anchor="middle"%3EImage not found%3C/text%3E%3C/svg%3E' : optimizedSrc
 
   return (
     <div className={`relative overflow-hidden ${className}`} ref={imgRef}>

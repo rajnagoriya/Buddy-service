@@ -467,29 +467,66 @@ export default function Dining() {
         }
       `}</style>
       
-      <DiningFiltersBar
-        loading={loading}
-        activeFilters={activeFilters}
-        onToggleFilter={toggleFilter}
-        onOpenFilters={() => setIsFilterOpen(true)}
-      />
+      {/* Mobile hero gradient section */}
+      <div className="md:hidden food-mobile-hero">
+        <div className="food-mobile-hero__glow food-mobile-hero__glow--left" aria-hidden />
+        <div className="food-mobile-hero__glow food-mobile-hero__glow--right" aria-hidden />
+        <div className="food-mobile-hero__pattern" aria-hidden />
+        <div className="pt-[calc(env(safe-area-inset-top,0px)+4.5rem)] px-3">
+          <DiningFiltersBar
+            loading={loading}
+            activeFilters={activeFilters}
+            onToggleFilter={toggleFilter}
+            onOpenFilters={() => setIsFilterOpen(true)}
+          />
 
-      <div className="mt-3 md:mt-4">
-        <DiningQuickActions />
+          <div className="mt-3">
+            <DiningQuickActions />
+          </div>
+
+          <div className="mt-4 pb-4">
+            <DiningHeroBanner
+              banners={diningHeroBanners}
+              loading={loading}
+              currentIndex={currentBannerIndex}
+              onTouchStart={handleBannerTouchStart}
+              onTouchMove={handleBannerTouchMove}
+              onTouchEnd={handleBannerTouchEnd}
+              onDotClick={(index) => {
+                setCurrentBannerIndex(index)
+                resetBannerAutoSlide()
+              }}
+            />
+          </div>
+        </div>
       </div>
 
-      <DiningHeroBanner
-        banners={diningHeroBanners}
-        loading={loading}
-        currentIndex={currentBannerIndex}
-        onTouchStart={handleBannerTouchStart}
-        onTouchMove={handleBannerTouchMove}
-        onTouchEnd={handleBannerTouchEnd}
-        onDotClick={(index) => {
-          setCurrentBannerIndex(index)
-          resetBannerAutoSlide()
-        }}
-      />
+      {/* Desktop view top section */}
+      <div className="hidden md:block">
+        <DiningFiltersBar
+          loading={loading}
+          activeFilters={activeFilters}
+          onToggleFilter={toggleFilter}
+          onOpenFilters={() => setIsFilterOpen(true)}
+        />
+
+        <div className="mt-3 md:mt-4">
+          <DiningQuickActions />
+        </div>
+
+        <DiningHeroBanner
+          banners={diningHeroBanners}
+          loading={loading}
+          currentIndex={currentBannerIndex}
+          onTouchStart={handleBannerTouchStart}
+          onTouchMove={handleBannerTouchMove}
+          onTouchEnd={handleBannerTouchEnd}
+          onDotClick={(index) => {
+            setCurrentBannerIndex(index)
+            resetBannerAutoSlide()
+          }}
+        />
+      </div>
 
       <div className="mx-auto max-w-7xl pb-6">
         <DiningCategoryRow categories={filteredCategories} loading={loading} />

@@ -1,6 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { diningAPI } from "@food/api";
-import api from "@food/api";
+import { diningAPI, landingAPI } from "@food/api";
 
 export const useDiningData = (location) => {
   const [categories, setCategories] = useState([]);
@@ -20,7 +19,7 @@ export const useDiningData = (location) => {
         diningAPI.getStories(),
         diningAPI.getRestaurants(location?.city ? { city: location.city } : {}),
         diningAPI.getBankOffers(),
-        api.get('/food/hero-banners/dining/public').catch(() => ({ data: { success: false } }))
+        landingAPI.getDiningBannersPublic().catch(() => ({ data: { success: false } }))
       ]);
 
       if (cats.data?.success) setCategories(cats.data.data);

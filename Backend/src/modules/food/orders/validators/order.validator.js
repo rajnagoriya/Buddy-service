@@ -89,7 +89,10 @@ export function validateCreateOrderDto(body) {
         // 'razorpay_qr' means COD-style flow, but payment is collected via Razorpay QR at delivery.
         paymentMethod: z.enum(['cash', 'razorpay', 'razorpay_qr', 'card', 'wallet']),
         zoneId: z.string().nullable().optional(),
-        scheduledAt: z.string().datetime({ offset: true }).nullable().optional()
+        scheduledAt: z.string().datetime({ offset: true }).nullable().optional(),
+        deliveryOption: z.string().optional(),
+        deliveryTime: z.string().optional(),
+        estimatedTime: z.number().optional()
     });
     const result = schema.safeParse(body);
     if (!result.success) {
@@ -163,6 +166,19 @@ export function validateDispatchSettingsDto(body) {
     const result = schema.safeParse(body);
     if (!result.success) {
         throw new ValidationError(result.error.errors?.[0]?.message || 'Validation failed');
+    }
+    return result.data;
+}
+
+export function validateRestaurantChainDto(body) {
+    const schema = z.object({
+        lastRestaurantId: z.string().min(1, 'Last restaurant id required'),
+        newRestaurantId: z.string().min(1, 'New restaurant id required'),
+    });
+    const result = schema.safeParse(body || {});
+    if (!result.success) {
+        const first = result.error.issues?.[0];
+        throw new ValidationError(first?.message || 'Validation failed');
     }
     return result.data;
 }
