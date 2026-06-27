@@ -1,44 +1,12 @@
-import { useEffect, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import Loader from "@food/components/Loader";
-import { isModuleAuthenticated } from "@food/utils/auth";
-import { restaurantAPI } from "@food/api";
+import { clearModuleAuth, isModuleAuthenticated } from "@food/utils/auth";
+import { useRestaurantSession, invalidateRestaurantSession } from "@food/context/RestaurantSessionContext";
 import { resolveRestaurantOnboardingStatus } from "@food/utils/onboardingUtils";
-
-let guardCache = null;
+import { isRestaurantBanned } from "@food/utils/restaurantBan";
 
 export function invalidateRestaurantAccessGuardCache() {
-  guardCache = null;
-}
-
-function loadOnboardingState() {
-  const token = localStorage.getItem("restaurant_accessToken");
-  if (guardCache && guardCache.token === token) return guardCache.promise;
-
-  const promise = restaurantAPI
-    .getOnboardingProgress()
-    .then((res) => res?.data?.data?.onboarding || res?.data?.onboarding || null)
-    .catch((err) => {
-      const status = err?.response?.status;
-      if (status === 401 || status === 403) {
-        guardCache = null;
-        throw err;
-      }
-      return null;
-    });
-
-  guardCache = { token, promise };
-  return promise;
-}
-
-if (typeof window !== "undefined" && !window.__restaurantGuardWired) {
-  window.__restaurantGuardWired = true;
-  window.addEventListener("restaurantAuthChanged", invalidateRestaurantAccessGuardCache);
-  window.addEventListener("storage", (e) => {
-    if (e.key === "restaurant_accessToken" || e.key === null) {
-      invalidateRestaurantAccessGuardCache();
-    }
-  });
+  // Kept for callers that invalidate on auth change; session context handles reload.
 }
 
 function resolveRedirect(onboarding, mode, pathname, locationState = {}) {
@@ -74,6 +42,10 @@ function resolveRedirect(onboarding, mode, pathname, locationState = {}) {
     return null;
   }
 
+  if (status === "BANNED") {
+    return null;
+  }
+
   if (status === "IN_PROGRESS" || status === "NOT_STARTED") {
     if (mode === "dashboard") {
       return `/food/restaurant/onboarding?step=${currentStep}`;
@@ -90,83 +62,75 @@ function resolveRedirect(onboarding, mode, pathname, locationState = {}) {
 
 export default function RestaurantAccessGuard({ children, mode = "dashboard" }) {
   const location = useLocation();
-  const [state, setState] = useState({ kind: "loading" });
+  const { onboarding, restaurant, loading, error } = useRestaurantSession();
 
-  useEffect(() => {
-    let cancelled = false;
+  const logoutBanned = () => {
+    clearModuleAuth("restaurant");
+    invalidateRestaurantSession();
+    window.dispatchEvent(new Event("restaurantAuthChanged"));
+    return (
+      <Navigate
+        to="/food/restaurant/login"
+        replace
+        state={{
+          banned: true,
+          message: "Your restaurant account has been banned. Please contact support.",
+        }}
+      />
+    );
+  };
 
-    const run = async () => {
-      if (!isModuleAuthenticated("restaurant")) {
-        if (!cancelled) {
-          setState({
-            kind: "redirect",
-            to: "/food/restaurant/login",
-            from: location.pathname + location.search,
-          });
-        }
-        return;
-      }
+  if (!isModuleAuthenticated("restaurant")) {
+    return (
+      <Navigate
+        to="/food/restaurant/login"
+        replace
+        state={{ from: location.pathname + location.search }}
+      />
+    );
+  }
 
-      try {
-        const onboarding = await loadOnboardingState();
-        if (cancelled) return;
-
-        const redirectTo = resolveRedirect(
-          onboarding,
-          mode,
-          location.pathname,
-          location.state,
-        );
-
-        if (redirectTo) {
-          const status = resolveRestaurantOnboardingStatus(onboarding);
-          setState({
-            kind: "redirect",
-            to: redirectTo,
-            state:
-              status === "REJECTED"
-                ? {
-                    isRejected: true,
-                    rejectionReason: onboarding?.adminRemarks || onboarding?.rejectionReason || "",
-                    rejectionStep:
-                      onboarding?.rejectionStep || onboarding?.currentStep || 1,
-                  }
-                : undefined,
-          });
-          return;
-        }
-
-        setState({ kind: "ok", onboarding });
-      } catch {
-        if (!cancelled) {
-          setState({
-            kind: "redirect",
-            to: "/food/restaurant/login",
-            from: location.pathname + location.search,
-          });
-        }
-      }
-    };
-
-    run();
-    return () => {
-      cancelled = true;
-    };
-  }, [location.pathname, location.search, mode]);
-
-  if (state.kind === "loading") {
+  if (loading) {
     return <Loader />;
   }
 
-  if (state.kind === "redirect") {
+  if (error?.response?.status === 403) {
+    return logoutBanned();
+  }
+
+  const sessionPayload = { ...onboarding, status: restaurant?.status, rejectionReason: restaurant?.rejectionReason, bannedAt: restaurant?.bannedAt };
+  const banned =
+    isRestaurantBanned(restaurant) ||
+    isRestaurantBanned(sessionPayload) ||
+    resolveRestaurantOnboardingStatus(sessionPayload) === "BANNED";
+
+  if (banned) {
+    return logoutBanned();
+  }
+
+  const redirectTo = resolveRedirect(
+    onboarding,
+    mode,
+    location.pathname,
+    location.state,
+  );
+
+  if (redirectTo) {
+    const status = resolveRestaurantOnboardingStatus(onboarding);
     return (
       <Navigate
-        to={state.to}
+        to={redirectTo}
         replace
-        state={{
-          from: state.from,
-          ...(state.state || {}),
-        }}
+        state={
+          status === "REJECTED"
+            ? {
+                isRejected: true,
+                rejectionReason: onboarding?.adminRemarks || onboarding?.rejectionReason || "",
+                rejectionStep:
+                  onboarding?.rejectionStep || onboarding?.currentStep || 1,
+              }
+            : undefined
+        }
       />
     );
   }

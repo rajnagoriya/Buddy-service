@@ -5,6 +5,10 @@
 import apiClient from "./axios.js";
 import { API_ENDPOINTS } from "./config.js";
 import * as authService from "./auth.js";
+import {
+  invalidateRestaurantSessionCache,
+  restaurantSessionCache,
+} from "../../modules/Food/utils/restaurantSessionCache.js";
 
 // Unified BuddyIdentity helpers (single login + driver onboarding/mode).
 export {
@@ -955,21 +959,16 @@ export const restaurantAPI = {
   /** Restaurant dashboard: fetch current restaurant profile (deduped + short-cached). */
   getCurrentRestaurant: () => getRestaurantCurrentOnce(),
   /** Onboarding progress from database. */
-  getOnboardingProgress: () =>
-    apiClient.get("/food/restaurant/onboarding", {
-      contextModule: "restaurant",
-    }),
+  getOnboardingProgress: () => getRestaurantOnboardingOnce(),
   saveOnboardingStep: (step, formData) => {
-    restaurantCurrentCached = null;
-    restaurantCurrentCacheTime = 0;
+    invalidateRestaurantSessionCache();
     return apiClient.put(`/food/restaurant/onboarding/step/${step}`, formData, {
       contextModule: "restaurant",
       headers: { "Content-Type": "multipart/form-data" },
     });
   },
   submitOnboarding: (formData) => {
-    restaurantCurrentCached = null;
-    restaurantCurrentCacheTime = 0;
+    invalidateRestaurantSessionCache();
     return apiClient.post("/food/restaurant/onboarding/submit", formData, {
       contextModule: "restaurant",
       headers: { "Content-Type": "multipart/form-data" },
@@ -1012,9 +1011,7 @@ export const restaurantAPI = {
         contextModule: "restaurant",
       })
       .then((res) => {
-        // Keep cache coherent to avoid an immediate refetch storm.
-        restaurantCurrentCached = res;
-        restaurantCurrentCacheTime = Date.now();
+        restaurantSessionCache.current = res;
         return res;
       }),
   updateDiningSettings: (body) =>
@@ -1023,8 +1020,7 @@ export const restaurantAPI = {
         contextModule: "restaurant",
       })
       .then((res) => {
-        restaurantCurrentCached = res;
-        restaurantCurrentCacheTime = Date.now();
+        restaurantSessionCache.current = res;
         return res;
       }),
   requestDiningUpdate: (body) =>
@@ -1044,9 +1040,7 @@ export const restaurantAPI = {
         { contextModule: "restaurant" },
       )
       .then((res) => {
-        // Keep cache coherent to avoid an immediate refetch storm.
-        restaurantCurrentCached = res;
-        restaurantCurrentCacheTime = Date.now();
+        restaurantSessionCache.current = res;
         return res;
       }),
   /** Upload and set restaurant profile image (multipart). Field name: file */
@@ -1138,7 +1132,6 @@ export const restaurantAPI = {
       params: {
         includeInactive: true,
         withCounts: true,
-        limit: 1000,
         ...params,
       },
       contextModule: "restaurant",
@@ -1382,9 +1375,7 @@ export const restaurantAPI = {
       contextModule: "restaurant",
     }),
   logout: (refreshToken) => {
-    restaurantCurrentInFlight = null;
-    restaurantCurrentCached = null;
-    restaurantCurrentCacheTime = 0;
+    invalidateRestaurantSessionCache();
     const token =
       refreshToken ||
       (typeof localStorage !== "undefined"
@@ -1601,34 +1592,44 @@ const getPublicRestaurantOutletTimingsOnce = (id, config = {}) => {
   );
 };
 
-/** Single in-flight + short cache for restaurant /food/restaurant/current - prevents request storms. */
-let restaurantCurrentInFlight = null;
-let restaurantCurrentCached = null;
-let restaurantCurrentCacheTime = 0;
-const RESTAURANT_CURRENT_CACHE_MS = 3000;
-
+/** Session cache for restaurant /food/restaurant/current and /onboarding — one fetch per login. */
 const getRestaurantCurrentOnce = () => {
-  const now = Date.now();
-  if (
-    restaurantCurrentCached &&
-    now - restaurantCurrentCacheTime < RESTAURANT_CURRENT_CACHE_MS
-  ) {
-    return Promise.resolve(restaurantCurrentCached);
+  if (restaurantSessionCache.current) {
+    return Promise.resolve(restaurantSessionCache.current);
   }
-  if (!restaurantCurrentInFlight) {
-    restaurantCurrentInFlight = apiClient
+  if (!restaurantSessionCache.currentInFlight) {
+    restaurantSessionCache.currentInFlight = apiClient
       .get("/food/restaurant/current", { contextModule: "restaurant" })
       .then((res) => {
-        restaurantCurrentCached = res;
-        restaurantCurrentCacheTime = Date.now();
+        restaurantSessionCache.current = res;
         return res;
       })
       .finally(() => {
-        restaurantCurrentInFlight = null;
+        restaurantSessionCache.currentInFlight = null;
       });
   }
-  return restaurantCurrentInFlight;
+  return restaurantSessionCache.currentInFlight;
 };
+
+const getRestaurantOnboardingOnce = () => {
+  if (restaurantSessionCache.onboarding) {
+    return Promise.resolve(restaurantSessionCache.onboarding);
+  }
+  if (!restaurantSessionCache.onboardingInFlight) {
+    restaurantSessionCache.onboardingInFlight = apiClient
+      .get("/food/restaurant/onboarding", { contextModule: "restaurant" })
+      .then((res) => {
+        restaurantSessionCache.onboarding = res;
+        return res;
+      })
+      .finally(() => {
+        restaurantSessionCache.onboardingInFlight = null;
+      });
+  }
+  return restaurantSessionCache.onboardingInFlight;
+};
+
+export { invalidateRestaurantSessionCache };
 
 /** Single in-flight + short cache for delivery /auth/me - one call per page load / refresh. */
 let deliveryMeInFlight = null;

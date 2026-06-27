@@ -19,13 +19,14 @@ const cacheTimestamps = {
 }
 
 // 1. Restaurant Categories Caching
-export async function getRestaurantCategoriesCached({ force = false } = {}) {
+export async function getRestaurantCategoriesCached(params = {}, { force = false } = {}) {
   const now = Date.now()
-  if (!force && cacheStore.restaurantCategories && (now - cacheTimestamps.restaurantCategories < CACHE_TTL_MS)) {
-    return cacheStore.restaurantCategories
+  const key = JSON.stringify(params)
+  if (!force && cacheStore.restaurantCategories?.key === key && (now - cacheTimestamps.restaurantCategories < CACHE_TTL_MS)) {
+    return cacheStore.restaurantCategories.response
   }
-  const response = await restaurantAPI.getAllCategories()
-  cacheStore.restaurantCategories = response
+  const response = await restaurantAPI.getAllCategories(params)
+  cacheStore.restaurantCategories = { key, response }
   cacheTimestamps.restaurantCategories = now
   return response
 }

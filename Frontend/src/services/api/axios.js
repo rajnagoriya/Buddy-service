@@ -7,6 +7,7 @@
  */
 
 import axios from "axios";
+import { clearModuleAuth } from "../../modules/Food/utils/auth.js";
 
 // Prefer explicit env. If not set, default to /api/v1 so the Vite proxy can forward to backend.
 // This avoids hardcoding ports like 5000 that may conflict with local setups.
@@ -110,15 +111,6 @@ function getRefreshToken(module) {
   }
 }
 
-function clearModuleAuth(module) {
-  try {
-    localStorage.removeItem(`${module}_accessToken`);
-    localStorage.removeItem(`${module}_refreshToken`);
-    localStorage.removeItem(`${module}_authenticated`);
-    localStorage.removeItem(`${module}_user`);
-  } catch (_) {}
-}
-
 let isRefreshing = false;
 let refreshSubscribers = [];
 
@@ -166,13 +158,28 @@ apiClient.interceptors.response.use(
   (response) => response,
   async (err) => {
     const original = err?.config;
+    const module = original?.contextModule || getModuleFromUrl(original?.url || "");
+    const banMessage = String(err?.response?.data?.message || "");
+
+    if (
+      err?.response?.status === 403 &&
+      module === "restaurant" &&
+      /banned/i.test(banMessage)
+    ) {
+      clearModuleAuth("restaurant");
+      window.dispatchEvent(new Event("restaurantAuthChanged"));
+      if (typeof window !== "undefined" && !window.location.pathname.includes("/food/restaurant/login")) {
+        window.location.assign("/food/restaurant/login");
+      }
+      return Promise.reject(err);
+    }
+
     if (err?.response?.status === 429) {
       return Promise.reject(err);
     }
     if (err?.response?.status !== 401 || !original || original._retry) {
       return Promise.reject(err);
     }
-    const module = original.contextModule || getModuleFromUrl(original.url);
     const refreshToken = getRefreshToken(module);
     if (!refreshToken) {
       clearModuleAuth(module);

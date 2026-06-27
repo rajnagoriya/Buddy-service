@@ -1,15 +1,5 @@
-import { useEffect, useState } from "react"
-import { useNavigate } from "react-router-dom"
-import { Bell, Menu, Search } from "lucide-react"
-import { restaurantAPI } from "@food/api"
-import useNotificationInbox from "@food/hooks/useNotificationInbox"
-import { RESTAURANT_BASE } from "@food/utils/restaurantNavConfig"
-
-const extractRestaurantPayload = (response) =>
-  response?.data?.data?.restaurant ||
-  response?.data?.restaurant ||
-  response?.data?.data ||
-  null
+import { Menu, Search } from "lucide-react"
+import { useRestaurantSession } from "@food/context/RestaurantSessionContext"
 
 export default function RestaurantPanelHeader({
   title,
@@ -18,25 +8,13 @@ export default function RestaurantPanelHeader({
   onMenuClick,
   className = "",
 }) {
-  const navigate = useNavigate()
-  const [restaurantName, setRestaurantName] = useState("Your restaurant")
-  const { unreadCount } = useNotificationInbox("restaurant", { limit: 20, pollMs: 60_000 })
+  const { restaurant } = useRestaurantSession()
 
-  useEffect(() => {
-    let mounted = true
-    restaurantAPI
-      .getCurrentRestaurant()
-      .then((res) => {
-        if (!mounted) return
-        const data = extractRestaurantPayload(res)
-        const name = data?.restaurantName || data?.name || data?.businessName
-        if (name) setRestaurantName(name)
-      })
-      .catch(() => {})
-    return () => {
-      mounted = false
-    }
-  }, [])
+  const restaurantName =
+    restaurant?.restaurantName ||
+    restaurant?.name ||
+    restaurant?.businessName ||
+    "Your restaurant"
 
   return (
     <header
@@ -71,20 +49,6 @@ export default function RestaurantPanelHeader({
             />
           </div>
         ) : null}
-
-        <button
-          type="button"
-          onClick={() => navigate(`${RESTAURANT_BASE}/notifications`)}
-          className="relative rounded-xl border border-[var(--rt-border)] p-2.5 hover:bg-gray-50"
-          aria-label="Notifications"
-        >
-          <Bell className="h-5 w-5 text-gray-700" />
-          {unreadCount > 0 ? (
-            <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
-              {unreadCount > 9 ? "9+" : unreadCount}
-            </span>
-          ) : null}
-        </button>
       </div>
     </header>
   )

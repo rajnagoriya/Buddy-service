@@ -15,6 +15,7 @@ import {
   normalizeRestaurantPhone,
   mapDuplicateKeyError,
 } from "./restaurantCreation.service.js";
+import { isRestaurantBanned } from "../utils/restaurantBan.util.js";
 
 export { ensureDraftRestaurantForPhone };
 
@@ -79,6 +80,7 @@ const hasSubmittedProfile = (doc) => {
 
 export const resolveOnboardingStatus = (doc) => {
   if (!doc) return "NOT_STARTED";
+  if (isRestaurantBanned(doc)) return "BANNED";
   if (
     doc.onboardingStatus &&
     ONBOARDING_STATUSES.has(doc.onboardingStatus)
@@ -86,6 +88,7 @@ export const resolveOnboardingStatus = (doc) => {
     return doc.onboardingStatus;
   }
   if (doc.status === "approved") return "APPROVED";
+  if (doc.status === "banned") return "BANNED";
   if (doc.status === "rejected") return "REJECTED";
   if (hasSubmittedProfile(doc)) return "SUBMITTED";
   if (doc.status === "pending") return "IN_PROGRESS";

@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
+import { isRestaurantBanned, LEGACY_ADMIN_BAN_REASON } from '../../restaurant/utils/restaurantBan.util.js';
 import { mergePendingProfileIntoSet } from '../../restaurant/services/restaurantProfileReview.service.js';
 import { buildRawDownloadUrlFromFileUrl } from '../../../../services/cloudinary.service.js';
 import {
@@ -48,6 +49,7 @@ import { FoodDeliveryCashDeposit } from '../../delivery/models/foodDeliveryCashD
 import {
     backfillLegacyCategoryWorkflow,
     categoryAllowsFoodType,
+    GLOBAL_CATEGORY_FILTER,
     normalizeCategoryFoodTypeScope,
     serializeCategoryForResponse
 } from '../../shared/categoryWorkflow.js';
@@ -295,8 +297,26 @@ export async function getRestaurants(query) {
     const skip = (page - 1) * limit;
     const status = query.status;
     const filter = {};
-    if (status && ['pending', 'approved', 'rejected'].includes(status)) {
-        filter.status = status;
+    if (status && ['pending', 'approved', 'rejected', 'banned'].includes(status)) {
+        if (status === 'approved') {
+            filter.$and = [
+                ...(Array.isArray(filter.$and) ? filter.$and : []),
+                {
+                    $or: [
+                        { status: { $in: ['approved', 'banned'] } },
+                        { status: 'rejected', rejectionReason: LEGACY_ADMIN_BAN_REASON },
+                        {
+                            status: 'rejected',
+                            isActive: false,
+                            onboardingStatus: 'APPROVED',
+                        },
+                        { bannedAt: { $exists: true, $ne: null } },
+                    ],
+                },
+            ];
+        } else {
+            filter.status = status;
+        }
     }
     const searchTerm = String(query.search || '').trim();
     if (searchTerm) {
@@ -2358,11 +2378,15 @@ export async function getPendingRestaurants() {
             { status: { $in: ['pending', 'rejected'] } },
             { profileReviewStatus: 'pending' },
         ],
+        status: { $ne: 'banned' },
+        bannedAt: { $exists: false },
     })
         .populate('zoneId', 'name zoneName')
         .sort({ createdAt: -1 })
         .lean();
-    return restaurants.map((r, i) => ({
+    return restaurants
+        .filter((r) => !isRestaurantBanned(r))
+        .map((r, i) => ({
         ...r,
         sl: i + 1,
         zone: r.zoneId?.zoneName || r.zoneId?.name || null,
@@ -2481,17 +2505,36 @@ export async function updateRestaurantStatus(id, body = {}) {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
     const raw = body.status !== undefined ? body.status : body.isActive;
     const isActive = parseBooleanLike(raw, 'status');
-    const status = isActive ? 'approved' : 'rejected';
+
+    if (isActive) {
+        return FoodRestaurant.findByIdAndUpdate(
+            id,
+            {
+                $set: {
+                    status: 'approved',
+                    isActive: true,
+                },
+                $unset: {
+                    bannedAt: 1,
+                },
+            },
+            { new: true, runValidators: false }
+        ).lean();
+    }
 
     return FoodRestaurant.findByIdAndUpdate(
         id,
         {
             $set: {
-                status,
-                approvedAt: isActive ? new Date() : undefined,
-                rejectedAt: isActive ? undefined : new Date(),
-                rejectionReason: isActive ? undefined : 'Disabled by admin'
-            }
+                status: 'banned',
+                isActive: false,
+                bannedAt: new Date(),
+                isAcceptingOrders: false,
+            },
+            $unset: {
+                rejectedAt: 1,
+                rejectionReason: 1,
+            },
         },
         { new: true, runValidators: false }
     ).lean();
@@ -2573,6 +2616,22 @@ export async function getCategories(query) {
     if (query.search && String(query.search).trim()) {
         const term = String(query.search).trim();
         filter.$or = [{ name: { $regex: term, $options: 'i' } }];
+    }
+    const activeFilter = query.status !== undefined ? query.status : query.isActive;
+    if (activeFilter !== undefined) {
+        filter.isActive = activeFilter;
+    }
+    if (query.isGlobal === true) {
+        filter.$and = [...(filter.$and || []), { $or: GLOBAL_CATEGORY_FILTER }];
+    }
+    if (query.restaurantId && mongoose.Types.ObjectId.isValid(String(query.restaurantId))) {
+        const restaurantObjectId = new mongoose.Types.ObjectId(String(query.restaurantId));
+        filter.$and = [...(filter.$and || []), {
+            $or: [
+                { restaurantId: restaurantObjectId },
+                { createdByRestaurantId: restaurantObjectId }
+            ]
+        }];
     }
     // Optional zone filter for admin list.
     // - zoneId=global => only global categories (zoneId missing)
