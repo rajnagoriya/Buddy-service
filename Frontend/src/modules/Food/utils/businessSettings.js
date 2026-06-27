@@ -5,7 +5,7 @@
 
 import apiClient from "@food/api/axios";
 import { API_ENDPOINTS } from "@food/api/config";
-import { publicGetOnce } from "@food/api";
+import { getPublicBusinessSettingsOnce, invalidatePublicBusinessSettingsCache } from "@food/api";
 
 const SETTINGS_KEY = 'food_business_settings';
 
@@ -61,7 +61,9 @@ export const loadBusinessSettings = async (options = {}) => {
     }
 
     inFlightSettingsPromise = (async () => {
-      const response = await publicGetOnce(endpoint);
+      const response = await getPublicBusinessSettingsOnce(
+        forceRefresh ? { noCache: true } : {},
+      );
       const settings = response?.data?.data || response?.data;
 
       if (settings) {
@@ -137,6 +139,7 @@ export const setCachedSettings = (settings) => {
 export const clearCache = () => {
   cachedSettings = null;
   lastFetchedAt = 0;
+  invalidatePublicBusinessSettingsCache();
   try {
     localStorage.removeItem(SETTINGS_KEY);
   } catch (e) {}

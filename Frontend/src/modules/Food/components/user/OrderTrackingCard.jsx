@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo, useRef, useCallback, memo } from "react";
 import { useNavigate } from "react-router-dom";
-import { UtensilsCrossed, ChevronRight, X } from "lucide-react";
+import { ChevronRight, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { orderAPI } from "@food/api";
 
 const CookingAnimation = memo(() => (
   <div className="relative w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center rounded-xl bg-orange-50 border border-orange-100 overflow-visible shadow-[0_4px_15px_rgba(235,89,14,0.15)] shrink-0">
@@ -71,10 +72,12 @@ const DeliveryAnimation = memo(() => (
   </div>
 ));
 
-import { useOrders } from "@food/context/OrdersContext";
-import { orderAPI } from "@food/api";
-
-const getOrderKey = (order) => order?.id || order?._id || order?.orderId || null;
+const getOrderKey = (order) =>
+  order?.orderMongoId ||
+  order?.id ||
+  order?._id ||
+  order?.orderId ||
+  null;
 
 const normalizeOrderToken = (value) =>
   String(value || "")
@@ -142,20 +145,41 @@ const isActiveOrder = (order) => {
 const getTimeRemaining = (order) => {
   if (!order) return null;
 
-  // Use scheduled time if available, fallback to creation time
-  const orderTime = new Date(
-    order.scheduledAt || order.createdAt || order.orderDate || order.created_at || order.date || Date.now(),
+  const status = getOrderStatus(order);
+  if (TERMINAL_STATUSES.has(status)) return null;
+
+  const createdAt = new Date(
+    order.createdAt || order.created_at || order.orderDate || Date.now(),
   );
+  if (Number.isNaN(createdAt.getTime())) return null;
 
-  // For non-scheduled orders, we add the estimated delivery time to the creation time.
-  // For scheduled orders, scheduledAt is already the target time.
-  const isScheduled = !!order.scheduledAt;
-  const estimatedMinutes = isScheduled 
-    ? 0 
-    : (order.estimatedDeliveryTime || order.estimatedTime || order.estimated_delivery_time || 35);
+  const elapsedMinutes = Math.floor((Date.now() - createdAt.getTime()) / 60000);
+  const maxETA =
+    order.eta?.max ??
+    order.eta?.min ??
+    order.estimatedDeliveryTime ??
+    order.estimated_delivery_time ??
+    null;
 
-  const deliveryTime = new Date(orderTime.getTime() + estimatedMinutes * 60000);
-  return Math.max(0, Math.floor((deliveryTime - new Date()) / 60000));
+  if (maxETA == null || maxETA === "") return null;
+
+  const remainingMinutes = Math.max(0, Number(maxETA) - elapsedMinutes);
+  return remainingMinutes > 0 ? remainingMinutes : null;
+};
+
+const getOrderRestaurantName = (order) => {
+  if (!order) return "";
+  const populated = order.restaurantId;
+  if (populated && typeof populated === "object") {
+    const name = populated.restaurantName || populated.name || "";
+    if (String(name).trim()) return String(name).trim();
+  }
+  const direct =
+    order.restaurantName ||
+    order.restaurant ||
+    order.pickups?.[0]?.restaurantName ||
+    "";
+  return String(direct).trim();
 };
 
 function ordersFingerprint(orders) {
@@ -175,21 +199,20 @@ function isUserAuthenticated() {
 }
 
 const ACTIVE_ORDER_POLL_MS = 30000;
-const RECENTLY_PLACED_GRACE_MS = 3 * 60 * 1000;
 
 function OrderTrackingCardInner({ hasBottomNav = true }) {
   const navigate = useNavigate();
-  const { orders: contextOrders } = useOrders();
   const [timeRemaining, setTimeRemaining] = useState(null);
   const [apiOrders, setApiOrders] = useState([]);
   const [hasFetchedApi, setHasFetchedApi] = useState(false);
   const [activeOrderOverride, setActiveOrderOverride] = useState(null);
+  const [pendingPlacedTick, setPendingPlacedTick] = useState(0);
   const lastRefreshRef = useRef(0);
   const lastApiFingerprintRef = useRef("");
   const activeOrderKeyRef = useRef("");
   const activeOrderSnapshotRef = useRef(null);
   const pollIntervalRef = useRef(null);
-  const recentlyPlacedKeysRef = useRef(new Map());
+  const pendingPlacedOrderRef = useRef(null);
   const [invalidOrderIds, setInvalidOrderIds] = useState(new Set());
 
   const stopPolling = useCallback(() => {
@@ -281,49 +304,60 @@ function OrderTrackingCardInner({ hasBottomNav = true }) {
 
     fetchOrders();
 
+    const handleAuthChange = () => {
+      if (isUserAuthenticated()) {
+        fetchOrders({ force: true });
+      } else {
+        pendingPlacedOrderRef.current = null;
+        setPendingPlacedTick((v) => v + 1);
+        setApiOrders([]);
+        setHasFetchedApi(true);
+        stopPolling();
+      }
+    };
+
+    window.addEventListener("userAuthChanged", handleAuthChange);
+
     return () => {
       stopPolling();
+      window.removeEventListener("userAuthChanged", handleAuthChange);
     };
   }, [fetchOrders, stopPolling]);
 
-  const uniqueOrders = useMemo(() => {
-    const now = Date.now();
-    const serverKeys = new Set(
-      (apiOrders || []).map((o) => String(getOrderKey(o) || "")).filter(Boolean),
-    );
-    const seen = new Set();
+  useEffect(() => {
+    const pending = pendingPlacedOrderRef.current;
+    if (!pending) return;
+    const pendingKey = String(getOrderKey(pending) || "");
+    if (!pendingKey) return;
+    if (apiOrders.some((order) => String(getOrderKey(order) || "") === pendingKey)) {
+      pendingPlacedOrderRef.current = null;
+      setPendingPlacedTick((v) => v + 1);
+    }
+  }, [apiOrders]);
 
-    return [...apiOrders, ...contextOrders].filter((order) => {
+  const candidateOrders = useMemo(() => {
+    const list = Array.isArray(apiOrders) ? [...apiOrders] : [];
+    const pending = pendingPlacedOrderRef.current;
+    if (pending) {
+      const pendingKey = String(getOrderKey(pending) || "");
+      if (pendingKey && !list.some((order) => String(getOrderKey(order) || "") === pendingKey)) {
+        list.unshift(pending);
+      }
+    }
+    return list.filter((order) => {
       const key = getOrderKey(order);
-      if (!key || seen.has(key)) {
-        return false;
-      }
-      if (invalidOrderIds.has(key)) {
-        return false;
-      }
-
-      if (hasFetchedApi && !serverKeys.has(String(key))) {
-        const placedAt = recentlyPlacedKeysRef.current.get(String(key));
-        if (placedAt && now - placedAt < RECENTLY_PLACED_GRACE_MS) {
-          seen.add(key);
-          return true;
-        }
-        return false;
-      }
-
-      seen.add(key);
-      return true;
+      return key && !invalidOrderIds.has(String(key));
     });
-  }, [contextOrders, apiOrders, invalidOrderIds, hasFetchedApi]);
+  }, [apiOrders, invalidOrderIds, pendingPlacedTick]);
 
   const activeOrder = useMemo(() => {
-    const candidate = uniqueOrders.find((order) => isActiveOrder(order)) || null;
+    const candidate = candidateOrders.find((order) => isActiveOrder(order)) || null;
     if (!candidate) return null;
     const overrideKey = getOrderKey(activeOrderOverride);
     const candidateKey = getOrderKey(candidate);
     if (overrideKey && candidateKey && overrideKey === candidateKey) return activeOrderOverride;
     return candidate;
-  }, [uniqueOrders, activeOrderOverride]);
+  }, [candidateOrders, activeOrderOverride]);
 
   useEffect(() => {
     const key = String(getOrderKey(activeOrder) || "");
@@ -371,11 +405,10 @@ function OrderTrackingCardInner({ hasBottomNav = true }) {
 
     const handleOrderPlaced = (event) => {
       const detail = event?.detail || {};
-      const placedKey = String(
-        detail?.order?._id || detail?.order?.id || detail?.orderId || "",
-      ).trim();
-      if (placedKey) {
-        recentlyPlacedKeysRef.current.set(placedKey, Date.now());
+      const placedOrder = detail?.order || null;
+      if (placedOrder) {
+        pendingPlacedOrderRef.current = placedOrder;
+        setPendingPlacedTick((v) => v + 1);
       }
       fetchOrders({ force: true });
     };
@@ -390,8 +423,8 @@ function OrderTrackingCardInner({ hasBottomNav = true }) {
   }, [fetchOrders]);
 
   useEffect(() => {
-    syncPolling(uniqueOrders);
-  }, [uniqueOrders, syncPolling]);
+    syncPolling(candidateOrders);
+  }, [candidateOrders, syncPolling]);
 
   useEffect(() => {
     if (!activeOrder) {
@@ -438,12 +471,16 @@ function OrderTrackingCardInner({ hasBottomNav = true }) {
 
   const [dismissedKey, setDismissedKey] = useState(null);
 
+  if (isUserAuthenticated() && !hasFetchedApi) {
+    return null;
+  }
+
   if (!activeOrder) {
     return null;
   }
 
-  const currentOrderKey = activeOrder.id || activeOrder._id || activeOrder.orderId;
-  if (dismissedKey === currentOrderKey) {
+  const currentOrderKey = getOrderKey(activeOrder);
+  if (!currentOrderKey || dismissedKey === currentOrderKey) {
     return null;
   }
 
@@ -453,8 +490,10 @@ function OrderTrackingCardInner({ hasBottomNav = true }) {
     return null;
   }
 
-  const restaurantName =
-    activeOrder.restaurant || activeOrder.restaurantName || "Restaurant";
+  const restaurantName = getOrderRestaurantName(activeOrder);
+  if (!restaurantName) {
+    return null;
+  }
   const statusText = (() => {
     const s = String(orderStatus);
     const p = String(orderPhase);
@@ -484,7 +523,7 @@ function OrderTrackingCardInner({ hasBottomNav = true }) {
           <div 
             onClick={() =>
               navigate(
-                `/food/user/orders/${activeOrder.id || activeOrder._id || activeOrder.orderId}`,
+                `/food/user/orders/${activeOrder.orderMongoId || activeOrder.id || activeOrder._id || activeOrder.orderId}`,
               )
             }
             className="bg-white/95 dark:bg-[#0a0a0a]/95 backdrop-blur-xl rounded-3xl shadow-2xl border border-gray-200 dark:border-gray-800 overflow-hidden cursor-pointer group"

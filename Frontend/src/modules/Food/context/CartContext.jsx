@@ -325,19 +325,29 @@ export function CartProvider({ children }) {
 
   useEffect(() => {
     if (!isFoodUserAuthenticated()) return
+    if (hasRestoredFromServerRef.current) return
     restoreCartFromServer()
-  }, [restoreCartFromServer])
+  }, [])
 
   useEffect(() => {
+    const handleAuthRefresh = () => {
+      if (!isFoodUserAuthenticated()) return
+      hasRestoredFromServerRef.current = false
+      restoreCartFromServer()
+    }
+
     const handleStorage = (event) => {
       if (event.key === "user_accessToken" || event.key === "user_authenticated") {
-        if (isFoodUserAuthenticated()) {
-          restoreCartFromServer()
-        }
+        handleAuthRefresh()
       }
     }
+
     window.addEventListener("storage", handleStorage)
-    return () => window.removeEventListener("storage", handleStorage)
+    window.addEventListener("userAuthChanged", handleAuthRefresh)
+    return () => {
+      window.removeEventListener("storage", handleStorage)
+      window.removeEventListener("userAuthChanged", handleAuthRefresh)
+    }
   }, [restoreCartFromServer])
 
   useEffect(() => {

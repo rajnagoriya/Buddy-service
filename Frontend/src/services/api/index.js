@@ -68,30 +68,7 @@ export const api = {
 };
 
 /** Single in-flight + short cache for user /auth/me - avoids duplicate calls. */
-let userMeInFlight = null;
-let userMeCached = null;
-let userMeCacheTime = 0;
-const USER_ME_CACHE_MS = 3000;
-
-const getUserMeOnce = () => {
-  const now = Date.now();
-  if (userMeCached && now - userMeCacheTime < USER_ME_CACHE_MS) {
-    return Promise.resolve(userMeCached);
-  }
-  if (!userMeInFlight) {
-    userMeInFlight = authService
-      .getMe("user")
-      .then((res) => {
-        userMeCached = res;
-        userMeCacheTime = Date.now();
-        return res;
-      })
-      .finally(() => {
-        userMeInFlight = null;
-      });
-  }
-  return userMeInFlight;
-};
+const getUserMeOnce = () => authService.getMe("user");
 
 /** Auth API - user OTP + admin login via new backend */
 export const authAPI = {
@@ -125,6 +102,7 @@ export const authAPI = {
   getCurrentUser: () => getUserMeOnce(),
   refreshToken: (token) => authService.refreshToken(token),
   logout: (refreshToken, fcmToken = null, platform = "web") => {
+    invalidateUserCartCache();
     const token =
       refreshToken ||
       (typeof localStorage !== "undefined"
@@ -335,10 +313,11 @@ export const adminAPI = {
     apiClient.get(`/food/admin/delivery/${id}`, { contextModule: "admin" }),
   updateDeliveryPartner: (id, body) =>
     apiClient.patch(`/food/admin/delivery/${id}`, body ?? {}, { contextModule: "admin" }),
-  getDeliveryBoySettings: () =>
-    apiClient.get('/food/admin/delivery-boy-settings', { contextModule: "admin" }),
-  updateDeliveryBoySettings: (body) =>
-    apiClient.put('/food/admin/delivery-boy-settings', body ?? {}, { contextModule: "admin" }),
+  getDeliveryBoySettings: (config = {}) => getDeliveryBoySettingsOnce(config),
+  updateDeliveryBoySettings: (body) => {
+    deliveryBoySettingsCache.clear("settings");
+    return apiClient.put('/food/admin/delivery-boy-settings', body ?? {}, { contextModule: "admin" });
+  },
   approveDeliveryPartner: (id) =>
     apiClient.patch(
       `/food/admin/delivery/${String(id)}/approve`,
@@ -1410,8 +1389,7 @@ export const restaurantAPI = {
   getRestaurants: (params = {}, config = {}) =>
     getPublicRestaurantsOnce(params, config),
   /** Public: get single approved restaurant by id or slug */
-  getRestaurantById: (id, config = {}) =>
-    apiClient.get(`/food/restaurant/restaurants/${String(id)}`, { ...config }),
+  getRestaurantById: (id, config = {}) => getPublicRestaurantDetailOnce(id, config),
   /** Public: get approved menu by restaurant id or slug */
   getMenuByRestaurantId: (id, config = {}) =>
     getPublicRestaurantMenuOnce(id, config),
@@ -1490,7 +1468,17 @@ function createInFlightCache({ ttlMs }) {
     return p;
   };
 
-  return { getOrCreate };
+  const clear = (key) => {
+    if (key) {
+      cached.delete(key);
+      inFlight.delete(key);
+      return;
+    }
+    cached.clear();
+    inFlight.clear();
+  };
+
+  return { getOrCreate, clear };
 }
 
 // Public user-app endpoints can be called by multiple components/effects on refresh (and React StrictMode in dev).
@@ -1498,7 +1486,68 @@ function createInFlightCache({ ttlMs }) {
 const publicRestaurantsCache = createInFlightCache({ ttlMs: 5 * 60 * 1000 });
 const publicRestaurantMenuCache = createInFlightCache({ ttlMs: 5 * 60 * 1000 });
 const publicRestaurantOutletTimingsCache = createInFlightCache({ ttlMs: 5 * 60 * 1000 });
+const publicRestaurantDetailCache = createInFlightCache({ ttlMs: 5 * 60 * 1000 });
+const publicBusinessSettingsCache = createInFlightCache({ ttlMs: 5 * 60 * 1000 });
+const deliveryBoySettingsCache = createInFlightCache({ ttlMs: 5 * 60 * 1000 });
+const userCartCache = createInFlightCache({ ttlMs: 15 * 1000 });
 const publicGenericGetCache = createInFlightCache({ ttlMs: 3000 });
+
+export const invalidatePublicBusinessSettingsCache = () => {
+  publicBusinessSettingsCache.clear("public");
+};
+
+export const getPublicBusinessSettingsOnce = (config = {}) => {
+  const { noCache } = config || {};
+  if (noCache) {
+    return apiClient.get(API_ENDPOINTS.ADMIN.BUSINESS_SETTINGS_PUBLIC);
+  }
+  return publicBusinessSettingsCache.getOrCreate("public", () =>
+    apiClient.get(API_ENDPOINTS.ADMIN.BUSINESS_SETTINGS_PUBLIC),
+  );
+};
+
+const getDeliveryBoySettingsOnce = (config = {}) => {
+  const { noCache } = config || {};
+  if (noCache) {
+    return apiClient.get("/food/admin/delivery-boy-settings", {
+      contextModule: "admin",
+    });
+  }
+  return deliveryBoySettingsCache.getOrCreate("settings", () =>
+    apiClient.get("/food/admin/delivery-boy-settings", {
+      contextModule: "admin",
+    }),
+  );
+};
+
+export const invalidateUserCartCache = () => {
+  userCartCache.clear("cart");
+};
+
+const getPublicRestaurantDetailOnce = (id, config = {}) => {
+  const safeId = String(id || "").trim();
+  const { noCache, ...axiosConfig } = config || {};
+  if (!safeId) {
+    return Promise.resolve({
+      data: { success: false, data: null },
+      status: 200,
+      statusText: "OK",
+      headers: {},
+      config: {},
+    });
+  }
+  if (noCache) {
+    return apiClient.get(`/food/restaurant/restaurants/${safeId}`, {
+      ...axiosConfig,
+    });
+  }
+  const key = `detail:${safeId}`;
+  return publicRestaurantDetailCache.getOrCreate(key, () =>
+    apiClient.get(`/food/restaurant/restaurants/${safeId}`, {
+      ...axiosConfig,
+    }),
+  );
+};
 
 export const publicGetOnce = (url, config = {}) => {
   const safeUrl = typeof url === "string" ? url.trim() : "";
@@ -2198,10 +2247,20 @@ export const userAPI = {
       contextModule: "user",
     }),
   /** GET /food/user/cart (Bearer USER) */
-  getCart: () => apiClient.get("/food/user/cart", { contextModule: "user" }),
+  getCart: (config = {}) => {
+    const { force = false } = config || {};
+    if (force) {
+      invalidateUserCartCache();
+    }
+    return userCartCache.getOrCreate("cart", () =>
+      apiClient.get("/food/user/cart", { contextModule: "user" }),
+    );
+  },
   /** PUT /food/user/cart (Bearer USER) */
-  syncCart: (body) =>
-    apiClient.put("/food/user/cart", body ?? {}, { contextModule: "user" }),
+  syncCart: (body) => {
+    invalidateUserCartCache();
+    return apiClient.put("/food/user/cart", body ?? {}, { contextModule: "user" });
+  },
   /** POST /food/user/cart/validate-restaurants (Bearer USER) */
   validateCartRestaurants: (body) =>
     apiClient.post("/food/user/cart/validate-restaurants", body ?? {}, {
@@ -2691,8 +2750,8 @@ export const diningAPI = {
   getRestaurants: (params = {}) =>
     apiClient.get("/food/dining/restaurants/public", { params }),
   getHeroBanners: () => apiClient.get("/food/hero-banners/dining/public"),
-  getRestaurantBySlug: (slug) =>
-    apiClient.get(`/food/restaurant/restaurants/${String(slug)}`),
+  getRestaurantBySlug: (slug, config = {}) =>
+    getPublicRestaurantDetailOnce(slug, config),
   getOfferBanners: () => Promise.resolve({ data: { success: true, data: [] } }),
   getStories: () => Promise.resolve({ data: { success: true, data: [] } }),
   getBankOffers: () => Promise.resolve({ data: { success: true, data: [] } }),
