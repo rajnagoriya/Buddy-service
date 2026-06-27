@@ -15,8 +15,13 @@ import {
   Plus,
   Trash2,
   Upload,
+  Folder,
+  CheckCircle2,
+  XCircle,
+  RotateCw,
 } from "lucide-react"
 import { restaurantAPI, uploadAPI } from "@food/api"
+import { getRestaurantCategoriesCached } from "@food/utils/foodListingsCache"
 import { toast } from "sonner"
 import { ImageSourcePicker } from "@food/components/ImageSourcePicker"
 import { isFlutterBridgeAvailable } from "@food/utils/imageUploadUtils"
@@ -77,10 +82,10 @@ export default function MenuCategoriesPage() {
     [categories],
   )
 
-  const fetchCategories = async () => {
+  const fetchCategories = async (options = {}) => {
     try {
       setLoading(true)
-      const response = await restaurantAPI.getAllCategories()
+      const response = await getRestaurantCategoriesCached(options)
       const list = response?.data?.data?.categories || []
       setCategories(Array.isArray(list) ? list : [])
     } catch (error) {
@@ -184,7 +189,7 @@ export default function MenuCategoriesPage() {
       }
 
       resetModal()
-      fetchCategories()
+      fetchCategories({ force: true })
     } catch (error) {
       toast.error(error?.response?.data?.message || "Failed to save category")
     } finally {
@@ -202,7 +207,7 @@ export default function MenuCategoriesPage() {
     try {
       await restaurantAPI.deleteCategory(category._id || category.id)
       toast.success("Category deleted successfully")
-      fetchCategories()
+      fetchCategories({ force: true })
     } catch (error) {
       toast.error(error?.response?.data?.message || "Failed to delete category")
     }
@@ -218,7 +223,7 @@ export default function MenuCategoriesPage() {
         isActive: !(category?.isActive !== false),
       })
       toast.success("Category updated and sent for admin approval")
-      fetchCategories()
+      fetchCategories({ force: true })
     } catch (error) {
       toast.error(error?.response?.data?.message || "Failed to update category")
     }
@@ -239,13 +244,60 @@ export default function MenuCategoriesPage() {
           </p>
         </div>
 
-        <button
-          onClick={openCreateModal}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white"
-        >
-          <Plus className="h-5 w-5" />
-          Add Category
-        </button>
+        {/* Statistics Cards */}
+        <div className="grid grid-cols-3 gap-4">
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total</p>
+              <h3 className="text-xl font-bold text-slate-900 mt-1">{ownCategories.length}</h3>
+            </div>
+            <div className="h-9 w-9 rounded-xl bg-slate-100 flex items-center justify-center text-slate-600 shrink-0">
+              <Folder className="h-4 w-4" />
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-emerald-100 p-4 shadow-sm flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-emerald-600">Active</p>
+              <h3 className="text-xl font-bold text-emerald-700 mt-1">
+                {ownCategories.filter((c) => c.isActive !== false).length}
+              </h3>
+            </div>
+            <div className="h-9 w-9 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600 shrink-0">
+              <CheckCircle2 className="h-4 w-4" />
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-rose-100 p-4 shadow-sm flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-rose-600">Deactive</p>
+              <h3 className="text-xl font-bold text-rose-700 mt-1">
+                {ownCategories.filter((c) => c.isActive === false).length}
+              </h3>
+            </div>
+            <div className="h-9 w-9 rounded-xl bg-rose-50 flex items-center justify-center text-rose-600 shrink-0">
+              <XCircle className="h-4 w-4" />
+            </div>
+          </div>
+        </div>
+
+        <div className="flex gap-3">
+          <button
+            onClick={() => fetchCategories({ force: true })}
+            disabled={loading}
+            className="flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-3 font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            <RotateCw className={`h-5 w-5 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+          <button
+            onClick={openCreateModal}
+            className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white"
+          >
+            <Plus className="h-5 w-5" />
+            Add Category
+          </button>
+        </div>
 
         {loading ? (
           <div className="flex items-center justify-center py-12">

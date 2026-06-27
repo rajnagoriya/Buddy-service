@@ -1,7 +1,8 @@
 import { useState, useMemo, useEffect, useCallback } from "react"
 import { useSearchParams } from "react-router-dom"
-import { Search, Trash2, Loader2, Eye, Pencil, Plus, Save, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react"
+import { Search, Trash2, Loader2, Eye, Pencil, Plus, Save, ChevronDown, ChevronLeft, ChevronRight, Utensils, CheckCircle2, XCircle, RotateCw } from "lucide-react"
 import { adminAPI, uploadAPI } from "@food/api"
+import { getAdminFoodsCached, getAdminRestaurantsActiveCached, getAdminRestaurantsInactiveCached } from "@food/utils/foodListingsCache"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@food/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@food/components/ui/popover"
@@ -76,13 +77,13 @@ export default function FoodsList() {
     return `${url}${url.includes("?") ? "&" : "?"}v=${imageVersion}`
   }
 
-  const fetchAllFoods = useCallback(async () => {
+  const fetchAllFoods = useCallback(async (options = {}) => {
     try {
       setLoading(true)
 
       const [activeRestaurantsResponse, inactiveRestaurantsResponse] = await Promise.all([
-        adminAPI.getRestaurants({ limit: 1000 }),
-        adminAPI.getRestaurants({ limit: 1000, status: "inactive" }),
+        getAdminRestaurantsActiveCached(options),
+        getAdminRestaurantsInactiveCached(options),
       ])
 
       const activeRestaurants = activeRestaurantsResponse?.data?.data?.restaurants ||
@@ -116,7 +117,7 @@ export default function FoodsList() {
         return
       }
 
-      const foodsRes = await adminAPI.getFoods({ limit: 1000 })
+      const foodsRes = await getAdminFoodsCached(options)
       const list = foodsRes?.data?.data?.foods || []
       const approvedOnly = Array.isArray(list)
         ? list.filter((f) => String(f?.approvalStatus || "").toLowerCase() === "approved")
@@ -427,7 +428,7 @@ export default function FoodsList() {
       setFoodForm(createFoodForm())
       setSelectedImageFile(null)
       setImagePreviewUrl("")
-      await fetchAllFoods()
+      await fetchAllFoods({ force: true })
     } catch (error) {
       debugError("Error saving food:", error)
       toast.error(error?.response?.data?.message || "Failed to save food")
@@ -447,7 +448,7 @@ export default function FoodsList() {
     try {
       setDeleting(true)
       await adminAPI.deleteFood(food?._id || food?.id)
-      setFoods((prev) => prev.filter((f) => String(f.id) !== String(id)))
+      await fetchAllFoods({ force: true })
       toast.success("Food item deleted successfully")
     } catch (error) {
       debugError("Error deleting food:", error)
@@ -489,6 +490,15 @@ export default function FoodsList() {
           <div className="flex items-center gap-3 flex-wrap">
             <button
               type="button"
+              onClick={() => fetchAllFoods({ force: true })}
+              disabled={loading}
+              className="px-4 py-2.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-medium hover:bg-slate-50 inline-flex items-center gap-2 disabled:opacity-50"
+            >
+              <RotateCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+              <span>Refresh</span>
+            </button>
+            <button
+              type="button"
               onClick={openAddFoodModal}
               className="px-4 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 inline-flex items-center gap-2"
             >
@@ -517,6 +527,43 @@ export default function FoodsList() {
                 </option>
               ))}
             </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Statistics Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm flex items-center justify-between hover:shadow-md transition-all">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total Foods</p>
+            <h3 className="text-2xl font-bold text-slate-900 mt-1">{filteredFoods.length}</h3>
+          </div>
+          <div className="h-10 w-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-600 shrink-0">
+            <Utensils className="h-5 w-5" />
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-emerald-100 p-5 shadow-sm flex items-center justify-between hover:shadow-md transition-all">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-emerald-600">Active</p>
+            <h3 className="text-2xl font-bold text-emerald-700 mt-1">
+              {filteredFoods.filter((f) => f.isAvailable !== false).length}
+            </h3>
+          </div>
+          <div className="h-10 w-10 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600 shrink-0">
+            <CheckCircle2 className="h-5 w-5" />
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-rose-100 p-5 shadow-sm flex items-center justify-between hover:shadow-md transition-all">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-rose-600">Deactive</p>
+            <h3 className="text-2xl font-bold text-rose-700 mt-1">
+              {filteredFoods.filter((f) => f.isAvailable === false).length}
+            </h3>
+          </div>
+          <div className="h-10 w-10 rounded-xl bg-rose-50 flex items-center justify-center text-rose-600 shrink-0">
+            <XCircle className="h-5 w-5" />
           </div>
         </div>
       </div>
