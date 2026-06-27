@@ -9,7 +9,12 @@ dns.setServers(['8.8.8.8', '1.1.1.1']);
 
 export const connectDB = async () => {
     try {
-        const conn = await mongoose.connect(config.mongodbUri);
+        const poolSize = Number(process.env.MONGO_MAX_POOL_SIZE || 10);
+        const conn = await mongoose.connect(config.mongodbUri, {
+            maxPoolSize: Number.isFinite(poolSize) && poolSize > 0 ? poolSize : 10,
+            serverSelectionTimeoutMS: Number(process.env.MONGO_CONNECT_TIMEOUT_MS || 10000),
+            socketTimeoutMS: Number(process.env.MONGO_SOCKET_TIMEOUT_MS || 45000),
+        });
         logger.info(`MongoDB connected: ${conn.connection.host}`);
     } catch (error) {
         logger.error(`MongoDB connection error: ${error.message}`);

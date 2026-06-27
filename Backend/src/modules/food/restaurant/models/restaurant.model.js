@@ -487,6 +487,8 @@ restaurantSchema.index(
 );
 restaurantSchema.index({ status: 1, createdAt: -1 });
 restaurantSchema.index({ status: 1, city: 1, createdAt: -1 });
+restaurantSchema.index({ status: 1, restaurantName: 1 });
+restaurantSchema.index({ restaurantName: 'text', cuisines: 'text' }, { weights: { restaurantName: 10, cuisines: 3 } });
 restaurantSchema.index({ status: 1, "location.city": 1, createdAt: -1 });
 
 export const FoodRestaurant = mongoose.model(

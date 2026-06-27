@@ -81,7 +81,7 @@ export default function ProfessionalSearch() {
     localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(newHistory))
   }
 
-  const performSearch = useCallback(async (searchTerm, catId) => {
+  const performSearch = useCallback(async (searchTerm, catId, signal) => {
     if (!searchTerm && !catId) {
       setResults({ restaurants: [], dishes: [] })
       return
@@ -95,7 +95,7 @@ export default function ProfessionalSearch() {
         lat: userCoords?.latitude,
         lng: userCoords?.longitude,
         zoneId
-      })
+      }, { signal })
       
       if (res.data?.success) {
         // Grouping results into Restaurants and potential Dishes
@@ -106,6 +106,7 @@ export default function ProfessionalSearch() {
         })
       }
     } catch (err) {
+      if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') return
       console.error("Search failed", err)
     } finally {
       setLoading(false)
@@ -113,10 +114,12 @@ export default function ProfessionalSearch() {
   }, [userCoords, zoneId])
 
   useEffect(() => {
-    performSearch(debouncedQuery, selectedCategoryId)
+    const controller = new AbortController()
+    performSearch(debouncedQuery, selectedCategoryId, controller.signal)
     if (debouncedQuery) {
         setSearchParams({ q: debouncedQuery, ...(selectedCategoryId ? { cat: selectedCategoryId } : {}) })
     }
+    return () => controller.abort()
   }, [debouncedQuery, selectedCategoryId, performSearch, setSearchParams])
 
   // Speech Recognition Implementation

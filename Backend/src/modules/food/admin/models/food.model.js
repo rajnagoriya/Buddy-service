@@ -39,5 +39,7 @@ foodSchema.index({ restaurantId: 1, createdAt: -1 });
 foodSchema.index({ approvalStatus: 1, createdAt: -1 });
 foodSchema.index({ approvalStatus: 1, requestedAt: -1 });
 foodSchema.index({ restaurantId: 1, approvalStatus: 1, createdAt: -1 });
+foodSchema.index({ approvalStatus: 1, name: 1 });
+foodSchema.index({ name: 'text', description: 'text' }, { weights: { name: 10, description: 2 } });
 
 export const FoodItem = mongoose.model('FoodItem', foodSchema);

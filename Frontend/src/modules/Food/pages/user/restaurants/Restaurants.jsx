@@ -76,13 +76,11 @@ export default function Restaurants() {
     const fetchRestaurants = async () => {
       try {
         setLoading(true);
-        const params = { limit: 300, _ts: Date.now() };
+        const params = { limit: 100, page: 1 };
         if (zoneId) {
           params.zoneId = zoneId;
         }
-        const response = await restaurantAPI.getRestaurants(params, {
-          noCache: true,
-        });
+        const response = await restaurantAPI.getRestaurants(params);
         const list =
           response?.data?.data?.restaurants ||
           response?.data?.restaurants ||

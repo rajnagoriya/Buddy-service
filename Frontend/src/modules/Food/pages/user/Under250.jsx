@@ -28,8 +28,7 @@ import { useCart } from "@food/context/CartContext";
 import offerImage from "@food/assets/offerimage.png";
 import AddToCartAnimation from "@food/components/user/AddToCartAnimation";
 import OptimizedImage from "@food/components/OptimizedImage";
-import api from "@food/api";
-import { restaurantAPI, adminAPI } from "@food/api";
+import { landingAPI, restaurantAPI, adminAPI } from "@food/api";
 import { isModuleAuthenticated } from "@food/utils/auth";
 import { flattenMenuItems } from "@food/utils/menuItems";
 import {
@@ -283,8 +282,7 @@ export default function Under250() {
   useEffect(() => {
     let cancelled = false;
     setLoadingBanner(true);
-    api
-      .get("/food/hero-banners/under-250/public")
+    landingAPI.getUnder250BannersPublic()
       .then((res) => {
         if (cancelled) return;
         const data = res?.data?.data;
@@ -314,8 +312,7 @@ export default function Under250() {
   // Fetch landing settings to get dynamic price limit
   useEffect(() => {
     let cancelled = false;
-    api
-      .get("/food/landing/settings/public")
+    landingAPI.getLandingSettingsPublic()
       .then((res) => {
         if (cancelled) return;
         const settings = res?.data?.data;
