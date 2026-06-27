@@ -60,10 +60,10 @@ import {
   hasFoodVariants,
 } from "@food/utils/foodVariants"
 import {
+  getRestaurantFssaiImage,
   getRestaurantFssaiNumber,
   resolveFoodItemImage,
 } from "@food/utils/common"
-import fssaiLogo from "@food/assets/fssai.png"
 import { RestaurantDetailSkeleton } from "@food/components/ui/loading-skeletons"
 import {
   RestaurantHero,
@@ -77,6 +77,7 @@ import MenuSectionBlock, {
   MenuEmptyComingSoon,
   MenuEmptyNoMatches,
   RestaurantFssaiBadge,
+  FssaiLogoImage,
   FloatingMenuFab,
 } from "@food/components/user/restaurant-details/MenuSectionBlock"
 
@@ -836,6 +837,12 @@ function RestaurantDetailsContent() {
               actualRestaurant?.onboarding?.step3?.fssai?.registrationNumber ||
               apiRestaurant?.onboarding?.step3?.fssai?.registrationNumber ||
               "",
+            fssaiImage:
+              actualRestaurant?.fssaiImage ||
+              apiRestaurant?.fssaiImage ||
+              actualRestaurant?.onboarding?.step3?.fssai?.image ||
+              apiRestaurant?.onboarding?.step3?.fssai?.image ||
+              null,
             // Availability fields for grayscale styling
             isActive: actualRestaurant?.isActive !== false, // Default to true if not specified
             isAcceptingOrders: actualRestaurant?.isAcceptingOrders !== false, // Default to true if not specified
@@ -2434,7 +2441,7 @@ function RestaurantDetailsContent() {
 
       <RestaurantFssaiBadge
         registrationNumber={getRestaurantFssaiNumber(restaurant)}
-        logoSrc={fssaiLogo}
+        logoSrc={getRestaurantFssaiImage(restaurant, BACKEND_ORIGIN)}
       />
 
       <FloatingMenuFab
@@ -3517,10 +3524,8 @@ function RestaurantDetailsContent() {
                     {getRestaurantFssaiNumber(restaurant) && (
                       <div className="mt-4 px-2 pt-4 border-t border-gray-100 dark:border-gray-800 flex items-center gap-3 opacity-80 mb-2">
                         <div className="h-8 w-14 flex items-center justify-center bg-white rounded p-1 border border-gray-100">
-                          <img
-                            src={fssaiLogo}
-                            alt="FSSAI"
-                            className="h-full w-auto object-contain"
+                          <FssaiLogoImage
+                            src={getRestaurantFssaiImage(restaurant, BACKEND_ORIGIN)}
                           />
                         </div>
                         <div className="flex-1">

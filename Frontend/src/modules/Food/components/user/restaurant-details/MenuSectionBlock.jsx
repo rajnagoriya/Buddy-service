@@ -1,7 +1,41 @@
+import { useEffect, useState } from "react"
 import { ChevronDown, Utensils } from "lucide-react"
 import { Button } from "@food/components/ui/button"
 import { hasFoodVariants } from "@food/utils/foodVariants"
 import { MenuDishCarouselCard, MenuDishListCard } from "./MenuDishCard"
+
+export function FssaiLogoImage({
+  src,
+  className = "h-full w-auto object-contain",
+  alt = "FSSAI",
+}) {
+  const [hasError, setHasError] = useState(false)
+  const imageSrc = typeof src === "string" ? src.trim() : ""
+
+  useEffect(() => {
+    setHasError(false)
+  }, [imageSrc])
+
+  if (hasError || !imageSrc) {
+    return (
+      <span
+        className="flex h-full w-full items-center justify-center text-[9px] font-bold uppercase tracking-wide text-[#F47920]"
+        aria-hidden="true"
+      >
+        FSSAI
+      </span>
+    )
+  }
+
+  return (
+    <img
+      src={imageSrc}
+      alt={alt}
+      className={className}
+      onError={() => setHasError(true)}
+    />
+  )
+}
 
 function DishCardWrapper({
   item,
@@ -272,7 +306,7 @@ export function RestaurantFssaiBadge({ registrationNumber, logoSrc }) {
     <div className="mx-4 mb-24 mt-2 rounded-2xl border border-dashed border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-white/5 p-4">
       <div className="flex items-center gap-4 max-w-7xl lg:mx-auto">
         <div className="h-11 w-16 flex items-center justify-center bg-white rounded-xl p-1 shadow-sm border border-gray-100">
-          <img src={logoSrc} alt="FSSAI" className="h-full w-auto object-contain" />
+          <FssaiLogoImage src={logoSrc} />
         </div>
         <div>
           <p className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">FSSAI License</p>

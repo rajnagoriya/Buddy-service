@@ -73,6 +73,15 @@ export const getRestaurantFssaiNumber = (restaurant) => {
   ).trim();
 };
 
+export const getRestaurantFssaiImage = (restaurant, backendOrigin = "") => {
+  if (!restaurant) return "";
+  const raw =
+    restaurant.fssaiImage ||
+    restaurant?.onboarding?.step3?.fssai?.image ||
+    null;
+  return extractImages(raw, backendOrigin)[0] || "";
+};
+
 export const resolveFoodItemImage = (item, backendOrigin = "") => {
   if (!item || typeof item !== "object") return "";
   return (
