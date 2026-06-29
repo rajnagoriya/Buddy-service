@@ -53,6 +53,7 @@ const vehicleSchema = new mongoose.Schema(
     type: { type: String, default: '', trim: true },
     make: { type: String, default: '', trim: true },
     model: { type: String, default: '', trim: true },
+    vehicleTypeId: { type: String, default: '', trim: true },
     number: { type: String, default: '', trim: true },
     color: { type: String, default: '', trim: true },
     photoUrl: { type: String, default: '', trim: true },

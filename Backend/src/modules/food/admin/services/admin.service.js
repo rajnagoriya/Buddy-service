@@ -9,6 +9,7 @@ import {
     deleteFoodImageAsset,
 } from '../../services/foodImage.service.js';
 import { FoodDeliveryPartner } from '../../delivery/models/deliveryPartner.model.js';
+import { BuddyIdentity } from '../../../../core/identity/buddyIdentity.model.js';
 import { DeliverySupportTicket } from '../../delivery/models/supportTicket.model.js';
 import { FoodZone } from '../models/zone.model.js';
 import { FoodCategory } from '../models/category.model.js';
@@ -4513,46 +4514,153 @@ export async function checkEarningAddonCompletions(deliveryPartnerId, _force = f
     return { completionsFound: globalCompletions };
 }
 
+const pickText = (value) => {
+    if (value == null) return '';
+    const text = String(value).trim();
+    return text;
+};
+
+const buildDeliveryPartnerDetail = (partner, identity = null) => {
+    const kyc = identity?.kyc || {};
+    const bank = identity?.bank || {};
+    const foodVehicle = identity?.foodVehicle || {};
+    const taxiVehicle = identity?.taxiVehicle || {};
+
+    const aadhaarNumber = pickText(kyc.aadhaar?.number) || pickText(partner.aadharNumber);
+    const aadhaarFront = pickText(kyc.aadhaar?.documentUrl) || pickText(partner.aadharPhoto);
+    const aadhaarBack = pickText(kyc.aadhaar?.backDocumentUrl);
+    const panNumber = pickText(kyc.pan?.number) || pickText(partner.panNumber);
+    const panPhoto = pickText(kyc.pan?.documentUrl) || pickText(partner.panPhoto);
+    const dlNumber = pickText(kyc.drivingLicense?.number) || pickText(partner.drivingLicenseNumber);
+    const dlPhoto = pickText(kyc.drivingLicense?.documentUrl) || pickText(partner.drivingLicensePhoto);
+    const selfieUrl = pickText(identity?.onboardingSelfieUrl) || pickText(partner.profilePhoto);
+
+    const vehicleMake = pickText(foodVehicle.make);
+    const vehicleModel = pickText(foodVehicle.model);
+    const vehicleName =
+        [vehicleMake, vehicleModel].filter(Boolean).join(' ').trim() || pickText(partner.vehicleName);
+
+    const accountHolder = pickText(bank.accountHolderName) || pickText(partner.bankAccountHolderName);
+    const accountNumber = pickText(bank.accountNumber) || pickText(partner.bankAccountNumber);
+    const ifscCode = pickText(bank.ifscCode) || pickText(partner.bankIfscCode);
+    const bankName = pickText(bank.bankName) || pickText(partner.bankName);
+    const branchName = pickText(bank.branchName);
+    const upiId = pickText(bank.upiId) || pickText(partner.upiId);
+    const upiQrCode = pickText(bank.upiQrCodeUrl) || pickText(partner.upiQrCode);
+
+    const deliveryId = partner._id
+        ? `DP-${partner._id.toString().slice(-8).toUpperCase()}`
+        : null;
+
+    return {
+        ...partner,
+        identityId: partner.identityId || null,
+        name: pickText(partner.name) || pickText(identity?.name),
+        email: pickText(partner.email) || pickText(identity?.email) || null,
+        phone: pickText(partner.phone) || pickText(identity?.phone),
+        countryCode: partner.countryCode || identity?.countryCode || '+91',
+        city: pickText(partner.city) || pickText(identity?.city),
+        gender: pickText(identity?.gender) || null,
+        deliveryId,
+        status: partner.status === 'rejected' ? 'blocked' : partner.status,
+        rejectionReason: partner.rejectionReason || null,
+        rejectedAt: partner.rejectedAt || null,
+        approvedAt: partner.approvedAt || null,
+        onboardingServices: Array.isArray(identity?.onboardingServices)
+            ? identity.onboardingServices
+            : [],
+        onboardingComplete: Boolean(identity?.onboardingComplete),
+        profileImage: selfieUrl ? { url: selfieUrl } : partner.profilePhoto ? { url: partner.profilePhoto } : null,
+        profilePhoto: selfieUrl || partner.profilePhoto || null,
+        documents: {
+            aadhar:
+                aadhaarNumber || aadhaarFront || aadhaarBack
+                    ? {
+                          number: aadhaarNumber || null,
+                          document: aadhaarFront || null,
+                          backDocument: aadhaarBack || null,
+                      }
+                    : null,
+            pan:
+                panNumber || panPhoto
+                    ? {
+                          number: panNumber || null,
+                          document: panPhoto || null,
+                      }
+                    : null,
+            drivingLicense:
+                dlNumber || dlPhoto
+                    ? {
+                          number: dlNumber || null,
+                          document: dlPhoto || null,
+                      }
+                    : null,
+            selfie: selfieUrl ? { document: selfieUrl } : null,
+            bankDetails:
+                accountHolder || accountNumber || ifscCode || bankName || branchName || upiId || upiQrCode
+                    ? {
+                          accountHolderName: accountHolder || null,
+                          accountNumber: accountNumber || null,
+                          ifscCode: ifscCode || null,
+                          bankName: bankName || null,
+                          branchName: branchName || null,
+                          upiId: upiId || null,
+                          upiQrCode: upiQrCode || null,
+                      }
+                    : null,
+        },
+        location:
+            partner.address || partner.city || partner.state || identity?.city
+                ? {
+                      addressLine1: pickText(partner.address) || null,
+                      city: pickText(partner.city) || pickText(identity?.city) || null,
+                      state: pickText(partner.state) || null,
+                  }
+                : null,
+        vehicle:
+            foodVehicle.type ||
+            foodVehicle.number ||
+            partner.vehicleType ||
+            partner.vehicleNumber ||
+            vehicleName
+                ? {
+                      type: pickText(foodVehicle.type) || pickText(partner.vehicleType) || null,
+                      brand: vehicleMake || vehicleName || null,
+                      model: vehicleModel || null,
+                      name: vehicleName || null,
+                      number: pickText(foodVehicle.number) || pickText(partner.vehicleNumber) || null,
+                      color: pickText(foodVehicle.color) || null,
+                      photoUrl: pickText(foodVehicle.photoUrl) || null,
+                      rcUrl: pickText(foodVehicle.rcUrl) || null,
+                      insuranceUrl: pickText(foodVehicle.insuranceUrl) || null,
+                  }
+                : null,
+        taxiVehicle: taxiVehicle?.number
+            ? {
+                  type: pickText(taxiVehicle.type) || null,
+                  make: pickText(taxiVehicle.make) || null,
+                  model: pickText(taxiVehicle.model) || null,
+                  number: pickText(taxiVehicle.number) || null,
+                  vehicleTypeId: pickText(taxiVehicle.vehicleTypeId) || null,
+                  color: pickText(taxiVehicle.color) || null,
+                  photoUrl: pickText(taxiVehicle.photoUrl) || null,
+                  rcUrl: pickText(taxiVehicle.rcUrl) || null,
+                  insuranceUrl: pickText(taxiVehicle.insuranceUrl) || null,
+              }
+            : null,
+    };
+};
+
 export async function getDeliveryPartnerById(id) {
     const partner = await FoodDeliveryPartner.findById(id).lean();
     if (!partner) return null;
-    const deliveryId = partner._id ? `DP-${partner._id.toString().slice(-8).toUpperCase()}` : null;
-    return {
-        ...partner,
-        email: partner.email || null,
-        deliveryId,
-        status: partner.status === 'rejected' ? 'blocked' : partner.status,
-        profileImage: partner.profilePhoto ? { url: partner.profilePhoto } : null,
-        documents: {
-            aadhar: (partner.aadharPhoto || partner.aadharNumber)
-                ? { number: partner.aadharNumber || null, document: partner.aadharPhoto || null }
-                : null,
-            pan: (partner.panPhoto || partner.panNumber)
-                ? { number: partner.panNumber || null, document: partner.panPhoto || null }
-                : null,
-            drivingLicense: partner.drivingLicensePhoto ? { document: partner.drivingLicensePhoto } : null,
-            bankDetails:
-                partner.bankAccountHolderName || partner.bankAccountNumber || partner.bankIfscCode || partner.bankName
-                    ? {
-                        accountHolderName: partner.bankAccountHolderName || null,
-                        accountNumber: partner.bankAccountNumber || null,
-                        ifscCode: partner.bankIfscCode || null,
-                        bankName: partner.bankName || null
-                    }
-                    : null
-        },
-        location: (partner.address || partner.city || partner.state)
-            ? { addressLine1: partner.address, city: partner.city, state: partner.state }
-            : null,
-        vehicle: (partner.vehicleType || partner.vehicleName || partner.vehicleNumber)
-            ? {
-                type: partner.vehicleType,
-                brand: partner.vehicleName,
-                model: partner.vehicleName,
-                number: partner.vehicleNumber
-            }
-            : null
-    };
+
+    let identity = null;
+    if (partner.identityId) {
+        identity = await BuddyIdentity.findById(partner.identityId).lean();
+    }
+
+    return buildDeliveryPartnerDetail(partner, identity);
 }
 
 export async function updateDeliveryPartner(id, payload) {

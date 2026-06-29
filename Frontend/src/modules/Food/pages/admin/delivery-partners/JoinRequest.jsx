@@ -1,9 +1,10 @@
 import { useState, useMemo, useEffect } from "react"
-import { Search, Filter, Eye, Check, X, Package, ArrowUpDown, FileText, FileSpreadsheet, Loader2, Download, ExternalLink, Calendar, MapPin, CreditCard, User, Mail, Phone, Bike, FileCheck } from "lucide-react"
+import { Search, Filter, Eye, Check, X, Package, ArrowUpDown, FileText, FileSpreadsheet, Loader2 } from "lucide-react"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
 import { exportJoinRequestsToExcel, exportJoinRequestsToPDF } from "@food/components/admin/deliveryman/joinRequestExportUtils"
+import DeliveryPartnerJoinDetailModal from "@food/components/admin/deliveryman/DeliveryPartnerJoinDetailModal"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -20,6 +21,7 @@ export default function JoinRequest() {
   const [isViewOpen, setIsViewOpen] = useState(false)
   const [selectedRequest, setSelectedRequest] = useState(null)
   const [viewDetails, setViewDetails] = useState(null)
+  const [viewLoading, setViewLoading] = useState(false)
   const [processing, setProcessing] = useState(false)
   const [rejectionReason, setRejectionReason] = useState("")
   const [filters, setFilters] = useState({
@@ -175,21 +177,25 @@ export default function JoinRequest() {
   }
 
   const handleView = async (request) => {
+    setSelectedRequest(request)
+    setViewDetails(null)
+    setIsViewOpen(true)
     try {
-      setLoading(true)
+      setViewLoading(true)
       const response = await adminAPI.getDeliveryPartnerById(request._id)
-      
+
       if (response.data && response.data.success) {
         setViewDetails(response.data.data.delivery)
-        setIsViewOpen(true)
       } else {
         toast.error("Failed to load details")
+        setIsViewOpen(false)
       }
     } catch (err) {
       debugError("Error fetching details:", err)
       toast.error(err.response?.data?.message || "Failed to load details")
+      setIsViewOpen(false)
     } finally {
-      setLoading(false)
+      setViewLoading(false)
     }
   }
 

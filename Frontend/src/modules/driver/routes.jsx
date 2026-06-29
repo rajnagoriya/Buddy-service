@@ -15,18 +15,18 @@
 
 import { Routes, Route, Navigate } from "react-router-dom";
 import { Suspense, lazy } from "react";
-import Loader from "@food/components/Loader";
 import DriverGuard from "./components/DriverGuard";
+import DriverPageLoader from "./components/DriverPageLoader";
+import Login from "./pages/Login";
+import OnboardingWizard from "./pages/OnboardingWizard";
+import DriverGate from "./pages/DriverGate";
 
-const Login = lazy(() => import("./pages/Login"));
-const OnboardingWizard = lazy(() => import("./pages/OnboardingWizard"));
 const DriverHome = lazy(() => import("./pages/DriverHome"));
-const DriverGate = lazy(() => import("./pages/DriverGate"));
 const DriverProfile = lazy(() => import("./pages/DriverProfile"));
 
 export default function DriverRoutes() {
   return (
-    <Suspense fallback={<Loader />}>
+    <Suspense fallback={<DriverPageLoader />}>
       <Routes>
         <Route index element={<DriverGate />} />
 
