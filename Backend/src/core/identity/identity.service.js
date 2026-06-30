@@ -149,9 +149,11 @@ const sanitizeIdentityForResponse = (identity) => ({
 const summariseCapabilities = (partner, driver) => ({
   food: partner ? partner.status || 'approved' : 'not_enabled',
   taxi: driver
-    ? driver.approve === false || String(driver.status || '').toLowerCase() === 'pending'
-      ? 'pending'
-      : driver.status || 'approved'
+    ? String(driver.status || '').toLowerCase() === 'rejected'
+      ? 'rejected'
+      : driver.approve === false || String(driver.status || '').toLowerCase() === 'pending'
+        ? 'pending'
+        : driver.status || 'approved'
     : 'not_enabled',
 });
 

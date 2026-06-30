@@ -396,18 +396,18 @@ export const adminAPI = {
     deliveryBoySettingsCache.clear("settings");
     return apiClient.put('/food/admin/delivery-boy-settings', body ?? {}, { contextModule: "admin" });
   },
-  approveDeliveryPartner: (id) =>
+  approveDeliveryPartner: (id, service = 'food') =>
     apiClient.patch(
       `/food/admin/delivery/${String(id)}/approve`,
-      {},
+      { service },
       {
         contextModule: "admin",
       },
     ),
-  rejectDeliveryPartner: (id, reason) =>
+  rejectDeliveryPartner: (id, reason, service = 'food') =>
     apiClient.patch(
       `/food/admin/delivery/${String(id)}/reject`,
-      { reason: String(reason || "").trim() },
+      { reason: String(reason || "").trim(), service },
       {
         contextModule: "admin",
       },

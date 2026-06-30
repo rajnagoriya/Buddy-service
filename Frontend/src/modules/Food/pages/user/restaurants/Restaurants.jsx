@@ -293,7 +293,7 @@ export default function Restaurants() {
                   </Link>
                 </ScrollReveal>
               );
-            })}
+            })}0
           </div>
         )}
       </div>

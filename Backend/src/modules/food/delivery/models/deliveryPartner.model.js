@@ -161,7 +161,19 @@ const deliveryPartnerSchema = new mongoose.Schema(
                 type: [Number],
                 default: [0, 0],
             },
-        }
+        },
+        submissionHistory: {
+            type: [
+                {
+                    submittedAt: { type: Date, default: null },
+                    resubmittedAt: { type: Date, default: null },
+                    previousStatus: { type: String, default: '', trim: true },
+                    previousRejectionReason: { type: String, default: '', trim: true },
+                    status: { type: String, default: 'pending', trim: true },
+                },
+            ],
+            default: [],
+        },
     },
     {
         collection: 'buddy_deliveries',

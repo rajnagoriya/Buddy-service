@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 
 import { driverOnboardingAPI } from "@food/api";
-import Loader from "@food/components/Loader";
+import DriverPageLoader from "./DriverPageLoader";
 
 /**
  * Single source of truth for /driver/* access control.
@@ -127,7 +127,7 @@ export default function DriverGuard({
     };
   }, [publicOnly, requireOnboardingComplete, location.pathname]);
 
-  if (status === "loading") return <Loader />;
+  if (status === "loading") return <DriverPageLoader />;
   if (status === "redirect" && redirectTo) {
     return <Navigate to={redirectTo} state={{ from: location.pathname }} replace />;
   }
