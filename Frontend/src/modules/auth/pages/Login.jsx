@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Link, useNavigate } from "react-router-dom"
+import { Link, useLocation, useNavigate } from "react-router-dom"
 import {
   ArrowRight,
   Loader2,
@@ -41,6 +41,7 @@ export default function UnifiedOTPFastLogin() {
   const [pendingVerify, setPendingVerify] = useState(null)
   const [deactivatedError, setDeactivatedError] = useState(false)
   const navigate = useNavigate()
+  const loginLocation = useLocation()
   const submitting = useRef(false)
 
   const normalizedPhone = () => {
@@ -555,11 +556,19 @@ export default function UnifiedOTPFastLogin() {
 
             <p className="text-center text-[10px] text-gray-500 font-medium max-w-[280px]">
               By continuing, you agree to our{" "}
-              <Link to="/terms" className="text-primary font-semibold hover:underline">
+              <Link
+                to="/terms"
+                state={{ from: `${loginLocation.pathname}${loginLocation.search}` }}
+                className="text-primary font-semibold hover:underline"
+              >
                 Terms & Conditions
               </Link>{" "}
               and{" "}
-              <Link to="/privacy" className="text-primary font-semibold hover:underline">
+              <Link
+                to="/privacy"
+                state={{ from: `${loginLocation.pathname}${loginLocation.search}` }}
+                className="text-primary font-semibold hover:underline"
+              >
                 Privacy Policy
               </Link>
               .

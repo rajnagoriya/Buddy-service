@@ -16,6 +16,8 @@ import {
     HOME_LIST_MAX_LIMIT,
     isHomeRestaurantListScope,
 } from '../../shared/utils/restaurantListQuery.js';
+import { getRestaurantAddressSummary } from '../../shared/utils/restaurantAddress.js';
+import { enrichRestaurantsWithDistance, formatDistanceLabel } from '../../shared/utils/restaurantDistance.js';
 import mongoose from 'mongoose';
 import { FoodZone } from '../../admin/models/zone.model.js';
 import { FoodOffer } from '../../admin/models/offer.model.js';
@@ -66,6 +68,29 @@ const normalizeTotalRatingsValue = (value) => {
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) return 0;
     return Math.max(0, Math.floor(numeric));
+};
+
+const mapRestaurantListItem = (r, extras = {}) => {
+    const distanceMeters = Number.isFinite(r.distanceMeters) ? r.distanceMeters : null;
+    return {
+        ...r,
+        restaurantId: r._id,
+        id: r._id,
+        name: r.restaurantName || '',
+        rating: normalizeRatingValue(r.rating),
+        totalRatings: normalizeTotalRatingsValue(r.totalRatings),
+        addressSummary: getRestaurantAddressSummary(r),
+        distanceMeters,
+        distanceInKm: distanceMeters !== null
+            ? Number((distanceMeters / 1000).toFixed(2))
+            : (r.distanceInKm ?? null),
+        distance: r.distance || (distanceMeters !== null ? formatDistanceLabel(distanceMeters) : ''),
+        distanceSource: r.distanceSource || null,
+        profileImage: r.profileImage ? { url: r.profileImage } : null,
+        coverImages: Array.isArray(r.coverImages) ? r.coverImages : [],
+        menuImages: Array.isArray(r.menuImages) ? r.menuImages : [],
+        ...extras,
+    };
 };
 
 const toUrl = (v) => (v && (typeof v === 'string' ? v : v.url)) ? (typeof v === 'string' ? v : v.url) : '';
@@ -1599,7 +1624,9 @@ export const listApprovedRestaurants = async (query = {}) => {
 
     // Use $geoNear only when geo is explicitly needed (radius filter or nearest sorting).
     // This avoids accidentally hiding restaurants that do not have coordinates yet.
-    const wantsGeo = (radiusKm !== null) || sortBy === 'nearest';
+    const wantsGeo = (radiusKm !== null)
+        || sortBy === 'nearest'
+        || (homeScope && lat !== null && lng !== null);
     if (lat !== null && lng !== null && wantsGeo) {
         const geoNear = {
             $geoNear: {
@@ -1651,20 +1678,12 @@ export const listApprovedRestaurants = async (query = {}) => {
         const defaultOutletTimings = getDefaultOutletTimingsShape();
         const restaurants = (pageDocs || []).map((r) => {
             const rid = String(r._id);
-            return {
-                ...r,
-                restaurantId: r._id,
-                id: r._id,
-                name: r.restaurantName || '',
-                rating: normalizeRatingValue(r.rating),
-                totalRatings: normalizeTotalRatingsValue(r.totalRatings),
-                profileImage: r.profileImage ? { url: r.profileImage } : null,
-                coverImages: Array.isArray(r.coverImages) ? r.coverImages : [],
-                menuImages: Array.isArray(r.menuImages) ? r.menuImages : [],
-                outletTimings: outletTimingsMap.get(rid) || defaultOutletTimings
-            };
+            return mapRestaurantListItem(r, {
+                outletTimings: outletTimingsMap.get(rid) || defaultOutletTimings,
+            });
         });
-        return formatRestaurantListResponse(restaurants, { page, limit, total });
+        const enriched = await enrichRestaurantsWithDistance(restaurants, { lat, lng });
+        return formatRestaurantListResponse(enriched, { page, limit, total });
     }
 
     // Non-geo path: normal query + sort.
@@ -1728,24 +1747,17 @@ export const listApprovedRestaurants = async (query = {}) => {
 
     const restaurants = (restaurantsRaw || []).map((r) => {
         const rid = String(r._id);
-        return {
-            ...r,
-            // Frontend user app expects `name` and often checks `profileImage.url`
-            restaurantId: r._id,
-            id: r._id,
-            name: r.restaurantName || '',
-            rating: normalizeRatingValue(r.rating),
-            totalRatings: normalizeTotalRatingsValue(r.totalRatings),
-            profileImage: r.profileImage ? { url: r.profileImage } : null,
-            coverImages: Array.isArray(r.coverImages) ? r.coverImages : [],
-            // Keep menuImages as an array for fallbacks; allow both string and {url} on client.
-            menuImages: Array.isArray(r.menuImages) ? r.menuImages : [],
+        return mapRestaurantListItem(r, {
             featuredItems: featuredItemsMap.get(rid) || [],
-            outletTimings: outletTimingsMap.get(rid) || defaultOutletTimings
-        };
+            outletTimings: outletTimingsMap.get(rid) || defaultOutletTimings,
+        });
     });
 
-    return formatRestaurantListResponse(restaurants, { page, limit, total });
+    const enriched = (lat !== null && lng !== null)
+        ? await enrichRestaurantsWithDistance(restaurants, { lat, lng })
+        : restaurants;
+
+    return formatRestaurantListResponse(enriched, { page, limit, total });
 };
 
 export const getApprovedRestaurantByIdOrSlug = async (idOrSlug) => {

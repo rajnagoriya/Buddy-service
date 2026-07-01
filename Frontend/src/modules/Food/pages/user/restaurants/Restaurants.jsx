@@ -16,6 +16,13 @@ import { API_BASE_URL } from "@food/api/config";
 import { useDelayedLoading } from "@food/hooks/useDelayedLoading";
 import { useCart } from "@food/context/CartContext";
 import {
+  getRestaurantAddressLine,
+  hasDisplayableRestaurantRating,
+  formatRestaurantRating,
+  resolveRestaurantDistance,
+} from "@food/utils/restaurantDisplay";
+import { resolveUserListCity } from "@food/utils/restaurantListParams";
+import {
   getLastRestaurantFromCart,
   getChainDistanceBadge,
 } from "@food/utils/restaurantRadius";
@@ -80,6 +87,17 @@ export default function Restaurants() {
         if (zoneId) {
           params.zoneId = zoneId;
         }
+        const city = resolveUserListCity(userLocation);
+        if (city) {
+          params.city = city;
+        }
+        if (
+          Number.isFinite(userLocation?.latitude) &&
+          Number.isFinite(userLocation?.longitude)
+        ) {
+          params.lat = userLocation.latitude;
+          params.lng = userLocation.longitude;
+        }
         const response = await restaurantAPI.getRestaurants(params);
         const list =
           response?.data?.data?.restaurants ||
@@ -99,22 +117,21 @@ export default function Restaurants() {
             restaurant.cuisines.length > 0
               ? restaurant.cuisines[0]
               : "Multi-cuisine";
+          const { distance } = resolveRestaurantDistance(restaurant, userLocation);
           return {
             id: restaurant?._id || restaurant?.restaurantId || slug,
             slug,
             name: restaurant?.name || "Unknown Restaurant",
+            address: getRestaurantAddressLine(restaurant),
             cuisine,
-            rating: Number(restaurant?.rating || 0) || 4.5,
+            rating: Number(restaurant?.rating) || 0,
+            totalRatings: Number(restaurant?.totalRatings) || 0,
             deliveryTime:
               restaurant?.estimatedDeliveryTime ||
               (restaurant?.estimatedDeliveryTimeMinutes
                 ? `${restaurant.estimatedDeliveryTimeMinutes} mins`
                 : "25-30 mins"),
-            distance: restaurant?.distance
-              ? typeof restaurant.distance === "number"
-                ? `${restaurant.distance.toFixed(1)} km`
-                : restaurant.distance
-              : "1.2 km",
+            distance,
             priceRange: restaurant?.priceRange || "$$",
             image: pickRestaurantImage(restaurant),
             latitude: restaurant?.location?.coordinates?.[1] ?? null,
@@ -138,7 +155,7 @@ export default function Restaurants() {
     return () => {
       cancelled = true;
     };
-  }, [zoneId]);
+  }, [zoneId, userLocation?.latitude, userLocation?.longitude, userLocation?.city]);
 
   const hasRestaurants = useMemo(
     () => restaurants.length > 0,
@@ -220,17 +237,24 @@ export default function Restaurants() {
                                   <CardTitle className="text-base sm:text-lg md:text-xl mb-1 line-clamp-2 text-gray-900 dark:text-white">
                                     {restaurant.name}
                                   </CardTitle>
+                                  {restaurant.address ? (
+                                    <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 line-clamp-1 mb-1">
+                                      {restaurant.address}
+                                    </p>
+                                  ) : null}
                                   <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 font-medium mb-2 line-clamp-1">
                                     {restaurant.cuisine}
                                   </p>
+                                  {hasDisplayableRestaurantRating(restaurant) && (
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <div className="flex items-center gap-1 bg-yellow-50 dark:bg-yellow-900/30 px-1.5 py-0.5 rounded-full">
                                       <Star className="h-3 w-3 sm:h-3.5 sm:w-3.5 fill-yellow-400 text-yellow-400" />
                                       <span className="font-bold text-xs sm:text-sm text-yellow-700 dark:text-yellow-400">
-                                        {restaurant.rating.toFixed(1)}
+                                        {formatRestaurantRating(restaurant)}
                                       </span>
                                     </div>
                                   </div>
+                                  )}
                                 </div>
                                 <Button
                                   variant="ghost"
@@ -252,12 +276,14 @@ export default function Restaurants() {
                                     {restaurant.deliveryTime}
                                   </span>
                                 </div>
+                                {restaurant.distance ? (
                                 <div className="flex items-center gap-1">
                                   <MapPin className="h-3 w-3 sm:h-3.5 sm:w-3.5 flex-shrink-0" />
                                   <span className="font-medium whitespace-nowrap">
                                     {restaurant.distance}
                                   </span>
                                 </div>
+                                ) : null}
                               </div>
                               <Button className="bg-[#16A34A] hover:opacity-90 dark:hover:opacity-80 text-white text-xs sm:text-sm h-7 sm:h-8 px-3 sm:px-4 flex-shrink-0 transition-opacity">
                                 Order Now

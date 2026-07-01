@@ -1696,6 +1696,11 @@ export const landingAPI = {
     publicGetOnce("/food/landing/settings/public", config),
 };
 
+export const pageAPI = {
+  getPublic: (key, config = {}) =>
+    publicGetOnce(`/food/pages/${String(key || "").trim().toLowerCase()}`, config),
+};
+
 const publicZonesCache = createInFlightCache({ ttlMs: 5 * 60 * 1000 });
 
 /** Single in-flight + short cache for restaurant /food/restaurant/current - prevents request storms. */

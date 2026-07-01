@@ -35,6 +35,8 @@ const debugLog = (...args) => { }
 const debugWarn = (...args) => { }
 const debugError = (...args) => { }
 const EDIT_PROFILE_DRAFT_KEY = "user_edit_profile_draft"
+export const PROFILE_NAME_MIN_LENGTH = 2
+export const PROFILE_NAME_MAX_LENGTH = 50
 
 
 // Gender options
@@ -136,6 +138,7 @@ export default function EditProfile() {
   const [imagePreview, setImagePreview] = useState(initialProfile?.profileImage || "")
   const [photoPickerOpen, setPhotoPickerOpen] = useState(false)
   const [fieldErrors, setFieldErrors] = useState({
+    name: "",
     mobile: "",
     email: "",
     dateOfBirth: "",
@@ -182,6 +185,18 @@ export default function EditProfile() {
     setHasChanges(currentData !== savedData)
   }, [formData, initialData])
 
+  const validateName = (value) => {
+    const trimmed = String(value || "").trim()
+    if (!trimmed) return "Name is required"
+    if (trimmed.length < PROFILE_NAME_MIN_LENGTH) {
+      return `Name must be at least ${PROFILE_NAME_MIN_LENGTH} characters`
+    }
+    if (trimmed.length > PROFILE_NAME_MAX_LENGTH) {
+      return `Name must be at most ${PROFILE_NAME_MAX_LENGTH} characters`
+    }
+    return ""
+  }
+
   const validateEmail = (value) => {
     if (!value) return ""
     return EMAIL_REGEX.test(value) ? "" : "Please enter a valid email"
@@ -203,7 +218,10 @@ export default function EditProfile() {
     let normalizedValue = value
     let errorMessage = ""
 
-    if (field === "mobile") {
+    if (field === "name") {
+      normalizedValue = String(value || "").slice(0, PROFILE_NAME_MAX_LENGTH)
+      errorMessage = validateName(normalizedValue)
+    } else if (field === "mobile") {
       normalizedValue = String(value || "").replace(/\D/g, "").slice(0, 10)
       errorMessage = validateMobile(normalizedValue)
     } else if (field === "email") {
@@ -218,7 +236,7 @@ export default function EditProfile() {
       [field]: normalizedValue
     }))
 
-    if (field === "mobile" || field === "email" || field === "dateOfBirth") {
+    if (field === "name" || field === "mobile" || field === "email" || field === "dateOfBirth") {
       setFieldErrors((prev) => ({
         ...prev,
         [field]: errorMessage
@@ -315,6 +333,7 @@ export default function EditProfile() {
 
   const validateForm = () => {
     const nextErrors = {
+      name: validateName(formData.name),
       mobile: validateMobile(formData.mobile),
       email: validateEmail(formData.email),
       dateOfBirth: validateDateOfBirth(formData.dateOfBirth),
@@ -335,7 +354,7 @@ export default function EditProfile() {
 
       // Prepare data for API
       const updateData = {
-        name: formData.name,
+        name: String(formData.name || "").trim().slice(0, PROFILE_NAME_MAX_LENGTH),
         email: formData.email || undefined,
         dateOfBirth: formData.dateOfBirth ? formData.dateOfBirth.format('YYYY-MM-DD') : undefined,
         anniversary: formData.anniversary ? formData.anniversary.format('YYYY-MM-DD') : undefined,
@@ -345,36 +364,50 @@ export default function EditProfile() {
 
       // Call API to update profile
       const response = await userAPI.updateProfile(updateData)
-      const updatedUser = response?.data?.data?.user || response?.data?.user
+      const responseData = response?.data?.data
+      const updatedUser =
+        response?.data?.data?.user
+        || response?.data?.user
+        || (responseData && (responseData._id || responseData.phone) ? responseData : null)
 
-      if (updatedUser) {
-        // Update context with all fields including profileImage
+      if (response?.data?.success !== false) {
+        const mergedUser = updatedUser || {
+          ...(userProfile || {}),
+          name: updateData.name,
+          email: updateData.email || userProfile?.email,
+          phone: formData.mobile || userProfile?.phone,
+          dateOfBirth: updateData.dateOfBirth ?? userProfile?.dateOfBirth,
+          anniversary: updateData.anniversary ?? userProfile?.anniversary,
+          gender: updateData.gender ?? userProfile?.gender,
+          profileImage: profileImage || userProfile?.profileImage,
+        }
+
         updateUserProfile({
-          ...updatedUser,
-          phone: updatedUser.phone || formData.mobile,
-          profileImage: updatedUser.profileImage || profileImage,
+          ...mergedUser,
+          phone: mergedUser.phone || formData.mobile,
+          profileImage: mergedUser.profileImage || profileImage,
         })
 
-        // Save to localStorage with complete data
         saveProfileToStorage({
-          name: updatedUser.name || formData.name,
-          phone: updatedUser.phone || formData.mobile,
-          mobile: updatedUser.phone || formData.mobile,
-          email: updatedUser.email || formData.email,
-          profileImage: updatedUser.profileImage || profileImage,
-          dateOfBirth: updatedUser.dateOfBirth || formData.dateOfBirth?.format('YYYY-MM-DD'),
-          anniversary: updatedUser.anniversary || formData.anniversary?.format('YYYY-MM-DD'),
-          gender: updatedUser.gender || formData.gender,
+          name: mergedUser.name || updateData.name,
+          phone: mergedUser.phone || formData.mobile,
+          mobile: mergedUser.phone || formData.mobile,
+          email: mergedUser.email || formData.email,
+          profileImage: mergedUser.profileImage || profileImage,
+          dateOfBirth: mergedUser.dateOfBirth || formData.dateOfBirth?.format('YYYY-MM-DD'),
+          anniversary: mergedUser.anniversary || formData.anniversary?.format('YYYY-MM-DD'),
+          gender: mergedUser.gender || formData.gender,
         })
         clearEditProfileDraft()
 
-        // Dispatch event to refresh profile from API
         window.dispatchEvent(new Event("userAuthChanged"))
 
-        toast.success('Profile updated successfully')
+        toast.success(response?.data?.message || "Profile updated successfully")
 
-        // Navigate back
-        navigate("/user/profile")
+        navigate("/food/user/profile?service=food", {
+          replace: true,
+          state: { profileUpdated: true },
+        })
       }
     } catch (error) {
       debugError('Error updating profile:', error)
@@ -461,6 +494,7 @@ export default function EditProfile() {
                   type="text"
                   value={formData.name}
                   onChange={(e) => handleChange('name', e.target.value)}
+                  maxLength={PROFILE_NAME_MAX_LENGTH}
                   className="pr-10 h-12 text-base border border-gray-300 dark:border-gray-700 focus:border-primary focus:ring-1 focus:ring-primary rounded-lg bg-white dark:bg-[#1a1a1a] text-gray-900 dark:text-white"
                   placeholder="Name"
                 />
@@ -474,6 +508,9 @@ export default function EditProfile() {
                   </button>
                 )}
               </div>
+              <p className={`text-xs ${fieldErrors.name ? "text-red-600" : "text-gray-500 dark:text-gray-400"}`}>
+                {fieldErrors.name || `${String(formData.name || "").length}/${PROFILE_NAME_MAX_LENGTH} characters`}
+              </p>
             </div>
 
             {/* Mobile Field */}

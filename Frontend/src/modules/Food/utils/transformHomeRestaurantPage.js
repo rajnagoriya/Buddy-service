@@ -1,4 +1,8 @@
 import { getRestaurantAvailabilityStatus } from "@food/utils/restaurantAvailability";
+import {
+  getRestaurantAddressLine,
+  resolveRestaurantDistance,
+} from "@food/utils/restaurantDisplay";
 
 const getRestaurantDisplayName = (restaurant) => {
   const nameCandidates = [
@@ -13,20 +17,6 @@ const getRestaurantDisplayName = (restaurant) => {
       typeof candidate === "string" && candidate.trim().length > 0,
   );
   return resolvedName ? resolvedName.trim() : "Restaurant";
-};
-
-const calculateDistanceKm = (lat1, lng1, lat2, lng2) => {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLng = ((lng2 - lng1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLng / 2) *
-      Math.sin(dLng / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
 };
 
 export function sortRestaurantsForDisplay(restaurants, filters, location) {
@@ -69,50 +59,12 @@ export function transformRestaurantApiList(
   restaurantsArray,
   { location, filters, extractImages, buildRestaurantImageCandidates },
 ) {
-  const userLat = location?.latitude;
-  const userLng = location?.longitude;
-
   const transformed = (restaurantsArray || []).map((restaurant) => {
     const deliveryTime = restaurant.estimatedDeliveryTime || "25-30 mins";
-    let distance = restaurant.distance || "1.2 km";
-
-    const restaurantLocation = restaurant.location;
-    const restaurantLat =
-      restaurantLocation?.latitude ||
-      (restaurantLocation?.coordinates &&
-      Array.isArray(restaurantLocation.coordinates)
-        ? restaurantLocation.coordinates[1]
-        : null);
-    const restaurantLng =
-      restaurantLocation?.longitude ||
-      (restaurantLocation?.coordinates &&
-      Array.isArray(restaurantLocation.coordinates)
-        ? restaurantLocation.coordinates[0]
-        : null);
-
-    let distanceInKm = null;
-    if (
-      userLat &&
-      userLng &&
-      restaurantLat &&
-      restaurantLng &&
-      !Number.isNaN(userLat) &&
-      !Number.isNaN(userLng) &&
-      !Number.isNaN(restaurantLat) &&
-      !Number.isNaN(restaurantLng)
-    ) {
-      distanceInKm = calculateDistanceKm(
-        userLat,
-        userLng,
-        restaurantLat,
-        restaurantLng,
-      );
-      if (distanceInKm >= 1) {
-        distance = `${distanceInKm.toFixed(1)} km`;
-      } else {
-        distance = `${Math.round(distanceInKm * 1000)} m`;
-      }
-    }
+    const { distance, distanceInKm, distanceSource } = resolveRestaurantDistance(
+      restaurant,
+      location,
+    );
 
     const cuisine =
       Array.isArray(restaurant.cuisines) && restaurant.cuisines.length > 0
@@ -164,9 +116,11 @@ export function transformRestaurantApiList(
       id: restaurant.restaurantId || restaurant._id,
       mongoId: restaurant._id || null,
       name: getRestaurantDisplayName(restaurant),
+      address: getRestaurantAddressLine(restaurant),
       cuisine,
       cuisines: Array.isArray(restaurant.cuisines) ? restaurant.cuisines : [],
       rating: Number(restaurant.rating) || 0,
+      totalRatings: Number(restaurant.totalRatings) || 0,
       deliveryTime:
         restaurant.deliveryTime ||
         restaurant.estimatedDeliveryTime ||
@@ -175,15 +129,15 @@ export function transformRestaurantApiList(
           : deliveryTime),
       distance,
       distanceInKm,
+      distanceMeters: Number.isFinite(restaurant.distanceMeters)
+        ? restaurant.distanceMeters
+        : (distanceInKm !== null ? distanceInKm * 1000 : null),
+      distanceSource,
       image,
       images: allImages,
       priceRange: restaurant.priceRange || "$$",
-      featuredDish:
-        restaurant.featuredDish ||
-        (restaurant.cuisines && restaurant.cuisines.length > 0
-          ? `${restaurant.cuisines[0]} Special`
-          : "Special Dish"),
-      featuredPrice: restaurant.featuredPrice || 249,
+      featuredDish: restaurant.featuredDish || null,
+      featuredPrice: restaurant.featuredPrice || null,
       offer: offerText,
       slug: restaurant.slug,
       restaurantId: restaurant.restaurantId,
@@ -195,66 +149,31 @@ export function transformRestaurantApiList(
     };
   });
 
-  return sortRestaurantsForDisplay(transformed, filters, location);
+  return transformed;
 }
 
 export function recalculateRestaurantDistances(restaurants, location) {
   if (!location?.latitude || !location?.longitude) return restaurants;
   if (!Array.isArray(restaurants) || restaurants.length === 0) return restaurants;
 
-  const userLat = location.latitude;
-  const userLng = location.longitude;
-
   return restaurants.map((restaurant) => {
-    if (!restaurant.location) return restaurant;
-
-    const restaurantLat =
-      restaurant.location?.latitude ||
-      (restaurant.location?.coordinates &&
-      Array.isArray(restaurant.location.coordinates)
-        ? restaurant.location.coordinates[1]
-        : null);
-    const restaurantLng =
-      restaurant.location?.longitude ||
-      (restaurant.location?.coordinates &&
-      Array.isArray(restaurant.location.coordinates)
-        ? restaurant.location.coordinates[0]
-        : null);
-
     if (
-      !restaurantLat ||
-      !restaurantLng ||
-      Number.isNaN(restaurantLat) ||
-      Number.isNaN(restaurantLng)
+      restaurant.distanceSource === "road" ||
+      restaurant.distanceSource === "geo" ||
+      restaurant.distanceSource === "api"
     ) {
       return restaurant;
     }
 
-    const distanceInKm = calculateDistanceKm(
-      userLat,
-      userLng,
-      restaurantLat,
-      restaurantLng,
-    );
-
-    let calculatedDistance;
-    if (distanceInKm >= 1) {
-      calculatedDistance = `${distanceInKm.toFixed(1)} km`;
-    } else {
-      calculatedDistance = `${Math.round(distanceInKm * 1000)} m`;
-    }
-
-    if (
-      restaurant.distance === calculatedDistance &&
-      restaurant.distanceInKm === distanceInKm
-    ) {
-      return restaurant;
-    }
+    const resolved = resolveRestaurantDistance(restaurant, location);
+    if (!resolved.distance) return restaurant;
 
     return {
       ...restaurant,
-      distance: calculatedDistance,
-      distanceInKm,
+      distance: resolved.distance,
+      distanceInKm: resolved.distanceInKm,
+      distanceMeters: resolved.distanceInKm !== null ? resolved.distanceInKm * 1000 : null,
+      distanceSource: resolved.distanceSource,
     };
   });
 }

@@ -63,6 +63,8 @@ import {
   getRestaurantFssaiImage,
   getRestaurantFssaiNumber,
   resolveFoodItemImage,
+  extractImages,
+  normalizeImageUrl,
 } from "@food/utils/common"
 import { RestaurantDetailSkeleton } from "@food/components/ui/loading-skeletons"
 import {
@@ -745,21 +747,21 @@ function RestaurantDetailsContent() {
 
           const onboardingStep2 = actualRestaurant?.onboarding?.step2 || apiRestaurant?.onboarding?.step2 || {}
           const onboardingStep4 = actualRestaurant?.onboarding?.step4 || apiRestaurant?.onboarding?.step4 || {}
-          const normalizedProfileImage = actualRestaurant?.profileImage || apiRestaurant?.profileImage || onboardingStep2?.profileImageUrl || null
-          const normalizedCoverImages =
+          const normalizedProfileImage = extractImages(actualRestaurant?.profileImage || apiRestaurant?.profileImage || onboardingStep2?.profileImageUrl, BACKEND_ORIGIN)[0] || null
+          const normalizedCoverImages = extractImages(
             Array.isArray(actualRestaurant?.coverImages) && actualRestaurant.coverImages.length > 0
               ? actualRestaurant.coverImages
               : Array.isArray(apiRestaurant?.coverImages) && apiRestaurant.coverImages.length > 0
                 ? apiRestaurant.coverImages
-                : []
-          const normalizedMenuImages =
+                : [], BACKEND_ORIGIN)
+          const normalizedMenuImages = extractImages(
             Array.isArray(actualRestaurant?.menuImages) && actualRestaurant.menuImages.length > 0
               ? actualRestaurant.menuImages
               : Array.isArray(apiRestaurant?.menuImages) && apiRestaurant.menuImages.length > 0
                 ? apiRestaurant.menuImages
                 : Array.isArray(onboardingStep2?.menuImageUrls)
                   ? onboardingStep2.menuImageUrls
-                  : []
+                  : [], BACKEND_ORIGIN)
           const normalizedRestaurantOffers = actualRestaurant?.restaurantOffers || apiRestaurant?.restaurantOffers || {}
 
           // Transform API data to match expected format with comprehensive fallbacks
@@ -781,15 +783,11 @@ function RestaurantDetailsContent() {
             distance: calculatedDistance || actualRestaurant?.distance || apiRestaurant?.distance || actualRestaurant?.distanceFromUser || apiRestaurant?.distanceFromUser || "1.2 km",
             location: formattedAddress,
             locationObject: locationObj, // Store full location object for reference
-            image: normalizedCoverImages?.[0]?.url
-              || normalizedCoverImages?.[0]
-              || normalizedProfileImage?.url
+            image: normalizedCoverImages?.[0]
               || normalizedProfileImage
-              || (normalizedMenuImages.length > 0
-                ? (normalizedMenuImages[0]?.url || normalizedMenuImages[0])
-                : null)
-              || actualRestaurant?.image
-              || apiRestaurant?.image
+              || (normalizedMenuImages.length > 0 ? normalizedMenuImages[0] : null)
+              || normalizeImageUrl(actualRestaurant?.image, BACKEND_ORIGIN)
+              || normalizeImageUrl(apiRestaurant?.image, BACKEND_ORIGIN)
               || null,
             priceRange: actualRestaurant?.priceRange || apiRestaurant?.priceRange || onboardingStep4?.priceRange || "$$",
             offers: Array.isArray(actualRestaurant?.offers) ? actualRestaurant.offers : (Array.isArray(apiRestaurant?.offers) ? apiRestaurant.offers : []), // Will be populated from menu/offers API later
@@ -812,8 +810,8 @@ function RestaurantDetailsContent() {
             slug: actualRestaurant?.slug || apiRestaurant?.slug || actualRestaurant?.name?.toLowerCase().replace(/\s+/g, '-') || apiRestaurant?.name?.toLowerCase().replace(/\s+/g, '-') || slug || "unknown",
             restaurantId: actualRestaurant?.restaurantId || actualRestaurant?._id || actualRestaurant?.id || apiRestaurant?.restaurantId || apiRestaurant?._id || apiRestaurant?.id || null,
             // Add other fields with defaults
-            featuredDish: actualRestaurant?.featuredDish || apiRestaurant?.featuredDish || onboardingStep4?.featuredDish || "Special Dish",
-            featuredPrice: actualRestaurant?.featuredPrice || apiRestaurant?.featuredPrice || onboardingStep4?.featuredPrice || 249,
+            featuredDish: actualRestaurant?.featuredDish || apiRestaurant?.featuredDish || onboardingStep4?.featuredDish || null,
+            featuredPrice: actualRestaurant?.featuredPrice || apiRestaurant?.featuredPrice || onboardingStep4?.featuredPrice || null,
             // Additional safety fields
             openDays: Array.isArray(actualRestaurant?.openDays)
               ? actualRestaurant.openDays

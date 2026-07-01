@@ -1603,6 +1603,32 @@ export function useLocation() {
     }
   }, [])
 
+  useEffect(() => {
+    const handleExternalLocationUpdate = (event) => {
+      const nextLocation = event?.detail?.location
+      if (nextLocation && typeof nextLocation === "object") {
+        setLocation(nextLocation)
+        return
+      }
+
+      try {
+        const raw = localStorage.getItem("userLocation")
+        if (!raw) return
+        const parsed = JSON.parse(raw)
+        if (parsed && typeof parsed === "object") {
+          setLocation(parsed)
+        }
+      } catch {
+        // ignore parse errors
+      }
+    }
+
+    window.addEventListener("userLocationUpdated", handleExternalLocationUpdate)
+    return () => {
+      window.removeEventListener("userLocationUpdated", handleExternalLocationUpdate)
+    }
+  }, [])
+
   const requestLocation = async () => {
     debugLog("?????? User requested location update - clearing cache and fetching fresh")
     setLoading(true)
@@ -1624,6 +1650,10 @@ export function useLocation() {
       const location = await getLocation(true, true, true)
 
       debugLog("??? Fresh location requested successfully:", location)
+      window.dispatchEvent(
+        new CustomEvent("userLocationUpdated", { detail: { location } }),
+      )
+
       debugLog("??? Complete Location details:", {
         formattedAddress: location?.formattedAddress,
         address: location?.address,

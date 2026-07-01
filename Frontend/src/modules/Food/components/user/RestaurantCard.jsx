@@ -1,6 +1,9 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { motion } from "framer-motion";
-import { Star, Clock, IndianRupee, Heart } from "lucide-react";
+import {
+  formatRestaurantRating,
+  hasDisplayableRestaurantRating,
+} from "@food/utils/restaurantDisplay";
 import OptimizedImage from "@food/components/OptimizedImage";
 
 const WEBVIEW_SESSION_CACHE_BUSTER = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -206,10 +209,12 @@ const RestaurantCard = ({
           <h3 className="text-[15px] sm:text-[17px] font-bold text-gray-900 line-clamp-1 group-hover:text-[#16A34A] transition-colors duration-200 flex-1 tracking-tight">
             {restaurant.name}
           </h3>
+          {hasDisplayableRestaurantRating(restaurant) && (
           <div className="flex items-center gap-1 bg-[#8CC63F] text-white px-1.5 py-0.5 rounded-md text-[10px] sm:text-[11px] font-bold shadow-sm flex-shrink-0">
-            <span>{restaurant.rating || "4.2"}</span>
+            <span>{formatRestaurantRating(restaurant)}</span>
             <Star className="w-2.5 h-2.5 fill-current" />
           </div>
+          )}
         </div>
 
         <p className="text-[11px] sm:text-[13px] text-gray-500 mb-2.5 line-clamp-1 font-medium">

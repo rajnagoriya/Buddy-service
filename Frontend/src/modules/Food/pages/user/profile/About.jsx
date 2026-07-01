@@ -1,15 +1,15 @@
-import { Link } from "react-router-dom"
+import { Link, useLocation } from "react-router-dom"
 import { useState, useEffect } from "react"
-import { ArrowLeft, ArrowRight, Heart, Users, Shield, Clock, Star, Award, FileText, Lock, Loader2, Receipt, Truck, XCircle } from "lucide-react"
+import { ArrowLeft, ArrowRight, Heart, Users, Shield, Clock, Star, Award, FileText, Loader2 } from "lucide-react"
 import { motion } from "framer-motion"
 import AnimatedPage from "@food/components/user/AnimatedPage"
 import { Button } from "@food/components/ui/button"
 import { Card, CardContent } from "@food/components/ui/card"
 import quickSpicyLogo from "@food/assets/quicky-spicy-logo.png"
-import api from "@food/api"
-import { API_ENDPOINTS } from "@food/api/config"
+import { publicGetOnce } from "@food/api"
 import { useCompanyName } from "@food/hooks/useCompanyName"
 import { getCachedSettings, loadBusinessSettings } from "@food/utils/businessSettings"
+import { USER_LEGAL_POLICY_PAGES } from "@food/utils/legalPolicyPages"
 
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
@@ -28,6 +28,7 @@ const iconMap = {
 
 export default function About() {
   const companyName = useCompanyName()
+  const location = useLocation()
   const [loading, setLoading] = useState(true)
   const [logoUrl, setLogoUrl] = useState(null)
   const [aboutData, setAboutData] = useState({
@@ -38,9 +39,13 @@ export default function About() {
     features: [],
     stats: []
   })
+  const [policyPages, setPolicyPages] = useState(
+    () => USER_LEGAL_POLICY_PAGES.map((page) => ({ ...page, title: page.defaultTitle, hasContent: false })),
+  )
 
   useEffect(() => {
     fetchAboutData()
+    fetchPolicyPages()
     loadLogo()
 
     // Listen for business settings updates
@@ -69,7 +74,7 @@ export default function About() {
   const fetchAboutData = async () => {
     try {
       setLoading(true)
-      const response = await api.get(API_ENDPOINTS.ADMIN.ABOUT_PUBLIC)
+      const response = await publicGetOnce("/food/pages/about")
       if (response.data.success) {
         setAboutData(response.data.data || {})
       }
@@ -77,6 +82,30 @@ export default function About() {
       debugError('Error fetching about data:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchPolicyPages = async () => {
+    try {
+      const results = await Promise.all(
+        USER_LEGAL_POLICY_PAGES.map(async (page) => {
+          try {
+            const response = await publicGetOnce(`/food/pages/${page.key}`)
+            const data = response?.data?.data
+            const content = String(data?.content || "").trim()
+            return {
+              ...page,
+              title: String(data?.title || page.defaultTitle).trim() || page.defaultTitle,
+              hasContent: content.length > 0,
+            }
+          } catch {
+            return { ...page, title: page.defaultTitle, hasContent: false }
+          }
+        }),
+      )
+      setPolicyPages(results)
+    } catch (error) {
+      debugError('Error fetching policy pages:', error)
     }
   }
 
@@ -224,95 +253,30 @@ export default function About() {
                 Legal Information
               </h3>
               <div className="space-y-3">
+                {policyPages.map((page) => {
+                  const IconComponent = page.icon || FileText
+                  return (
                 <Link
-                  to="/user/profile/terms"
+                  key={page.key}
+                  to={page.path}
+                  state={{ from: `${location.pathname}${location.search}` }}
                   className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors group"
                 >
                   <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-2 group-hover:bg-gray-200 dark:group-hover:bg-gray-700 transition-colors">
-                    <FileText className="h-5 w-5 text-gray-600 dark:text-gray-400" />
+                    <IconComponent className="h-5 w-5 text-gray-600 dark:text-gray-400" />
                   </div>
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-0">
                     <div className="text-base font-medium text-gray-900 dark:text-white group-hover:text-[#16A34A] dark:group-hover:text-[#16A34A] transition-colors">
-                      Terms and Conditions
+                      {page.title}
                     </div>
                     <div className="text-sm text-gray-500 dark:text-gray-500">
-                      Read our terms and conditions
+                      {page.hasContent ? page.defaultDescription : "Content not added yet"}
                     </div>
                   </div>
-                  <ArrowRight className="h-5 w-5 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300 transition-colors" />
+                  <ArrowRight className="h-5 w-5 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300 transition-colors flex-shrink-0" />
                 </Link>
-
-                <Link
-                  to="/user/profile/privacy"
-                  className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors group"
-                >
-                  <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-2 group-hover:bg-gray-200 dark:group-hover:bg-gray-700 transition-colors">
-                    <Lock className="h-5 w-5 text-gray-600 dark:text-gray-400" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="text-base font-medium text-gray-900 dark:text-white group-hover:text-[#16A34A] dark:group-hover:text-[#16A34A] transition-colors">
-                      Privacy Policy
-                    </div>
-                    <div className="text-sm text-gray-500 dark:text-gray-500">
-                      Learn how we protect your data
-                    </div>
-                  </div>
-                  <ArrowRight className="h-5 w-5 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300 transition-colors" />
-                </Link>
-
-                <Link
-                  to="/user/profile/refund"
-                  className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors group"
-                >
-                  <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-2 group-hover:bg-gray-200 dark:group-hover:bg-gray-700 transition-colors">
-                    <Receipt className="h-5 w-5 text-gray-600 dark:text-gray-400" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="text-base font-medium text-gray-900 dark:text-white group-hover:text-[#16A34A] dark:group-hover:text-[#16A34A] transition-colors">
-                      Refund Policy
-                    </div>
-                    <div className="text-sm text-gray-500 dark:text-gray-500">
-                      Read our refund terms and conditions
-                    </div>
-                  </div>
-                  <ArrowRight className="h-5 w-5 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300 transition-colors" />
-                </Link>
-
-                <Link
-                  to="/user/profile/shipping"
-                  className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors group"
-                >
-                  <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-2 group-hover:bg-gray-200 dark:group-hover:bg-gray-700 transition-colors">
-                    <Truck className="h-5 w-5 text-gray-600 dark:text-gray-400" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="text-base font-medium text-gray-900 dark:text-white group-hover:text-[#16A34A] dark:group-hover:text-[#16A34A] transition-colors">
-                      Shipping Policy
-                    </div>
-                    <div className="text-sm text-gray-500 dark:text-gray-500">
-                      Learn about our shipping terms
-                    </div>
-                  </div>
-                  <ArrowRight className="h-5 w-5 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300 transition-colors" />
-                </Link>
-
-                <Link
-                  to="/user/profile/cancellation"
-                  className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors group"
-                >
-                  <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-2 group-hover:bg-gray-200 dark:group-hover:bg-gray-700 transition-colors">
-                    <XCircle className="h-5 w-5 text-gray-600 dark:text-gray-400" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="text-base font-medium text-gray-900 dark:text-white group-hover:text-[#16A34A] dark:group-hover:text-[#16A34A] transition-colors">
-                      Cancellation Policy
-                    </div>
-                    <div className="text-sm text-gray-500 dark:text-gray-500">
-                      Read our cancellation terms and conditions
-                    </div>
-                  </div>
-                  <ArrowRight className="h-5 w-5 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300 transition-colors" />
-                </Link>
+                  )
+                })}
               </div>
             </CardContent>
           </Card>

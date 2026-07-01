@@ -9,6 +9,8 @@ import {
     getDefaultOutletTimingsShape,
     getOutletTimingsMapForRestaurants,
 } from '../../restaurant/services/outletTimings.service.js';
+import { getRestaurantAddressSummary } from '../../shared/utils/restaurantAddress.js';
+import { enrichRestaurantsWithDistance } from '../../shared/utils/restaurantDistance.js';
 import { sendResponse } from '../../../../utils/response.js';
 
 /** Public hero banners for user home: active only, sorted, with linkedRestaurants populated for click-through */
@@ -86,16 +88,26 @@ export const getPublicLandingSettingsController = async (req, res, next) => {
         let recommendedRestaurants = [];
         if (Array.isArray(ids) && ids.length > 0) {
             const docs = await FoodRestaurant.find({ _id: { $in: ids }, status: 'approved' })
-                .select('restaurantName area city profileImage coverImages menuImages slug rating cuisines pureVegRestaurant isAcceptingOrders isActive')
+                .select('restaurantName restaurantId area city location profileImage coverImages menuImages slug rating totalRatings cuisines pureVegRestaurant isAcceptingOrders isActive estimatedDeliveryTime')
                 .lean();
             const timingsMap = await getOutletTimingsMapForRestaurants(docs.map((r) => r._id));
             const defaultTimings = getDefaultOutletTimingsShape();
-            recommendedRestaurants = docs.map((r) => ({
+            let mapped = docs.map((r) => ({
                 ...r,
+                name: r.restaurantName || '',
+                addressSummary: getRestaurantAddressSummary(r),
                 isAcceptingOrders: r.isAcceptingOrders !== false,
                 isActive: r.isActive !== false,
                 outletTimings: timingsMap.get(String(r._id)) || defaultTimings,
             }));
+
+            const lat = Number(req.query.lat);
+            const lng = Number(req.query.lng);
+            if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                mapped = await enrichRestaurantsWithDistance(mapped, { lat, lng });
+            }
+
+            recommendedRestaurants = mapped;
         }
         const payload = {
             ...settings,
