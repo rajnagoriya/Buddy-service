@@ -166,6 +166,24 @@ const resolveCartEntryId = (items, itemId, variantId = "") => {
 
 const CART_SAVE_DEBOUNCE_MS = 2500
 
+const deriveCartType = (items = []) => {
+  if (!Array.isArray(items) || items.length === 0) {
+    return null
+  }
+
+  const restaurantIds = new Set(
+    items.map((item) => String(item.restaurantId || "").trim()).filter(Boolean),
+  )
+  const lineItemIds = new Set(
+    items.map((item) => String(item.lineItemId || item.itemId || "").trim()).filter(Boolean),
+  )
+
+  return {
+    restaurantScope: restaurantIds.size > 1 ? "multi_restaurant" : "single_restaurant",
+    itemScope: lineItemIds.size > 1 ? "multi_item" : "single_item",
+  }
+}
+
 const isFoodUserAuthenticated = () => {
   if (typeof window === "undefined") return false
   return (
@@ -224,7 +242,8 @@ export function CartProvider({ children }) {
   const buildCartPayload = useCallback(() => {
     const items = normalizeCartData(cartRef.current)
     const meta = buildRestaurantMetaFromCart(items, restaurantMetaRef.current)
-    return { items, restaurantMeta: meta }
+    const cartType = deriveCartType(items)
+    return { items, restaurantMeta: meta, cartType }
   }, [])
 
   const flushCartSave = useCallback(async () => {

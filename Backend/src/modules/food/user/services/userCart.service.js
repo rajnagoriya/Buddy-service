@@ -6,12 +6,13 @@ import { getRestaurantOrderableStatus } from '../../shared/utils/restaurantAvail
 
 const toCartResponse = (cartDoc) => {
   if (!cartDoc) {
-    return { items: [], restaurantMeta: [], updatedAt: null };
+    return { items: [], restaurantMeta: [], cartType: null, updatedAt: null };
   }
   const plain = typeof cartDoc.toObject === 'function' ? cartDoc.toObject() : cartDoc;
   return {
     items: plain.items || [],
     restaurantMeta: plain.restaurantMeta || [],
+    cartType: plain.cartType || null,
     updatedAt: plain.updatedAt || null,
   };
 };
@@ -21,10 +22,10 @@ export const getUserCart = async (userId) => {
   return toCartResponse(cart);
 };
 
-export const syncUserCart = async (userId, { items, restaurantMeta }) => {
+export const syncUserCart = async (userId, { items, restaurantMeta, cartType }) => {
   const cart = await FoodUserCart.findOneAndUpdate(
     { userId },
-    { $set: { items, restaurantMeta } },
+    { $set: { items, restaurantMeta, cartType } },
     { upsert: true, new: true, setDefaultsOnInsert: true },
   ).lean();
   return toCartResponse(cart);

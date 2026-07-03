@@ -34,6 +34,8 @@ const debugLog = (...args) => { }
 const debugWarn = (...args) => { }
 const debugError = (...args) => { }
 
+const PRICING_CALC_DEBOUNCE_MS = 500
+
 
 
 // Removed hardcoded suggested items - now fetching approved addons from backend
@@ -130,6 +132,7 @@ function Cart() {
   const hasRestoredRecipientRef = useRef(false)
   const hasRestoredNoteRef = useRef(false)
   const hasManuallyRemovedCouponRef = useRef(false)
+  const pricingRequestIdRef = useRef(0)
 
   // Defensive check: Ensure CartProvider is available
   let cartContext;
@@ -989,25 +992,28 @@ function Cart() {
     }
   }, [availableCoupons, subtotal, userOrderCount, loadingCoupons, appliedCoupon])
 
-  // Calculate pricing from backend whenever cart, address, or coupon changes
+  // Calculate pricing from backend whenever cart, address, or coupon changes (debounced)
   useEffect(() => {
-    const calculatePricing = async () => {
-      if (cart.length === 0 || !hasSavedAddress) {
-        setPricing(null)
-        return
-      }
+    if (cart.length === 0 || !hasSavedAddress) {
+      setPricing(null)
+      return undefined
+    }
 
+    let cancelled = false
+    const requestId = ++pricingRequestIdRef.current
+
+    const timer = setTimeout(async () => {
       try {
         setLoadingPricing(true)
         const items = cart.map(item => ({
           itemId: item.itemId || item.id,
           name: item.name,
-          price: item.price, // Price should already be in INR
+          price: item.price,
           variantId: item.variantId || undefined,
           variantName: item.variantName || undefined,
           variantPrice: item.variantPrice || item.price,
           quantity: item.quantity || 1,
-          image: item.image,
+          image: item.image || item.imageUrl,
           description: item.description,
           isVeg: item.isVeg !== false,
           restaurantId: item.restaurantId || item.restaurant?._id || item.restaurant
@@ -1019,13 +1025,13 @@ function Cart() {
           items,
           restaurantId: resolvedRestaurantId,
           deliveryAddress: defaultAddress
-          // Removed couponCode so backend doesn't try to look it up in database
         })
+
+        if (cancelled || requestId !== pricingRequestIdRef.current) return
 
         if (response?.data?.success && response?.data?.data?.pricing) {
           setPricing(response.data.data.pricing)
 
-          // Update applied coupon if backend returns one
           if (response.data.data.pricing.appliedCoupon && !appliedCoupon) {
             const coupon = availableCoupons.find(c => c.code === response.data.data.pricing.appliedCoupon.code)
             if (coupon) {
@@ -1034,19 +1040,23 @@ function Cart() {
           }
         }
       } catch (error) {
-        // Network errors or 404 errors - silently handle, fallback to frontend calculation
+        if (cancelled || requestId !== pricingRequestIdRef.current) return
         if (error.code !== 'ERR_NETWORK' && error.response?.status !== 404) {
           debugError("Error calculating pricing:", error)
         }
-        // Fallback to frontend calculation if backend fails
         setPricing(null)
       } finally {
-        setLoadingPricing(false)
+        if (!cancelled && requestId === pricingRequestIdRef.current) {
+          setLoadingPricing(false)
+        }
       }
-    }
+    }, PRICING_CALC_DEBOUNCE_MS)
 
-    calculatePricing()
-  }, [cart, defaultAddress, appliedCoupon, couponCode, restaurantId])
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [cart, defaultAddress, appliedCoupon, couponCode, restaurantId, hasSavedAddress, restaurantData, availableCoupons])
 
   // Fetch wallet balance
   useEffect(() => {
