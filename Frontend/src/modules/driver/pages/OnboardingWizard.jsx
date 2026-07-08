@@ -15,6 +15,7 @@ import {
   ImagePlus,
   ShieldCheck,
   AlertCircle,
+  CarTaxiFront,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -751,10 +752,10 @@ export default function OnboardingWizard() {
                     ) : (
                       <div className="grid grid-cols-3 gap-2">
                         {[
-                          { value: "bike", label: "Bike" },
-                          { value: "auto", label: "Auto" },
-                          { value: "car", label: "Car" },
-                        ].map(({ value, label }) => {
+                          { value: "bike", label: "Bike", Icon: Bike },
+                          { value: "auto", label: "Auto", Icon: CarTaxiFront },
+                          { value: "car", label: "Car", Icon: Car },
+                        ].map(({ value, label, Icon }) => {
                           const selected = state.taxiVehicle.type === value;
                           return (
                             <button
@@ -772,7 +773,7 @@ export default function OnboardingWizard() {
                                   : "bg-white/5 border-white/10 text-white/50 hover:border-white/20",
                               ].join(" ")}
                             >
-                              <Car className={["w-5 h-5", selected ? "text-[#88c170]" : ""].join(" ")} />
+                              <Icon className={["w-5 h-5", selected ? "text-[#88c170]" : ""].join(" ")} />
                               <span className="text-[10px] font-bold">{label}</span>
                             </button>
                           );

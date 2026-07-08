@@ -1,8 +1,28 @@
 import mongoose from "mongoose";
 import { FoodRestaurant } from "../models/restaurant.model.js";
+import { FoodZone } from "../../admin/models/zone.model.js";
 import { ValidationError, ConflictError } from "../../../../core/auth/errors.js";
 
 export const DRAFT_PLACEHOLDER_NAME = "__DRAFT__";
+
+const isPointInPolygon = (lat, lng, polygon = []) => {
+  if (!Array.isArray(polygon) || polygon.length < 3) return false;
+  const x = Number(lat);
+  const y = Number(lng);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = Number(polygon[i].latitude);
+    const yi = Number(polygon[i].longitude);
+    const xj = Number(polygon[j].latitude);
+    const yj = Number(polygon[j].longitude);
+
+    const intersect = yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+};
 
 export const CREATION_SOURCE = {
   ONBOARDING_DRAFT: "onboarding_draft",
@@ -201,6 +221,22 @@ export const createRestaurant = async (input = {}, { source = CREATION_SOURCE.AD
     doc.status = doc.status || "approved";
     doc.onboardingStatus = doc.onboardingStatus || "APPROVED";
     doc.approvedAt = doc.approvedAt || new Date();
+  }
+
+  if (doc.zoneId) {
+    const latVal = doc.location?.latitude ?? (Array.isArray(doc.location?.coordinates) ? doc.location.coordinates[1] : undefined);
+    const lngVal = doc.location?.longitude ?? (Array.isArray(doc.location?.coordinates) ? doc.location.coordinates[0] : undefined);
+    const latitude = Number(latVal);
+    const longitude = Number(lngVal);
+    if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+      const zone = await FoodZone.findById(doc.zoneId).lean();
+      if (zone && Array.isArray(zone.coordinates) && zone.coordinates.length >= 3) {
+        const isInside = isPointInPolygon(latitude, longitude, zone.coordinates);
+        if (!isInside) {
+          throw new ValidationError("Restaurant location is outside the selected service zone boundaries");
+        }
+      }
+    }
   }
 
   try {

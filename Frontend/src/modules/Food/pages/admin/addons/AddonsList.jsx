@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react"
-import { Eye, Loader2, Search, Trash2, Pencil, FolderOpen, CheckCircle2, XCircle, RotateCw } from "lucide-react"
+import { Eye, Loader2, Search, Trash2, Pencil, FolderOpen, CheckCircle2, XCircle, RotateCw, MoreVertical } from "lucide-react"
 import { Switch } from "@food/components/ui/switch"
 import { adminAPI, uploadAPI } from "@food/api"
 import { getAdminAddonsCached, invalidateAdminAddonsCache } from "@food/utils/foodListingsCache"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@food/components/ui/dialog"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 
 const debugError = (...args) => {}
 
@@ -47,6 +48,9 @@ export default function AddonsList() {
   const [editImagePreview, setEditImagePreview] = useState("")
   const [editImageFile, setEditImageFile] = useState(null)
 
+  const [selectedRestaurant, setSelectedRestaurant] = useState("all")
+  const [statusFilter, setStatusFilter] = useState("all")
+
   const handleRefresh = () => {
     invalidateAdminAddonsCache()
     setRefreshTrigger((prev) => prev + 1)
@@ -82,11 +86,36 @@ export default function AddonsList() {
     return () => clearTimeout(t)
   }, [searchQuery, refreshTrigger])
 
+  const restaurantsList = useMemo(() => {
+    const list = []
+    const seen = new Set()
+    addons.forEach((a) => {
+      const r = a?.restaurant
+      if (r && (r.id || r._id)) {
+        const id = String(r.id || r._id)
+        if (!seen.has(id)) {
+          seen.add(id)
+          list.push({ id, name: r.name || "Unnamed Restaurant" })
+        }
+      }
+    })
+    return list
+  }, [addons])
+
   const filteredAddons = useMemo(() => {
-    const result = Array.isArray(addons) ? [...addons] : []
+    let result = Array.isArray(addons) ? [...addons] : []
+    if (selectedRestaurant !== "all") {
+      result = result.filter((a) => String(a?.restaurant?.id || a?.restaurant?._id || "") === selectedRestaurant)
+    }
+    if (statusFilter !== "all") {
+      result = result.filter((a) => {
+        const isAvail = a.isAvailable !== false
+        return statusFilter === "active" ? isAvail : !isAvail
+      })
+    }
     result.sort((a, b) => getItemCreatedMs(b) - getItemCreatedMs(a))
     return result
-  }, [addons])
+  }, [addons, selectedRestaurant, statusFilter])
 
   const countLabel = filteredAddons.length
 
@@ -217,15 +246,38 @@ export default function AddonsList() {
         </div>
 
         <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div className="relative w-full sm:w-96">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Search add-ons or restaurant..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10 pr-4 py-2.5 w-full text-sm rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400"
-            />
+          <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+            <div className="relative w-full sm:w-80">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search add-ons or restaurant..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10 pr-4 py-2.5 w-full text-sm rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400"
+              />
+            </div>
+            <select
+              value={selectedRestaurant}
+              onChange={(e) => setSelectedRestaurant(e.target.value)}
+              className="px-3 py-2.5 text-sm rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400 min-w-[180px]"
+            >
+              <option value="all">All Restaurants</option>
+              {restaurantsList.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
+              ))}
+            </select>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="px-3 py-2.5 text-sm rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400 min-w-[140px]"
+            >
+              <option value="all">All Statuses</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
           </div>
           <div className="text-sm text-slate-600">
             Showing <span className="font-semibold">{countLabel}</span>
@@ -352,29 +404,37 @@ export default function AddonsList() {
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-center">
-                      <div className="flex items-center justify-center gap-2 flex-wrap">
-                        <button
-                          onClick={() => handleViewDetails(addon)}
-                          className="p-1.5 rounded text-blue-600 hover:bg-blue-50 transition-colors"
-                          title="View"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleEdit(addon)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 transition-colors"
-                        >
-                          <Pencil className="w-4 h-4" />
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => handleDelete(addon)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-600 text-white hover:bg-red-700 transition-colors"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                          Delete
-                        </button>
-                      </div>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button className="p-1.5 rounded text-slate-600 hover:bg-slate-100 transition-colors">
+                            <MoreVertical className="w-4 h-4" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-40 bg-white border border-slate-200 rounded-lg shadow-lg z-50">
+                          <DropdownMenuItem
+                            onClick={() => handleViewDetails(addon)}
+                            className="cursor-pointer flex items-center gap-2"
+                          >
+                            <Eye className="w-4 h-4 text-slate-500" />
+                            <span>View Details</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => handleEdit(addon)}
+                            className="cursor-pointer flex items-center gap-2"
+                          >
+                            <Pencil className="w-4 h-4 text-blue-500" />
+                            <span>Edit</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onClick={() => handleDelete(addon)}
+                            className="cursor-pointer flex items-center gap-2 text-red-600 hover:text-red-700"
+                          >
+                            <Trash2 className="w-4 h-4 text-red-500" />
+                            <span>Delete</span>
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </td>
                   </tr>
                 ))

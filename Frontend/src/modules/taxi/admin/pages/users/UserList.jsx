@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { 
-  Search, Download, UserPlus, MoreHorizontal,
+  Search, Download, UserPlus, MoreVertical,
   ChevronRight, UserCheck, Edit2, Lock, Trash2,
   Loader2, Ban, FileText
 } from 'lucide-react';
@@ -334,7 +334,7 @@ const UserList = () => {
                         onClick={(e) => toggleMenu(e, user.id)}
                         className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
                       >
-                        <MoreHorizontal size={16} />
+                        <MoreVertical size={16} />
                       </button>
                     </div>
                   </td>

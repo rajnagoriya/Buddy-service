@@ -192,6 +192,25 @@ function DietTypeIcon({ type, size = "sm", className = "" }) {
   )
 }
 
+const isPointInPolygon = (lat, lng, polygon = []) => {
+  if (!Array.isArray(polygon) || polygon.length < 3) return false
+  const x = Number(lat)
+  const y = Number(lng)
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return false
+
+  let inside = false
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = Number(polygon[i].latitude)
+    const yi = Number(polygon[i].longitude)
+    const xj = Number(polygon[j].latitude)
+    const yj = Number(polygon[j].longitude)
+
+    const intersect = yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi
+    if (intersect) inside = !inside
+  }
+  return inside
+}
+
 export default function AddRestaurant() {
   const navigate = useNavigate()
   const [step, setStep] = useState(1)
@@ -463,7 +482,22 @@ export default function AddRestaurant() {
     if (step1.ownerPhone?.trim() && !PHONE_REGEX.test(step1.ownerPhone.trim())) errors.push("Owner phone number must be 10 digits")
     if (!step1.primaryContactNumber?.trim()) errors.push("Primary contact number is required")
     if (step1.primaryContactNumber?.trim() && !PHONE_REGEX.test(step1.primaryContactNumber.trim())) errors.push("Primary contact number must be 10 digits")
-    if (!step1.zoneId?.trim()) errors.push("Service zone is required")
+    if (!step1.zoneId?.trim()) {
+      errors.push("Service zone is required")
+    } else if (
+      step1.location?.latitude !== undefined &&
+      step1.location?.latitude !== "" &&
+      step1.location?.longitude !== undefined &&
+      step1.location?.longitude !== ""
+    ) {
+      const selectedZone = zones.find((z) => String(z?._id || z?.id || "") === step1.zoneId)
+      if (selectedZone) {
+        const isInside = isPointInPolygon(step1.location.latitude, step1.location.longitude, selectedZone.coordinates)
+        if (!isInside) {
+          errors.push("The selected location is outside the chosen service zone boundaries.")
+        }
+      }
+    }
     if (!step1.location?.area?.trim()) errors.push("Area/Sector/Locality is required")
     if (!step1.location?.city?.trim()) errors.push("City is required")
     return errors
