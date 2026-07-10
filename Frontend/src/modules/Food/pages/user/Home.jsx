@@ -2236,6 +2236,8 @@ export default function Home() {
             sortBy={sortBy}
             selectedCuisine={selectedCuisine}
             setIsFilterOpen={setIsFilterOpen}
+            festSlideIndex={festSlideIndex}
+            setFestSlideIndex={setFestSlideIndex}
           />
         </div>
 

@@ -130,14 +130,14 @@ export default function DesktopNavbar({ showLogo = true }) {
             {/* Top Row: Location - Search - Icons */}
             <div className={`w-full ${(isBannerRoute && !hasScrolledPastBanner) ? "border-b border-transparent" : "border-b border-gray-100 dark:border-gray-800"}`}>
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="flex items-center justify-between h-16 gap-4">
+                    <div className="flex items-center justify-between h-16 md:gap-2 lg:gap-4">
                         {/* Left: Logo & Location */}
-                        <div className="flex items-center gap-4 lg:gap-6 flex-shrink-0">
+                        <div className="flex items-center md:gap-2 lg:gap-6 flex-shrink-0">
                             {/* Logo */}
                             {showLogo && (
                                 <Link to="/" className="flex items-center justify-center flex-shrink-0">
                                     <BusinessLogo
-                                        className="h-10 w-auto md:h-14 lg:h-16 object-contain"
+                                        className="h-10 w-auto md:h-10 lg:h-16 object-contain"
                                         fallback="logo"
                                     />
                                 </Link>
@@ -155,7 +155,7 @@ export default function DesktopNavbar({ showLogo = true }) {
                                         Loading...
                                     </span>
                                 ) : (
-                                    <div className="flex flex-col items-start min-w-0 max-w-[220px] lg:max-w-[280px]">
+                                    <div className="flex flex-col items-start min-w-0 md:max-w-[130px] lg:max-w-[280px]">
                                         <div className="flex items-center gap-1.5 lg:gap-2 min-w-0">
                                             <FaLocationDot
                                                 className="h-4 w-4 lg:h-5 lg:w-5 text-primary shrink-0"
@@ -167,20 +167,18 @@ export default function DesktopNavbar({ showLogo = true }) {
                                             <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" strokeWidth={2.5} />
                                         </div>
                                         {baseAddress && (
-                                            <span className="text-[11px] lg:text-xs font-medium text-muted-foreground truncate w-full">
+                                            <span className="hidden lg:block text-[11px] lg:text-xs font-medium text-muted-foreground truncate w-full">
                                                 {baseAddress}
                                             </span>
                                         )}
-                                        <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide leading-none">
+                                        <span className="hidden lg:block text-[10px] font-medium text-muted-foreground uppercase tracking-wide leading-none">
                                             {bottomCity}
                                         </span>
                                     </div>
                                 )}
                             </Button>
-                        </div>
-
-                        {/* Center: Search Bar & Veg Mode */}
-                        <div className="flex-1 max-w-3xl mx-4 flex items-center gap-4">
+                        </div>                        {/* Center: Search Bar & Veg Mode */}
+                        <div className="flex-1 max-w-3xl md:mx-2 lg:mx-4 flex items-center md:gap-2 lg:gap-4">
                             {/* Search Bar */}
                             <div className="relative flex-1">
                                 <div className="relative bg-muted/60 dark:bg-[#2a2a2a] rounded-xl transition-all duration-300 focus-within:ring-2 focus-within:ring-primary/30 focus-within:bg-card border border-transparent focus-within:border-primary/20">
@@ -209,7 +207,7 @@ export default function DesktopNavbar({ showLogo = true }) {
                                                 onClick={() => setHeroSearch("")}
                                             >
                                                 <span className="sr-only">Clear</span>
-                                                <span aria-hidden="true">�</span>
+                                                <span aria-hidden="true">×</span>
                                             </Button>
                                         )}
                                     </div>
@@ -217,10 +215,13 @@ export default function DesktopNavbar({ showLogo = true }) {
                             </div>
 
                             {/* VEG MODE Toggle - Moved here */}
-                            <div className="flex items-center gap-2 flex-shrink-0">
-                                <div className="flex flex-col items-end">
+                            <div className="flex items-center md:gap-1 lg:gap-2 flex-shrink-0">
+                                <div className="hidden lg:flex flex-col items-end">
                                     <span className="text-[10px] font-bold text-gray-700 dark:text-gray-300 leading-none">VEG</span>
                                     <span className="text-[8px] font-bold text-gray-500 dark:text-gray-400 leading-none">MODE</span>
+                                </div>
+                                <div className="flex lg:hidden flex-col items-end">
+                                    <span className="text-[10px] font-bold text-gray-700 dark:text-gray-300 leading-none">VEG</span>
                                 </div>
                                 <Switch
                                     checked={vegMode}
@@ -231,12 +232,12 @@ export default function DesktopNavbar({ showLogo = true }) {
                         </div>
 
                         {/* Right: Wallet and Cart Icons */}
-                        <div className="flex items-center gap-2 lg:gap-3 flex-shrink-0">
+                        <div className="flex items-center md:gap-1 lg:gap-3 flex-shrink-0">
                             {/* Wallet Icon */}
                             <Link to="/food/user/wallet">
                                 <Button
                                     variant="ghost"
-                                    className="h-12 w-12 lg:h-14 lg:w-14 rounded-full p-0 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                                    className="md:h-10 md:w-10 lg:h-14 lg:w-14 rounded-full p-0 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                                     title="Wallet"
                                 >
                                     <Wallet className="!h-5 !w-5 lg:!h-6 lg:!w-6 text-gray-700 dark:text-gray-300" strokeWidth={2} />
@@ -247,12 +248,12 @@ export default function DesktopNavbar({ showLogo = true }) {
                             <Link to="/food/user/cart">
                                 <Button
                                     variant="ghost"
-                                    className="relative h-12 w-12 lg:h-14 lg:w-14 rounded-full p-0 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                                    className="relative md:h-10 md:w-10 lg:h-14 lg:w-14 rounded-full p-0 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                                     title="Cart"
                                 >
                                     <ShoppingCart className="!h-5 !w-5 lg:!h-6 lg:!w-6 text-gray-700 dark:text-gray-300" strokeWidth={2} />
                                     {cartCount > 0 && (
-                                        <span className="absolute -top-1 -right-1 w-6 h-6 bg-red-500 rounded-full flex items-center justify-center ring-2 ring-white dark:ring-gray-800">
+                                        <span className="absolute -top-1 -right-1 w-6 h-6 bg-red-500 rounded-full flex items-center justify-center ring-2 ring-white dark:ring-gray-800 md:scale-75 lg:scale-100 origin-top-right">
                                             <span className="text-xs font-bold text-white">{cartCount > 99 ? "99+" : cartCount}</span>
                                         </span>
                                     )}

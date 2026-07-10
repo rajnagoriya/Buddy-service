@@ -114,6 +114,18 @@ export const adminSidebarMenu = [
   },
   {
     type: "section",
+    label: "GLOBAL SUPPORT MANAGEMENT",
+    items: [
+      {
+        type: "link",
+        label: "Global Support Tickets",
+        path: "/admin/support/tickets",
+        icon: "ShieldCheck",
+      },
+    ],
+  },
+  {
+    type: "section",
     label: "CUSTOMER MANAGEMENT",
     items: [
       {

@@ -34,6 +34,9 @@ const normalizeRole = (role = '') => {
   if (value === 'super-admin') {
     return 'admin';
   }
+  if (value === 'customer') {
+    return 'user';
+  }
   return value;
 };
 

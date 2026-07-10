@@ -729,10 +729,28 @@ export async function registerWebPushForCurrentModule(pathname = window.location
       });
       const messaging = getMessaging(app);
 
-      const token = await getToken(messaging, {
-        vapidKey: firebasePublicEnv.vapidKey,
-        serviceWorkerRegistration: registration,
-      });
+      let token;
+      try {
+        token = await getToken(messaging, {
+          vapidKey: firebasePublicEnv.vapidKey,
+          serviceWorkerRegistration: registration,
+        });
+      } catch (err) {
+        if (err && err.message && err.message.includes('less than the existing version')) {
+          pushDebugWarn(PUSH_DEBUG_PREFIX, "FCM IndexedDB version mismatch, deleting database and retrying...");
+          const dbReq = window.indexedDB.deleteDatabase("firebase-messaging-database");
+          await new Promise((resolve) => {
+            dbReq.onsuccess = resolve;
+            dbReq.onerror = resolve;
+          });
+          token = await getToken(messaging, {
+            vapidKey: firebasePublicEnv.vapidKey,
+            serviceWorkerRegistration: registration,
+          });
+        } else {
+          throw err;
+        }
+      }
 
       if (!token) return;
       pushDebugLog(PUSH_DEBUG_PREFIX, "FCM token resolved", {

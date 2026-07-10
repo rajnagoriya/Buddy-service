@@ -5,6 +5,8 @@ import { Switch } from "@food/components/ui/switch";
 import HomeSectionHeader from "./HomeSectionHeader";
 import PromoRow from "./PromoRow";
 
+import FestBanner from "./FestBanner";
+
 export default function HomeDesktopShell({
   displayCategories = [],
   heroBanner = null,
@@ -19,6 +21,8 @@ export default function HomeDesktopShell({
   sortBy,
   selectedCuisine,
   setIsFilterOpen,
+  festSlideIndex,
+  setFestSlideIndex,
 }) {
   const quickFilters = [
     { id: "delivery-under-30", label: "Under 30 mins" },
@@ -41,7 +45,7 @@ export default function HomeDesktopShell({
     <div className="food-landing-desktop max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8 space-y-8">
       <section className="rounded-3xl border border-emerald-100/80 bg-gradient-to-br from-emerald-50/90 via-white to-lime-50/50 dark:from-emerald-950/20 dark:via-[#0a0a0a] dark:to-[#0a0a0a] dark:border-emerald-900/40 p-6 lg:p-8 shadow-sm">
         <div className="grid lg:grid-cols-[minmax(0,1fr)_minmax(280px,420px)] gap-8 items-center">
-          <div className="space-y-5 min-w-0">
+          <div className="space-y-5 min-w-0 order-2 lg:order-1">
             <p className="food-landing-eyebrow text-primary">Food delivery</p>
             <h1 className="food-landing-hero-title">
               Great food from restaurants near you
@@ -79,8 +83,9 @@ export default function HomeDesktopShell({
               </button>
             </div>
           </div>
-          <div className="w-full min-h-[220px] lg:min-h-[260px] rounded-2xl overflow-hidden [&>div]:!p-0 [&_.px-4]:!px-0">
+          <div className={`w-full flex flex-col gap-4 rounded-2xl overflow-hidden [&>div]:!p-0 [&_.px-4]:!px-0 order-1 lg:order-2 ${heroBanner ? "min-h-[220px] lg:min-h-[260px]" : ""}`}>
             {heroBanner}
+            <FestBanner embedded activeIndex={festSlideIndex} onChange={setFestSlideIndex} />
           </div>
         </div>
       </section>
