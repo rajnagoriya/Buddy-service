@@ -11,6 +11,16 @@ import {
     uploadRestaurantCoverImages,
     uploadRestaurantMenuImages,
     listPublicOffers,
+    listOffersForRestaurantPage,
+    listDeliverySpeedOptions,
+    getPublicCheckoutSettings,
+    listRestaurantOffers,
+    createRestaurantOffer,
+    updateRestaurantOffer,
+    deleteRestaurantOffer,
+    reapplyRestaurantOffer,
+    getRestaurantOfferAnalytics,
+    getRestaurantOfferUsageHistory,
     getRestaurantComplaints
 } from '../services/restaurant.service.js';
 import {
@@ -18,7 +28,8 @@ import {
     getPendingDiningRequest
 } from '../../dining/services/dining.service.js';
 import { validateRestaurantRegisterDto } from '../validators/restaurant.validator.js';
-import { sendResponse } from '../../../../utils/response.js';
+import { validateRestaurantCreateOfferDto, validateRestaurantUpdateOfferDto } from '../../admin/validators/offer.validator.js';
+import { sendResponse, sendError } from '../../../../utils/response.js';
 
 export const registerRestaurantController = async (req, res, next) => {
     try {
@@ -135,6 +146,123 @@ export const listPublicOffersController = async (req, res, next) => {
     try {
         const data = await listPublicOffers(req.query || {});
         return sendResponse(res, 200, 'Offers fetched successfully', data);
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const listOffersForRestaurantPageController = async (req, res, next) => {
+    try {
+        const { restaurantId } = req.params;
+        const userId = req.user?.userId || null;
+        const data = await listOffersForRestaurantPage(restaurantId, userId);
+        return sendResponse(res, 200, 'Offers fetched successfully', data);
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const listDeliverySpeedOptionsController = async (req, res, next) => {
+    try {
+        const data = await listDeliverySpeedOptions();
+        return sendResponse(res, 200, 'Delivery speed options fetched successfully', data);
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const getPublicCheckoutSettingsController = async (req, res, next) => {
+    try {
+        const data = await getPublicCheckoutSettings();
+        return sendResponse(res, 200, 'Checkout settings fetched successfully', data);
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const listRestaurantOffersController = async (req, res, next) => {
+    try {
+        const restaurantId = req.user?.userId;
+        const data = await listRestaurantOffers(restaurantId);
+        return sendResponse(res, 200, 'Offers fetched successfully', data);
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const createRestaurantOfferController = async (req, res, next) => {
+    try {
+        const restaurantId = req.user?.userId;
+        const dto = validateRestaurantCreateOfferDto(req.body || {});
+        const offer = await createRestaurantOffer(restaurantId, dto);
+        return sendResponse(res, 201, 'Coupon created successfully', { offer });
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const updateRestaurantOfferController = async (req, res, next) => {
+    try {
+        const restaurantId = req.user?.userId;
+        const { id } = req.params;
+        const dto = validateRestaurantUpdateOfferDto(req.body || {});
+        const offer = await updateRestaurantOffer(restaurantId, id, dto);
+        if (!offer) {
+            return sendError(res, 404, 'Coupon not found');
+        }
+        return sendResponse(res, 200, 'Coupon updated successfully', { offer });
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const deleteRestaurantOfferController = async (req, res, next) => {
+    try {
+        const restaurantId = req.user?.userId;
+        const { id } = req.params;
+        const result = await deleteRestaurantOffer(restaurantId, id);
+        if (!result) {
+            return sendError(res, 404, 'Coupon not found');
+        }
+        return sendResponse(res, 200, 'Coupon deleted successfully', result);
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const reapplyRestaurantOfferController = async (req, res, next) => {
+    try {
+        const restaurantId = req.user?.userId;
+        const { id } = req.params;
+        const offer = await reapplyRestaurantOffer(restaurantId, id);
+        if (!offer) {
+            return sendError(res, 404, 'Coupon not found');
+        }
+        return sendResponse(res, 200, 'Coupon resubmitted for approval', { offer });
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const getRestaurantOfferAnalyticsController = async (req, res, next) => {
+    try {
+        const restaurantId = req.user?.userId;
+        const { id } = req.params;
+        const data = await getRestaurantOfferAnalytics(restaurantId, id);
+        if (!data) return sendError(res, 404, 'Coupon not found');
+        return sendResponse(res, 200, 'Analytics fetched successfully', data);
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const getRestaurantOfferUsageHistoryController = async (req, res, next) => {
+    try {
+        const restaurantId = req.user?.userId;
+        const { id } = req.params;
+        const data = await getRestaurantOfferUsageHistory(restaurantId, id, req.query || {});
+        if (!data) return sendError(res, 404, 'Coupon not found');
+        return sendResponse(res, 200, 'Usage history fetched successfully', data);
     } catch (error) {
         next(error);
     }

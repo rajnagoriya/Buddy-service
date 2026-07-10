@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, useRef, useCallback } from "react"
 import { buildCartLineId } from "@food/utils/foodVariants"
-import { adminAPI, userAPI } from "@food/api"
+import { restaurantAPI, userAPI } from "@food/api"
 import { API_BASE_URL } from "@food/api/config"
 import { buildRestaurantMetaFromCart } from "@food/hooks/useCartRestaurantValidation"
 
@@ -412,10 +412,10 @@ export function CartProvider({ children }) {
   useEffect(() => {
     const fetchSettings = async () => {
       try {
-        const res = await adminAPI.getDeliveryBoySettings()
+        const res = await restaurantAPI.getPublicCheckoutSettings()
         if (res.data?.success) setAdminSettings(res.data.data)
       } catch (err) {
-        debugError('Failed to fetch admin settings for multi-order:', err)
+        debugError('Failed to fetch checkout settings for multi-order:', err)
       }
     }
     fetchSettings()
@@ -477,6 +477,9 @@ export function CartProvider({ children }) {
             longitude: item?.longitude,
             restaurantId: newItemRestaurantId,
           },
+          Number(adminSettings?.multiOrderMaxDistance) > 0
+            ? Number(adminSettings.multiOrderMaxDistance)
+            : undefined,
         )
 
         if (!chainCheck.skipped && !chainCheck.valid) {
@@ -502,13 +505,26 @@ export function CartProvider({ children }) {
 
     setCart((prev) => {
       const safePrev = normalizeCartData(prev)
-      const existing = safePrev.find((i) => i.id === item.id)
+      const normalizedIncoming = normalizeCartData([
+        {
+          ...item,
+          itemId: item?.itemId || item?.productId || item?.id,
+          productId: item?.productId || item?.itemId || item?.id,
+          variantId: item?.variantId || "",
+          lineItemId: buildCartLineId(
+            item?.itemId || item?.productId || item?.id,
+            item?.variantId || "",
+          ),
+        },
+      ])[0]
+      const incomingId = normalizedIncoming?.id || String(item?.id || "")
+      const existing = safePrev.find((i) => i.id === incomingId)
       if (existing) {
         // Set last add event for animation when incrementing existing item
         if (sourcePosition) {
           setLastAddEvent({
             product: {
-              id: item.id,
+              id: incomingId,
               name: item.name,
               imageUrl: item.image || item.imageUrl,
             },
@@ -518,7 +534,7 @@ export function CartProvider({ children }) {
           setTimeout(() => setLastAddEvent(null), 1500)
         }
         return safePrev.map((i) =>
-          i.id === item.id ? { ...i, quantity: i.quantity + 1 } : i
+          i.id === incomingId ? { ...i, quantity: i.quantity + 1 } : i
         )
       }
       
@@ -528,13 +544,13 @@ export function CartProvider({ children }) {
         return safePrev;
       }
       
-      const newItem = { ...item, quantity: 1 }
+      const newItem = { ...normalizedIncoming, quantity: 1 }
       
       // Set last add event for animation if sourcePosition is provided
       if (sourcePosition) {
         setLastAddEvent({
           product: {
-            id: item.id,
+              id: incomingId,
             name: item.name,
             imageUrl: item.image || item.imageUrl,
           },
@@ -633,7 +649,23 @@ export function CartProvider({ children }) {
     return safeCart.find((i) => i.id === resolvedItemId) || null
   }
 
-  const clearCart = () => setCart([])
+  const clearCart = ({ skipServerSync = false } = {}) => {
+    if (skipServerSync) {
+      skipServerSyncRef.current = true
+      if (saveDebounceRef.current) {
+        clearTimeout(saveDebounceRef.current)
+        saveDebounceRef.current = null
+      }
+    }
+    setCart([])
+    setRestaurantMeta([])
+    if (skipServerSync) {
+      // Allow future cart edits to sync again after React applies empty cart.
+      setTimeout(() => {
+        skipServerSyncRef.current = false
+      }, 0)
+    }
+  }
 
   const removeItemsByRestaurantIds = (restaurantIds = []) => {
     const idSet = new Set((Array.isArray(restaurantIds) ? restaurantIds : []).map(String))

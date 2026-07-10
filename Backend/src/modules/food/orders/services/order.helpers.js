@@ -29,6 +29,130 @@ export function haversineKm(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
+export function calculateDistanceSlabFee(distanceKm, rules = []) {
+  const d = Math.max(0, Number(distanceKm) || 0);
+  const list = Array.isArray(rules) ? rules.filter((r) => r && r.status !== false) : [];
+  if (!list.length) return 0;
+
+  const sorted = [...list].sort(
+    (a, b) => (Number(a.minDistance) || 0) - (Number(b.minDistance) || 0),
+  );
+  const baseRule = sorted.find((r) => Number(r.minDistance || 0) === 0) || sorted[0];
+  if (!baseRule) return 0;
+
+  let fee = Number(baseRule.basePayout || 0);
+
+  for (const rule of sorted) {
+    const perKm = Number(rule.commissionPerKm || 0);
+    if (!Number.isFinite(perKm) || perKm <= 0) continue;
+    const min = Number(rule.minDistance || 0);
+    const max = rule.maxDistance == null ? null : Number(rule.maxDistance);
+    if (d <= min) continue;
+    const upper = max == null ? d : Math.min(d, max);
+    const kmInSlab = Math.max(0, upper - min);
+    if (kmInSlab > 0) fee += kmInSlab * perKm;
+  }
+
+  if (!Number.isFinite(fee) || fee < 0) return 0;
+  return Math.round(fee);
+}
+
+export function calculateRangeDeliveryFee(distanceKm, ranges = []) {
+  const d = Number(distanceKm);
+  if (!Number.isFinite(d) || d < 0) return null;
+  const list = Array.isArray(ranges) ? [...ranges] : [];
+  if (!list.length) return null;
+
+  const sorted = list.sort((a, b) => Number(a.min) - Number(b.min));
+  for (let i = 0; i < sorted.length; i += 1) {
+    const range = sorted[i];
+    const min = Number(range.min);
+    const max = Number(range.max);
+    const fee = Number(range.fee);
+    if (!Number.isFinite(min) || !Number.isFinite(max) || !Number.isFinite(fee)) continue;
+    const isLastRange = i === sorted.length - 1;
+    const inRange = isLastRange
+      ? d >= min && d <= max
+      : d >= min && d < max;
+    if (inRange) return fee;
+  }
+  return null;
+}
+
+export function resolveOrderDistanceKm(restaurants = [], userLoc) {
+  if (!Array.isArray(restaurants) || restaurants.length === 0) return 0;
+  if (!Array.isArray(userLoc) || userLoc.length < 2) return 0;
+
+  if (restaurants.length === 2) {
+    const r1 = restaurants[0];
+    const r2 = restaurants[1];
+    if (r1?.location?.coordinates?.length === 2 && r2?.location?.coordinates?.length === 2) {
+      return (
+        haversineKm(
+          r1.location.coordinates[1], r1.location.coordinates[0],
+          r2.location.coordinates[1], r2.location.coordinates[0],
+        ) +
+        haversineKm(
+          r2.location.coordinates[1], r2.location.coordinates[0],
+          userLoc[1], userLoc[0],
+        )
+      );
+    }
+  }
+
+  const mainRestaurant = restaurants[0];
+  if (mainRestaurant?.location?.coordinates?.length === 2) {
+    return haversineKm(
+      mainRestaurant.location.coordinates[1], mainRestaurant.location.coordinates[0],
+      userLoc[1], userLoc[0],
+    );
+  }
+  return 0;
+}
+
+export function applyDeliverySurcharges(baseFee, { isMultiRestaurant, isSplitOrder, deliveryBoySettings } = {}) {
+  const base = Math.max(0, Number(baseFee) || 0);
+  let surcharge = 0;
+  let multiplier = 1;
+
+  if (isMultiRestaurant) {
+    surcharge += Math.max(0, Number(deliveryBoySettings?.multiOrderAdditionalCharge) || 0);
+  }
+  if (isSplitOrder) {
+    surcharge += base;
+    multiplier = 2;
+  }
+
+  return {
+    baseFee: base,
+    surcharge,
+    multiplier: isSplitOrder ? multiplier : 1,
+    fee: base + surcharge,
+  };
+}
+
+export function resolveSpeedFeeModifier(deliveryBoySettings, deliverySpeedOptionId, deliveryOptionName) {
+  const options = Array.isArray(deliveryBoySettings?.deliverySpeedOptions)
+    ? deliveryBoySettings.deliverySpeedOptions
+    : [];
+  if (!options.length) return 0;
+
+  const id = String(deliverySpeedOptionId || "").trim();
+  if (id) {
+    const byId = options.find((o) => String(o.id) === id);
+    if (byId) return Number(byId.feeModifier) || 0;
+  }
+
+  const name = String(deliveryOptionName || "").trim().toLowerCase();
+  if (name) {
+    const byName = options.find((o) => String(o.name || "").trim().toLowerCase() === name);
+    if (byName) return Number(byName.feeModifier) || 0;
+  }
+
+  const defaultOption = options.find((o) => o.isDefault) || options[0];
+  return Number(defaultOption?.feeModifier) || 0;
+}
+
 export function generateFourDigitDeliveryOtp() {
   return String(Math.floor(1000 + Math.random() * 9000));
 }
@@ -119,10 +243,46 @@ export function pushStatusHistory(order, { byRole, byId, from, to, note = "" }) 
   });
 }
 
+export const MAX_DISPATCH_ATTEMPTS = 10;
+
+export function freeOrderDispatch(orderDoc) {
+  if (!orderDoc) return;
+  orderDoc.dispatch = orderDoc.dispatch || {};
+  orderDoc.dispatch.status = 'cancelled';
+  orderDoc.dispatch.deliveryPartnerId = null;
+  orderDoc.dispatch.sharedPartnerId = null;
+  orderDoc.dispatch.acceptedAt = undefined;
+  orderDoc.dispatch.assignedAt = undefined;
+}
+
+export function computeRiderToRestaurantDistanceKm(orderDoc) {
+  const order = orderDoc?.toObject ? orderDoc.toObject() : orderDoc || {};
+  const riderCoords = order?.lastRiderLocation?.coordinates;
+  if (!Array.isArray(riderCoords) || riderCoords.length < 2) return null;
+
+  const restaurantCoords =
+    order?.restaurantId?.location?.coordinates ||
+    order?.pickups?.[0]?.location?.coordinates ||
+    null;
+  if (!Array.isArray(restaurantCoords) || restaurantCoords.length < 2) return null;
+
+  const [rLng, rLat] = riderCoords;
+  const [restLng, restLat] = restaurantCoords;
+  const km = haversineKm(rLat, rLng, restLat, restLng);
+  return Number.isFinite(km) ? Number(km.toFixed(2)) : null;
+}
+
 export function normalizeOrderForClient(orderDoc) {
   const order = orderDoc?.toObject ? orderDoc.toObject() : orderDoc || {};
   const mongoId = (order._id || orderDoc?._id || "").toString();
   const displayId = order.order_id || mongoId;
+  const phase = order?.deliveryState?.currentPhase;
+  const prePickupPhases = new Set(['en_route_to_pickup', 'at_pickup']);
+  const prePickupStatuses = new Set(['created', 'confirmed', 'preparing', 'ready_for_pickup', 'reached_pickup']);
+  const showRiderToRestaurantDistance =
+    prePickupPhases.has(phase) ||
+    (prePickupStatuses.has(order?.orderStatus) && order?.dispatch?.status === 'accepted');
+
   return {
     ...order,
     orderMongoId: mongoId,
@@ -136,6 +296,17 @@ export function normalizeOrderForClient(orderDoc) {
     restaurantNote: order?.restaurantNote || "",
     cancellationReason: (order?.orderStatus?.includes('cancel') || order?.status?.includes('cancel')) 
       ? (order.statusHistory?.findLast(h => h.to?.includes('cancel'))?.note || "")
+      : null,
+    failureReason: (() => {
+      const cancelNote = String(
+        order.statusHistory?.findLast((h) => h.to?.includes('cancel'))?.note || '',
+      ).toLowerCase();
+      if (cancelNote.includes('no delivery partner')) return 'driver_not_found';
+      if (cancelNote.includes('3 times') || cancelNote.includes('3 attempts')) return 'restaurant_rejected';
+      return null;
+    })(),
+    riderToRestaurantDistanceKm: showRiderToRestaurantDistance
+      ? computeRiderToRestaurantDistanceKm(order)
       : null,
     deliveryState: {
       ...(order?.deliveryState || {}),

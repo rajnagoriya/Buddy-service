@@ -8,7 +8,11 @@ export const requireRoles = (...allowedRoles) => {
 
         const userRole = String(req.user.role).toUpperCase();
         const allowedSet = new Set(allowedRoles.map((r) => String(r).toUpperCase()));
-        if (!allowedSet.has(userRole)) {
+        // Unified identity login issues role=DRIVER; legacy food delivery uses DELIVERY_PARTNER.
+        const roleMatches =
+            allowedSet.has(userRole) ||
+            (userRole === 'DRIVER' && allowedSet.has('DELIVERY_PARTNER'));
+        if (!roleMatches) {
             return sendError(res, 403, 'Forbidden: insufficient permissions');
         }
 

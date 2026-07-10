@@ -33,6 +33,7 @@ const invDining = withFoodCacheInvalidation(invalidateAfterDiningAdminMutation);
 
 // ----- Public Business Settings (No Admin Required) -----
 router.get('/business-settings/public', businessSettingsController.getBusinessSettings);
+router.get('/fee-settings/public', adminController.getPublicFeeSettings);
 
 const requireAdmin = (req, _res, next) => {
     const user = req.user;
@@ -131,8 +132,13 @@ router.patch('/foods/:id/reject', invFood, foodApprovalController.rejectFoodItem
 // ----- Offers & Coupons -----
 router.get('/offers', adminController.getAllOffers);
 router.post('/offers', invOffer, adminController.createAdminOffer);
+router.patch('/offers/:id', invOffer, adminController.updateAdminOffer);
+router.patch('/offers/:id/approve', invOffer, adminController.approveAdminOffer);
+router.patch('/offers/:id/reject', invOffer, adminController.rejectAdminOffer);
 router.patch('/offers/:id/cart-visibility', invOffer, adminController.updateAdminOfferCartVisibility);
 router.delete('/offers/:id', invOffer, adminController.deleteAdminOffer);
+router.get('/offers/:id/analytics', invOffer, adminController.getAdminOfferAnalytics);
+router.get('/offers/:id/history', invOffer, adminController.getAdminOfferUsageHistory);
 
 // ----- Feedback Experience (Admin) -----
 router.get('/feedback-experiences', feedbackExperienceController.getFeedbackExperiences);

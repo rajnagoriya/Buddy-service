@@ -45,6 +45,12 @@ const pricingSchema = new mongoose.Schema(
         platformFee: { type: Number, default: 0, min: 0 },
         restaurantCommission: { type: Number, default: 0, min: 0 },
         discount: { type: Number, default: 0, min: 0 },
+        couponCode: { type: String },
+        couponCreatedBy: { type: String, enum: ['admin', 'restaurant'] },
+        couponCategory: { type: String, enum: ['normal', 'free_delivery'] },
+        offerId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodOffer' },
+        platformSubsidy: { type: Number, default: 0, min: 0 },
+        deliveryDiscount: { type: Number, default: 0, min: 0 },
         total: { type: Number, required: true, min: 0 },
         currency: { type: String, default: 'INR' },
         deliveryFeeBreakdown: { type: mongoose.Schema.Types.Mixed }

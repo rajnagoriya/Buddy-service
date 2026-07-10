@@ -14,7 +14,6 @@ const feeSettingsSchema = new mongoose.Schema(
         // No defaults here; admin must explicitly configure values.
         deliveryFee: { type: Number, min: 0 },
         deliveryFeeRanges: { type: [deliveryFeeRangeSchema], default: [] },
-        freeDeliveryUpTo: { type: Number, min: 0 },
         freeDeliveryThreshold: { type: Number, min: 0 },
         platformFee: { type: Number, min: 0 },
         packagingFee: { type: Number, min: 0 },

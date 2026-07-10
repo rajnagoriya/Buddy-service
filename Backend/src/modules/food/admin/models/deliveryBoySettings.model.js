@@ -8,6 +8,24 @@ const salarySlabSchema = new mongoose.Schema(
     { _id: false }
 );
 
+const deliverySpeedOptionSchema = new mongoose.Schema(
+    {
+        id: { type: String, required: true, trim: true },
+        name: { type: String, required: true, trim: true },
+        badge: { type: String, default: '', trim: true },
+        badgeColor: { type: String, default: 'bg-slate-100 text-slate-700 border border-slate-200' },
+        time: { type: String, default: '', trim: true },
+        estimatedTime: { type: Number, default: 30, min: 1 },
+        feeModifier: { type: Number, default: 0 },
+        description: { type: String, default: '', trim: true },
+        icon: { type: String, enum: ['bike', 'leaf', 'zap', 'truck', 'clock'], default: 'bike' },
+        isEnabled: { type: Boolean, default: true },
+        isDefault: { type: Boolean, default: false },
+        sortOrder: { type: Number, default: 0, min: 0 },
+    },
+    { _id: false }
+);
+
 const deliveryBoySettingsSchema = new mongoose.Schema(
     {
         adminCommissionPercentage: { type: Number, default: 0, min: 0, max: 100 },
@@ -20,6 +38,7 @@ const deliveryBoySettingsSchema = new mongoose.Schema(
         // Order Sharing Settings
         splitOrderEnabled: { type: Boolean, default: true },
         splitOrderThreshold: { type: Number, default: 20, min: 1 },
+        deliverySpeedOptions: { type: [deliverySpeedOptionSchema], default: [] },
         isActive: { type: Boolean, default: true }
     },
     { collection: 'food_delivery_boy_settings', timestamps: true }

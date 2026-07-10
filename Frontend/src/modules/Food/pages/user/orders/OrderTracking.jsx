@@ -33,6 +33,7 @@ import {
 } from "@food/components/ui/dialog"
 import { Textarea } from "@food/components/ui/textarea"
 import { useOrders } from "@food/context/OrdersContext"
+import { useCart } from "@food/context/CartContext"
 import { useProfile } from "@food/context/ProfileContext"
 import { useLocation as useUserLocation } from "@food/hooks/useLocation"
 import DeliveryTrackingMap from "@food/components/user/DeliveryTrackingMap"
@@ -358,6 +359,8 @@ const transformOrderForTracking = (apiOrder, previousOrder = null, explicitResta
       coordinates: restaurantCoords
     },
     items: apiOrder?.items?.map(item => ({
+      itemId: item.itemId || item.id || item._id,
+      id: item.itemId || item.id || item._id,
       name: item.name,
       variantName: item.variantName || '',
       quantity: item.quantity,
@@ -426,6 +429,11 @@ const transformOrderForTracking = (apiOrder, previousOrder = null, explicitResta
     restaurantRating: apiOrder?.ratings?.restaurant?.rating || apiOrder?.restaurantRating || previousOrder?.restaurantRating || null,
     deliveryPartnerRating: apiOrder?.ratings?.deliveryPartner?.rating || apiOrder?.deliveryPartnerRating || previousOrder?.deliveryPartnerRating || null,
     delayContext: apiOrder?.delayContext || previousOrder?.delayContext || null,
+    riderToRestaurantDistanceKm:
+      apiOrder?.riderToRestaurantDistanceKm ??
+      previousOrder?.riderToRestaurantDistanceKm ??
+      null,
+    failureReason: apiOrder?.failureReason || previousOrder?.failureReason || null,
   }
 }
 
@@ -455,8 +463,13 @@ function mapOrderToTrackingUiStatus(orderLike) {
   if (isFoodOrderCancelledStatus(statusRaw)) return "cancelled"
   if (statusRaw === "delivered" || statusRaw === "completed") return "delivered"
 
-  // Live Ride / Phase-based mapping (Highest priority for precision)
   const isRiderAccepted = orderLike.dispatch?.status === "accepted" || orderLike.assignmentInfo?.status === "accepted" || orderLike.deliveryPartner?.status === "accepted";
+  const isSearchingDriver = !isRiderAccepted && ["created", "scheduled", "placed", "pending"].includes(String(statusRaw || "").toLowerCase())
+
+  if (isSearchingDriver) return "finding_driver"
+  if (isRiderAccepted && ["created", "scheduled", "placed", "pending"].includes(String(statusRaw || "").toLowerCase())) {
+    return "awaiting_restaurant"
+  }
   
   if (phase === "reached_drop" || phase === "at_drop" || statusRaw === "at_drop") return "at_drop"
   if (phase === "en_route_to_delivery" || statusRaw === "picked_up" || statusRaw === "out_for_delivery") return "on_way"
@@ -487,7 +500,18 @@ const StatusBanner = ({ order }) => {
 
   const getConsolingMessage = () => {
     if (status === 'delivered') return "Order delivered! Enjoy your meal. 😋";
-    if (status === 'cancelled') return "This order was cancelled.";
+    if (status === 'cancelled') {
+      if (order?.failureReason === 'driver_not_found' || String(order?.cancellationReason || '').toLowerCase().includes('no delivery partner')) {
+        return "We couldn't find a delivery partner near you. Your order was cancelled and any paid amount will be refunded.";
+      }
+      if (order?.failureReason === 'restaurant_rejected' || String(order?.cancellationReason || '').toLowerCase().includes('3 times')) {
+        return "The restaurant couldn't accept this order after 3 attempts. Your order was cancelled and any paid amount will be refunded.";
+      }
+      return "This order was cancelled.";
+    }
+
+    if (status === 'finding_driver') return "Fetching a delivery partner near the restaurant... 🛵";
+    if (status === 'awaiting_restaurant') return "Delivery partner assigned! Waiting for the restaurant to accept your order. 🍽️";
 
     // Logic for delay reasons
     if (delayReason) {
@@ -505,6 +529,11 @@ const StatusBanner = ({ order }) => {
       case 'at_pickup':
         return "Rider has reached the restaurant. Your food is being packed! 🛍️";
       case 'en_route_to_pickup':
+        if (typeof order?.riderToRestaurantDistanceKm === 'number') {
+          const km = order.riderToRestaurantDistanceKm;
+          const distanceText = km >= 1 ? `${km.toFixed(1)} km` : `${Math.round(km * 1000)} m`;
+          return `Your delivery partner is ${distanceText} away from the restaurant. 🛵`;
+        }
         return "Our partner is on the way to pick up your order. 🛵";
       case 'en_route_to_delivery':
         return "Fresh food is on its way to your doorstep! 🏎️";
@@ -539,6 +568,7 @@ export default function OrderTracking() {
   const companyName = useCompanyName()
   const navigate = useNavigate()
   const location = useLocation()
+  const { replaceCart } = useCart()
   const { orderId } = useParams()
   const [searchParams] = useSearchParams()
   const confirmed = searchParams.get("confirmed") === "true"
@@ -554,7 +584,6 @@ export default function OrderTracking() {
   const [error, setError] = useState(null)
 
   const [showConfirmation, setShowConfirmation] = useState(confirmed)
-  const [orderStatus, setOrderStatus] = useState('placed')
   const [estimatedTime, setEstimatedTime] = useState(29)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [showCancelDialog, setShowCancelDialog] = useState(false)
@@ -640,12 +669,77 @@ export default function OrderTracking() {
       setEstimatedTime(newEta);
     }
   }, [])
-  const lastRealtimeRefreshRef = useRef(0)
+
+  const orderStatus = useMemo(
+    () => mapOrderToTrackingUiStatus(order),
+    [
+      order?.status,
+      order?.orderStatus,
+      order?.failureReason,
+      order?.dispatch?.status,
+      order?.deliveryState?.currentPhase,
+      order?.deliveryState?.status,
+    ],
+  )
+
+  const isDriverNotFoundCancelled = useMemo(() => {
+    if (orderStatus !== 'cancelled') return false
+    const reason = String(order?.cancellationReason || '').toLowerCase()
+    return (
+      order?.failureReason === 'driver_not_found' ||
+      reason.includes('no delivery partner') ||
+      reason.includes('delivery partner not found')
+    )
+  }, [orderStatus, order?.failureReason, order?.cancellationReason])
+
+  const handleReorder = () => {
+    if (!order?.items?.length) {
+      toast.error('No items available to reorder')
+      return
+    }
+    const restaurantTarget =
+      order.restaurantSlug ||
+      order.restaurantId?._id ||
+      order.restaurantId ||
+      order.items?.[0]?.restaurantId
+    if (!restaurantTarget) {
+      toast.error('Restaurant information not available')
+      return
+    }
+    const reorderItems = order.items
+      .map((item, index) => {
+        const itemId = item.itemId || item.id || item._id
+        if (!itemId) return null
+        return {
+          id: itemId,
+          itemId,
+          name: item.name || 'Item',
+          price: Number(item.price) || 0,
+          image: item.image || '',
+          restaurant: order.restaurant || order.restaurantName || 'Restaurant',
+          restaurantId: item.restaurantId || order.restaurantId,
+          variantId: item.variantId,
+          variantName: item.variantName,
+          variantPrice: item.variantPrice,
+          description: item.description || '',
+          isVeg: item.isVeg !== false,
+          quantity: Math.max(1, Number(item.quantity) || 1),
+          reorderIndex: index,
+        }
+      })
+      .filter(Boolean)
+    if (!reorderItems.length) {
+      toast.error('No reorderable items found')
+      return
+    }
+    replaceCart(reorderItems)
+    toast.success('Items added to cart')
+    navigate(`/food/user/restaurants/${restaurantTarget}`)
+  }
   const trackingOrderIdsRef = useRef(new Set())
   const terminalPollStopRef = useRef(false)
   const lookupIdsRef = useRef([])
-  const isInitialPollRequestedRef = useRef(null)
-  const lastPollExecutionRef = useRef(0) // New: Hard throttle for extreme cases
+  const pollRef = useRef(null)
   const lastStatusToastRef = useRef({ key: '', at: 0 })
 
   const ORDER_STATUS_TOAST_ID = 'order-tracking-status-update'
@@ -921,16 +1015,6 @@ export default function OrderTracking() {
     ].includes(status)
   }, [order?.status])
 
-  // Single source of truth: backend order.status (+ deliveryState phase for live ride)
-  useEffect(() => {
-    if (!order) return
-    setOrderStatus(mapOrderToTrackingUiStatus(order))
-  }, [
-    order?.status,
-    order?.deliveryState?.currentPhase,
-    order?.deliveryState?.status,
-  ])
-
   const acceptedAtMs = useMemo(() => {
     const timestamp =
       order?.tracking?.confirmed?.timestamp ||
@@ -1038,39 +1122,28 @@ export default function OrderTracking() {
 
   // Poll for order updates (especially when delivery partner accepts)
 
-  const pollRef = useRef(null);
-
-  // Main fetch & polling core logic. (Isolated from socket connection stat-changes)
+  // Main fetch on orderId change; pollRef used for optional fallback refresh only.
   useEffect(() => {
     if (!orderId) return;
 
-    let isSubscribed = true;
-    let requestInProgress = false;
+    let cancelled = false;
 
-    const poll = async (isInitial = false) => {
-      if (!isSubscribed || requestInProgress) return;
-      if (terminalPollStopRef.current && !isInitial) return;
+    const loadOrder = async (isInitial = false) => {
+      if (cancelled) return;
+      if (!isInitial && terminalPollStopRef.current) return;
 
-      const now = Date.now();
-      if (isInitial && now - lastPollExecutionRef.current < 1000) return;
-      if (isInitial) lastPollExecutionRef.current = now;
-
-      // Check context immediately to avoid loaders if data exists locally
       if (isInitial) {
         const rawContext = getOrderById(orderId);
         if (rawContext) {
           setOrder(transformOrderForTracking(rawContext));
-          setLoading(false);
         }
       }
 
-      requestInProgress = true;
       try {
         const response = await fetchOrderDetailsWithFallback({ force: isInitial });
-        if (!isSubscribed) return;
+        if (cancelled) return;
 
         let finalOrderData = null;
-
         if (response.data?.success && response.data.data?.order) {
           finalOrderData = response.data.data.order;
         } else if (isInitial) {
@@ -1079,70 +1152,65 @@ export default function OrderTracking() {
         }
 
         if (finalOrderData) {
-          setOrder(prev => {
+          setOrder((prev) => {
             const transformedOrder = transformOrderForTracking(finalOrderData, prev);
             const ui = mapOrderToTrackingUiStatus(transformedOrder);
             terminalPollStopRef.current = ui === 'delivered' || ui === 'cancelled';
             return transformedOrder;
           });
           setError(null);
-          setLoading(false);
           return;
         }
 
-        if (isInitial && !order) {
+        if (isInitial) {
           setError(response.data?.message || 'Order not found');
           terminalPollStopRef.current = true;
         }
       } catch (err) {
-        if (isInitial && !order) {
-          try {
-            const matchedOrder = await resolveOrderFromList(orderId);
-            if (matchedOrder) {
-              if (!isSubscribed) return;
-              setOrder(prev => transformOrderForTracking(matchedOrder, prev));
-              setError(null);
-              setLoading(false);
-              return;
-            }
-          } catch {}
-          if (!isSubscribed) return;
-          setError(err.response?.data?.message || 'Failed to fetch order details');
-          terminalPollStopRef.current = true;
+        if (!isInitial || cancelled) return;
+        try {
+          const matchedOrder = await resolveOrderFromList(orderId);
+          if (matchedOrder) {
+            if (cancelled) return;
+            setOrder((prev) => transformOrderForTracking(matchedOrder, prev));
+            setError(null);
+            return;
+          }
+        } catch {
+          // ignore list fallback errors
         }
+        setError(err.response?.data?.message || 'Failed to fetch order details');
+        terminalPollStopRef.current = true;
       } finally {
-        requestInProgress = false;
-        if (isInitial && isSubscribed) setLoading(false);
+        if (isInitial && !cancelled) {
+          setLoading(false);
+        }
       }
     };
 
-    pollRef.current = poll;
     terminalPollStopRef.current = false;
-
-    if (isInitialPollRequestedRef.current !== orderId) {
-      isInitialPollRequestedRef.current = orderId;
-      poll(true);
-    }
+    setLoading(true);
+    setError(null);
+    loadOrder(true);
+    pollRef.current = () => loadOrder(false);
 
     return () => {
-      isSubscribed = false;
+      cancelled = true;
     };
-  }, [orderId, fetchOrderDetailsWithFallback, resolveOrderFromList]);
+  }, [orderId, fetchOrderDetailsWithFallback, resolveOrderFromList, getOrderById]);
 
-  // Interval Manager (dynamically adapts based on socket connection state independently)
+  // Fallback polling only when socket is disconnected (live updates come from socket).
   useEffect(() => {
     if (!orderId) return;
+    if (isSocketConnected || window.orderSocketConnected) return;
 
     const tick = () => {
       if (terminalPollStopRef.current) return;
       if (document.hidden) return;
-      // Delegate to the latest instance of our polling function capturing current state
       if (pollRef.current) pollRef.current(false);
     };
-    
-    const pollInterval = (isSocketConnected || window.orderSocketConnected) ? 12000 : 5000;
-    const interval = setInterval(tick, pollInterval);
 
+    const interval = setInterval(tick, 20000);
     return () => clearInterval(interval);
   }, [orderId, isSocketConnected]);
 
@@ -1167,7 +1235,7 @@ export default function OrderTracking() {
     return () => clearInterval(timer)
   }, [])
 
-  // Listen for order status updates from socket (e.g., "Delivery partner on the way")
+  // Live updates via socket (no polling while connected).
   useEffect(() => {
     const handleOrderStatusNotification = (event) => {
       const payload = event?.detail || {};
@@ -1179,59 +1247,55 @@ export default function OrderTracking() {
         evtKeys.some((k) => String(k) === String(orderId)) ||
         evtKeys.some((k) => trackingOrderIdsRef.current.has(k))
 
-      debugLog('?? Order status notification received:', { message, status, idMatches });
+      if (!idMatches) return
 
-      if (idMatches) {
-        const next = mapOrderToTrackingUiStatus({
-          status,
-          orderStatus: payload.orderStatus || status,
-          deliveryState: payload.deliveryState,
-        });
-        setOrderStatus(next);
+      const nextStatusRaw = payload.orderStatus || status
+      const isCancelled = String(nextStatusRaw || '').toLowerCase().includes('cancel')
 
-        // Pull latest order state without refresh spam on bursty socket events.
-        const now = Date.now();
-        if (now - lastRealtimeRefreshRef.current > 1500 && !isRefreshing) {
-          lastRealtimeRefreshRef.current = now;
-          handleRefresh();
+      setOrder((prev) => {
+        const apiPatch = {
+          ...(prev || {}),
+          orderStatus: nextStatusRaw || prev?.status,
+          status: nextStatusRaw || prev?.status,
+          failureReason: payload.failureReason ?? prev?.failureReason ?? null,
+          cancellationReason: isCancelled && message ? message : prev?.cancellationReason,
+          deliveryState: payload.deliveryState ?? prev?.deliveryState,
+          dispatch: payload.dispatch ?? prev?.dispatch,
+          payment: payload.payment ?? prev?.payment,
         }
-      }
+        const transformed = transformOrderForTracking(apiPatch, prev)
+        const ui = mapOrderToTrackingUiStatus(transformed)
+        terminalPollStopRef.current = ui === 'delivered' || ui === 'cancelled'
+        return transformed
+      })
 
-      // Show a single deduped notification toast
-      if (message && idMatches) {
-        const toastKey = `${String(evtOrderId || orderMongoId || orderId)}:${String(status || payload.orderStatus || '')}`
+      if (message) {
+        const toastKey = `${String(evtOrderId || orderMongoId || orderId)}:${String(nextStatusRaw || '')}`
         const now = Date.now()
         const isDuplicateToast =
           toastKey &&
           toastKey === lastStatusToastRef.current.key &&
           now - lastStatusToastRef.current.at < ORDER_STATUS_TOAST_DEDUPE_MS
 
-        if (isDuplicateToast) return
-
-        lastStatusToastRef.current = { key: toastKey, at: now }
-        toast.dismiss(ORDER_STATUS_TOAST_ID)
-        toast.success(message, {
-          id: ORDER_STATUS_TOAST_ID,
-          duration: 5000,
-          position: 'top-center',
-          description: estimatedDeliveryTime
-            ? `Estimated delivery in ${Math.round(estimatedDeliveryTime / 60)} minutes`
-            : undefined
-        });
-
-        // Optional: Vibrate device if supported
-        if (navigator.vibrate) {
-          navigator.vibrate([200, 100, 200]);
+        if (!isDuplicateToast) {
+          lastStatusToastRef.current = { key: toastKey, at: now }
+          toast.dismiss(ORDER_STATUS_TOAST_ID)
+          const toastFn = isCancelled || payload.failureReason === 'driver_not_found' ? toast.error : toast.success
+          toastFn(message, {
+            id: ORDER_STATUS_TOAST_ID,
+            duration: 6000,
+            position: 'top-center',
+            description: estimatedDeliveryTime
+              ? `Estimated delivery in ${Math.round(estimatedDeliveryTime / 60)} minutes`
+              : undefined,
+          })
+          if (navigator.vibrate) navigator.vibrate([200, 100, 200])
         }
       }
     };
 
-    // Listen for custom event from DeliveryTrackingMap
     window.addEventListener('orderStatusNotification', handleOrderStatusNotification);
-
-    return () => {
-      window.removeEventListener('orderStatusNotification', handleOrderStatusNotification);
-    };
+    return () => window.removeEventListener('orderStatusNotification', handleOrderStatusNotification);
   }, [orderId])
 
   const handleCancelOrder = () => {
@@ -1447,9 +1511,21 @@ export default function OrderTracking() {
   }
 
   const statusConfig = {
+    finding_driver: {
+      title: "Fetching driver",
+      subtitle: "Looking for an available rider near the restaurant",
+      color: "bg-orange-600",
+      iconType: 'rider'
+    },
+    awaiting_restaurant: {
+      title: "Waiting for restaurant",
+      subtitle: "Delivery partner assigned — restaurant will confirm soon",
+      color: "bg-green-600",
+      iconType: 'food'
+    },
     placed: {
       title: "Order Placed",
-      subtitle: "Waiting for restaurant to accept",
+      subtitle: "Looking for a delivery partner",
       color: "bg-green-600",
       iconType: 'food'
     },
@@ -1467,7 +1543,9 @@ export default function OrderTracking() {
     },
     assigned: {
       title: "Rider is arriving",
-      subtitle: "A delivery partner is arriving at the restaurant",
+      subtitle: typeof order?.riderToRestaurantDistanceKm === 'number'
+        ? `${order.riderToRestaurantDistanceKm >= 1 ? `${order.riderToRestaurantDistanceKm.toFixed(1)} km` : `${Math.round(order.riderToRestaurantDistanceKm * 1000)} m`} from restaurant`
+        : "A delivery partner is heading to the restaurant",
       color: "bg-green-600",
       iconType: 'rider'
     },
@@ -1503,7 +1581,10 @@ export default function OrderTracking() {
     },
     cancelled: {
       title: "Order cancelled",
-      subtitle: order?.cancellationReason || "This order has been cancelled",
+      subtitle:
+        order?.failureReason === 'driver_not_found'
+          ? "No delivery partner found — order cancelled"
+          : order?.cancellationReason || "This order has been cancelled",
       color: "bg-red-600",
       iconType: 'cancelled'
     }
@@ -2146,6 +2227,29 @@ export default function OrderTracking() {
             </div>
           </div>
         </motion.div>
+
+        {isDriverNotFoundCancelled && (
+          <motion.div
+            className="bg-red-50 dark:bg-red-950/20 border border-red-100 dark:border-red-900/40 rounded-xl p-5 space-y-4"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            <p className="text-sm text-red-800 dark:text-red-200 leading-relaxed">
+              We couldn&apos;t find an available delivery partner near the restaurant.
+              {order?.payment?.refund?.destination === 'wallet'
+                ? ` ₹${Number(order?.pricing?.total || 0).toFixed(0)} has been credited to your wallet.`
+                : order?.payment?.status === 'refunded'
+                  ? ' Any prepaid amount will be refunded to your wallet.'
+                  : ''}
+            </p>
+            <Button
+              onClick={handleReorder}
+              className="w-full bg-[#16A34A] hover:bg-[#15803D] text-white font-bold h-12 rounded-xl"
+            >
+              Re-order same items
+            </Button>
+          </motion.div>
+        )}
 
         {!isAdminAccepted && orderStatus !== 'cancelled' && orderStatus !== 'delivered' && (
           <motion.div
