@@ -3,6 +3,12 @@ import VegIndicator from "@food/components/user/restaurant-details/VegIndicator"
 
 const FOOD_IMAGE_FALLBACK = "https://picsum.photos/seed/cart-food/200/200"
 
+const formatCartAmount = (value) => {
+  const amount = Number(value)
+  if (!Number.isFinite(amount)) return "0.00"
+  return amount.toFixed(2)
+}
+
 export default function CartItemsCard({ items, rupeeSymbol, onUpdateQuantity, onAddMore }) {
   return (
     <div className="rounded-2xl border border-gray-100 bg-white shadow-xs overflow-hidden dark:border-gray-800 dark:bg-[#141414]">
@@ -15,7 +21,7 @@ export default function CartItemsCard({ items, rupeeSymbol, onUpdateQuantity, on
       <div className="divide-y divide-gray-100 dark:divide-gray-800">
         {items.map((item) => {
           const isVeg = item.isVeg === true || item.foodType === "Veg"
-          const lineTotal = ((item.price || 0) * (item.quantity || 1)).toFixed(0)
+          const lineTotal = formatCartAmount((item.price || 0) * (item.quantity || 1))
 
           return (
             <div key={item.id} className="flex gap-3 p-3">

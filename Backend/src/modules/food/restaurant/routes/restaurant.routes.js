@@ -5,6 +5,16 @@ import {
     listApprovedRestaurantsController,
     getApprovedRestaurantController,
     listPublicOffersController,
+    listOffersForRestaurantPageController,
+    listDeliverySpeedOptionsController,
+    getPublicCheckoutSettingsController,
+    listRestaurantOffersController,
+    createRestaurantOfferController,
+    updateRestaurantOfferController,
+    deleteRestaurantOfferController,
+    reapplyRestaurantOfferController,
+    getRestaurantOfferAnalyticsController,
+    getRestaurantOfferUsageHistoryController,
     getCurrentRestaurantController,
     updateRestaurantProfileController,
     updateRestaurantAcceptingOrdersController,
@@ -123,7 +133,17 @@ router.get('/restaurants', cacheResponse(300, 'restaurants'), listApprovedRestau
 router.get('/restaurants/:id', cacheResponse(600, 'restaurant_detail'), getApprovedRestaurantController);
 router.get('/restaurants/:id/menu', cacheResponse(600, 'restaurant_menu'), getPublicRestaurantMenuController);
 router.get('/restaurants/:id/outlet-timings', cacheResponse(600, 'restaurant_timings'), getOutletTimingsByRestaurantIdController);
+router.get('/restaurants/:id/offers', cacheResponse(120, 'restaurant_offers'), listOffersForRestaurantPageController);
 router.get('/offers', cacheResponse(300, 'offers'), listPublicOffersController);
+router.get('/delivery-speed-options', cacheResponse(300, 'delivery_speed_options'), listDeliverySpeedOptionsController);
+router.get('/checkout-settings/public', cacheResponse(300, 'checkout_settings'), getPublicCheckoutSettingsController);
+router.get('/my-offers', authMiddleware, requireRestaurant, listRestaurantOffersController);
+router.get('/my-offers/:id/analytics', authMiddleware, requireRestaurant, getRestaurantOfferAnalyticsController);
+router.get('/my-offers/:id/history', authMiddleware, requireRestaurant, getRestaurantOfferUsageHistoryController);
+router.post('/my-offers', authMiddleware, requireRestaurant, createRestaurantOfferController);
+router.patch('/my-offers/:id/reapply', authMiddleware, requireRestaurant, reapplyRestaurantOfferController);
+router.patch('/my-offers/:id', authMiddleware, requireRestaurant, updateRestaurantOfferController);
+router.delete('/my-offers/:id', authMiddleware, requireRestaurant, deleteRestaurantOfferController);
 router.get('/categories/public', cacheResponse(600, 'categories'), listCategoriesController);
 
 router.get('/current', authMiddleware, requireRestaurant, getCurrentRestaurantController);

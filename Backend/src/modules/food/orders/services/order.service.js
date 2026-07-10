@@ -12,7 +12,7 @@ import { FoodFeeSettings } from '../../admin/models/feeSettings.model.js';
 import { ValidationError, ForbiddenError, NotFoundError } from '../../../../core/auth/errors.js';
 import { buildPaginationOptions, buildPaginatedResult } from '../../../../utils/helpers.js';
 import { FoodOffer } from '../../admin/models/offer.model.js';
-import { FoodOfferUsage } from '../../admin/models/offerUsage.model.js';
+import { recordOfferRedemption } from '../../admin/services/offer.service.js';
 import { FoodDeliveryCommissionRule } from '../../admin/models/deliveryCommissionRule.model.js';
 import { FoodRestaurantCommission } from '../../admin/models/restaurantCommission.model.js';
 import { FoodTransaction } from '../models/foodTransaction.model.js';
@@ -32,17 +32,30 @@ import { fetchPolyline } from '../utils/googleMaps.js';
 import { getFirebaseDB } from '../../../../config/firebase.js';
 import * as foodTransactionService from './foodTransaction.service.js';
 import * as userWalletService from '../../user/services/userWallet.service.js';
+import { syncUserCart } from '../../user/services/userCart.service.js';
 import { calculateOrderPricing } from './order-pricing.service.js';
 import {
   validateRestaurantChainForItems,
   validateNewRestaurantAgainstLast,
 } from './restaurant-chain-radius.service.js';
 import * as dispatchService from './order-dispatch.service.js';
+
+async function clearUserCartAfterOrder(userId) {
+  if (!userId) return;
+  try {
+    await syncUserCart(userId, { items: [], restaurantMeta: [], cartType: null });
+  } catch (err) {
+    logger.warn(`Failed to clear cart after order for user ${userId}: ${err?.message || err}`);
+  }
+}
 import * as deliveryService from './order-delivery.service.js';
 import * as paymentService from './order-payment.service.js';
 import {
   enqueueOrderEvent,
   haversineKm,
+  calculateDistanceSlabFee,
+  resolveOrderDistanceKm,
+  applyDeliverySurcharges,
   generateFourDigitDeliveryOtp,
   sanitizeOrderForExternal,
   emitDeliveryDropOtpToUser,
@@ -57,6 +70,7 @@ import {
   buildDeliverySocketPayload,
   notifyRestaurantNewOrder,
   isStatusAdvance,
+  freeOrderDispatch,
 } from './order.helpers.js';
 
 
@@ -86,33 +100,8 @@ async function getActiveCommissionRules() {
 
 
 async function getRiderEarning(distanceKm) {
-  const d = Math.max(0, Number(distanceKm) || 0);
   const rules = await getActiveCommissionRules();
-  if (!rules.length) return 0;
-
-  const sorted = [...rules].sort(
-    (a, b) => (a.minDistance || 0) - (b.minDistance || 0),
-  );
-  const baseRule = sorted.find((r) => Number(r.minDistance || 0) === 0) || sorted[0];
-  if (!baseRule) return 0;
-
-  let earning = Number(baseRule.basePayout || 0);
-
-  for (const r of sorted) {
-    const perKm = Number(r.commissionPerKm || 0);
-    if (!Number.isFinite(perKm) || perKm <= 0) continue;
-    const min = Number(r.minDistance || 0);
-    const max = r.maxDistance == null ? null : Number(r.maxDistance);
-    if (d <= min) continue;
-    const upper = max == null ? d : Math.min(d, max);
-    const kmInSlab = Math.max(0, upper - min);
-    if (kmInSlab > 0) {
-      earning += kmInSlab * perKm;
-    }
-  }
-
-  if (!Number.isFinite(earning) || earning < 0) return 0;
-  return Math.round(earning);
+  return calculateDistanceSlabFee(distanceKm, rules);
 }
 
 /** Append-only food_order_payments row; never blocks main flow on failure */
@@ -198,27 +187,42 @@ export async function createOrder(userId, dto) {
   const isCash = paymentMethod === "cash";
   const isWallet = paymentMethod === "wallet";
 
-  const computedSubtotal = items.reduce((sum, item) => {
-    return sum + (Number(item.price) || 0) * (Number(item.quantity) || 1);
-  }, 0);
-
-  const totalItemCount = items.reduce(
-    (sum, item) => sum + (Number(item.quantity) || 1),
-    0,
-  );
+  const recalculated = await calculateOrderPricing(userId, {
+    items,
+    restaurantId: dto.restaurantId,
+    deliveryAddress: dto.address,
+    couponCode: dto.pricing?.couponCode,
+    deliverySpeedOptionId: dto.deliverySpeedOptionId,
+    deliveryOption: dto.deliveryOption,
+  });
 
   const normalizedPricing = {
-    subtotal: Number(dto.pricing?.subtotal ?? computedSubtotal),
-    tax: Number(dto.pricing?.tax ?? 0),
-    packagingFee: Number(dto.pricing?.packagingFee ?? 0),
-    deliveryFee: Number(dto.pricing?.deliveryFee ?? 0),
-    platformFee: Number(dto.pricing?.platformFee ?? 0),
-    discount: Number(dto.pricing?.discount ?? 0),
-    total: Number(dto.pricing?.total ?? 0),
-    currency: String(dto.pricing?.currency || "INR"),
+    subtotal: Number(recalculated.pricing?.subtotal ?? 0),
+    tax: Number(recalculated.pricing?.tax ?? 0),
+    packagingFee: Number(recalculated.pricing?.packagingFee ?? 0),
+    deliveryFee: Number(recalculated.pricing?.deliveryFee ?? 0),
+    platformFee: Number(recalculated.pricing?.platformFee ?? 0),
+    discount: Number(recalculated.pricing?.discount ?? 0),
+    deliveryDiscount: Number(recalculated.pricing?.deliveryDiscount ?? 0),
+    platformSubsidy: Number(recalculated.pricing?.platformSubsidy ?? 0),
+    couponCategory: recalculated.pricing?.couponCategory || undefined,
+    total: Number(recalculated.pricing?.total ?? 0),
+    currency: String(recalculated.pricing?.currency || "INR"),
     restaurantCommission: Number(dto.pricing?.restaurantCommission || 0),
-    deliveryFeeBreakdown: dto.pricing?.deliveryFeeBreakdown || null,
+    couponCode: recalculated.pricing?.couponCode ? String(recalculated.pricing.couponCode).trim().toUpperCase() : undefined,
+    couponCreatedBy: recalculated.pricing?.couponCreatedBy || undefined,
+    offerId: recalculated.pricing?.offerId || undefined,
+    deliveryFeeBreakdown: recalculated.pricing?.deliveryFeeBreakdown || null,
   };
+
+  const couponCodeMeta = normalizedPricing.couponCode;
+  if (couponCodeMeta) {
+    const offerDoc = await FoodOffer.findOne({ couponCode: couponCodeMeta }).lean();
+    if (offerDoc) {
+      normalizedPricing.couponCreatedBy = offerDoc.createdBy || 'admin';
+      normalizedPricing.offerId = offerDoc._id;
+    }
+  }
 
   let deliveryBoySettings = await FoodDeliveryBoySettings.findOne({ isActive: true })
     .sort({ createdAt: -1 })
@@ -228,43 +232,26 @@ export async function createOrder(userId, dto) {
       .sort({ createdAt: -1 })
       .lean();
   }
-  // Trust the pricing service for the delivery fee and total. 
-  // Redundant multiplier logic removed to prevent double-doubling.
+
+  const totalItemCount = items.reduce(
+    (sum, item) => sum + (Number(item.quantity) || 1),
+    0,
+  );
   const splitEnabled = deliveryBoySettings ? (deliveryBoySettings.splitOrderEnabled !== false) : true;
   const splitThreshold = Number(deliveryBoySettings?.splitOrderThreshold ?? 20);
   const isSplitOrder = Boolean(splitEnabled && splitThreshold > 0 && totalItemCount >= splitThreshold);
   const isMultiRestaurant = restaurants.length > 1;
-  const deliveryMultiplier = (isMultiRestaurant || isSplitOrder) ? 2 : 1;
-  const baseFee = Number(normalizedPricing.deliveryFeeBreakdown?.baseFee || 0) || (Number(normalizedPricing.deliveryFee || 0) / deliveryMultiplier);
 
-  normalizedPricing.deliveryFeeBreakdown = {
-    ...(normalizedPricing.deliveryFeeBreakdown || {}),
+  const userLoc = deliveryAddress.location?.coordinates;
+  const totalDistanceKm = resolveOrderDistanceKm(restaurantsWithTimings, userLoc);
+
+  const baseRiderEarning = await getRiderEarning(totalDistanceKm);
+  const riderSurcharge = applyDeliverySurcharges(baseRiderEarning, {
     isMultiRestaurant,
     isSplitOrder,
-    totalItems: totalItemCount,
-    multiplier: deliveryMultiplier,
-    additionalCharge: 0,
-    baseFee,
-    fee: Number(normalizedPricing.deliveryFee || 0),
-  };
-
-  // Distance calculation
-  let totalDistanceKm = 0;
-  const userLoc = deliveryAddress.location?.coordinates;
-  if (restaurants.length === 2 && userLoc?.length === 2) {
-    const r1 = restaurants[0];
-    const r2 = restaurants[1];
-    if (r1.location?.coordinates?.length === 2 && r2.location?.coordinates?.length === 2) {
-      totalDistanceKm = haversineKm(r1.location.coordinates[1], r1.location.coordinates[0], r2.location.coordinates[1], r2.location.coordinates[0]) +
-        haversineKm(r2.location.coordinates[1], r2.location.coordinates[0], userLoc[1], userLoc[0]);
-    }
-  } else if (mainRestaurant?.location?.coordinates?.length === 2 && userLoc?.length === 2) {
-    totalDistanceKm = haversineKm(mainRestaurant.location.coordinates[1], mainRestaurant.location.coordinates[0], userLoc[1], userLoc[0]);
-  }
-
-  let riderEarning = await getRiderEarning(totalDistanceKm);
-  const multiplier = Number(normalizedPricing.deliveryFeeBreakdown?.multiplier || 1);
-  riderEarning *= multiplier;
+    deliveryBoySettings,
+  });
+  const riderEarning = riderSurcharge.fee;
 
   const pickups = restaurants.map(r => ({
     restaurantId: r._id,
@@ -287,7 +274,8 @@ export async function createOrder(userId, dto) {
     normalizedPricing.platformFee +
     normalizedPricing.deliveryFee +
     normalizedPricing.restaurantCommission -
-    riderEarning,
+    riderEarning -
+    Number(normalizedPricing.platformSubsidy || 0),
   );
 
   const payment = {
@@ -389,16 +377,9 @@ export async function createOrder(userId, dto) {
 
   const couponCode = dto.pricing?.couponCode ? String(dto.pricing.couponCode).trim().toUpperCase() : "";
   if (couponCode) {
-    const offer = await FoodOffer.findOne({ couponCode }).lean();
+    const offer = await FoodOffer.findOne({ couponCode, isDeleted: { $ne: true } }).lean();
     if (offer) {
-      await FoodOffer.updateOne({ _id: offer._id }, { $inc: { usedCount: 1 } });
-      if (userId) {
-        await FoodOfferUsage.updateOne(
-          { offerId: offer._id, userId: new mongoose.Types.ObjectId(userId) },
-          { $inc: { count: 1 }, $set: { lastUsedAt: new Date() } },
-          { upsert: true },
-        );
-      }
+      await recordOfferRedemption({ offer, order, userId });
     }
   }
 
@@ -407,6 +388,11 @@ export async function createOrder(userId, dto) {
     try {
       await dispatchService.tryAutoAssign(order._id);
     } catch { }
+  }
+
+  // Clear server cart once order is confirmed (cash/wallet). Razorpay clears after payment verify.
+  if (isCash || isWallet) {
+    await clearUserCartAfterOrder(userId);
   }
 
   return { order: normalizeOrderForClient(order), razorpay: razorpayPayload };
@@ -479,6 +465,8 @@ export async function verifyPayment(userId, dto) {
     } catch { }
   }
 
+  await clearUserCartAfterOrder(userId);
+
   return { order: normalizeOrderForClient(order), payment: order.payment };
 }
 
@@ -498,6 +486,262 @@ export async function tryAutoAssign(orderId, options = {}) {
  */
 export async function processDispatchTimeout(orderId, partnerId, options = {}) {
   return dispatchService.processDispatchTimeout(orderId, partnerId, options);
+}
+
+async function applyOrderRefundIfPaid(order, { recordedByRole = 'SYSTEM', recordedById = null, note = '', preferWallet = false } = {}) {
+  const paymentMethod = String(order.payment?.method || 'cash').toLowerCase();
+  const paymentStatus = String(order.payment?.status || 'cod_pending').toLowerCase();
+  const hasRefundProcessed =
+    String(order.payment?.refund?.status || 'none').toLowerCase() === 'processed';
+
+  if (paymentStatus !== 'paid' || hasRefundProcessed) return order;
+
+  const refundToWallet = async () => {
+    await userWalletService.refundWalletBalance(
+      order.userId,
+      order.pricing.total,
+      note || `Refund for order #${order.order_id || order._id}`,
+      { orderId: order._id },
+    );
+    order.payment.status = 'refunded';
+    order.payment.refund = {
+      status: 'processed',
+      destination: 'wallet',
+      amount: order.pricing.total,
+      processedAt: new Date(),
+    };
+  };
+
+  if (paymentMethod === 'razorpay' && order.payment?.razorpay?.paymentId) {
+    if (preferWallet) {
+      try {
+        await refundToWallet();
+      } catch (err) {
+        logger.warn(`applyOrderRefundIfPaid wallet (razorpay→wallet) failed for ${order._id}: ${err?.message || err}`);
+        order.payment.refund = { status: 'failed', destination: 'wallet', amount: order.pricing.total };
+      }
+    } else {
+      try {
+        const refundResult = await initiateRazorpayRefund(
+          order.payment.razorpay.paymentId,
+          order.pricing.total,
+        );
+        if (refundResult.success) {
+          order.payment.status = 'refunded';
+          order.payment.refund = {
+            status: 'processed',
+            destination: 'source',
+            amount: order.pricing.total,
+            refundId: refundResult.refundId,
+            processedAt: new Date(),
+          };
+        } else {
+          order.payment.refund = { status: 'failed', destination: 'source', amount: order.pricing.total };
+        }
+      } catch (err) {
+        logger.warn(`applyOrderRefundIfPaid razorpay failed for ${order._id}: ${err?.message || err}`);
+        order.payment.refund = { status: 'failed', destination: 'source', amount: order.pricing.total };
+      }
+    }
+  } else if (paymentMethod === 'wallet') {
+    try {
+      await refundToWallet();
+    } catch (err) {
+      logger.warn(`applyOrderRefundIfPaid wallet failed for ${order._id}: ${err?.message || err}`);
+      order.payment.refund = { status: 'failed', destination: 'wallet', amount: order.pricing.total };
+    }
+  }
+
+  try {
+    const finalPaymentMethod = String(order.payment?.method || paymentMethod).toLowerCase();
+    const finalPaymentStatus = String(order.payment?.status || paymentStatus).toLowerCase();
+    const isOnlinePaid =
+      finalPaymentMethod === 'razorpay' &&
+      (finalPaymentStatus === 'paid' || finalPaymentStatus === 'refunded');
+    await foodTransactionService.updateTransactionStatus(order._id, order.orderStatus, {
+      status: isOnlinePaid ? 'refunded' : 'failed',
+      note: note || 'Order cancelled with refund',
+      recordedByRole,
+      recordedById,
+    });
+  } catch (err) {
+    logger.warn(`applyOrderRefundIfPaid transaction sync failed: ${err?.message || err}`);
+  }
+
+  return order;
+}
+
+/**
+ * Cancel order when no delivery partner accepts after all dispatch retries.
+ */
+export async function cancelOrderNoDriverFound(orderId) {
+  const identity = buildOrderIdentityFilter(orderId);
+  if (!identity) return null;
+
+  const order = await FoodOrder.findOne({
+    ...identity,
+    orderStatus: { $in: ['created', 'scheduled'] },
+    'dispatch.status': { $in: ['unassigned', 'offered', 'assigned'] },
+  });
+  if (!order) return null;
+
+  const from = order.orderStatus;
+  const cancelNote = 'No delivery partner found. Order cancelled and refund initiated where applicable.';
+  order.orderStatus = 'cancelled_by_admin';
+  freeOrderDispatch(order);
+  pushStatusHistory(order, {
+    byRole: 'SYSTEM',
+    from,
+    to: 'cancelled_by_admin',
+    note: cancelNote,
+  });
+
+  await applyOrderRefundIfPaid(order, { note: cancelNote, preferWallet: true });
+  await order.save();
+
+  const refundDetail =
+    order.payment?.status === 'refunded'
+      ? order.payment?.refund?.destination === 'wallet'
+        ? ` ₹${order.pricing.total} has been credited to your wallet.`
+        : ` Your refund of ₹${order.pricing.total} is being processed.`
+      : '';
+
+  try {
+    const io = getIO();
+    if (io) {
+      const payload = {
+        orderMongoId: order._id?.toString?.(),
+        orderId: order._id.toString(),
+        orderStatus: order.orderStatus,
+        title: 'Delivery partner not found',
+        message: `We couldn't find a delivery partner for your order.${refundDetail}`,
+        failureReason: 'driver_not_found',
+        dispatch: order.dispatch || null,
+        payment: order.payment || null,
+      };
+      io.to(rooms.user(order.userId)).emit('order_status_update', payload);
+    }
+  } catch (err) {
+    logger.warn(`cancelOrderNoDriverFound socket emit failed: ${err?.message || err}`);
+  }
+
+  await notifyOwnersSafely(
+    [{ ownerType: 'USER', ownerId: order.userId }],
+    {
+      title: 'Delivery partner not found',
+      body: `We couldn't find a delivery partner near you. Your order has been cancelled.${refundDetail}`,
+      data: {
+        type: 'driver_not_found',
+        orderId: String(order._id),
+        orderMongoId: String(order._id),
+      },
+    },
+  );
+
+  enqueueOrderEvent('order_cancelled_no_driver', {
+    orderMongoId: order._id?.toString?.(),
+    orderId: order._id.toString(),
+  });
+
+  return normalizeOrderForClient(order);
+}
+
+async function finalizeRestaurantRejectionExhausted(order, restaurantId, note = '') {
+  const from = order.orderStatus;
+  const assignedRiderId = order.dispatch?.deliveryPartnerId;
+  const cancelNote =
+    note ||
+    'Restaurant rejected the order 3 times. Order cancelled, driver released, and refund initiated where applicable.';
+
+  order.orderStatus = 'cancelled_by_restaurant';
+  freeOrderDispatch(order);
+  pushStatusHistory(order, {
+    byRole: 'SYSTEM',
+    byId: restaurantId,
+    from,
+    to: 'cancelled_by_restaurant',
+    note: cancelNote,
+  });
+
+  await applyOrderRefundIfPaid(order, {
+    recordedByRole: 'RESTAURANT',
+    recordedById: restaurantId,
+    note: cancelNote,
+  });
+  await order.save();
+
+  const refundDetail =
+    order.payment?.status === 'refunded'
+      ? ` Refund of ₹${order.pricing.total} is being processed.`
+      : '';
+  const userMessage = `The restaurant is not accepting this order after 3 attempts.${refundDetail}`;
+  const riderMessage = `Restaurant rejected order #${order.order_id || order._id} after 3 attempts. You are now free to accept new orders.`;
+
+  try {
+    const io = getIO();
+    if (io) {
+      const payload = {
+        orderMongoId: order._id?.toString?.(),
+        orderId: order._id.toString(),
+        orderStatus: order.orderStatus,
+        title: 'Order cancelled — restaurant rejected',
+        message: userMessage,
+        failureReason: 'restaurant_rejected',
+      };
+      io.to(rooms.user(order.userId)).emit('order_status_update', payload);
+      io.to(rooms.restaurant(restaurantId)).emit('order_status_update', payload);
+      if (assignedRiderId) {
+        io.to(rooms.delivery(assignedRiderId)).emit('order_status_update', {
+          ...payload,
+          message: riderMessage,
+        });
+      }
+    }
+  } catch (err) {
+    logger.warn(`finalizeRestaurantRejectionExhausted socket emit failed: ${err?.message || err}`);
+  }
+
+  const notifyList = [
+    { ownerType: 'USER', ownerId: order.userId },
+    { ownerType: 'RESTAURANT', ownerId: restaurantId },
+  ];
+  if (assignedRiderId) {
+    notifyList.push({ ownerType: 'DELIVERY_PARTNER', ownerId: assignedRiderId });
+  }
+
+  await notifyOwnersSafely(notifyList, {
+    title: 'Order cancelled — restaurant rejected',
+    body: userMessage,
+    data: {
+      type: 'restaurant_rejection_exhausted',
+      orderId: String(order._id),
+      orderMongoId: String(order._id),
+    },
+  });
+
+  if (assignedRiderId) {
+    await notifyOwnerSafely(
+      { ownerType: 'DELIVERY_PARTNER', ownerId: assignedRiderId },
+      {
+        title: 'Order cancelled',
+        body: riderMessage,
+        data: {
+          type: 'restaurant_rejection_exhausted',
+          orderId: String(order._id),
+          orderMongoId: String(order._id),
+        },
+      },
+    );
+  }
+
+  enqueueOrderEvent('order_cancelled_restaurant_rejection_exhausted', {
+    orderMongoId: order._id?.toString?.(),
+    orderId: order._id.toString(),
+    restaurantId: String(restaurantId),
+    deliveryPartnerId: assignedRiderId ? String(assignedRiderId) : null,
+  });
+
+  return order;
 }
 
 // ----- User: list, get, cancel -----
@@ -681,35 +925,15 @@ export async function recoverStuckOrders() {
     // 4. Auto-Cancel orders with NO RIDER after 15 minutes
     const FIFTEEN_MIN = 15 * 60 * 1000;
     const noRiderTimeout = await FoodOrder.find({
-      orderStatus: 'created',
-      'dispatch.status': 'unassigned',
+      orderStatus: { $in: ['created', 'scheduled'] },
+      'dispatch.status': { $in: ['unassigned', 'offered', 'assigned'] },
       createdAt: { $lt: new Date(now - FIFTEEN_MIN) }
     });
 
     if (noRiderTimeout.length > 0) {
       logger.info(`Watchdog: Auto-cancelling ${noRiderTimeout.length} orders due to no rider availability.`);
       for (const order of noRiderTimeout) {
-        order.orderStatus = 'cancelled_by_admin';
-        order.statusHistory.push({
-          at: new Date(),
-          byRole: 'SYSTEM',
-          from: 'created',
-          to: 'cancelled_by_admin',
-          note: 'Auto-cancelled: No delivery partner found within 15 minutes.'
-        });
-        await order.save();
-        
-        // Notify User
-        try {
-          const io = getIO();
-          if (io) {
-            io.to(rooms.user(order.userId)).emit("order_status_update", {
-              orderId: order._id.toString(),
-              orderStatus: 'cancelled_by_admin',
-              message: "We couldn't find a delivery partner near you. Order cancelled & refund initiated."
-            });
-          }
-        } catch {}
+        await cancelOrderNoDriverFound(order._id.toString());
       }
     }
 
@@ -750,7 +974,7 @@ export async function resyncState(userId, role) {
     return { activeOrder: null };
   }
 
-  if (role === "DELIVERY_PARTNER") {
+  if (role === "DELIVERY_PARTNER" || role === "DRIVER") {
     const order = await FoodOrder.findOne({
       "dispatch.deliveryPartnerId": new mongoose.Types.ObjectId(userId),
       "dispatch.status": { $in: ["assigned", "accepted"] },
@@ -1117,6 +1341,10 @@ export async function updateOrderStatusRestaurant(
     if (orderStatus === 'cancelled_by_restaurant' || orderStatus === 'rejected_by_restaurant') {
       pickup.status = 'cancelled';
       order.restaurantRejectionCount = (order.restaurantRejectionCount || 0) + 1;
+      if (order.restaurantRejectionCount >= 3) {
+        const finalized = await finalizeRestaurantRejectionExhausted(order, restaurantId, note);
+        return normalizeOrderForClient(finalized);
+      }
       finalStatus = 'rejected_by_restaurant';
       skipRefund = true;
     } else if (orderStatus === 'confirmed') {
@@ -1137,10 +1365,13 @@ export async function updateOrderStatusRestaurant(
     }
   } else {
     // Handle rejection retry logic for single-restaurant flow
-    if (orderStatus === 'cancelled_by_restaurant') {
+    if (orderStatus === 'cancelled_by_restaurant' || orderStatus === 'rejected_by_restaurant') {
       order.restaurantRejectionCount = (order.restaurantRejectionCount || 0) + 1;
       if (order.restaurantRejectionCount < 3) {
         finalStatus = 'rejected_by_restaurant';
+      } else {
+        const finalized = await finalizeRestaurantRejectionExhausted(order, restaurantId, note);
+        return normalizeOrderForClient(finalized);
       }
     }
 
@@ -1276,10 +1507,11 @@ export async function updateOrderStatusRestaurant(
   try {
     const io = getIO();
     if (io) {
-      // On accept (confirmed or preparing) -> request delivery partners via central logic
+      // Driver-first flow: only search for riders if none accepted yet
       if (
         (String(statusForMessage) === "preparing" || String(statusForMessage) === "confirmed") &&
-        (String(from) !== "preparing" && String(from) !== "confirmed")
+        (String(from) !== "preparing" && String(from) !== "confirmed") &&
+        order.dispatch?.status !== 'accepted'
       ) {
         console.log(
           `[DEBUG] Order ${order._id.toString()} status changed to '${orderStatus}'. Triggering central delivery dispatch.`,

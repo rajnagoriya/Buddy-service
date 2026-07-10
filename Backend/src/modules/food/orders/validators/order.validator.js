@@ -61,7 +61,9 @@ export function validateCalculateOrderDto(body) {
         deliveryAddressId: z.string().optional(),
         zoneId: z.string().optional(),
         couponCode: z.string().optional(),
-        deliveryFleet: z.string().optional()
+        deliveryFleet: z.string().optional(),
+        deliverySpeedOptionId: z.string().optional(),
+        deliveryOption: z.string().optional(),
     });
     const result = schema.safeParse(body);
     if (!result.success) {
@@ -91,6 +93,7 @@ export function validateCreateOrderDto(body) {
         zoneId: z.string().nullable().optional(),
         scheduledAt: z.string().datetime({ offset: true }).nullable().optional(),
         deliveryOption: z.string().optional(),
+        deliverySpeedOptionId: z.string().optional(),
         deliveryTime: z.string().optional(),
         estimatedTime: z.number().optional()
     });

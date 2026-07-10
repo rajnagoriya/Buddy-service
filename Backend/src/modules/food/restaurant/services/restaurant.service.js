@@ -21,6 +21,15 @@ import { enrichRestaurantsWithDistance, formatDistanceLabel } from '../../shared
 import mongoose from 'mongoose';
 import { FoodZone } from '../../admin/models/zone.model.js';
 import { FoodOffer } from '../../admin/models/offer.model.js';
+import { FoodOfferUsage } from '../../admin/models/offerUsage.model.js';
+import {
+    getOffersForRestaurantPage,
+    getOfferAnalytics,
+    getOfferUsageHistory,
+    buildBaseActiveOfferFilter,
+    logOfferAction,
+    COUPON_CATEGORY,
+} from '../../admin/services/offer.service.js';
 import { FoodDiningRestaurant } from '../../dining/models/diningRestaurant.model.js';
 import {
     getDefaultOutletTimingsShape,
@@ -1800,11 +1809,7 @@ export const getApprovedRestaurantByIdOrSlug = async (idOrSlug) => {
 export const listPublicOffers = async () => {
     const now = new Date();
     const filter = {
-        status: 'active',
-        $and: [
-            { $or: [{ startDate: { $exists: false } }, { startDate: null }, { startDate: { $lte: now } }] },
-            { $or: [{ endDate: { $exists: false } }, { endDate: null }, { endDate: { $gt: now } }] }
-        ]
+        ...buildBaseActiveOfferFilter(now),
     };
 
     const list = await FoodOffer.find(filter)
@@ -1843,12 +1848,249 @@ export const listPublicOffers = async () => {
             restaurantRating: typeof restaurant?.rating === 'number' ? restaurant.rating : 0,
             endDate: o.endDate || null,
             showInCart: o.showInCart !== false,
-            minOrderValue: o.minOrderValue ?? 0
+            minOrderValue: o.minOrderValue ?? 0,
+            createdBy: o.createdBy || 'admin',
+            couponCategory: o.couponCategory || COUPON_CATEGORY.NORMAL,
+            isFreeDelivery: o.couponCategory === COUPON_CATEGORY.FREE_DELIVERY,
         };
     });
 
     return { allOffers, groupedByOffer: {} };
 };
+
+export const listOffersForRestaurantPage = async (restaurantId, userId = null) => {
+    return getOffersForRestaurantPage(restaurantId, userId);
+};
+
+export const listDeliverySpeedOptions = async () => {
+    const { getPublicDeliverySpeedOptions } = await import('../../admin/services/admin.service.js');
+    return getPublicDeliverySpeedOptions();
+};
+
+export const getPublicCheckoutSettings = async () => {
+    const { getPublicCheckoutSettings: getSettings } = await import('../../admin/services/admin.service.js');
+    return getSettings();
+};
+
+export async function listRestaurantOffers(restaurantId) {
+    if (!restaurantId) return { offers: [] };
+    const list = await FoodOffer.find({ restaurantId, createdBy: 'restaurant', isDeleted: { $ne: true } })
+        .sort({ createdAt: -1 })
+        .lean();
+    const offers = list.map((o, index) => ({
+        sl: index + 1,
+        offerId: String(o._id),
+        couponCode: o.couponCode,
+        discountType: o.discountType,
+        discountValue: o.discountValue,
+        customerScope: o.customerScope,
+        minOrderValue: o.minOrderValue ?? 0,
+        maxDiscount: o.maxDiscount ?? null,
+        usageLimit: o.usageLimit ?? null,
+        perUserLimit: o.perUserLimit ?? null,
+        usedCount: o.usedCount ?? 0,
+        startDate: o.startDate || null,
+        endDate: o.endDate || null,
+        status: o.status,
+        approvalStatus: o.approvalStatus || (o.createdBy === 'restaurant' ? 'pending' : 'approved'),
+        showInCart: o.showInCart !== false,
+        isFirstOrderOnly: o.isFirstOrderOnly ?? false,
+        rejectionReason: o.rejectionReason || '',
+        rejectedAt: o.rejectedAt || null,
+        pausedBy: o.pausedBy || null,
+        createdAt: o.createdAt,
+    }));
+    return { offers };
+}
+
+export async function createRestaurantOffer(restaurantId, body) {
+    const existing = await FoodOffer.findOne({ couponCode: body.couponCode }).lean();
+    if (existing) {
+        throw new ValidationError('Coupon code already exists');
+    }
+
+    const isFirstTime = body.customerScope === 'first-time';
+    const perUserLimit = body.perUserLimit ?? (isFirstTime ? 1 : null);
+
+    const doc = await FoodOffer.create({
+        couponCode: body.couponCode,
+        discountType: body.discountType,
+        discountValue: body.discountValue,
+        customerScope: body.customerScope,
+        restaurantScope: 'selected',
+        restaurantId,
+        minOrderValue: body.minOrderValue ?? 0,
+        maxDiscount: body.maxDiscount ?? null,
+        usageLimit: body.usageLimit ?? null,
+        perUserLimit,
+        startDate: body.startDate,
+        isFirstOrderOnly: body.isFirstOrderOnly ?? isFirstTime,
+        endDate: body.endDate,
+        approvalStatus: 'pending',
+        status: 'paused',
+        showInCart: true,
+        createdBy: 'restaurant',
+        createdById: restaurantId,
+        couponCategory: COUPON_CATEGORY.NORMAL,
+    });
+
+    logOfferAction('created', { offerId: String(doc._id), couponCode: doc.couponCode, createdBy: 'restaurant', restaurantId: String(restaurantId) });
+    return doc.toObject();
+}
+
+export async function updateRestaurantOffer(restaurantId, offerId, body) {
+    if (!offerId || !mongoose.Types.ObjectId.isValid(offerId)) return null;
+
+    const existing = await FoodOffer.findOne({
+        _id: offerId,
+        restaurantId,
+        createdBy: 'restaurant',
+    }).lean();
+    if (!existing) return null;
+
+    if (existing.pausedBy === 'admin' && existing.status === 'paused') {
+        throw new ValidationError('This coupon was paused by admin and cannot be modified');
+    }
+
+    if (body.status) {
+        if (body.status === 'active' && existing.pausedBy === 'admin') {
+            throw new ValidationError('This coupon was paused by admin');
+        }
+        const statusUpdate = {
+            status: body.status,
+            pausedBy: body.status === 'paused' ? 'restaurant' : null,
+        };
+        const updated = await FoodOffer.findOneAndUpdate(
+            { _id: offerId, restaurantId, createdBy: 'restaurant' },
+            { $set: statusUpdate },
+            { new: true }
+        ).lean();
+        logOfferAction('status_changed', { offerId, editedBy: 'restaurant', status: body.status, restaurantId: String(restaurantId) });
+        return updated;
+    }
+
+    if (body.couponCode) {
+        const duplicate = await FoodOffer.findOne({
+            couponCode: body.couponCode,
+            _id: { $ne: offerId },
+        }).lean();
+        if (duplicate) {
+            throw new ValidationError('Coupon code already exists');
+        }
+    }
+
+    const endTs = body.endDate ? new Date(body.endDate).getTime() : null;
+    const isFirstTime = (body.customerScope ?? existing.customerScope) === 'first-time';
+    const perUserLimit = body.perUserLimit !== undefined
+        ? body.perUserLimit
+        : (isFirstTime && existing.perUserLimit == null ? 1 : existing.perUserLimit ?? null);
+    const status = endTs && endTs <= Date.now()
+        ? 'inactive'
+        : (existing.status === 'active' ? 'paused' : 'paused');
+
+    const updated = await FoodOffer.findOneAndUpdate(
+        { _id: offerId, restaurantId, createdBy: 'restaurant' },
+        {
+            $set: {
+                couponCode: body.couponCode ?? existing.couponCode,
+                discountType: body.discountType ?? existing.discountType,
+                discountValue: body.discountValue ?? existing.discountValue,
+                customerScope: body.customerScope ?? existing.customerScope,
+                minOrderValue: body.minOrderValue ?? existing.minOrderValue ?? 0,
+                maxDiscount: body.maxDiscount ?? existing.maxDiscount ?? null,
+                usageLimit: body.usageLimit !== undefined ? body.usageLimit : existing.usageLimit ?? null,
+                perUserLimit,
+                startDate: body.startDate ?? existing.startDate ?? undefined,
+                isFirstOrderOnly: body.isFirstOrderOnly ?? isFirstTime ?? existing.isFirstOrderOnly ?? false,
+                endDate: body.endDate ?? existing.endDate ?? undefined,
+                status,
+                approvalStatus: 'pending',
+            },
+        },
+        { new: true }
+    ).lean();
+
+    logOfferAction('edited', { offerId, editedBy: 'restaurant', restaurantId: String(restaurantId) });
+    return updated;
+}
+
+export async function reapplyRestaurantOffer(restaurantId, offerId) {
+    if (!offerId || !mongoose.Types.ObjectId.isValid(offerId)) return null;
+
+    const existing = await FoodOffer.findOne({
+        _id: offerId,
+        restaurantId,
+        createdBy: 'restaurant',
+        isDeleted: { $ne: true },
+    }).lean();
+    if (!existing) return null;
+    if (existing.approvalStatus !== 'rejected') {
+        throw new ValidationError('Only rejected coupons can be resubmitted for approval');
+    }
+
+    const updated = await FoodOffer.findOneAndUpdate(
+        { _id: offerId, restaurantId, createdBy: 'restaurant' },
+        { $set: { approvalStatus: 'pending', status: 'paused' } },
+        { new: true }
+    ).lean();
+
+    logOfferAction('reapplied', { offerId, restaurantId: String(restaurantId) });
+    return updated;
+}
+
+export async function getRestaurantOfferAnalytics(restaurantId, offerId) {
+    if (!offerId || !mongoose.Types.ObjectId.isValid(offerId)) return null;
+    const offer = await FoodOffer.findOne({
+        _id: offerId,
+        restaurantId,
+        createdBy: 'restaurant',
+    }).lean();
+    if (!offer) return null;
+    return getOfferAnalytics(offerId, { restaurantId });
+}
+
+export async function getRestaurantOfferUsageHistory(restaurantId, offerId, query = {}) {
+    if (!offerId || !mongoose.Types.ObjectId.isValid(offerId)) return null;
+    const offer = await FoodOffer.findOne({
+        _id: offerId,
+        restaurantId,
+        createdBy: 'restaurant',
+    }).lean();
+    if (!offer) return null;
+    return getOfferUsageHistory(offerId, {
+        restaurantId,
+        page: Number(query.page) || 1,
+        limit: Number(query.limit) || 20,
+    });
+}
+
+export async function deleteRestaurantOffer(restaurantId, offerId) {
+    if (!offerId || !mongoose.Types.ObjectId.isValid(offerId)) return null;
+
+    const existing = await FoodOffer.findOne({
+        _id: offerId,
+        restaurantId,
+        createdBy: 'restaurant',
+        isDeleted: { $ne: true },
+    }).lean();
+    if (!existing) return null;
+    if (existing.pausedBy === 'admin' && existing.status === 'paused') {
+        throw new ValidationError('This coupon was paused by admin and cannot be deleted');
+    }
+
+    const deleted = await FoodOffer.findOneAndUpdate(
+        {
+            _id: offerId,
+            restaurantId,
+            createdBy: 'restaurant',
+        },
+        { $set: { isDeleted: true, status: 'inactive' } },
+        { new: true }
+    ).lean();
+    if (!deleted) return null;
+    logOfferAction('deleted', { offerId, deletedBy: 'restaurant', restaurantId: String(restaurantId) });
+    return { id: offerId };
+}
 
 /**
  * List complaints for a restaurant.
