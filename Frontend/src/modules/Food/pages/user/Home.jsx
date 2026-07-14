@@ -46,6 +46,7 @@ import StickyCartCard from "@food/components/user/StickyCartCard";
 import RestaurantChainDistanceBadge from "@food/components/user/RestaurantChainDistanceBadge";
 import { getLastRestaurantFromCart } from "@food/utils/restaurantRadius";
 import OrderTrackingCard from "@food/components/user/OrderTrackingCard";
+import VegModePopups from "@food/components/user/VegModePopups";
 import {
   CategoryChipRowSkeleton,
   ExploreGridSkeleton,
@@ -87,8 +88,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@food/components/ui/dropdown-menu";
-import { useLocation } from "@food/hooks/useLocation";
 import { useZone } from "@food/hooks/useZone";
+import { useLocation } from "@food/hooks/useLocation";
+import useEffectiveDeliveryLocation from "@food/hooks/useEffectiveDeliveryLocation";
 import offerImage from "@food/assets/offerimage.png";
 import api, { publicGetOnce, restaurantAPI, adminAPI } from "@food/api";
 import { fetchRestaurantMenuCached } from "@food/utils/restaurantMenuCache";
@@ -110,6 +112,12 @@ import { useInfinitePagination } from "@food/hooks/useInfinitePagination";
 import { API_BASE_URL } from "@food/api/config";
 import OptimizedImage from "@food/components/OptimizedImage";
 import { getRestaurantAvailabilityStatus } from "@food/utils/restaurantAvailability";
+import {
+  formatRestaurantRating,
+  getRestaurantAddressLine,
+  hasDisplayableRestaurantRating,
+  resolveRestaurantDistance,
+} from "@food/utils/restaurantDisplay";
 import HomeHeader from "@food/components/user/home/HomeHeader";
 import HomeDesktopShell from "@food/components/user/home/HomeDesktopShell";
 import HomeMobileHero from "@food/components/user/home/HomeMobileHero";
@@ -935,35 +943,7 @@ export default function Home() {
     setLoadingRealCategories(false);
   }, []);
 
-  // Fetch landing settings from public API
-  useEffect(() => {
-    let cancelled = false;
-    setLoadingLandingConfig(true);
-    publicGetOnce("/food/landing/settings/public")
-      .catch(() => ({ data: { data: {} } }))
-      .then((settingsRes) => {
-        if (cancelled) return;
-        const settings = settingsRes?.data?.data || {};
-        setRecommendedRestaurantIds(settings.recommendedRestaurantIds || []);
-        setUnder250PriceLimit(Number(settings.under250PriceLimit) || 250);
-        setRecommendedRestaurantsFromSettings(
-          settings.recommendedRestaurants || [],
-        );
-        setFestBannerVideoUrl(typeof settings.festBannerVideoUrl === "string" ? settings.festBannerVideoUrl : "");
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setRecommendedRestaurantsFromSettings([]);
-          setFestBannerVideoUrl("");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingLandingConfig(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Fetch landing settings from public API — see effect after effectiveLocation is defined.
 
   // Keep index within current banner bounds after admin updates/reloads.
   useEffect(() => {
@@ -1138,7 +1118,6 @@ export default function Home() {
     removeFavorite,
     isFavorite,
     getFavorites,
-    getDefaultAddress,
   } = profileContext;
   const { addToCart, cart } = useCart();
   const lastCartRestaurant = useMemo(
@@ -1146,6 +1125,12 @@ export default function Home() {
     [cart],
   );
   const { location, loading, requestLocation } = useLocation();
+  const {
+    effectiveLocation,
+    savedAddressText,
+    defaultSavedAddress,
+    defaultSavedAddressLocation,
+  } = useEffectiveDeliveryLocation();
   const {
     zoneId,
     zoneStatus,
@@ -1250,114 +1235,43 @@ export default function Home() {
     return hasAddressText || hasCityState;
   }, [location]);
 
-  const formatSavedAddress = useCallback((address) => {
-    if (!address) return "";
-
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingLandingConfig(true);
+    const params = new URLSearchParams();
     if (
-      address.formattedAddress &&
-      address.formattedAddress !== "Select location"
+      Number.isFinite(effectiveLocation?.latitude) &&
+      Number.isFinite(effectiveLocation?.longitude)
     ) {
-      return address.formattedAddress;
+      params.set("lat", String(effectiveLocation.latitude));
+      params.set("lng", String(effectiveLocation.longitude));
     }
-
-    const parts = [];
-    if (address.additionalDetails) parts.push(address.additionalDetails);
-    if (address.street) parts.push(address.street);
-    if (address.city) parts.push(address.city);
-    if (address.state) parts.push(address.state);
-    if (address.zipCode) parts.push(address.zipCode);
-
-    if (parts.length > 0) return parts.join(", ");
-    if (address.address && address.address !== "Select location")
-      return address.address;
-
-    return "";
-  }, []);
-
-  const savedAddressText = useMemo(() => {
-    const defaultAddress = getDefaultAddress?.();
-    return formatSavedAddress(defaultAddress);
-  }, [getDefaultAddress, formatSavedAddress]);
-
-  const defaultSavedAddress = useMemo(
-    () => getDefaultAddress?.() || null,
-    [getDefaultAddress],
-  );
-
-  const defaultSavedAddressLocation = useMemo(() => {
-    const coords = defaultSavedAddress?.location?.coordinates;
-    if (Array.isArray(coords) && coords.length >= 2) {
-      const lng = parseFloat(coords[0]);
-      const lat = parseFloat(coords[1]);
-      if (Number.isFinite(lat) && Number.isFinite(lng)) {
-        return { latitude: lat, longitude: lng };
-      }
-    }
-
-    const lat = parseFloat(
-      defaultSavedAddress?.latitude || defaultSavedAddress?.lat,
-    );
-    const lng = parseFloat(
-      defaultSavedAddress?.longitude || defaultSavedAddress?.lng,
-    );
-    if (Number.isFinite(lat) && Number.isFinite(lng)) {
-      return { latitude: lat, longitude: lng };
-    }
-
-    return null;
-  }, [defaultSavedAddress]);
-
-  const effectiveLocation = useMemo(() => {
-    let deliveryAddressMode = "saved";
-    try {
-      deliveryAddressMode =
-        localStorage.getItem("deliveryAddressMode") || "saved";
-    } catch {
-      deliveryAddressMode = "saved";
-    }
-
-    if (deliveryAddressMode === "current") {
-      return location;
-    }
-
-    if (
-      defaultSavedAddressLocation &&
-      Number.isFinite(defaultSavedAddressLocation.latitude) &&
-      Number.isFinite(defaultSavedAddressLocation.longitude)
-    ) {
-      const resolvedAddress = formatSavedAddress(defaultSavedAddress);
-      return {
-        ...(location || {}),
-        latitude: defaultSavedAddressLocation.latitude,
-        longitude: defaultSavedAddressLocation.longitude,
-        area:
-          defaultSavedAddress?.additionalDetails ||
-          defaultSavedAddress?.street ||
-          defaultSavedAddress?.area ||
-          location?.area ||
-          "",
-        city: defaultSavedAddress?.city || location?.city || "",
-        state: defaultSavedAddress?.state || location?.state || "",
-        address:
-          resolvedAddress ||
-          defaultSavedAddress?.address ||
-          location?.address ||
-          "",
-        formattedAddress:
-          resolvedAddress ||
-          defaultSavedAddress?.formattedAddress ||
-          location?.formattedAddress ||
-          "",
-      };
-    }
-
-    return location;
-  }, [
-    defaultSavedAddress,
-    defaultSavedAddressLocation,
-    formatSavedAddress,
-    location,
-  ]);
+    const query = params.toString();
+    publicGetOnce(`/food/landing/settings/public${query ? `?${query}` : ""}`)
+      .catch(() => ({ data: { data: {} } }))
+      .then((settingsRes) => {
+        if (cancelled) return;
+        const settings = settingsRes?.data?.data || {};
+        setRecommendedRestaurantIds(settings.recommendedRestaurantIds || []);
+        setUnder250PriceLimit(Number(settings.under250PriceLimit) || 250);
+        setRecommendedRestaurantsFromSettings(
+          settings.recommendedRestaurants || [],
+        );
+        setFestBannerVideoUrl(typeof settings.festBannerVideoUrl === "string" ? settings.festBannerVideoUrl : "");
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRecommendedRestaurantsFromSettings([]);
+          setFestBannerVideoUrl("");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingLandingConfig(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveLocation?.latitude, effectiveLocation?.longitude]);
 
   const { zoneId: effectiveZoneId } = useZone(effectiveLocation);
 
@@ -1533,18 +1447,15 @@ export default function Home() {
     isLoadingMore: loadingMoreRestaurants,
     loadMoreRef: restaurantLoadMoreRef,
     loadMore: loadMoreRestaurants,
-    updateItems: updateRestaurantsData,
   } = useInfinitePagination({
     queryKey: restaurantListQueryKey,
     fetchPage: fetchRestaurantPage,
     getItemId: (restaurant) => restaurant.id || restaurant.mongoId,
-    mergeItems: (base, incoming) =>
-      sortRestaurantsForDisplay(
-        [...base, ...incoming],
-        appliedFiltersRef.current,
-        effectiveLocationRef.current,
-      ),
-    enabled: restaurantsFetchReady && Boolean(homeListCity),
+    enabled:
+      restaurantsFetchReady &&
+      (Boolean(homeListCity) ||
+        (Number.isFinite(effectiveLocation?.latitude) &&
+          Number.isFinite(effectiveLocation?.longitude))),
     initialLimit: RESTAURANTS_BATCH_SIZE,
   });
 
@@ -1576,17 +1487,6 @@ export default function Home() {
     },
     [activeFilters, sortBy, selectedCuisine],
   );
-
-  useEffect(() => {
-    if (!effectiveLocation?.latitude || !effectiveLocation?.longitude) return;
-    updateRestaurantsData((prev) =>
-      recalculateRestaurantDistances(prev, effectiveLocation),
-    );
-  }, [
-    effectiveLocation?.latitude,
-    effectiveLocation?.longitude,
-    updateRestaurantsData,
-  ]);
 
   // IMPORTANT:
   // Homepage should avoid eager N+1 menu requests. We only resolve menu metadata
@@ -1767,6 +1667,32 @@ export default function Home() {
   }, [restaurantsData, matchesVegMode]);
 
   const recommendedForYouRestaurants = useMemo(() => {
+    const restaurantsByMongoId = new Map(
+      (restaurantsData || [])
+        .map((restaurant) => {
+          const mongoId = String(restaurant.mongoId || restaurant.id || "");
+          return mongoId ? [mongoId, restaurant] : null;
+        })
+        .filter(Boolean),
+    );
+
+    const mergeWithListData = (restaurant) => {
+      const mongoId = String(restaurant.mongoId || restaurant.id || "");
+      const fromList = restaurantsByMongoId.get(mongoId);
+      if (!fromList) return restaurant;
+      return {
+        ...restaurant,
+        address: fromList.address || restaurant.address,
+        distance: fromList.distance || restaurant.distance,
+        distanceInKm: fromList.distanceInKm ?? restaurant.distanceInKm,
+        distanceMeters: fromList.distanceMeters ?? restaurant.distanceMeters,
+        distanceSource: fromList.distanceSource || restaurant.distanceSource,
+        rating: fromList.rating ?? restaurant.rating,
+        totalRatings: fromList.totalRatings ?? restaurant.totalRatings,
+        deliveryTime: fromList.deliveryTime || restaurant.deliveryTime,
+      };
+    };
+
     const idsInOrder = (recommendedRestaurantIds || []).map((id) => String(id));
     const hasIds = idsInOrder.length > 0;
     const fromSettings = Array.isArray(recommendedRestaurantsFromSettings)
@@ -1793,21 +1719,31 @@ export default function Home() {
       ]);
       const image = imageCandidates[0] || foodImages[0];
 
+      const distanceMeta = resolveRestaurantDistance(restaurant, effectiveLocation);
+
       return {
         id: restaurant?.restaurantId || restaurantId,
         mongoId: restaurantId,
         name: getRestaurantDisplayName(restaurant),
+        address: getRestaurantAddressLine(restaurant),
         cuisine,
         rating: Number(restaurant?.rating) || 0,
-        distance: "",
-        deliveryTime: "",
+        totalRatings: Number(restaurant?.totalRatings) || 0,
+        distance: distanceMeta.distance,
+        distanceInKm: distanceMeta.distanceInKm,
+        distanceMeters: Number.isFinite(restaurant?.distanceMeters)
+          ? restaurant.distanceMeters
+          : (distanceMeta.distanceInKm !== null ? distanceMeta.distanceInKm * 1000 : null),
+        distanceSource: distanceMeta.distanceSource,
+        deliveryTime: restaurant?.estimatedDeliveryTime || "",
         image: normalizeImageUrl(image) || foodImages[0],
         images: imageCandidates.length > 0 ? imageCandidates : [foodImages[0]],
         slug: restaurant?.slug || restaurant?.restaurantId || restaurantId,
         offer: null,
         pureVegRestaurant: restaurant?.pureVegRestaurant === true,
-        isActive: true,
-        isAcceptingOrders: true,
+        isActive: restaurant?.isActive !== false,
+        isAcceptingOrders: restaurant?.isAcceptingOrders !== false,
+        outletTimings: restaurant?.outletTimings || null,
       };
     });
 
@@ -1837,6 +1773,7 @@ export default function Home() {
 
     return [...orderedFromSettings, ...fromFetchedMissing]
       .filter(matchesVegMode)
+      .map(mergeWithListData)
       .slice(0, 12);
   }, [
     recommendedRestaurantIds,
@@ -1845,6 +1782,7 @@ export default function Home() {
     extractImages,
     normalizeImageUrl,
     matchesVegMode,
+    effectiveLocation,
   ]);
 
   // Featured foods removed - will be handled by restaurants data from API
@@ -2342,18 +2280,41 @@ export default function Home() {
                           lastCartRestaurant={lastCartRestaurant}
                           restaurant={restaurant}
                         />
-                        <div className={`absolute bottom-2 left-2 px-2 py-0.5 rounded-lg ${Number(restaurant.rating) > 0 ? "bg-black/80 backdrop-blur-md text-white font-medium" : "bg-gray-200/90 text-gray-600 font-medium"} text-[10px] shadow-lg border border-white/10`}>
-                          {Number(restaurant.rating) > 0 ? Number(restaurant.rating).toFixed(1) : "NEW"}
-                        </div>
+                        {hasDisplayableRestaurantRating(restaurant) && (
+                          <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded-lg bg-black/80 backdrop-blur-md text-white font-medium text-[10px] shadow-lg border border-white/10 flex items-center gap-1">
+                            <Star className="w-3 h-3 fill-white text-white" strokeWidth={0} />
+                            {formatRestaurantRating(restaurant)}
+                          </div>
+                        )}
                       </div>
                       <div className="p-2.5 min-h-[3.25rem]">
                         <p className="text-sm font-semibold text-foreground line-clamp-2 leading-snug break-words">
                           {restaurant.name}
                         </p>
-                        <p className="text-[11px] text-primary font-semibold mt-1 flex items-center gap-1">
-                          <Flame className="w-3.5 h-3.5 fill-primary text-primary" />
-                          Near & fast
-                        </p>
+                        {restaurant.address ? (
+                          <p className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5">
+                            {restaurant.address}
+                          </p>
+                        ) : null}
+                        {(restaurant.distance || restaurant.deliveryTime) && (
+                          <p className="text-[11px] text-primary font-semibold mt-1 flex items-center gap-1">
+                            {restaurant.distance ? (
+                              <>
+                                <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
+                                <span>{restaurant.distance}</span>
+                              </>
+                            ) : null}
+                            {restaurant.distance && restaurant.deliveryTime ? (
+                              <span className="text-muted-foreground font-normal">·</span>
+                            ) : null}
+                            {restaurant.deliveryTime ? (
+                              <>
+                                <Clock className="w-3.5 h-3.5 flex-shrink-0" />
+                                <span>{restaurant.deliveryTime}</span>
+                              </>
+                            ) : null}
+                          </p>
+                        )}
                       </div>
                     </Link>
                   </motion.div>
@@ -2504,12 +2465,14 @@ export default function Home() {
                             )}
 
                             {/* Featured Dish Badge - Top Left */}
+                            {restaurant.featuredDish && restaurant.featuredPrice && (
                             <div className="absolute top-3 left-3 sm:top-4 sm:left-4 flex items-center z-10 transform transition-transform duration-300 group-hover:scale-105">
                               <div className="bg-black/70 backdrop-blur-lg text-white px-2.5 sm:px-4 py-1 rounded-full text-[9px] sm:text-[11px] font-medium tracking-tight flex items-center shadow-2xl border border-white/20">
                                 {restaurant.featuredDish} • ₹
                                 {restaurant.featuredPrice}
                               </div>
                             </div>
+                            )}
 
                             {/* Bookmark Icon - Top Right */}
                             <div className="absolute top-3 right-3 sm:top-4 sm:right-4 z-10 transform transition-transform duration-300 group-hover:scale-110">
@@ -2548,6 +2511,11 @@ export default function Home() {
                                   <h3 className="text-base sm:text-lg font-bold text-foreground line-clamp-2 leading-tight group-hover:text-primary transition-colors break-words">
                                     {restaurant.name}
                                   </h3>
+                                  {restaurant.address ? (
+                                    <p className="text-xs text-muted-foreground line-clamp-1 mt-1">
+                                      {restaurant.address}
+                                    </p>
+                                  ) : null}
                                   {hasClosingCountdown && (
                                     <div className="flex items-center gap-1 mt-2 text-[9px] sm:text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
                                       <Timer className="h-3 w-3 flex-shrink-0" strokeWidth={3} />
@@ -2557,16 +2525,21 @@ export default function Home() {
                                     </div>
                                   )}
                                 </div>
-                                <div className={`flex-shrink-0 min-w-[52px] justify-center ${Number(restaurant.rating) > 0 ? "bg-primary" : "bg-muted"} text-primary-foreground px-2.5 sm:px-3 py-1 rounded-2xl flex items-center gap-1 shadow-sm`}>
-                                  <span className="text-xs sm:text-sm font-bold">
-                                    {Number(restaurant.rating) > 0 ? Number(restaurant.rating).toFixed(1) : "NEW"}
-                                  </span>
-                                  {Number(restaurant.rating) > 0 && <Star className="h-3 w-3 sm:h-3.5 sm:w-3.5 lg:h-4.5 lg:w-4.5 fill-white text-white" strokeWidth={0} />}
-                                </div>
+                                {hasDisplayableRestaurantRating(restaurant) && (
+                                  <div className="flex-shrink-0 min-w-[52px] justify-center bg-primary text-primary-foreground px-2.5 sm:px-3 py-1 rounded-2xl flex items-center gap-1 shadow-sm">
+                                    <span className="text-xs sm:text-sm font-bold">
+                                      {formatRestaurantRating(restaurant)}
+                                    </span>
+                                    <Star className="h-3 w-3 sm:h-3.5 sm:w-3.5 lg:h-4.5 lg:w-4.5 fill-white text-white" strokeWidth={0} />
+                                  </div>
+                                )}
                               </div>
 
                               {/* Delivery Time & Distance */}
+                              {(restaurant.deliveryTime || restaurant.distance) && (
                               <div className="flex items-center gap-1 text-xs sm:text-sm text-muted-foreground mb-2 lg:mb-3">
+                                {restaurant.deliveryTime ? (
+                                  <>
                                 <Clock
                                   className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground"
                                   strokeWidth={1.5}
@@ -2574,11 +2547,18 @@ export default function Home() {
                                 <span className="font-medium text-foreground/80">
                                   {restaurant.deliveryTime}
                                 </span>
+                                  </>
+                                ) : null}
+                                {restaurant.deliveryTime && restaurant.distance ? (
                                 <span className="mx-1 text-border">|</span>
+                                ) : null}
+                                {restaurant.distance ? (
                                 <span className="font-medium text-foreground/80">
                                   {restaurant.distance}
                                 </span>
+                                ) : null}
                               </div>
+                              )}
 
                               {/* Offer Badge */}
                               {restaurant.offer && (
@@ -3015,224 +2995,33 @@ export default function Home() {
         )}
       </AnimatePresence>
 
-      {/* Veg Mode Popup */}
-      <AnimatePresence>
-        {showVegModePopup && (
-          <>
-            {/* Backdrop */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              onClick={() => {
-                setShowVegModePopup(false);
-                // Revert veg mode to OFF if popup is closed without applying
-                setVegModeContext(false);
-                setPrevVegMode(false);
-              }}
-              className="fixed inset-0 bg-black/30 z-[9998] backdrop-blur-sm"
-            />
-
-            {/* Popup */}
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: -10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: -10 }}
-              transition={{
-                type: "spring",
-                damping: 25,
-                stiffness: 300,
-                mass: 0.8,
-              }}
-              className="fixed z-[9999] bg-white dark:bg-[#1a1a1a] rounded-2xl shadow-2xl p-4 w-[calc(100%-2rem)] max-w-xs"
-              style={{
-                top: `${popupPosition.top}px`,
-                left: `${popupPosition.left}px`,
-              }}
-              onClick={(e) => e.stopPropagation()}>
-              {/* Pointer Triangle */}
-              <div
-                className="absolute -top-2 w-3 h-3 bg-white dark:bg-[#1a1a1a] transform rotate-45"
-                style={{
-                  left: `${popupPosition.triangleLeft - 6}px`,
-                  boxShadow: "-2px -2px 4px rgba(0,0,0,0.1)",
-                }}
-              />
-
-              {/* Title */}
-              <h3 className="text-base font-bold text-gray-900 dark:text-white mb-3">
-                See veg dishes from
-              </h3>
-
-              {/* Radio Options */}
-              <div className="space-y-2 mb-4">
-                {/* All restaurants */}
-                <label
-                  className="flex items-center gap-2.5 cursor-pointer p-1.5 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-                  onClick={() => setVegModeOption("all")}>
-                  <div className="relative flex items-center justify-center">
-                    <input
-                      type="radio"
-                      name="vegModeOption"
-                      value="all"
-                      checked={vegModeOption === "all"}
-                      onChange={() => setVegModeOption("all")}
-                      className="sr-only"
-                    />
-                    <div
-                      className={`w-4 h-4 rounded-full border-2 flex items-center justify-center transition-all ${vegModeOption === "all"
-                        ? "border-green-600 dark:border-green-500 bg-green-600 dark:bg-green-500"
-                        : "border-gray-300 dark:border-gray-600 bg-white dark:bg-[#2a2a2a]"
-                        }`}>
-                      {vegModeOption === "all" && (
-                        <div className="w-1.5 h-1.5 rounded-full bg-white dark:bg-white" />
-                      )}
-                    </div>
-                  </div>
-                  <span className="text-sm font-medium text-gray-900 dark:text-white">
-                    All restaurants
-                  </span>
-                </label>
-
-                {/* Pure Veg restaurants only */}
-                <label
-                  className="flex items-center gap-2.5 cursor-pointer p-1.5 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-                  onClick={() => setVegModeOption("pure-veg")}>
-                  <div className="relative flex items-center justify-center">
-                    <input
-                      type="radio"
-                      name="vegModeOption"
-                      value="pure-veg"
-                      checked={vegModeOption === "pure-veg"}
-                      onChange={() => setVegModeOption("pure-veg")}
-                      className="sr-only"
-                    />
-                    <div
-                      className={`w-4 h-4 rounded-full border-2 flex items-center justify-center transition-all ${vegModeOption === "pure-veg"
-                        ? "border-green-600 dark:border-green-500 bg-green-600 dark:bg-green-500"
-                        : "border-gray-300 dark:border-gray-600 bg-white dark:bg-[#2a2a2a]"
-                        }`}>
-                      {vegModeOption === "pure-veg" && (
-                        <div className="w-1.5 h-1.5 rounded-full bg-white dark:bg-white" />
-                      )}
-                    </div>
-                  </div>
-                  <span className="text-sm font-medium text-gray-900 dark:text-white">
-                    Pure Veg restaurants only
-                  </span>
-                </label>
-              </div>
-
-              {/* Apply Button */}
-              <button
-                onClick={() => {
-                  setShowVegModePopup(false);
-                  setIsApplyingVegMode(true);
-                  // Confirm veg mode is ON by updating context and prevVegMode
-                  setVegModeContext(true);
-                  setPrevVegMode(true);
-                  // Simulate applying veg mode settings
-                  setTimeout(() => {
-                    setIsApplyingVegMode(false);
-                  }, 2000);
-                }}
-                className="w-full bg-[#0F172A] text-white font-semibold py-2.5 rounded-xl hover:bg-[#15803D] transition-colors mb-2 text-sm">
-                Apply
-              </button>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-
-      {/* Switch Off Veg Mode Popup */}
-      <AnimatePresence>
-        {showSwitchOffPopup && (
-          <>
-            {/* Backdrop */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              onClick={() => {
-                setShowSwitchOffPopup(false);
-                isHandlingSwitchOff.current = false;
-                setVegModeContext(true);
-                // prevVegMode stays true (from before), which is correct
-              }}
-              className="fixed inset-0 bg-black/50 z-[9998] backdrop-blur-sm"
-            />
-
-            {/* Popup */}
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              transition={{
-                type: "spring",
-                damping: 25,
-                stiffness: 300,
-                mass: 0.8,
-              }}
-              className="fixed inset-0 z-[9999] flex dark:bg-[#lalala] dark:text-white items-center justify-center p-4"
-              onClick={(e) => e.stopPropagation()}>
-              <div className="bg-white dark:bg-[#lalala] dark:text-white rounded-2xl shadow-2xl w-[85%] max-w-sm p-6">
-                {/* Warning Icon */}
-                <div className="flex justify-center mb-4">
-                  <div className="w-20 h-20 rounded-full bg-pink-100 flex items-center justify-center">
-                    <AlertCircle
-                      className="w-20 h-20 text-white bg-red-500/90 rounded-full p-2"
-                      strokeWidth={2.5}
-                    />
-                  </div>
-                </div>
-
-                {/* Title */}
-                <h2 className="text-2xl font-bold text-gray-900  text-center mb-2">
-                  Switch off Veg Mode?
-                </h2>
-
-                {/* Description */}
-                <p className="text-gray-600 text-center mb-6 text-sm">
-                  You'll see all restaurants, including those serving non-veg
-                  dishes
-                </p>
-
-                {/* Buttons */}
-                <div className="space-y-3">
-                  <button
-                    onClick={() => {
-                      setShowSwitchOffPopup(false);
-                      setIsSwitchingOffVegMode(true);
-                      // Simulate switching off veg mode
-                      setTimeout(() => {
-                        setIsSwitchingOffVegMode(false);
-                        isHandlingSwitchOff.current = false;
-                        setVegModeContext(false);
-                        setPrevVegMode(false); // Set to false to match current state (veg mode is OFF)
-                      }, 2000);
-                    }}
-                    className="w-full bg-transparent text-red-600 font-normal py-1 text-normal rounded-xl hover:bg-red-50 transition-colors text-base">
-                    Switch off
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      setShowSwitchOffPopup(false);
-                      isHandlingSwitchOff.current = false;
-                      setVegModeContext(true);
-                      // prevVegMode stays true (from before), which is correct
-                    }}
-                    className="w-full text-gray-900 font-normal py-1 text-center rounded-xl hover:bg-gray-200 transition-colors text-base">
-                    Keep using this mode
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+      {/* Unified Veg Mode Popups */}
+      <VegModePopups
+        showVegModePopup={showVegModePopup}
+        showSwitchOffPopup={showSwitchOffPopup}
+        onCloseVegPopup={() => {
+          setShowVegModePopup(false);
+          setIsApplyingVegMode(true);
+          setVegModeContext(true);
+          setPrevVegMode(true);
+          setTimeout(() => setIsApplyingVegMode(false), 2000);
+        }}
+        onCloseSwitchOffPopup={() => {
+          setShowSwitchOffPopup(false);
+          isHandlingSwitchOff.current = false;
+          setVegModeContext(true);
+        }}
+        onConfirmSwitchOff={() => {
+          setShowSwitchOffPopup(false);
+          setIsSwitchingOffVegMode(true);
+          setTimeout(() => {
+            setIsSwitchingOffVegMode(false);
+            isHandlingSwitchOff.current = false;
+            setVegModeContext(false);
+            setPrevVegMode(false);
+          }, 2000);
+        }}
+      />
 
       {/* All Categories Modal */}
       <AnimatePresence>

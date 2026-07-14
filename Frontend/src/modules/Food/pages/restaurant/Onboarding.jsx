@@ -690,7 +690,7 @@ export default function RestaurantOnboarding() {
     const safeStep = requested > allowedCap ? allowedCap : requested
     setStep(safeStep)
     if (replaceUrl) {
-      setSearchParams({ step: String(safeStep) }, { replace: true })
+      setSearchParams({ step: String(safeStep) }, { replace: true, state: location.state })
     }
     window.scrollTo({ top: 0, behavior: "instant" })
   }
@@ -1288,7 +1288,7 @@ export default function RestaurantOnboarding() {
 
         desiredStep = Math.min(allowedStep, Math.max(1, Number(desiredStep) || 1))
         setStep(desiredStep)
-        setSearchParams({ step: String(desiredStep) }, { replace: true })
+        setSearchParams({ step: String(desiredStep) }, { replace: true, state: location.state })
 
       } catch (err) {
         debugError("Onboarding hydration failed:", err)
@@ -1694,12 +1694,9 @@ export default function RestaurantOnboarding() {
   }
 
   const appendStep2ToFormData = (formData) => {
-    const legacyTimings = deriveLegacyFromOutletTimings(step2.outletTimings)
     formData.append("cuisines", (step2.cuisines || []).join(","))
     formData.append("estimatedDeliveryTime", (step2.estimatedDeliveryTime || "").trim())
-    formData.append("openingTime", normalizeTimeValue(legacyTimings.openingTime) || "")
-    formData.append("closingTime", normalizeTimeValue(legacyTimings.closingTime) || "")
-    formData.append("openDays", (legacyTimings.openDays || []).join(","))
+    formData.append("outletTimings", JSON.stringify(step2.outletTimings || getDefaultDays()))
 
     const menuFiles = (step2.menuImages || []).filter((f) => isUploadableFile(f))
     menuFiles.forEach((file) => formData.append("menuImages", file))
@@ -1818,7 +1815,6 @@ export default function RestaurantOnboarding() {
             resolveMenuPdfForProfileUpdate(step2.menuPdf),
           ])
 
-          const legacyTimings = deriveLegacyFromOutletTimings(step2.outletTimings)
           const updatePayload = {
             restaurantName: step1.restaurantName || "",
             dietaryType: step1.dietaryType || "",
@@ -1842,9 +1838,6 @@ export default function RestaurantOnboarding() {
             },
             cuisines: Array.isArray(step2.cuisines) ? step2.cuisines : [],
             estimatedDeliveryTime: (step2.estimatedDeliveryTime || "").trim(),
-            openingTime: normalizeTimeValue(legacyTimings.openingTime) || "",
-            closingTime: normalizeTimeValue(legacyTimings.closingTime) || "",
-            openDays: Array.isArray(legacyTimings.openDays) ? legacyTimings.openDays : [],
             menuImages: menuImagesPayload,
             profileImage: profileImagePayload || "",
             panNumber: step3.panNumber || "",

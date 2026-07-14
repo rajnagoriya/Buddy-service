@@ -93,7 +93,32 @@ export default function RestaurantOTP() {
 
   const handleChange = (index, value) => {
     const digits = value.replace(/\D/g, "")
+
     if (digits.length > 1) {
+      const previousDigit = otp[index]
+      // Some mobile keyboards don't honor maxLength=1 and append the new
+      // keystroke to the existing value instead of replacing it. In that
+      // case the extra characters aren't a paste/autofill of the full code -
+      // they're "old digit + newly typed digit(s)", so we keep only what
+      // was typed after the existing value instead of treating index as a
+      // paste start (which would keep the stale old digit).
+      if (previousDigit && digits.startsWith(previousDigit)) {
+        const typed = digits.slice(previousDigit.length)
+        const newDigit = typed.slice(-1)
+        if (!newDigit) return
+        const newOtp = [...otp]
+        newOtp[index] = newDigit
+        setOtp(newOtp)
+        if (index < otp.length - 1) {
+          inputRefs.current[index + 1]?.focus()
+        }
+        if (newOtp.every((digit) => digit !== "") && !hasSubmittedRef.current) {
+          hasSubmittedRef.current = true
+          handleVerify(newOtp.join(""))
+        }
+        return
+      }
+
       applyOtpDigits(digits, index)
       return
     }
@@ -104,7 +129,7 @@ export default function RestaurantOTP() {
     newOtp[index] = value
     setOtp(newOtp)
 
-    if (value && index < 3) {
+    if (value && index < otp.length - 1) {
       inputRefs.current[index + 1]?.focus()
     }
 

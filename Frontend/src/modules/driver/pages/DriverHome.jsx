@@ -7,6 +7,9 @@ import {
   LogOut,
   Sparkles,
   Plus,
+  AlertCircle,
+  Pencil,
+  Package,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -20,6 +23,12 @@ import { clearModuleAuth } from "@food/utils/auth";
 
 const OFF_VALUES = new Set(["off", "none", "offline", "", null, undefined]);
 const normalizeMode = (raw) => (OFF_VALUES.has(raw) ? "off" : raw);
+
+const SERVICE_STATUS_CARDS = [
+  { key: "food", label: "Food", Icon: Bike, accent: "text-orange-400" },
+  { key: "quickCommerce", label: "Quick Commerce", Icon: Package, accent: "text-emerald-400" },
+  { key: "taxi", label: "Taxi", Icon: Car, accent: "text-sky-400" },
+];
 
 const SERVICE_TOGGLES = [
   {
@@ -68,12 +77,18 @@ const APPLY_FOR_SERVICE = {
 export default function DriverHome() {
   const navigate = useNavigate();
   const [mode, setMode] = useState("off");
-  const [capabilities, setCapabilities] = useState({ food: "not_enabled", taxi: "not_enabled" });
+  const [capabilities, setCapabilities] = useState({
+    food: "not_enabled",
+    quickCommerce: "not_enabled",
+    taxi: "not_enabled",
+  });
   const [identity, setIdentity] = useState(null);
   const [bootLoading, setBootLoading] = useState(true);
   const [switching, setSwitching] = useState(false);
   const [enrollingService, setEnrollingService] = useState(null);
   const [latLng, setLatLng] = useState(null);
+  const [rejection, setRejection] = useState({ food: null, quickCommerce: null, taxi: null });
+  const [resubmitAllowed, setResubmitAllowed] = useState(false);
 
   useEffect(() => {
     const token =
@@ -98,6 +113,8 @@ export default function DriverHome() {
           navigate("/driver/onboarding", { replace: true });
           return;
         }
+        setResubmitAllowed(Boolean(onboardingState?.resubmitAllowed));
+        setRejection(onboardingState?.rejection || { food: null, quickCommerce: null, taxi: null });
         setIdentity(onboardingState?.identity || onboardingState || null);
         if (onboardingState?.capabilities) setCapabilities(onboardingState.capabilities);
         if (modeState?.capabilities) setCapabilities((prev) => ({ ...prev, ...modeState.capabilities }));
@@ -124,10 +141,18 @@ export default function DriverHome() {
     food: "/food/delivery",
   };
 
+  const foodRejected = capabilities?.food === "rejected";
+  const qcRejected = capabilities?.quickCommerce === "rejected";
+  const taxiRejected = capabilities?.taxi === "rejected";
+  const anyRejected = foodRejected || qcRejected || taxiRejected;
   const foodEnabled = capabilities?.food && capabilities.food !== "not_enabled";
+  const qcEnabled = capabilities?.quickCommerce && capabilities.quickCommerce !== "not_enabled";
   const taxiEnabled = capabilities?.taxi && capabilities.taxi !== "not_enabled";
   const foodApproved = capabilities?.food === "approved" || capabilities?.food === "enabled" || capabilities?.food === "active";
+  const qcApproved = capabilities?.quickCommerce === "approved" || capabilities?.quickCommerce === "enabled" || capabilities?.quickCommerce === "active";
   const taxiApproved = capabilities?.taxi === "approved" || capabilities?.taxi === "enabled" || capabilities?.taxi === "active";
+  const deliveryApproved = foodApproved || qcApproved;
+  const deliveryEnabled = foodEnabled || qcEnabled;
   const missingServiceKey = foodEnabled && !taxiEnabled ? "taxi" : taxiEnabled && !foodEnabled ? "food" : null;
   const applyCta = missingServiceKey ? APPLY_FOR_SERVICE[missingServiceKey] : null;
 
@@ -141,6 +166,10 @@ export default function DriverHome() {
     if (onboardingState?.capabilities) {
       setCapabilities(onboardingState.capabilities);
     }
+    if (onboardingState?.rejection) {
+      setRejection(onboardingState.rejection);
+    }
+    setResubmitAllowed(Boolean(onboardingState?.resubmitAllowed));
     if (modeState?.capabilities) {
       setCapabilities((prev) => ({ ...prev, ...modeState.capabilities }));
     }
@@ -196,16 +225,16 @@ export default function DriverHome() {
       toast.error("Apply for Taxi below to enable this service.");
       return;
     }
-    if (serviceKey === "food" && !foodEnabled) {
-      toast.error("Apply for Food & Quick Commerce below to enable this service.");
+    if (serviceKey === "food" && !deliveryEnabled) {
+      toast.error("Apply for Food or Quick Commerce below to enable this service.");
       return;
     }
     if (serviceKey === "taxi" && taxiEnabled && !taxiApproved) {
       toast.info("Taxi profile is pending admin approval.");
       return;
     }
-    if (serviceKey === "food" && foodEnabled && !foodApproved) {
-      toast.info("Food profile is pending admin approval.");
+    if (serviceKey === "food" && deliveryEnabled && !deliveryApproved) {
+      toast.info("Delivery profile is pending admin approval.");
       return;
     }
 
@@ -265,6 +294,84 @@ export default function DriverHome() {
           </button>
         </div>
 
+        <div className="rounded-3xl bg-white/[0.04] border border-white/10 p-5 mb-5">
+          <p className="text-[12px] uppercase tracking-widest font-bold text-[#9bc78a] mb-3">
+            Service status
+          </p>
+          <div className="space-y-2">
+            {SERVICE_STATUS_CARDS.map(({ key, label, Icon, accent }) => {
+              const status = capabilities?.[key] || "not_enabled";
+              const rejected = status === "rejected";
+              const approved = status === "approved" || status === "enabled" || status === "active";
+              const pending = status === "pending";
+              const notEnabled = status === "not_enabled";
+              const reason = rejection?.[key]?.reason;
+              return (
+                <div key={key} className="rounded-2xl border border-white/10 bg-white/5 p-3 flex items-start gap-3">
+                  <div className={`w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center shrink-0 ${accent}`}>
+                    <Icon className="w-4 h-4" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-bold text-[13px]">{label}</span>
+                      {approved ? (
+                        <span className="text-[10px] uppercase tracking-widest text-[#88c170]">Approved</span>
+                      ) : pending ? (
+                        <span className="text-[10px] uppercase tracking-widest text-amber-400">Pending</span>
+                      ) : rejected ? (
+                        <span className="text-[10px] uppercase tracking-widest text-red-400">Rejected</span>
+                      ) : notEnabled ? (
+                        <span className="text-[10px] uppercase tracking-widest text-white/40">Not selected</span>
+                      ) : null}
+                    </div>
+                    {rejected && reason ? (
+                      <p className="text-[12px] text-red-200/90 mt-1 leading-relaxed">{reason}</p>
+                    ) : null}
+                    {rejected && resubmitAllowed ? (
+                      <button
+                        type="button"
+                        onClick={() => navigate("/driver/onboarding")}
+                        className="mt-2 text-[11px] font-bold text-red-300 underline"
+                      >
+                        Edit & Resubmit
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {anyRejected && resubmitAllowed ? (
+          <div className="rounded-3xl border border-red-500/30 bg-red-500/10 p-5 mb-5">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-500/20 flex items-center justify-center shrink-0">
+                <AlertCircle className="w-5 h-5 text-red-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] uppercase tracking-widest font-bold text-red-300">
+                  Action required
+                </p>
+                <p className="text-white font-bold text-[15px] mt-1">
+                  One or more services were rejected
+                </p>
+                <p className="text-[13px] text-red-100/70 mt-2">
+                  Update the rejected service details and resubmit for admin review.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => navigate("/driver/onboarding")}
+                  className="mt-4 w-full sm:w-auto h-11 px-5 rounded-2xl bg-red-500 hover:bg-red-600 text-white font-extrabold text-[13px] flex items-center justify-center gap-2 transition-colors active:scale-[0.98]"
+                >
+                  <Pencil className="w-4 h-4" />
+                  Edit & Resubmit
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {/* Service toggles */}
         <div className="rounded-3xl bg-white/[0.04] border border-white/10 p-5 mb-5">
           <div className="flex items-center justify-between gap-3 mb-3">
@@ -291,11 +398,12 @@ export default function DriverHome() {
 
           <div className="space-y-3">
             {SERVICE_TOGGLES.map(({ key, label, description, Icon, accent }) => {
-              const enabled = key === "food" ? foodEnabled : taxiEnabled;
-              const approved = key === "food" ? foodApproved : taxiApproved;
-              const pending = enabled && !approved;
+              const enabled = key === "food" ? deliveryEnabled : taxiEnabled;
+              const approved = key === "food" ? deliveryApproved : taxiApproved;
+              const rejected = key === "food" ? (foodRejected || qcRejected) : taxiRejected;
+              const pending = enabled && !approved && !rejected;
               const active = key === "food" ? foodActive : taxiActive;
-              const disabled = !enabled || pending || switching;
+              const disabled = !enabled || pending || rejected || switching;
 
               return (
                 <div
@@ -314,6 +422,9 @@ export default function DriverHome() {
                       {label}
                       {pending && (
                         <span className="text-[10px] uppercase tracking-widest text-amber-400">Pending</span>
+                      )}
+                      {(key === "food" ? foodRejected : taxiRejected) && (
+                        <span className="text-[10px] uppercase tracking-widest text-red-400">Rejected</span>
                       )}
                       {!enabled && (
                         <span className="text-[10px] uppercase tracking-widest text-white/40">Not Enrolled</span>
@@ -427,14 +538,20 @@ function ApplyForServiceCard({ cta, loading, onApply }) {
 }
 
 function CapabilityCard({ Icon, title, status, enabled, href }) {
-  const label = enabled ? String(status || "active").replace(/_/g, " ") : "Not enrolled";
-  const isReady = enabled && (status === "approved" || status === "enabled" || status === "active");
-  const isPending = enabled && !isReady;
-  const target = !enabled ? null : isPending ? "/driver/home" : href;
+  const normalized = String(status || "").toLowerCase();
+  const label = !enabled
+    ? "Not enrolled"
+    : normalized === "rejected"
+      ? "Rejected"
+      : String(status || "active").replace(/_/g, " ");
+  const isReady = enabled && (normalized === "approved" || normalized === "enabled" || normalized === "active");
+  const isPending = enabled && !isReady && normalized !== "rejected";
+  const isRejected = enabled && normalized === "rejected";
+  const target = !enabled || isRejected ? null : isPending ? "/driver/home" : href;
 
   const className = [
     "block rounded-2xl border p-4 transition-all",
-    isReady ? "bg-[#88c170]/10 border-[#88c170]/30" : "bg-white/5 border-white/10",
+    isReady ? "bg-[#88c170]/10 border-[#88c170]/30" : isRejected ? "bg-red-500/10 border-red-500/30" : "bg-white/5 border-white/10",
     !enabled ? "opacity-70" : "",
   ].join(" ");
 

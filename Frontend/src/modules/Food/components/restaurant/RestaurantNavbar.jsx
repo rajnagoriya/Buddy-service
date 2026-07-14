@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react"
 import { useNavigate } from "react-router-dom"
 import { Search, Menu, ChevronRight, MapPin, X, Bell, HelpCircle } from "lucide-react"
 import { restaurantAPI } from "@food/api"
+import { getRestaurantAvailabilityStatus } from "@food/utils/restaurantAvailability"
 import { getCachedSettings, loadBusinessSettings } from "@food/utils/businessSettings"
 import useNotificationInbox from "@food/hooks/useNotificationInbox"
 import { useRestaurantNotifications } from "@food/hooks/useRestaurantNotifications"
@@ -292,39 +293,59 @@ export default function RestaurantNavbar({
     }
   }, [restaurantData, propLocation])
 
-  // Load status from localStorage on mount and listen for changes
+  // Reflect customer-visible online status from profile + schedule (no polling)
   useEffect(() => {
-    const updateStatus = () => {
+    const applyStatus = (restaurant, outletTimings) => {
+      const availability = getRestaurantAvailabilityStatus({
+        isAcceptingOrders: restaurant?.isAcceptingOrders === true,
+        outletTimings: outletTimings || restaurant?.outletTimings || null,
+      })
+      const isOnline = availability.isOpen
+      setStatus(isOnline ? "Online" : "Offline")
       try {
-        const savedStatus = localStorage.getItem('restaurant_online_status')
-        if (savedStatus !== null) {
-          const isOnline = JSON.parse(savedStatus)
-          setStatus(isOnline ? "Online" : "Offline")
-        } else {
-          // If not stored yet, fallback to backend value (when available).
-          const isOnline = Boolean(restaurantData?.isAcceptingOrders)
-          setStatus(isOnline ? "Online" : "Offline")
-        }
-      } catch (error) {
-        debugError("Error loading restaurant status:", error)
-        const isOnline = Boolean(restaurantData?.isAcceptingOrders)
+        localStorage.setItem("restaurant_online_status", JSON.stringify(isOnline))
+      } catch {}
+    }
+
+    if (restaurantData) {
+      applyStatus(restaurantData, restaurantData.outletTimings)
+    }
+
+    const handleStatusChange = (event) => {
+      const isOnline = event.detail?.isOnline
+      if (typeof isOnline === "boolean") {
         setStatus(isOnline ? "Online" : "Offline")
+        try {
+          localStorage.setItem("restaurant_online_status", JSON.stringify(isOnline))
+        } catch {}
+        setRestaurantData((prev) =>
+          prev ? { ...prev, isAcceptingOrders: isOnline } : prev,
+        )
+        return
+      }
+      if (restaurantData) {
+        applyStatus(restaurantData, restaurantData.outletTimings)
       }
     }
 
-    // Load initial status
-    updateStatus()
+    const handleTimingsUpdated = (event) => {
+      const outletTimings = event.detail?.outletTimings
+      if (outletTimings && typeof outletTimings === "object") {
+        setRestaurantData((prev) => {
+          if (!prev) return prev
+          const next = { ...prev, outletTimings }
+          applyStatus(next, outletTimings)
+          return next
+        })
+      }
+    }
 
-    // Listen for status changes from RestaurantStatus page
-  const handleStatusChange = (event) => {
-      const isOnline = event.detail?.isOnline || false
-      setStatus(isOnline ? "Online" : "Offline")
-  }
+    window.addEventListener("restaurantStatusChanged", handleStatusChange)
+    window.addEventListener("outletTimingsUpdated", handleTimingsUpdated)
 
-    window.addEventListener('restaurantStatusChanged', handleStatusChange)
-    
     return () => {
-      window.removeEventListener('restaurantStatusChanged', handleStatusChange)
+      window.removeEventListener("restaurantStatusChanged", handleStatusChange)
+      window.removeEventListener("outletTimingsUpdated", handleTimingsUpdated)
     }
   }, [restaurantData])
 

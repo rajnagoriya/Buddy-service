@@ -33,6 +33,8 @@ const foodCategorySchema = new mongoose.Schema(
          */
         zoneId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodZone', index: true, default: undefined },
         isActive: { type: Boolean, default: true, index: true },
+        /** When true, only admin can reactivate this category. */
+        adminDeactivated: { type: Boolean, default: false, index: true },
         sortOrder: { type: Number, default: 0, index: true }
     },
     {

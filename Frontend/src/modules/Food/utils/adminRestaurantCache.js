@@ -113,12 +113,22 @@ export function prefetchRestaurantDetail(id) {
   fetchRestaurantDetailCached(id).catch(() => {})
 }
 
+function parseRestaurantDetailResponse(response) {
+  const raw = response?.data?.data
+  const data = raw?.restaurant && typeof raw.restaurant === "object" ? raw.restaurant : raw
+  if (data && (data.restaurantName || data._id)) return data
+  return null
+}
+
 export async function fetchRestaurantDetailCached(id, { force = false } = {}) {
   if (!id) return null
   const key = String(id)
   const now = Date.now()
 
-  if (!force) {
+  if (force) {
+    detailCache.delete(key)
+    detailInFlight.delete(key)
+  } else {
     const hit = detailCache.get(key)
     if (hit && now - hit.ts < DETAIL_CACHE_TTL_MS) {
       return hit.data
@@ -131,8 +141,8 @@ export async function fetchRestaurantDetailCached(id, { force = false } = {}) {
   const request = adminAPI
     .getRestaurantById(id)
     .then((response) => {
-      const data = response?.data?.data
-      if (data && (data.restaurantName || data._id)) {
+      const data = parseRestaurantDetailResponse(response)
+      if (data) {
         detailCache.set(key, { ts: Date.now(), data })
         return data
       }

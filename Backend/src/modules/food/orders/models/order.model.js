@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { buildLocationSchema } from '../../../../core/location/location.schema.js';
 
 const orderItemSchema = new mongoose.Schema(
     {
@@ -29,8 +30,8 @@ const deliveryAddressSchema = new mongoose.Schema(
         zipCode: { type: String, default: '', trim: true },
         phone: { type: String, default: '', trim: true },
         location: {
-            type: { type: String, enum: ['Point'], default: 'Point' },
-            coordinates: { type: [Number], default: undefined }
+            type: buildLocationSchema(),
+            default: undefined
         }
     },
     { _id: false }
@@ -205,8 +206,8 @@ const pickupSchema = new mongoose.Schema(
             default: 'pending' 
         },
         location: {
-            type: { type: String, enum: ['Point'], default: 'Point' },
-            coordinates: { type: [Number] }
+            type: buildLocationSchema(),
+            default: undefined
         },
         items: [String] // Array of item names or IDs belonging to this pickup
     },

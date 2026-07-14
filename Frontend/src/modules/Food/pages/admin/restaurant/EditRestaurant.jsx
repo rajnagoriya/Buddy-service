@@ -3,6 +3,11 @@ import { useNavigate, useParams } from "react-router-dom"
 import { adminAPI } from "@food/api"
 import { Input } from "@food/components/ui/input"
 import { Button } from "@food/components/ui/button"
+import OutletTimingsEditor from "@food/components/admin/OutletTimingsEditor"
+import { getDefaultDays } from "@food/utils/outletTimingsUtils"
+import { fetchOutletTimingsCached, clearOutletTimingsCache } from "@food/utils/outletTimingsCache"
+import { clearRestaurantListCache } from "@food/utils/restaurantListCache"
+import { invalidateApprovedRestaurantsCache } from "@food/utils/adminRestaurantCache"
 import { Label } from "@food/components/ui/label"
 import { getGoogleMapsApiKey } from "@food/utils/googleMapsApiKey"
 import { ArrowLeft, Loader2 } from "lucide-react"
@@ -82,8 +87,9 @@ const normalizeDetailsFormFromRestaurant = (restaurant) => {
       restaurant?.estimatedDeliveryTime ??
       "",
     offer: restaurant?.offer || "",
-    openingTime: restaurant?.openingTime || restaurant?.deliveryTimings?.openingTime || "",
-    closingTime: restaurant?.closingTime || restaurant?.deliveryTimings?.closingTime || "",
+    outletTimings: restaurant?.outletTimings && typeof restaurant.outletTimings === "object"
+      ? { ...getDefaultDays(), ...restaurant.outletTimings }
+      : getDefaultDays(),
     isActive: restaurant?.isActive !== false,
   }
 }
@@ -165,8 +171,15 @@ export default function EditRestaurant() {
         }
 
         setRestaurant(data)
-        setDetailsForm(normalizeDetailsFormFromRestaurant(data))
-        setLocationForm(normalizeLocationFormFromRestaurant(data))
+        const outletTimings = await fetchOutletTimingsCached(restaurantId, { force: true })
+        const merged = {
+          ...data,
+          outletTimings: outletTimings && typeof outletTimings === "object"
+            ? { ...getDefaultDays(), ...outletTimings }
+            : data.outletTimings,
+        }
+        setDetailsForm(normalizeDetailsFormFromRestaurant(merged))
+        setLocationForm(normalizeLocationFormFromRestaurant(merged))
       } catch (e) {
         debugError(e)
         if (!mounted) return
@@ -314,8 +327,7 @@ export default function EditRestaurant() {
             ? undefined
             : Number(detailsForm.estimatedDeliveryTimeMinutes),
         offer: detailsForm.offer,
-        openingTime: detailsForm.openingTime,
-        closingTime: detailsForm.closingTime,
+        outletTimings: detailsForm.outletTimings,
         isActive: detailsForm.isActive !== false,
       }
 
@@ -323,7 +335,11 @@ export default function EditRestaurant() {
       const updated = res?.data?.data?.restaurant || res?.data?.data || null
       if (updated) {
         setRestaurant((prev) => ({ ...(prev || {}), ...updated }))
+        setDetailsForm(normalizeDetailsFormFromRestaurant(updated))
       }
+      clearOutletTimingsCache()
+      clearRestaurantListCache()
+      invalidateApprovedRestaurantsCache()
       alert("Restaurant details updated successfully")
     } catch (e) {
       alert(e?.response?.data?.message || "Failed to update restaurant details")
@@ -494,6 +510,12 @@ export default function EditRestaurant() {
                 <div>
                   <Label>Offer</Label>
                   <Input value={detailsForm.offer} onChange={(e) => setDetailsForm((p) => ({ ...p, offer: e.target.value }))} />
+                </div>
+                <div className="md:col-span-2">
+                  <OutletTimingsEditor
+                    value={detailsForm.outletTimings}
+                    onChange={(outletTimings) => setDetailsForm((p) => ({ ...p, outletTimings }))}
+                  />
                 </div>
               </div>
             </section>

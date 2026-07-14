@@ -614,12 +614,7 @@ export default forwardRef(function ZoneSetup({ embedded = false, mapActive = tru
         const updated = response.data.data.restaurant
         setRestaurantData(updated)
         savedSnapshotRef.current = { lat, lng, zoneId }
-        if (embedded) {
-          toast.success("Zone and location saved")
-        } else {
-          toast.success("Zone and location saved")
-          window.location.reload()
-        }
+        toast.success("Zone and location saved")
         return true
       }
       throw new Error("Failed to save location")

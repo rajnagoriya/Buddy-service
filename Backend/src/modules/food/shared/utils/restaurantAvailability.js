@@ -85,29 +85,25 @@ export const getRestaurantAvailabilityStatus = (restaurant, now = new Date()) =>
   }
 
   const dayName = DAY_NAMES[now.getDay()];
-  const todayTiming = getTodayTiming(restaurant, dayName);
-  const openDays = Array.isArray(restaurant.openDays) ? restaurant.openDays : [];
-  if (!todayTiming && openDays.length > 0) {
-    const normalizedOpenDays = new Set(openDays.map((day) => normalizeDay(day)).filter(Boolean));
-    if (normalizedOpenDays.size > 0 && !normalizedOpenDays.has(dayName)) {
-      return { isOpen: false, isAcceptingOrders, reason: 'closed-day' };
-    }
+  const resolvedOutletTimings =
+    restaurant?.outletTimings && typeof restaurant.outletTimings === 'object'
+      ? restaurant.outletTimings
+      : null;
+  const todayTiming = getTodayTiming(
+    { outletTimings: resolvedOutletTimings },
+    dayName,
+  );
+
+  if (!todayTiming) {
+    return { isOpen: false, isAcceptingOrders, reason: 'no-timings' };
   }
 
-  if (todayTiming?.isOpen === false) {
+  if (todayTiming.isOpen === false) {
     return { isOpen: false, isAcceptingOrders, reason: 'day-closed' };
   }
 
-  const openingTime =
-    todayTiming?.openingTime ||
-    restaurant?.deliveryTimings?.openingTime ||
-    restaurant?.openingTime ||
-    null;
-  const closingTime =
-    todayTiming?.closingTime ||
-    restaurant?.deliveryTimings?.closingTime ||
-    restaurant?.closingTime ||
-    null;
+  const openingTime = todayTiming.openingTime || null;
+  const closingTime = todayTiming.closingTime || null;
 
   const openingMinutes = parseTimeToMinutes(openingTime);
   const closingMinutes = parseTimeToMinutes(closingTime);

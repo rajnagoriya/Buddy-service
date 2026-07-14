@@ -16,6 +16,7 @@ import {
   Trash2,
   Upload,
   X,
+  Eye,
   Folder,
   CheckCircle2,
   XCircle,
@@ -55,8 +56,127 @@ const scopeBadgeClass = (scope) => {
   return "bg-slate-100 text-slate-700 border-slate-200"
 }
 
+const formatAdminDate = (value) => {
+  if (!value) return "—"
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString()
+}
+
+const toShortDisplayId = (value) => {
+  const s = String(value || "").trim()
+  if (!s) return "—"
+  return s.length >= 5 ? s.slice(-5) : s
+}
+
+const displayValue = (value) => {
+  if (value === null || value === undefined || value === "") return "—"
+  if (typeof value === "boolean") return value ? "Yes" : "No"
+  return String(value)
+}
+
+function DetailField({ label, value, full = false }) {
+  return (
+    <div className={full ? "col-span-full" : ""}>
+      <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</p>
+      <p className="break-all whitespace-pre-wrap text-sm text-slate-900">{displayValue(value)}</p>
+    </div>
+  )
+}
+
+function CategoryViewModal({ category, onClose }) {
+  if (!category) return null
+
+  const restaurant = category?.createdByRestaurant || category?.restaurant || null
+  const restaurantDisplayId = toShortDisplayId(
+    restaurant?._id || category?.createdByRestaurantId || category?.restaurantId,
+  )
+  const isActive = category?.isActive !== false && category?.status !== false
+
+  return createPortal(
+    <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative flex max-h-[min(90vh,900px)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5">
+          <div>
+            <h2 className="text-lg font-bold text-slate-900">Category Details</h2>
+            <p className="mt-0.5 text-xs text-slate-500">{category?.name || "Category"}</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5 space-y-6">
+          {category?.image ? (
+            <div>
+              <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">Image</p>
+              <img
+                src={category.image}
+                alt={category.name || "Category"}
+                className="h-32 w-32 rounded-2xl border border-slate-200 object-cover"
+              />
+            </div>
+          ) : null}
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <DetailField label="Name" value={category?.name} />
+            <DetailField label="Type" value={category?.type} />
+            <DetailField label="Diet Scope" value={category?.foodTypeScope} />
+            <DetailField label="Sort Order" value={category?.sortOrder} />
+            <DetailField label="Visibility" value={category?.isGlobal ? "Global" : "Restaurant-specific"} />
+            <DetailField label="Status" value={isActive ? "Active" : "Inactive"} />
+            {category?.adminDeactivated ? (
+              <DetailField label="Admin Note" value="Disabled by admin" />
+            ) : null}
+            <DetailField label="Approval Status" value={category?.approvalStatus} />
+            <DetailField label="Total Items" value={category?.itemCount} />
+            <DetailField label="Approved Items" value={category?.approvedFoodCount} />
+            <DetailField label="Created" value={formatAdminDate(category?.createdAt)} />
+            <DetailField label="Last Updated" value={formatAdminDate(category?.updatedAt)} />
+            {category?.requestedAt ? (
+              <DetailField label="Requested On" value={formatAdminDate(category?.requestedAt)} />
+            ) : null}
+            {category?.approvedAt ? (
+              <DetailField label="Approved On" value={formatAdminDate(category?.approvedAt)} />
+            ) : null}
+            {category?.rejectedAt ? (
+              <DetailField label="Rejected On" value={formatAdminDate(category?.rejectedAt)} />
+            ) : null}
+            {category?.rejectionReason ? (
+              <DetailField label="Rejection Reason" value={category?.rejectionReason} full />
+            ) : null}
+          </div>
+
+          {restaurant ? (
+            <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+              <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-500">Restaurant</p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <DetailField label="Restaurant ID" value={restaurantDisplayId} />
+                <DetailField label="Restaurant Name" value={restaurant?.name} />
+                <DetailField label="Owner Name" value={restaurant?.ownerName} />
+                <DetailField label="Owner Phone" value={restaurant?.ownerPhone} />
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="border-t border-slate-100 bg-slate-50/50 px-6 py-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
 // ─── Row Actions Dropdown ─────────────────────────────────────────────────────
-function RowActions({ category, onEdit, onDelete, onApprove, onReject, onMakeGlobal, onToggleStatus }) {
+function RowActions({ category, onView, onEdit, onDelete, onApprove, onReject, onMakeGlobal, onToggleStatus }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
 
@@ -75,6 +195,12 @@ function RowActions({ category, onEdit, onDelete, onApprove, onReject, onMakeGlo
   const close = () => setOpen(false)
 
   const items = [
+    {
+      label: "View",
+      icon: <Eye className="h-3.5 w-3.5" />,
+      onClick: () => { close(); onView(category) },
+      className: "text-slate-700",
+    },
     {
       label: "Edit",
       icon: <Pencil className="h-3.5 w-3.5" />,
@@ -98,13 +224,15 @@ function RowActions({ category, onEdit, onDelete, onApprove, onReject, onMakeGlo
     ...(isRestaurantCategory && !category?.isGlobal && approvalStatus === "approved"
       ? [{ label: "Make Global", icon: <Globe className="h-3.5 w-3.5" />, onClick: () => { close(); onMakeGlobal(category) }, className: "text-sky-700" }]
       : []),
-    {
-      label: "Delete",
-      icon: <Trash2 className="h-3.5 w-3.5" />,
-      onClick: () => { close(); onDelete(catId) },
-      className: "text-rose-600",
-      divider: true,
-    },
+    ...(category?.canDelete !== false
+      ? [{
+          label: "Delete",
+          icon: <Trash2 className="h-3.5 w-3.5" />,
+          onClick: () => { close(); onDelete(catId) },
+          className: "text-rose-600",
+          divider: true,
+        }]
+      : []),
   ]
 
   return (
@@ -362,6 +490,7 @@ export default function Category() {
   const [selectedImageFile, setSelectedImageFile] = useState(null)
   const [imagePreview, setImagePreview] = useState(null)
   const [uploadingImage, setUploadingImage] = useState(false)
+  const [viewCategory, setViewCategory] = useState(null)
   const fileInputRef = useRef(null)
 
   // ── Split order threshold ──
@@ -521,13 +650,22 @@ export default function Category() {
 
   // ─── CRUD handlers ─────────────────────────────────────────────────────────────
   const handleToggleStatus = async (id) => {
-    const category = categories.find((c) => String(c?.id || c?._id) === String(id))
-    const newStatus = category?.status === false // toggle: if currently false → true
     try {
       const response = await adminAPI.toggleCategoryStatus(String(id))
       if (response?.data?.success) {
-        updateCategoryInState(id, { status: newStatus })
-        toast.success(`Category ${newStatus ? "activated" : "deactivated"}`)
+        const updated = response?.data?.data?.category || {}
+        const isActive = updated?.isActive !== false
+        const patch = {
+          status: isActive,
+          isActive,
+          adminDeactivated: updated?.adminDeactivated === true,
+        }
+        if ((statusFilter === "active" && !isActive) || (statusFilter === "inactive" && isActive)) {
+          removeCategoryFromState(id)
+        } else {
+          updateCategoryInState(id, patch)
+        }
+        toast.success(`Category ${isActive ? "activated" : "deactivated"}`)
       }
     } catch (error) {
       toast.error(error?.response?.data?.message || "Failed to update status")
@@ -577,7 +715,12 @@ export default function Category() {
   }
 
   const handleDelete = async (id) => {
-    const name = categories.find((c) => String(c?.id || c?._id) === String(id))?.name || "this category"
+    const category = categories.find((c) => String(c?.id || c?._id) === String(id))
+    if (category?.canDelete === false) {
+      toast.error("This category has items. Deactivate it instead of deleting.")
+      return
+    }
+    const name = category?.name || "this category"
     if (!window.confirm(`Delete "${name}"? This action cannot be undone.`)) return
     try {
       const response = await adminAPI.deleteCategory(String(id))
@@ -1008,6 +1151,7 @@ export default function Category() {
                           <td className="px-6 py-4 text-right">
                             <RowActions
                               category={category}
+                              onView={setViewCategory}
                               onEdit={handleEdit}
                               onDelete={handleDelete}
                               onApprove={handleApprove}
@@ -1110,6 +1254,7 @@ export default function Category() {
                           <td className="px-2 py-2.5 text-right whitespace-nowrap">
                             <RowActions
                               category={category}
+                              onView={setViewCategory}
                               onEdit={handleEdit}
                               onDelete={handleDelete}
                               onApprove={handleApprove}
@@ -1304,6 +1449,8 @@ export default function Category() {
           </AnimatePresence>,
           document.body,
         )}
+
+      <CategoryViewModal category={viewCategory} onClose={() => setViewCategory(null)} />
     </div>
   )
 }

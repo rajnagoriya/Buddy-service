@@ -100,6 +100,7 @@ export default function ItemDetailsPage() {
   const [images, setImages] = useState([])
   const [imageFiles, setImageFiles] = useState(new Map()) // Track File objects by preview URL
   const [uploadingImages, setUploadingImages] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
   const [saveStatus, setSaveStatus] = useState("") // "" | "uploading" | "saving"
   const [isPhotoPickerOpen, setIsPhotoPickerOpen] = useState(false)
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
@@ -760,10 +761,45 @@ export default function ItemDetailsPage() {
     setVariants((prev) => prev.filter((variant) => variant.localId !== localId))
   }
 
-  const handleDelete = () => {
-    // Delete logic here
-    debugLog("Deleting item:", id)
-    goBack()
+  const handleDelete = async () => {
+    const itemId = String(itemData?.id || itemData?._id || id || "").trim()
+    if (!itemId || itemId === "new") {
+      toast.error("Invalid item id")
+      return
+    }
+
+    const dishName = itemName.trim() || "this dish"
+    if (!window.confirm(`Are you sure you want to delete "${dishName}"? This action cannot be undone.`)) {
+      return
+    }
+
+    try {
+      setIsDeleting(true)
+      await restaurantAPI.deleteFood(itemId)
+
+      try {
+        if (typeof window !== "undefined") {
+          const raw = window.localStorage.getItem(INVENTORY_RECOMMENDED_KEY)
+          const parsed = raw ? JSON.parse(raw) : {}
+          if (parsed && typeof parsed === "object" && Object.prototype.hasOwnProperty.call(parsed, itemId)) {
+            const nextRecommendedMap = { ...parsed }
+            delete nextRecommendedMap[itemId]
+            window.localStorage.setItem(INVENTORY_RECOMMENDED_KEY, JSON.stringify(nextRecommendedMap))
+          }
+        }
+      } catch (recommendedError) {
+        debugWarn("Failed to clear recommended state after delete:", recommendedError)
+      }
+
+      toast.success("Dish deleted successfully")
+      window.dispatchEvent(new CustomEvent("foodsChanged"))
+      navigate("/food/restaurant/inventory", { replace: true })
+    } catch (error) {
+      debugError("Error deleting dish:", error)
+      toast.error(error?.response?.data?.message || error?.message || "Failed to delete dish")
+    } finally {
+      setIsDeleting(false)
+    }
   }
 
   return (
@@ -1206,15 +1242,23 @@ export default function ItemDetailsPage() {
               <button
                 type="button"
                 onClick={handleDelete}
-                className="flex-1 py-3 px-4 border-2 border-rose-200 text-rose-600 rounded-xl text-xs font-bold bg-white hover:bg-rose-50/50 hover:border-rose-300 transition-colors"
+                disabled={isDeleting || uploadingImages}
+                className="flex-1 py-3 px-4 border-2 border-rose-200 text-rose-600 rounded-xl text-xs font-bold bg-white hover:bg-rose-50/50 hover:border-rose-300 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Delete Dish
+                {isDeleting ? (
+                  <span className="inline-flex items-center justify-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Deleting...
+                  </span>
+                ) : (
+                  "Delete Dish"
+                )}
               </button>
             )}
             <button
               type="button"
               onClick={handleSave}
-              disabled={uploadingImages}
+              disabled={uploadingImages || isDeleting}
               className={`${isNewItem ? 'w-full' : 'flex-1'} py-3 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${!uploadingImages
                 ? "bg-[#16A34A] text-white hover:bg-[#15803d]"
                 : "bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200"

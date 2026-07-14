@@ -17,8 +17,10 @@ import {
 } from "@food/components/ui/dialog"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
-const debugError = (...args) => {}
+const debugError = (...args) => { }
 
+const SAFETY_REPORT_MIN_LENGTH = 10
+const SAFETY_REPORT_MAX_LENGTH = 4000
 
 export default function ReportSafetyEmergency() {
   const goBack = useAppBackNavigation()
@@ -89,20 +91,30 @@ export default function ReportSafetyEmergency() {
     }
   }
 
+  const handleReportChange = (value) => {
+    setReport(String(value || "").slice(0, SAFETY_REPORT_MAX_LENGTH))
+  }
+
   const handleSubmit = async () => {
-    if (!report.trim()) {
+    const trimmed = report.trim()
+    if (!trimmed) {
       toast.error('Please describe the safety concern or emergency')
       return
     }
 
-    if (report.trim().length < 10) {
-      toast.error('Description must be at least 10 characters')
+    if (trimmed.length < SAFETY_REPORT_MIN_LENGTH) {
+      toast.error(`Description must be at least ${SAFETY_REPORT_MIN_LENGTH} characters`)
+      return
+    }
+
+    if (trimmed.length > SAFETY_REPORT_MAX_LENGTH) {
+      toast.error(`Description must be at most ${SAFETY_REPORT_MAX_LENGTH} characters`)
       return
     }
 
     try {
       setIsSubmitting(true)
-      const response = await userAPI.createSafetyEmergencyReport(report.trim())
+      const response = await userAPI.createSafetyEmergencyReport(trimmed)
       
       if (response.data.success) {
         setIsSubmitted(true)
@@ -193,7 +205,8 @@ export default function ReportSafetyEmergency() {
                 <Textarea
                   placeholder="Please provide details about the safety issue..."
                   value={report}
-                  onChange={(e) => setReport(e.target.value)}
+                  onChange={(e) => handleReportChange(e.target.value)}
+                  maxLength={SAFETY_REPORT_MAX_LENGTH}
                   className="min-h-[150px] md:min-h-[200px] lg:min-h-[250px] w-full resize-y text-sm md:text-base leading-relaxed"
                   dir="ltr"
                   style={{
@@ -204,9 +217,9 @@ export default function ReportSafetyEmergency() {
                     maxWidth: '100%'
                   }}
                 />
-                <p className={`text-xs md:text-sm mt-2 flex justify-between ${report.trim().length < 10 ? 'text-red-500' : 'text-gray-500 dark:text-gray-400'}`}>
-                  <span>{report.length} characters</span>
-                  <span>Min 10 characters</span>
+                <p className={`text-xs md:text-sm mt-2 flex justify-between ${report.trim().length < SAFETY_REPORT_MIN_LENGTH ? 'text-red-500' : 'text-gray-500 dark:text-gray-400'}`}>
+                  <span>{report.length}/{SAFETY_REPORT_MAX_LENGTH} characters</span>
+                  <span>Min {SAFETY_REPORT_MIN_LENGTH} characters</span>
                 </p>
               </CardContent>
             </Card>
@@ -214,7 +227,7 @@ export default function ReportSafetyEmergency() {
             {/* Submit Button */}
             <Button
               onClick={handleSubmit}
-              disabled={report.trim().length < 10 || isSubmitting}
+              disabled={report.trim().length < SAFETY_REPORT_MIN_LENGTH || report.trim().length > SAFETY_REPORT_MAX_LENGTH || isSubmitting}
               className="w-full bg-red-600 hover:bg-red-700 text-white text-sm md:text-base h-10 md:h-12 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isSubmitting ? (

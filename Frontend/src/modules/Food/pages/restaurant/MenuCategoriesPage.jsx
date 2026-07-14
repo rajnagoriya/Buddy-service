@@ -259,11 +259,15 @@ export default function MenuCategoriesPage() {
       toast.error("Admin controls this category now")
       return
     }
+    if (category?.isActive === false && category?.adminDeactivated) {
+      toast.error("This category was deactivated by admin and cannot be reactivated")
+      return
+    }
     try {
       await restaurantAPI.updateCategory(category._id || category.id, {
         isActive: !(category?.isActive !== false),
       })
-      toast.success("Category updated and sent for admin approval")
+      toast.success("Category status updated")
       await refreshCategories()
     } catch (error) {
       toast.error(error?.response?.data?.message || "Failed to update category")
@@ -364,6 +368,7 @@ export default function MenuCategoriesPage() {
                 {categories.map((category) => {
                   const status = category?.approvalStatus || "pending"
                   const isEditable = category?.canEdit
+                  const canToggleActive = isEditable && !(category?.isActive === false && category?.adminDeactivated)
 
                   return (
                     <TableRow key={category._id || category.id} className="border-b border-slate-100">
@@ -409,14 +414,21 @@ export default function MenuCategoriesPage() {
                         <span className={`text-xs font-semibold ${category?.isActive !== false ? "text-emerald-600" : "text-rose-600"}`}>
                           {category?.isActive !== false ? "Yes" : "No"}
                         </span>
+                        {category?.adminDeactivated ? (
+                          <p className="mt-1 text-[11px] text-amber-600">Disabled by admin</p>
+                        ) : null}
                       </TableCell>
                       <TableCell className="px-3 py-3 align-top">
                         <div className="flex items-center justify-end gap-1.5">
                           <button
                             onClick={() => handleToggleActive(category)}
                             className="rounded-lg bg-slate-100 p-2 text-slate-700 disabled:opacity-50"
-                            disabled={!isEditable}
-                            title={category?.isActive !== false ? "Deactivate" : "Activate"}
+                            disabled={!canToggleActive}
+                            title={
+                              category?.adminDeactivated && category?.isActive === false
+                                ? "Disabled by admin"
+                                : (category?.isActive !== false ? "Deactivate" : "Activate")
+                            }
                           >
                             {category?.isActive !== false ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
                           </button>
@@ -565,14 +577,18 @@ export default function MenuCategoriesPage() {
             />
           </div>
 
-          <label className="flex items-center gap-2 text-sm text-slate-700">
+          <label className={`flex items-center gap-2 text-sm text-slate-700 ${editingCategory?.adminDeactivated ? "opacity-60" : ""}`}>
             <input
               type="checkbox"
               checked={formData.isActive}
+              disabled={Boolean(editingCategory?.adminDeactivated)}
               onChange={() => setFormData((prev) => ({ ...prev, isActive: !prev.isActive }))}
             />
             Keep category active
           </label>
+          {editingCategory?.adminDeactivated ? (
+            <p className="text-xs text-amber-600">This category was deactivated by admin.</p>
+          ) : null}
         </div>
       </RestaurantPanelModal>
 

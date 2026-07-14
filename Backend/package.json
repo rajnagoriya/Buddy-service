@@ -18,6 +18,10 @@
     "test:food-cache-invalidation": "node scripts/test-food-cache-invalidation.js",
     "cleanup:legacy-collections": "node scripts/cleanup-legacy-collections.js",
     "seed:admin": "node scripts/seedFoodAdmin.js",
+    "seed:global-categories": "node scripts/seedRestaurantOnboarding/seedGlobalCategories.js",
+    "seed:restaurants": "node scripts/seedRestaurantOnboarding/seedRestaurants.js --with-global-categories",
+    "seed:restaurant-addons": "node scripts/seedRestaurantOnboarding/seedAddons.js",
+    "seed:restaurant-onboarding": "node scripts/seedRestaurantOnboarding/seedGlobalCategories.js && node scripts/seedRestaurantOnboarding/seedRestaurants.js --with-global-categories && node scripts/seedRestaurantOnboarding/seedAddons.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

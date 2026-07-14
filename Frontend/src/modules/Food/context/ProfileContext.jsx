@@ -224,6 +224,7 @@ export function ProfileProvider({ children }) {
           )
           const updated = dedupeAddressesByLabel([...filtered, normalizedNewAddress])
           localStorage.setItem("userAddresses", JSON.stringify(updated))
+          window.dispatchEvent(new CustomEvent("userAddressesUpdated"))
           return updated
         })
         return normalizedNewAddress
@@ -246,6 +247,7 @@ export function ProfileProvider({ children }) {
             prev.map((addr) => (String(getAddressId(addr)) === String(id) ? normalizedUpdatedAddress : normalizeAddress(addr)))
           )
           localStorage.setItem("userAddresses", JSON.stringify(updated))
+          window.dispatchEvent(new CustomEvent("userAddressesUpdated"))
           return updated
         })
         return normalizedUpdatedAddress
@@ -270,10 +272,29 @@ export function ProfileProvider({ children }) {
     }
   }, [])
 
-  const setDefaultAddress = useCallback(async (id) => {
+  const setDefaultAddress = useCallback(async (id, fallbackAddress = null) => {
     // Optimistic UI update first
     setAddresses((prev) => {
-      const updatedAddresses = prev.map((addr) => ({
+      let workingList = prev
+      const hasTarget = workingList.some(
+        (addr) => String(getAddressId(addr)) === String(id),
+      )
+      if (!hasTarget && fallbackAddress) {
+        const normalizedFallback = normalizeAddress(fallbackAddress)
+        if (normalizedFallback) {
+          const filtered = workingList.filter(
+            (addr) =>
+              normalizeAddressLabel(addr?.label) !==
+              normalizeAddressLabel(normalizedFallback.label),
+          )
+          workingList = dedupeAddressesByLabel([
+            ...filtered,
+            normalizedFallback,
+          ])
+        }
+      }
+
+      const updatedAddresses = workingList.map((addr) => ({
         ...addr,
         isDefault: String(getAddressId(addr)) === String(id),
       }))
@@ -281,6 +302,7 @@ export function ProfileProvider({ children }) {
       localStorage.setItem("userAddresses", JSON.stringify(updatedAddresses))
       localStorage.setItem("deliveryAddressMode", "saved")
       window.dispatchEvent(new CustomEvent("deliveryAddressModeUpdated"))
+      window.dispatchEvent(new CustomEvent("userAddressesUpdated"))
 
       const selectedAddress =
         updatedAddresses.find((addr) => addr.isDefault) || updatedAddresses[0]

@@ -6,6 +6,7 @@ import { FoodEarningAddon } from '../../admin/models/earningAddon.model.js';
 import { FoodOrder } from '../../orders/models/order.model.js';
 import { ValidationError, ConflictError } from '../../../../core/auth/errors.js';
 import { getDeliveryCashLimitSettings } from '../../admin/services/admin.service.js';
+import { saveActorLocation } from '../../../../core/location/location.service.js';
 import {
     replaceCloudinaryImage,
     uploadFoodImage,
@@ -391,16 +392,21 @@ export const updateDeliveryAvailability = async (userId, payload) => {
     }
 
     partner.availabilityStatus = validStatus;
-    if (typeof latitude === 'number' && typeof longitude === 'number') {
-        partner.lastLocation = {
-            type: 'Point',
-            coordinates: [longitude, latitude]
-        };
-        partner.lastLat = latitude;
-        partner.lastLng = longitude;
-        partner.lastLocationAt = new Date();
-    }
     await partner.save();
+
+    if (typeof latitude === 'number' && typeof longitude === 'number') {
+        // Single write path shared with the live-tracking socket handler -
+        // keeps currentLocation (+ deprecated lastLocation/lastLat/lastLng
+        // mirrors) consistent regardless of which entrypoint updated it.
+        await saveActorLocation({
+            actorType: 'DELIVERY_PARTNER',
+            actorId: userId,
+            lat: latitude,
+            lng: longitude,
+            reverseGeocodeIfMissingAddress: false,
+        });
+    }
+
     return { availabilityStatus: partner.availabilityStatus };
 };
 

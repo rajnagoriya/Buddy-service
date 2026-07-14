@@ -4,6 +4,8 @@ import { FoodOrder, FoodSettings } from '../models/order.model.js';
 import { logger } from '../../../../utils/logger.js';
 import { FoodUser } from '../../../../core/users/user.model.js';
 import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
+import { attachOutletTimingsToRestaurants } from '../../restaurant/services/outletTimings.service.js';
+import { getRestaurantOrderableStatus } from '../../shared/utils/restaurantAvailability.js';
 import { FoodDeliveryPartner } from '../../delivery/models/deliveryPartner.model.js';
 import { FoodZone } from '../../admin/models/zone.model.js';
 import { FoodFeeSettings } from '../../admin/models/feeSettings.model.js';
@@ -38,9 +40,9 @@ import {
 import * as dispatchService from './order-dispatch.service.js';
 import * as deliveryService from './order-delivery.service.js';
 import * as paymentService from './order-payment.service.js';
+import { getRoadDistanceMeters } from '../../../../core/location/distance.service.js';
 import {
   enqueueOrderEvent,
-  haversineKm,
   generateFourDigitDeliveryOtp,
   sanitizeOrderForExternal,
   emitDeliveryDropOtpToUser,
@@ -153,7 +155,10 @@ export async function createOrder(userId, dto) {
 
   if (restaurants.length === 0) throw new ValidationError("Restaurants not found");
 
-  for (const r of restaurants) {
+  const restaurantsWithTimings = await attachOutletTimingsToRestaurants(restaurants);
+  const now = new Date();
+
+  for (const r of restaurantsWithTimings) {
     if (
       r.status !== "approved" ||
       r.profileReviewStatus === "pending" ||
@@ -161,9 +166,16 @@ export async function createOrder(userId, dto) {
     ) {
       throw new ValidationError(`Restaurant ${r.name || r.restaurantName} is not accepting orders`);
     }
+
+    const orderable = getRestaurantOrderableStatus(r, now);
+    if (!orderable.isOrderable) {
+      throw new ValidationError(
+        `Restaurant ${r.name || r.restaurantName} is closed right now. Please try again during open hours.`,
+      );
+    }
   }
 
-  const mainRestaurant = restaurants[0];
+  const mainRestaurant = restaurantsWithTimings[0];
   const settings = await getDispatchSettings();
   const dispatchMode = settings.dispatchMode;
 
@@ -243,11 +255,20 @@ export async function createOrder(userId, dto) {
     const r1 = restaurants[0];
     const r2 = restaurants[1];
     if (r1.location?.coordinates?.length === 2 && r2.location?.coordinates?.length === 2) {
-      totalDistanceKm = haversineKm(r1.location.coordinates[1], r1.location.coordinates[0], r2.location.coordinates[1], r2.location.coordinates[0]) +
-        haversineKm(r2.location.coordinates[1], r2.location.coordinates[0], userLoc[1], userLoc[0]);
+      const p1 = { lat: r1.location.coordinates[1], lng: r1.location.coordinates[0] };
+      const p2 = { lat: r2.location.coordinates[1], lng: r2.location.coordinates[0] };
+      const pUser = { lat: userLoc[1], lng: userLoc[0] };
+      const [betweenRestaurants, toUser] = await Promise.all([
+        getRoadDistanceMeters(p1, p2),
+        getRoadDistanceMeters(p2, pUser),
+      ]);
+      totalDistanceKm = (betweenRestaurants.meters + toUser.meters) / 1000;
     }
   } else if (mainRestaurant?.location?.coordinates?.length === 2 && userLoc?.length === 2) {
-    totalDistanceKm = haversineKm(mainRestaurant.location.coordinates[1], mainRestaurant.location.coordinates[0], userLoc[1], userLoc[0]);
+    const pRestaurant = { lat: mainRestaurant.location.coordinates[1], lng: mainRestaurant.location.coordinates[0] };
+    const pUser = { lat: userLoc[1], lng: userLoc[0] };
+    const result = await getRoadDistanceMeters(pRestaurant, pUser);
+    totalDistanceKm = result.meters / 1000;
   }
 
   let riderEarning = await getRiderEarning(totalDistanceKm);
