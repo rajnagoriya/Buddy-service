@@ -10,7 +10,7 @@ import { Button } from "@food/components/ui/button";
 import { RestaurantGridSkeleton } from "@food/components/ui/loading-skeletons";
 import { useProfile } from "@food/context/ProfileContext";
 import { useZone } from "@food/hooks/useZone";
-import { useLocation } from "@food/hooks/useLocation";
+import useEffectiveDeliveryLocation from "@food/hooks/useEffectiveDeliveryLocation";
 import { restaurantAPI } from "@food/api";
 import { API_BASE_URL } from "@food/api/config";
 import { useDelayedLoading } from "@food/hooks/useDelayedLoading";
@@ -66,7 +66,7 @@ const pickRestaurantImage = (restaurant) => {
 export default function Restaurants() {
   const { addFavorite, removeFavorite, isFavorite } = useProfile();
   const { cart } = useCart();
-  const { location: userLocation } = useLocation();
+  const { effectiveLocation: userLocation } = useEffectiveDeliveryLocation();
   const { zoneId } = useZone(userLocation);
   const [restaurants, setRestaurants] = useState([]);
   const [loading, setLoading] = useState(true);

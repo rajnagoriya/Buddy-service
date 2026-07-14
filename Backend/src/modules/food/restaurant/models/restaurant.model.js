@@ -1,44 +1,11 @@
 import mongoose from "mongoose";
+import { buildLocationSchema } from "../../../../core/location/location.schema.js";
 
 const normalizeRatingValue = (value) => {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 0;
   return Math.max(0, Math.min(5, Number(numeric.toFixed(1))));
 };
-
-const geoPointSchema = new mongoose.Schema(
-  {
-    type: { type: String, enum: ["Point"], default: "Point" },
-    coordinates: {
-      type: [Number], // [lng, lat]
-      default: undefined,
-      validate: {
-        validator(v) {
-          return (
-            !v ||
-            (Array.isArray(v) &&
-              v.length === 2 &&
-              v.every((n) => typeof n === "number" && Number.isFinite(n)))
-          );
-        },
-        message: "location.coordinates must be [lng, lat]",
-      },
-    },
-    // Address fields stored alongside geo so UI can consume a single object.
-    latitude: { type: Number },
-    longitude: { type: Number },
-    formattedAddress: { type: String, trim: true },
-    address: { type: String, trim: true },
-    addressLine1: { type: String, trim: true },
-    addressLine2: { type: String, trim: true },
-    area: { type: String, trim: true },
-    city: { type: String, trim: true },
-    state: { type: String, trim: true },
-    pincode: { type: String, trim: true },
-    landmark: { type: String, trim: true },
-  },
-  { _id: false },
-);
 
 const restaurantSchema = new mongoose.Schema(
   {
@@ -196,7 +163,7 @@ const restaurantSchema = new mongoose.Schema(
     },
     /** GeoJSON point used for distance queries. */
     location: {
-      type: geoPointSchema,
+      type: buildLocationSchema(),
       default: undefined,
     },
     /** Optional service zone id (can be computed from location). */

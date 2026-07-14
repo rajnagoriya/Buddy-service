@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { buildLocationSchema } from '../../../../core/location/location.schema.js';
 
 const normalizeRatingValue = (value) => {
     const numeric = Number(value);
@@ -104,13 +105,24 @@ const deliveryPartnerSchema = new mongoose.Schema(
             enum: ['online', 'offline'],
             default: 'offline'
         },
+        /**
+         * Single source of truth for the partner's live GPS location, written
+         * exclusively via saveActorLocation(). `lastLocation`/`lastLat`/`lastLng`/
+         * `location` below are deprecated read-compat fields kept only until the
+         * Phase 5 cleanup migration removes them - do not write to them anymore.
+         */
+        currentLocation: {
+            type: buildLocationSchema(),
+            default: undefined
+        },
+        lastLocationAt: { type: Date },
+        // Deprecated - superseded by currentLocation. Read-only during migration window.
         lastLocation: {
             type: { type: String, enum: ['Point'] },
             coordinates: { type: [Number] }
         },
         lastLat: { type: Number },
         lastLng: { type: Number },
-        lastLocationAt: { type: Date },
         referralCode: { type: String, index: true },
         referredBy: {
             type: mongoose.Schema.Types.ObjectId,
@@ -151,15 +163,16 @@ const deliveryPartnerSchema = new mongoose.Schema(
             type: Boolean,
             default: false
         },
+        // Deprecated - superseded by currentLocation. No default: an absent
+        // location must never be mistaken for a real point at [0,0] (Null Island).
         location: {
             type: {
                 type: String,
                 enum: ["Point"],
-                default: "Point",
             },
             coordinates: {
                 type: [Number],
-                default: [0, 0],
+                default: undefined,
             },
         },
         submissionHistory: {
@@ -182,6 +195,8 @@ const deliveryPartnerSchema = new mongoose.Schema(
 );
 
 // Indices
+deliveryPartnerSchema.index({ currentLocation: '2dsphere' });
+// Deprecated indices - kept until the deprecated fields above are dropped (Phase 5).
 deliveryPartnerSchema.index({ lastLocation: '2dsphere' });
 deliveryPartnerSchema.index({ location: '2dsphere' });
 

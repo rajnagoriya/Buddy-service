@@ -1543,7 +1543,7 @@ export const invalidateUserCartCache = () => {
 
 const getPublicRestaurantDetailOnce = (id, config = {}) => {
   const safeId = String(id || "").trim();
-  const { noCache, ...axiosConfig } = config || {};
+  const { noCache, params, ...axiosConfig } = config || {};
   if (!safeId) {
     return Promise.resolve({
       data: { success: false, data: null },
@@ -1553,14 +1553,24 @@ const getPublicRestaurantDetailOnce = (id, config = {}) => {
       config: {},
     });
   }
+  // Round to ~111m so nearby GPS jitter still hits the in-flight cache.
+  const keyParams = { ...params };
+  if (keyParams.lat != null && Number.isFinite(Number(keyParams.lat))) {
+    keyParams.lat = Math.round(Number(keyParams.lat) * 1000) / 1000;
+  }
+  if (keyParams.lng != null && Number.isFinite(Number(keyParams.lng))) {
+    keyParams.lng = Math.round(Number(keyParams.lng) * 1000) / 1000;
+  }
   if (noCache) {
     return apiClient.get(`/food/restaurant/restaurants/${safeId}`, {
+      params: keyParams,
       ...axiosConfig,
     });
   }
-  const key = `detail:${safeId}`;
+  const key = `detail:${safeId}:${stableStringify(keyParams)}`;
   return publicRestaurantDetailCache.getOrCreate(key, () =>
     apiClient.get(`/food/restaurant/restaurants/${safeId}`, {
+      params: keyParams,
       ...axiosConfig,
     }),
   );
@@ -2382,14 +2392,11 @@ export const userAPI = {
       contextModule: "user",
     }),
   /**
-   * Legacy UI compatibility: update "current user location".
-   * We already persist the user's selected location in localStorage in the UI.
-   * Keep this as a no-op success so existing flows don't break.
+   * POST /food/user/location (Bearer USER) - persists the raw "current
+   * location" GPS ping (independent of any saved address) to the backend.
    */
-  updateLocation: (_payload) =>
-    Promise.resolve({
-      data: { success: true, message: "Location saved (client)", data: null },
-    }),
+  updateLocation: (payload) =>
+    apiClient.post("/food/user/location", payload, { contextModule: "user" }),
   saveFcmToken: (token, options = {}) => {
     if (!token) return Promise.reject(new Error("FCM token is required"));
     const platform = options?.platform === "mobile" ? "mobile" : "web";
@@ -2420,7 +2427,16 @@ export const userAPI = {
   deleteAccount: () =>
     apiClient.delete("/food/user/account", { contextModule: "user" }),
 };
-export const locationAPI = createStubAPI();
+export const locationAPI = {
+  /**
+   * GET /location/reverse-geocode?lat=&lng= - shared endpoint (any
+   * authenticated actor). Backend does the Google Geocode API call + caching
+   * server-side so the API key is never exposed to the browser.
+   * Response shape: { lat, lng, formattedAddress, addressLine1, area, city, state, pincode, country, placeId }
+   */
+  reverseGeocode: (lat, lng) =>
+    apiClient.get("/location/reverse-geocode", { params: { lat, lng } }),
+};
 export const zoneAPI = {
   /** Public: detect active service zone for a lat/lng point. */
   detectZone: (lat, lng, config = {}) => {

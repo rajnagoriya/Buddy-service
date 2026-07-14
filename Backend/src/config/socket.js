@@ -1,8 +1,8 @@
+import mongoose from 'mongoose';
 import { Server } from 'socket.io';
 import { config } from './env.js';
 import { logger } from '../utils/logger.js';
 import { verifyAccessToken } from '../core/auth/token.util.js';
-import { getFirebaseDB } from './firebase.js';
 import { setupQCSocketHandlers, setQCIO } from '../modules/quickCommerce/socket/socketManager.js';
 
 
@@ -194,7 +194,6 @@ export const initSocket = async (server) => {
 
         // Delivery partner emits live GPS location for an active order.
         // Broadcasts to the tracking room so users see the bike move in real time.
-        const _lastLocationBroadcast = {};
         socket.on('update-location', async (data) => {
             if (socket.user?.role !== 'DELIVERY_PARTNER') return;
             if (!data || !data.orderId) return;
@@ -207,12 +206,51 @@ export const initSocket = async (server) => {
             const heading = Number.isFinite(Number(data.heading)) ? Number(data.heading) : 0;
             const speed = Number.isFinite(Number(data.speed)) ? Number(data.speed) : 0;
             const accuracy = Number.isFinite(Number(data.accuracy)) ? Number(data.accuracy) : null;
-
-            // Throttle: max one broadcast per 2s per orderId
             const now = Date.now();
-            const lastTS = _lastLocationBroadcast[data.orderId] || 0;
-            if (now - lastTS < 2000) return;
-            _lastLocationBroadcast[data.orderId] = now;
+
+            const rawOrderId = String(data.orderId).trim();
+            const orderIdentityFilter = mongoose.isValidObjectId(rawOrderId)
+                ? { _id: new mongoose.Types.ObjectId(rawOrderId) }
+                : { $or: [{ order_id: rawOrderId }, { orderId: rawOrderId }] };
+
+            const { FoodOrder } = await import('../modules/food/orders/models/order.model.js');
+
+            // Authorization: only the delivery partner actually assigned to this
+            // order may broadcast/persist a location for it - previously any
+            // authenticated delivery partner could spoof any orderId here.
+            try {
+                const assignedOrder = await FoodOrder.findOne({
+                    ...orderIdentityFilter,
+                    'dispatch.deliveryPartnerId': userId,
+                }).select('_id').lean();
+                if (!assignedOrder) {
+                    logDeliverySocket('Rejected update-location: partner not assigned to order', {
+                        socketId: socket.id,
+                        deliveryPartnerId: String(userId),
+                        orderId: rawOrderId,
+                    });
+                    return;
+                }
+            } catch (err) {
+                logger.error(`update-location authorization check failed: ${err.message}`);
+                return;
+            }
+
+            const { getRedisClient } = await import('../config/redis.js');
+            const redis = getRedisClient();
+
+            // Throttle: max one broadcast per 2s per orderId. Redis-backed (SET
+            // NX) so the limit holds across horizontally-scaled server
+            // instances - an in-memory-per-process throttle lets the effective
+            // broadcast rate scale with instance count.
+            if (redis) {
+                try {
+                    const acquired = await redis.set(`throttle:loc:${rawOrderId}`, '1', { NX: true, PX: 2000 });
+                    if (!acquired) return;
+                } catch (err) {
+                    logger.warn(`Location throttle check failed, proceeding without throttle: ${err.message}`);
+                }
+            }
 
             const payload = {
                 orderId: String(data.orderId),
@@ -253,13 +291,11 @@ export const initSocket = async (server) => {
             // ─── Scalable Persistence (BullMQ + Redis "Hot" Buffering) ───
             try {
                 const { getTrackingQueue } = await import('../queues/index.js');
-                const { getRedisClient } = await import('../config/redis.js');
                 const trackingQueue = getTrackingQueue();
-                const redis = getRedisClient();
 
                 if (trackingQueue && redis) {
                     const coordString = JSON.stringify({ lat, lng, timestamp: now });
-                    
+
                     // 1. Immediately buffer the newest location in high-speed Redis Hash (HOT storage)
                     await Promise.all([
                         redis.hSet('rider:locations:hot', String(userId), coordString),
@@ -270,46 +306,34 @@ export const initSocket = async (server) => {
                     // jobId debulks updates: if a job is already waiting, BullMQ ignores the new add()
                     // Delay (30s) ensures we don't spam MongoDB while the rider is moving fast
                     const syncJobId = `sync:loc:${data.orderId}`;
-                    trackingQueue.add('sync-hot-locations', 
-                        { userId, orderId: data.orderId }, 
+                    trackingQueue.add('sync-hot-locations',
+                        { userId, orderId: data.orderId },
                         { jobId: syncJobId, delay: 30000, removeOnComplete: true }
                     ).catch(e => logger.error(`BullMQ sync schedule failed: ${e.message}`));
+                } else {
+                    // Redis/BullMQ unavailable - degrade to a direct, unbuffered
+                    // write rather than silently dropping location persistence
+                    // (previously this branch just did nothing).
+                    logger.warn('Redis/BullMQ unavailable - falling back to direct location write, hot-path buffering disabled');
+                    const { FoodDeliveryPartner } = await import('../modules/food/delivery/models/deliveryPartner.model.js');
+                    const point = { type: 'Point', coordinates: [lng, lat] };
+                    await Promise.all([
+                        FoodDeliveryPartner.updateOne({ _id: userId }, {
+                            $set: {
+                                currentLocation: { ...point, latitude: lat, longitude: lng },
+                                lastLocationAt: new Date(),
+                                lastLocation: point,
+                                lastLat: lat,
+                                lastLng: lng,
+                            },
+                        }).catch((e) => logger.error(`Direct delivery partner location write failed: ${e.message}`)),
+                        FoodOrder.updateOne(orderIdentityFilter, {
+                            $set: { lastRiderLocation: point },
+                        }).catch((e) => logger.error(`Direct order location write failed: ${e.message}`)),
+                    ]);
                 }
             } catch (err) {
                 logger.error(`Real-time persistence layer error: ${err.message}`);
-            }
-
-            // ─── Firebase Realtime Database Sync (Cost Optimization) ───
-            try {
-                const db = getFirebaseDB();
-                if (db) {
-                    // 1. Update order-specific tracking node
-                    const orderRef = db.ref(`active_orders/${data.orderId}`);
-                    orderRef.update({
-                        lat,
-                        lng,
-                        boy_lat: lat,
-                        boy_lng: lng,
-                        heading,
-                        speed,
-                        accuracy,
-                        last_updated: now,
-                        status: data.status || 'on_the_way'
-                    }).catch(e => logger.error(`Firebase orderRef update error: ${e.message}`));
-
-                    // 2. Update global delivery boy status node
-                    const boyRef = db.ref(`delivery_boys/${userId}`);
-                    boyRef.update({
-                        lat,
-                        lng,
-                        accuracy,
-                        last_updated: now,
-                        status: 'online'
-                    }).catch(e => logger.error(`Firebase boyRef update error: ${e.message}`));
-                }
-            } catch (err) {
-                // Silently skip if Firebase not initialized yet
-                logger.debug(`Firebase RTDB sync skipped: ${err.message}`);
             }
         });
 

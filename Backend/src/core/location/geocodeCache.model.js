@@ -1,0 +1,28 @@
+import mongoose from "mongoose";
+
+/**
+ * Persistent geocode cache as a fallback when Redis is disabled/unavailable.
+ * TTL is enforced via expiresAt index (MongoDB TTL monitor).
+ *
+ * Moved from Backend/src/modules/quickCommerce/models/geocodeCache.js as part
+ * of centralizing location/geocoding into core/location/ - collection name
+ * kept unchanged so existing cached rows remain valid.
+ */
+const geocodeCacheSchema = new mongoose.Schema(
+  {
+    key: { type: String, required: true, unique: true, index: true },
+    lat: { type: Number, required: true },
+    lng: { type: Number, required: true },
+    formattedAddress: { type: String },
+    placeId: { type: String },
+    types: { type: [String], default: [] },
+    source: { type: String, enum: ["geocode-api"], default: "geocode-api" },
+    expiresAt: { type: Date, required: true },
+  },
+  { timestamps: true },
+);
+
+// Mongo TTL index. Documents expire after expiresAt passes.
+geocodeCacheSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+
+export default mongoose.model("GeocodeCache", geocodeCacheSchema, "quick_geocodecaches");

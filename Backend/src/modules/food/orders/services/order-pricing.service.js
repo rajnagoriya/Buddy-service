@@ -6,7 +6,7 @@ import { FoodDeliveryCommissionRule } from '../../admin/models/deliveryCommissio
 import { FoodOffer } from '../../admin/models/offer.model.js';
 import { FoodOfferUsage } from '../../admin/models/offerUsage.model.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
-import { haversineKm } from './order.helpers.js';
+import { getRoadDistanceMeters } from '../../../../core/location/distance.service.js';
 import { FoodDeliveryBoySettings } from '../../admin/models/deliveryBoySettings.model.js';
 import { validateRestaurantChainForItems } from './restaurant-chain-radius.service.js';
 export async function calculateOrderPricing(userId, dto) {
@@ -78,21 +78,20 @@ export async function calculateOrderPricing(userId, dto) {
     const r2 = restaurants[1];
     
     if (r1.location?.coordinates?.length === 2 && r2.location?.coordinates?.length === 2) {
-      const distBetweenRestaurants = haversineKm(
-        r1.location.coordinates[1], r1.location.coordinates[0],
-        r2.location.coordinates[1], r2.location.coordinates[0]
-      );
-      const distToUser = haversineKm(
-        r2.location.coordinates[1], r2.location.coordinates[0],
-        userLoc[1], userLoc[0]
-      );
-      distanceKm = distBetweenRestaurants + distToUser;
+      const p1 = { lat: r1.location.coordinates[1], lng: r1.location.coordinates[0] };
+      const p2 = { lat: r2.location.coordinates[1], lng: r2.location.coordinates[0] };
+      const pUser = { lat: userLoc[1], lng: userLoc[0] };
+      const [betweenRestaurants, toUser] = await Promise.all([
+        getRoadDistanceMeters(p1, p2),
+        getRoadDistanceMeters(p2, pUser),
+      ]);
+      distanceKm = (betweenRestaurants.meters + toUser.meters) / 1000;
     }
   } else if (mainRestaurant?.location?.coordinates?.length === 2 && userLoc?.length === 2) {
-    distanceKm = haversineKm(
-      mainRestaurant.location.coordinates[1], mainRestaurant.location.coordinates[0],
-      userLoc[1], userLoc[0]
-    );
+    const pRestaurant = { lat: mainRestaurant.location.coordinates[1], lng: mainRestaurant.location.coordinates[0] };
+    const pUser = { lat: userLoc[1], lng: userLoc[0] };
+    const result = await getRoadDistanceMeters(pRestaurant, pUser);
+    distanceKm = result.meters / 1000;
   }
 
   if (!Number.isFinite(distanceKm)) distanceKm = 0;

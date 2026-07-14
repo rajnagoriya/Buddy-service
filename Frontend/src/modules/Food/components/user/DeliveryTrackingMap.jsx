@@ -142,10 +142,19 @@ const DeliveryTrackingMap = ({
   }, [order, riderLocation]);
 
   // 2. Core Data Sync (Socket + Firebase)
+  //
+  // Both channels are genuinely needed, not redundant: the OLDER Food
+  // delivery flow (useLocationSharing.js) emits position via Socket.io, but
+  // the current DeliveryV2 driver app (DeliveryHomeV2.jsx) never opens a
+  // socket at all - it only writes position/polyline/eta straight to
+  // Firebase via the REST availability-update + writeOrderTracking calls.
+  // This page serves customer tracking for orders from BOTH driver apps, so
+  // it must keep listening to both channels for position.
   useEffect(() => {
     if (!trackingIds.length) return;
 
-    // A. FIREBASE FALLBACK
+    // A. FIREBASE — primary channel for DeliveryV2 orders (position + cloud
+    // polyline + eta), fallback for older-flow orders.
     const unsubs = trackingIds.map(id => subscribeOrderTracking(id, (data) => {
       const lat = Number(data?.lat ?? data?.boy_lat);
       const lng = Number(data?.lng ?? data?.boy_lng);
@@ -169,7 +178,8 @@ const DeliveryTrackingMap = ({
       }
     }));
 
-    // B. SOCKET.IO REALTIME
+    // B. SOCKET.IO REALTIME — drives the smooth interpolation animation when
+    // available (older delivery flow only; DeliveryV2 never emits this).
     const token = localStorage.getItem('user_accessToken') || localStorage.getItem('accessToken') || '';
     socketRef.current = io(backendUrl, {
       transports: ['websocket'],

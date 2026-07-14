@@ -40,9 +40,9 @@ import {
 import * as dispatchService from './order-dispatch.service.js';
 import * as deliveryService from './order-delivery.service.js';
 import * as paymentService from './order-payment.service.js';
+import { getRoadDistanceMeters } from '../../../../core/location/distance.service.js';
 import {
   enqueueOrderEvent,
-  haversineKm,
   generateFourDigitDeliveryOtp,
   sanitizeOrderForExternal,
   emitDeliveryDropOtpToUser,
@@ -255,11 +255,20 @@ export async function createOrder(userId, dto) {
     const r1 = restaurants[0];
     const r2 = restaurants[1];
     if (r1.location?.coordinates?.length === 2 && r2.location?.coordinates?.length === 2) {
-      totalDistanceKm = haversineKm(r1.location.coordinates[1], r1.location.coordinates[0], r2.location.coordinates[1], r2.location.coordinates[0]) +
-        haversineKm(r2.location.coordinates[1], r2.location.coordinates[0], userLoc[1], userLoc[0]);
+      const p1 = { lat: r1.location.coordinates[1], lng: r1.location.coordinates[0] };
+      const p2 = { lat: r2.location.coordinates[1], lng: r2.location.coordinates[0] };
+      const pUser = { lat: userLoc[1], lng: userLoc[0] };
+      const [betweenRestaurants, toUser] = await Promise.all([
+        getRoadDistanceMeters(p1, p2),
+        getRoadDistanceMeters(p2, pUser),
+      ]);
+      totalDistanceKm = (betweenRestaurants.meters + toUser.meters) / 1000;
     }
   } else if (mainRestaurant?.location?.coordinates?.length === 2 && userLoc?.length === 2) {
-    totalDistanceKm = haversineKm(mainRestaurant.location.coordinates[1], mainRestaurant.location.coordinates[0], userLoc[1], userLoc[0]);
+    const pRestaurant = { lat: mainRestaurant.location.coordinates[1], lng: mainRestaurant.location.coordinates[0] };
+    const pUser = { lat: userLoc[1], lng: userLoc[0] };
+    const result = await getRoadDistanceMeters(pRestaurant, pUser);
+    totalDistanceKm = result.meters / 1000;
   }
 
   let riderEarning = await getRiderEarning(totalDistanceKm);

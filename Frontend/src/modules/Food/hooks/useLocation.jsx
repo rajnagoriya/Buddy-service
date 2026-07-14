@@ -1,6 +1,11 @@
 import { useState, useEffect, useRef } from "react"
 import { locationAPI, userAPI } from "@food/api"
 
+const isAuthenticatedForReverseGeocode = () => {
+  const token = localStorage.getItem("user_accessToken") || localStorage.getItem("accessToken")
+  return Boolean(token && token !== "null" && token !== "undefined")
+}
+
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -31,8 +36,6 @@ let globalReverseGeocodeLastSuccess = null
 // Default behavior: only resolve an address once on initial app load,
 // then rely on localStorage/DB. Live watching is enabled only via explicit user action.
 const AUTO_START_LIVE_WATCH = false
-
-const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY
 
 const reverseGeocodeDirect = async (latitude, longitude) => {
   const now = Date.now()
@@ -75,54 +78,41 @@ const reverseGeocodeDirect = async (latitude, longitude) => {
 
   const run = (async () => {
     try {
-      let googleData = null
+      let backendData = null
       let area = ""
       let city = ""
       let state = ""
       let country = "India"
       let formattedAddress = ""
 
-      // 1. Try Google Maps Reverse Geocoding (Primary - highest precision)
-      if (GOOGLE_MAPS_API_KEY) {
+      // 1. Try the backend reverse-geocode endpoint (Primary - highest precision).
+      // The backend calls Google Geocoding server-side with its own cache, so the
+      // API key is never exposed to the browser. Requires auth; anonymous
+      // visitors fall straight through to the BigDataCloud/Nominatim chain below.
+      if (isAuthenticatedForReverseGeocode()) {
         try {
           const controller = new AbortController()
           const timeout = setTimeout(() => controller.abort(), 4000)
-          const response = await fetch(
-            `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${GOOGLE_MAPS_API_KEY}`,
-            { signal: controller.signal }
-          )
+          const res = await locationAPI.reverseGeocode(latitude, longitude)
           clearTimeout(timeout)
-          const data = await response.json()
-          
-          if (data.status === "OK" && data.results && data.results.length > 0) {
-            googleData = data.results[0]
-            formattedAddress = googleData.formatted_address
-            
-            // Extract components
-            const components = googleData.address_components
-            
-            // Area extraction (sublocality_level_1 or sublocality)
-            const subLocality1 = components.find(c => c.types.includes("sublocality_level_1"))?.long_name
-            const subLocality = components.find(c => c.types.includes("sublocality"))?.long_name
-            const neighborhood = components.find(c => c.types.includes("neighborhood"))?.long_name
-            area = subLocality1 || subLocality || neighborhood || ""
-            
-            // City extraction (locality)
-            city = components.find(c => c.types.includes("locality"))?.long_name || ""
-            
-            // State extraction (administrative_area_level_1)
-            state = components.find(c => c.types.includes("administrative_area_level_1"))?.long_name || ""
-            
-            // Country extraction
-            country = components.find(c => c.types.includes("country"))?.long_name || "India"
+          const geo = res?.data?.data
+
+          if (geo && (geo.formattedAddress || geo.city)) {
+            backendData = geo
+            formattedAddress = geo.formattedAddress || ""
+            area = geo.area || ""
+            city = geo.city || ""
+            state = geo.state || ""
+            country = geo.country || "India"
           }
         } catch (err) {
-          debugError("?? Google Maps Geocoding failed:", err)
+          debugError("?? Backend reverse geocode failed:", err)
         }
       }
 
-      // 2. Fallback to BigDataCloud + Nominatim if Google fails or is missing key info
-      if (!googleData) {
+      // 2. Fallback to BigDataCloud + Nominatim if the backend call fails,
+      // is skipped (anonymous visitor), or returns incomplete data.
+      if (!backendData) {
         // ... previous logic as fallback ...
         const controller = new AbortController()
         const bdcTimeout = setTimeout(() => controller.abort(), 3000)

@@ -18,6 +18,7 @@ import {
 } from '../../shared/utils/restaurantListQuery.js';
 import { getRestaurantAddressSummary } from '../../shared/utils/restaurantAddress.js';
 import { enrichRestaurantsWithDistance, formatDistanceLabel } from '../../shared/utils/restaurantDistance.js';
+import { reverseGeocode } from '../../../../core/location/geocode.service.js';
 import mongoose from 'mongoose';
 import { FoodZone } from '../../admin/models/zone.model.js';
 import { FoodOffer } from '../../admin/models/offer.model.js';
@@ -886,13 +887,34 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
     }
 
     if (body.location !== undefined) {
-        const loc = body.location && typeof body.location === 'object' ? body.location : null;
+        let loc = body.location && typeof body.location === 'object' ? body.location : null;
         if (!loc) {
             throw new ValidationError('Location must be an object');
         }
         const toStr = (v) => (v != null ? String(v).trim() : '');
         const lat = toFiniteNumber(loc.latitude);
         const lng = toFiniteNumber(loc.longitude);
+
+        // Fill in missing address detail via reverse geocoding when only a
+        // pin (lat/lng) was supplied - best-effort, never blocks the update.
+        if (lat !== null && lng !== null && !toStr(loc.city) && !toStr(loc.formattedAddress || loc.address)) {
+            try {
+                const geo = await reverseGeocode(lat, lng);
+                loc = {
+                    ...loc,
+                    formattedAddress: loc.formattedAddress || loc.address || geo.formattedAddress,
+                    address: loc.address || loc.formattedAddress || geo.formattedAddress,
+                    addressLine1: loc.addressLine1 || geo.addressLine1,
+                    area: loc.area || geo.area,
+                    city: loc.city || geo.city,
+                    state: loc.state || geo.state,
+                    pincode: loc.pincode || geo.pincode,
+                };
+            } catch {
+                // Reverse geocode is best-effort - proceed with whatever was supplied.
+            }
+        }
+
         const isDeliveryPinUpdate = body.deliveryPinUpdate === true;
 
         if (isDeliveryPinUpdate) {
@@ -1756,41 +1778,43 @@ export const listApprovedRestaurants = async (query = {}) => {
     return formatRestaurantListResponse(enriched, { page, limit, total });
 };
 
-export const getApprovedRestaurantByIdOrSlug = async (idOrSlug) => {
+export const getApprovedRestaurantByIdOrSlug = async (idOrSlug, origin = {}) => {
     const value = String(idOrSlug || '').trim();
     if (!value) return null;
 
-    // ObjectId path
+    let doc;
     if (/^[0-9a-fA-F]{24}$/.test(value)) {
-        const doc = await FoodRestaurant.findOne({ _id: value, status: 'approved' }).lean();
-        if (!doc) return null;
-        const timingsMap = await getOutletTimingsMapForRestaurants([doc._id]);
-        const rid = String(doc._id);
-        return {
-            ...doc,
-            rating: normalizeRatingValue(doc.rating),
-            totalRatings: normalizeTotalRatingsValue(doc.totalRatings),
-            outletTimings: timingsMap.get(rid) || getDefaultOutletTimingsShape()
-        };
+        // ObjectId path
+        doc = await FoodRestaurant.findOne({ _id: value, status: 'approved' }).lean();
+    } else {
+        // Slug path: use normalized field for index-friendly exact match.
+        const restaurantNameNormalized = normalizeName(value);
+        if (!restaurantNameNormalized) return null;
+        doc = await FoodRestaurant.findOne({
+            status: 'approved',
+            restaurantNameNormalized
+        }).lean();
     }
-
-    // Slug path: use normalized field for index-friendly exact match.
-    const restaurantNameNormalized = normalizeName(value);
-    if (!restaurantNameNormalized) return null;
-
-    const doc = await FoodRestaurant.findOne({
-        status: 'approved',
-        restaurantNameNormalized
-    }).lean();
     if (!doc) return null;
+
     const timingsMap = await getOutletTimingsMapForRestaurants([doc._id]);
     const rid = String(doc._id);
-    return {
+    const restaurant = {
         ...doc,
         rating: normalizeRatingValue(doc.rating),
         totalRatings: normalizeTotalRatingsValue(doc.totalRatings),
         outletTimings: timingsMap.get(rid) || getDefaultOutletTimingsShape()
     };
+
+    const lat = toFiniteNumber(origin.lat);
+    const lng = toFiniteNumber(origin.lng);
+    if (lat === null || lng === null) return restaurant;
+
+    // Same road-distance pipeline used by the restaurant list endpoint, so the
+    // details page shows a distance consistent with the list page instead of
+    // being left for the frontend to approximate with straight-line distance.
+    const [enriched] = await enrichRestaurantsWithDistance([restaurant], { lat, lng });
+    return enriched;
 };
 
 export const listPublicOffers = async () => {
