@@ -1,6 +1,10 @@
 import { MapPin, Clock, Star, Utensils } from "lucide-react"
 import { Button } from "@food/components/ui/button"
 import { ArrowLeft, Search, MoreVertical, X } from "lucide-react"
+import {
+  formatRestaurantRating,
+  hasDisplayableRestaurantRating,
+} from "@food/utils/restaurantDisplay"
 
 export function RestaurantHero({ restaurant }) {
   const coverImage =
@@ -105,15 +109,19 @@ export function RestaurantInfoCard({
               {restaurant?.topCategory || restaurant?.cuisine || "Multi-cuisine"} · {restaurant?.distance || "—"}
             </p>
           </div>
+          {hasDisplayableRestaurantRating(restaurant) && (
           <div className="flex flex-col items-center gap-0.5 flex-shrink-0 rounded-2xl bg-[#F0FDF4] dark:bg-green-950/40 px-3 py-2 border border-green-100 dark:border-green-900/40">
             <div className="flex items-center gap-1 text-[#16A34A] font-extrabold text-sm">
               <Star className="h-3.5 w-3.5 fill-[#16A34A]" />
-              {Number(restaurant?.rating || 4.5).toFixed(1)}
+              {formatRestaurantRating(restaurant)}
             </div>
+            {Number(restaurant?.totalRatings || restaurant?.reviews) > 0 && (
             <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">
-              {(restaurant?.reviews || 0).toLocaleString()}+
+              {Number(restaurant?.totalRatings || restaurant?.reviews).toLocaleString()}+
             </span>
+            )}
           </div>
+          )}
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-2">

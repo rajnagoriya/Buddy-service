@@ -1,12 +1,14 @@
 import mongoose from 'mongoose';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { buildPaginationMeta } from '../../../../utils/helpers.js';
+import { buildFoodVisibleCategoryFilter, getCategoryApprovalStatus, isCategoryDisabled, isCategoryHiddenFromPublic, isCategoryPubliclyVisible, isCategoryVisibleToEndUser } from '../../shared/categoryWorkflow.js';
 import { FoodRestaurant } from '../models/restaurant.model.js';
 import { FoodItem } from '../../admin/models/food.model.js';
 import { FoodCategory } from '../../admin/models/category.model.js';
 import { getFoodDisplayPrice, serializeFoodVariants } from '../../admin/services/foodVariant.service.js';
 
-const buildMenuFromFoods = async (foods = []) => {
+const buildMenuFromFoods = async (foods = [], options = {}) => {
+    const { hideInactiveCategoryItems = false } = options;
     const categoryIds = Array.from(
         new Set(
             (foods || [])
@@ -21,7 +23,7 @@ const buildMenuFromFoods = async (foods = []) => {
 
     const categoryDocs = categoryIds.length
         ? await FoodCategory.find({ _id: { $in: categoryIds } })
-            .select('name image sortOrder')
+            .select('name image sortOrder isActive adminDeactivated approvalStatus isApproved')
             .lean()
         : [];
     const categoryMap = new Map(categoryDocs.map((doc) => [String(doc._id), doc]));
@@ -30,6 +32,13 @@ const buildMenuFromFoods = async (foods = []) => {
     for (const food of foods) {
         const categoryId = food?.categoryId ? String(food.categoryId) : '';
         const categoryDoc = categoryMap.get(categoryId) || null;
+        const categoryDisabled = Boolean(categoryId && categoryDoc && isCategoryDisabled(categoryDoc));
+        const categoryHiddenFromPublic = Boolean(categoryId && categoryDoc && isCategoryHiddenFromPublic(categoryDoc));
+
+        if (hideInactiveCategoryItems && categoryId && (!categoryDoc || categoryHiddenFromPublic)) {
+            continue;
+        }
+
         const sectionName = (categoryDoc?.name || food?.categoryName || food?.category || 'Menu').trim() || 'Menu';
         const groupKey = categoryId || `name:${sectionName.toLowerCase()}`;
 
@@ -39,6 +48,10 @@ const buildMenuFromFoods = async (foods = []) => {
                 name: sectionName,
                 image: categoryDoc?.image || '',
                 sortOrder: Number.isFinite(Number(categoryDoc?.sortOrder)) ? Number(categoryDoc.sortOrder) : Number.MAX_SAFE_INTEGER,
+                categoryDisabled,
+                categoryDisabledByAdmin: categoryDoc?.adminDeactivated === true,
+                categoryIsActive: categoryDoc ? isCategoryPubliclyVisible(categoryDoc) : true,
+                categoryPendingApproval: categoryDoc ? !isCategoryVisibleToEndUser(categoryDoc) && getCategoryApprovalStatus(categoryDoc) === 'pending' : false,
                 items: []
             });
         }
@@ -49,6 +62,9 @@ const buildMenuFromFoods = async (foods = []) => {
             categoryId: categoryId || null,
             categoryName: sectionName,
             category: sectionName,
+            categoryDisabled,
+            categoryDisabledByAdmin: categoryDoc?.adminDeactivated === true,
+            categoryIsActive: categoryDoc ? isCategoryPubliclyVisible(categoryDoc) : true,
             name: food.name,
             description: food.description || '',
             price: getFoodDisplayPrice(food),
@@ -79,6 +95,9 @@ const buildMenuFromFoods = async (foods = []) => {
         name: group.name,
         image: group.image || '',
         sortOrder: Number.isFinite(Number(group.sortOrder)) ? Number(group.sortOrder) : 0,
+        categoryDisabled: group.categoryDisabled === true,
+        categoryDisabledByAdmin: group.categoryDisabledByAdmin === true,
+        categoryIsActive: group.categoryIsActive !== false,
         itemCount: group.items.length,
         items: group.items.sort((a, b) => {
             const at = new Date(a.createdAt || a.requestedAt || 0).getTime();
@@ -94,7 +113,10 @@ const buildMenuFromFoods = async (foods = []) => {
         name: section.name,
         image: section.image || '',
         sortOrder: section.sortOrder || 0,
-        itemCount: section.itemCount || 0
+        itemCount: section.itemCount || 0,
+        categoryDisabled: section.categoryDisabled === true,
+        categoryDisabledByAdmin: section.categoryDisabledByAdmin === true,
+        categoryIsActive: section.categoryIsActive !== false,
     }));
 
     return { sections, categories };
@@ -153,7 +175,7 @@ export async function getRestaurantMenu(restaurantId, query = {}) {
         FoodItem.countDocuments(filter)
     ]);
 
-    const menu = await buildMenuFromFoods(foods);
+    const menu = await buildMenuFromFoods(foods, { hideInactiveCategoryItems: false });
 
     return {
         ...menu,
@@ -192,6 +214,10 @@ export async function getPublicApprovedRestaurantMenu(restaurantIdOrSlug, query 
     const skip = (page - 1) * limit;
 
     const filter = { restaurantId: restaurant._id, approvalStatus: 'approved' };
+    const visibleCategoryFilter = await buildFoodVisibleCategoryFilter();
+    if (visibleCategoryFilter) {
+        filter.$and = [...(filter.$and || []), visibleCategoryFilter];
+    }
 
     if (query.search) {
         const term = String(query.search).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -199,8 +225,12 @@ export async function getPublicApprovedRestaurantMenu(restaurantIdOrSlug, query 
     }
 
     // Get all food items for categories construction to ensure tabs are fully populated
-    const allFoods = await FoodItem.find({ restaurantId: restaurant._id, approvalStatus: 'approved' })
-        .select('categoryName sectionName sortOrder')
+    const allFoodsFilter = { restaurantId: restaurant._id, approvalStatus: 'approved' };
+    if (visibleCategoryFilter) {
+        allFoodsFilter.$and = [...(allFoodsFilter.$and || []), visibleCategoryFilter];
+    }
+    const allFoods = await FoodItem.find(allFoodsFilter)
+        .select('categoryName sectionName sortOrder categoryId')
         .lean();
 
     // Group allFoods to build complete categories list
@@ -240,7 +270,7 @@ export async function getPublicApprovedRestaurantMenu(restaurantIdOrSlug, query 
         FoodItem.countDocuments(filter)
     ]);
 
-    const menu = await buildMenuFromFoods(foods);
+    const menu = await buildMenuFromFoods(foods, { hideInactiveCategoryItems: true });
 
     return {
         sections: menu.sections,

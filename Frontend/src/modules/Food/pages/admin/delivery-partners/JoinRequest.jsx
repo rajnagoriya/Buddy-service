@@ -1,9 +1,10 @@
 import { useState, useMemo, useEffect } from "react"
-import { Search, Filter, Eye, Check, X, Package, ArrowUpDown, FileText, FileSpreadsheet, Loader2, Download, ExternalLink, Calendar, MapPin, CreditCard, User, Mail, Phone, Bike, FileCheck } from "lucide-react"
+import { Search, Filter, Eye, Check, X, Package, ArrowUpDown, FileText, FileSpreadsheet, Loader2 } from "lucide-react"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
 import { exportJoinRequestsToExcel, exportJoinRequestsToPDF } from "@food/components/admin/deliveryman/joinRequestExportUtils"
+import DeliveryPartnerJoinDetailModal from "@food/components/admin/deliveryman/DeliveryPartnerJoinDetailModal"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -20,7 +21,9 @@ export default function JoinRequest() {
   const [isViewOpen, setIsViewOpen] = useState(false)
   const [selectedRequest, setSelectedRequest] = useState(null)
   const [viewDetails, setViewDetails] = useState(null)
+  const [viewLoading, setViewLoading] = useState(false)
   const [processing, setProcessing] = useState(false)
+  const [processingService, setProcessingService] = useState(null)
   const [rejectionReason, setRejectionReason] = useState("")
   const [filters, setFilters] = useState({
     zone: "",
@@ -120,7 +123,7 @@ export default function JoinRequest() {
 
     try {
       setProcessing(true)
-      await adminAPI.approveDeliveryPartner(selectedRequest._id)
+      await adminAPI.approveDeliveryPartner(selectedRequest._id, "food")
       
       // Refresh the list
       await fetchJoinRequests()
@@ -155,7 +158,7 @@ export default function JoinRequest() {
 
     try {
       setProcessing(true)
-      await adminAPI.rejectDeliveryPartner(selectedRequest._id, rejectionReason.trim())
+      await adminAPI.rejectDeliveryPartner(selectedRequest._id, rejectionReason.trim(), "food")
       
       // Refresh the list
       await fetchJoinRequests()
@@ -174,22 +177,65 @@ export default function JoinRequest() {
     }
   }
 
-  const handleView = async (request) => {
+  const handleModalApprove = async (service) => {
+    if (!selectedRequest) return
     try {
-      setLoading(true)
+      setProcessingService(service)
+      await adminAPI.approveDeliveryPartner(selectedRequest._id, service)
+      await fetchJoinRequests()
+      if (selectedRequest) {
+        const response = await adminAPI.getDeliveryPartnerById(selectedRequest._id)
+        if (response.data?.success) setViewDetails(response.data.data.delivery)
+      }
+      toast.success(`Approved ${service} service`)
+    } catch (err) {
+      toast.error(err.response?.data?.message || err?.message || "Failed to approve")
+    } finally {
+      setProcessingService(null)
+    }
+  }
+
+  const handleModalReject = async (service) => {
+    if (!selectedRequest) return
+    const reason = window.prompt(`Rejection reason for ${service} (required):`)
+    if (!reason?.trim()) {
+      toast.error("Rejection reason is required")
+      return
+    }
+    try {
+      setProcessingService(service)
+      await adminAPI.rejectDeliveryPartner(selectedRequest._id, reason.trim(), service)
+      await fetchJoinRequests()
+      setIsViewOpen(false)
+      setViewDetails(null)
+      toast.success(`Rejected ${service} service`)
+    } catch (err) {
+      toast.error(err.response?.data?.message || err?.message || "Failed to reject")
+    } finally {
+      setProcessingService(null)
+    }
+  }
+
+  const handleView = async (request) => {
+    setSelectedRequest(request)
+    setViewDetails(null)
+    setIsViewOpen(true)
+    try {
+      setViewLoading(true)
       const response = await adminAPI.getDeliveryPartnerById(request._id)
-      
+
       if (response.data && response.data.success) {
         setViewDetails(response.data.data.delivery)
-        setIsViewOpen(true)
       } else {
         toast.error("Failed to load details")
+        setIsViewOpen(false)
       }
     } catch (err) {
       debugError("Error fetching details:", err)
       toast.error(err.response?.data?.message || "Failed to load details")
+      setIsViewOpen(false)
     } finally {
-      setLoading(false)
+      setViewLoading(false)
     }
   }
 
@@ -368,6 +414,9 @@ export default function JoinRequest() {
                       </div>
                     </th>
                     <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
+                      Services
+                    </th>
+                    <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
                       <div className="flex items-center gap-2">
                         <span>Availability Status</span>
                         <ArrowUpDown className="w-3 h-3 text-slate-400 cursor-pointer hover:text-slate-600" />
@@ -379,7 +428,7 @@ export default function JoinRequest() {
                 <tbody className="bg-white divide-y divide-slate-100">
                   {filteredRequests.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="px-6 py-20 text-center">
+                      <td colSpan={9} className="px-6 py-20 text-center">
                         <p className="text-sm text-slate-500">
                           {error ? "Error loading requests" : "No requests found"}
                         </p>
@@ -409,12 +458,19 @@ export default function JoinRequest() {
                                 </span>
                               )}
                             </div>
-                            <span 
-                              className="text-sm font-medium text-slate-900 cursor-pointer hover:text-blue-600 transition-colors"
-                              onClick={() => handleView(request)}
-                            >
-                              {request.name}
-                            </span>
+                            <div className="flex flex-col min-w-0">
+                              <span
+                                className="text-sm font-medium text-slate-900 cursor-pointer hover:text-blue-600 transition-colors"
+                                onClick={() => handleView(request)}
+                              >
+                                {request.name}
+                              </span>
+                              {request.isResubmission ? (
+                                <span className="mt-1 inline-flex w-fit rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-700">
+                                  Resubmitted
+                                </span>
+                              ) : null}
+                            </div>
                           </div>
                         </td>
                         <td className="px-6 py-4">
@@ -431,6 +487,12 @@ export default function JoinRequest() {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span className="text-sm text-slate-700">{request.vehicleType}</span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className="text-sm text-slate-700">
+                            {request.servicesLabel ||
+                              (Array.isArray(request.services) ? request.services.join(", ") : "—")}
+                          </span>
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex flex-col gap-1">
@@ -572,371 +634,22 @@ export default function JoinRequest() {
         </DialogContent>
       </Dialog>
 
-      {/* View Details Dialog */}
-      <Dialog open={isViewOpen} onOpenChange={setIsViewOpen}>
-        <DialogContent className="max-w-3xl bg-white p-0 opacity-0 data-[state=open]:opacity-100 data-[state=closed]:opacity-0 transition-opacity duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 data-[state=open]:scale-100 data-[state=closed]:scale-100 max-h-[85vh] overflow-y-auto">
-          <DialogHeader className="px-6 pt-6 pb-4 border-b border-slate-200">
-            <DialogTitle className="text-xl font-bold text-slate-900">Delivery Partner Details</DialogTitle>
-          </DialogHeader>
-          <div className="px-6 pb-6">
-            {viewDetails ? (
-              <div className="space-y-6 mt-4">
-                {/* Profile Image & Basic Info */}
-                <div className="flex items-start gap-6 pb-6 border-b border-slate-200">
-                  <div className="flex-shrink-0">
-                    {viewDetails.profileImage?.url ? (
-                      <img 
-                        src={viewDetails.profileImage.url} 
-                        alt={viewDetails.name}
-                        className="w-24 h-24 rounded-full object-cover border-2 border-slate-200"
-                      />
-                    ) : (
-                      <div className="w-24 h-24 rounded-full bg-slate-200 flex items-center justify-center">
-                        <User className="w-12 h-12 text-slate-400" />
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex-1 grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-xs font-semibold text-slate-500 uppercase flex items-center gap-1">
-                        <User className="w-3 h-3" /> Name
-                      </label>
-                      <p className="text-sm font-medium text-slate-900 mt-1">{viewDetails.name || "N/A"}</p>
-                    </div>
-                    <div>
-                      <label className="text-xs font-semibold text-slate-500 uppercase flex items-center gap-1">
-                        <Mail className="w-3 h-3" /> Email
-                      </label>
-                      <p className="text-sm text-slate-900 mt-1">{viewDetails.email || "N/A"}</p>
-                    </div>
-                    <div>
-                      <label className="text-xs font-semibold text-slate-500 uppercase flex items-center gap-1">
-                        <Phone className="w-3 h-3" /> Phone
-                      </label>
-                      <p className="text-sm text-slate-900 mt-1">{viewDetails.phone || "N/A"}</p>
-                    </div>
-                    <div>
-                      <label className="text-xs font-semibold text-slate-500 uppercase">Delivery ID</label>
-                      <p className="text-sm font-medium text-slate-900 mt-1">{viewDetails.deliveryId || "N/A"}</p>
-                    </div>
-                    <div>
-                      <label className="text-xs font-semibold text-slate-500 uppercase">Status</label>
-                      <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium mt-1 ${
-                        viewDetails.status === 'pending' ? 'bg-blue-100 text-blue-700' :
-                        viewDetails.status === 'approved' || viewDetails.status === 'active' ? 'bg-green-100 text-green-700' :
-                        viewDetails.status === 'blocked' ? 'bg-red-100 text-red-700' :
-                        'bg-slate-100 text-slate-700'
-                      }`}>
-                        {viewDetails.status === 'blocked' ? 'Rejected' : (viewDetails.status?.charAt(0).toUpperCase() + viewDetails.status?.slice(1) || "N/A")}
-                      </span>
-                    </div>
-                    {viewDetails.rejectionReason && (
-                      <div className="col-span-2">
-                        <label className="text-xs font-semibold text-slate-500 uppercase text-red-600">Rejection Reason</label>
-                        <div className="bg-red-50 border border-red-200 rounded-lg p-3 mt-1">
-                          <p className="text-sm text-red-700 whitespace-pre-wrap">{viewDetails.rejectionReason}</p>
-                        </div>
-                      </div>
-                    )}
-                    {viewDetails.dateOfBirth && (
-                      <div>
-                        <label className="text-xs font-semibold text-slate-500 uppercase flex items-center gap-1">
-                          <Calendar className="w-3 h-3" /> Date of Birth
-                        </label>
-                        <p className="text-sm text-slate-900 mt-1">
-                          {new Date(viewDetails.dateOfBirth).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                        </p>
-                      </div>
-                    )}
-                    {viewDetails.gender && (
-                      <div>
-                        <label className="text-xs font-semibold text-slate-500 uppercase">Gender</label>
-                        <p className="text-sm text-slate-900 mt-1 capitalize">{viewDetails.gender || "N/A"}</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Location Details */}
-                {viewDetails.location && (
-                  <div className="pb-6 border-b border-slate-200">
-                    <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
-                      <MapPin className="w-4 h-4" /> Location Details
-                    </h3>
-                    <div className="grid grid-cols-2 gap-4">
-                      {viewDetails.location.addressLine1 && (
-                        <div className="col-span-2">
-                          <label className="text-xs font-semibold text-slate-500 uppercase">Address Line 1</label>
-                          <p className="text-sm text-slate-900 mt-1">{viewDetails.location.addressLine1}</p>
-                        </div>
-                      )}
-                      {viewDetails.location.addressLine2 && (
-                        <div className="col-span-2">
-                          <label className="text-xs font-semibold text-slate-500 uppercase">Address Line 2</label>
-                          <p className="text-sm text-slate-900 mt-1">{viewDetails.location.addressLine2}</p>
-                        </div>
-                      )}
-                      {viewDetails.location.area && (
-                        <div>
-                          <label className="text-xs font-semibold text-slate-500 uppercase">Area</label>
-                          <p className="text-sm text-slate-900 mt-1">{viewDetails.location.area}</p>
-                        </div>
-                      )}
-                      {viewDetails.location.city && (
-                        <div>
-                          <label className="text-xs font-semibold text-slate-500 uppercase">City</label>
-                          <p className="text-sm text-slate-900 mt-1">{viewDetails.location.city}</p>
-                        </div>
-                      )}
-                      {viewDetails.location.state && (
-                        <div>
-                          <label className="text-xs font-semibold text-slate-500 uppercase">State</label>
-                          <p className="text-sm text-slate-900 mt-1">{viewDetails.location.state}</p>
-                        </div>
-                      )}
-                      {viewDetails.location.zipCode && (
-                        <div>
-                          <label className="text-xs font-semibold text-slate-500 uppercase">Zip Code</label>
-                          <p className="text-sm text-slate-900 mt-1">{viewDetails.location.zipCode}</p>
-                        </div>
-                      )}
-                      {(viewDetails.location.latitude && viewDetails.location.longitude) && (
-                        <div className="col-span-2">
-                          <label className="text-xs font-semibold text-slate-500 uppercase">Coordinates</label>
-                          <p className="text-sm text-slate-900 mt-1">
-                            {viewDetails.location.latitude}, {viewDetails.location.longitude}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Vehicle Details */}
-                {viewDetails.vehicle && (
-                  <div className="pb-6 border-b border-slate-200">
-                    <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
-                      <Bike className="w-4 h-4" /> Vehicle Details
-                    </h3>
-                    <div className="grid grid-cols-4 gap-4">
-                      {viewDetails.vehicle.brand && (
-                        <div>
-                          <label className="text-xs font-semibold text-slate-500 uppercase">Brand</label>
-                          <p className="text-sm text-slate-900 mt-1">{viewDetails.vehicle.brand}</p>
-                        </div>
-                      )}
-                      {viewDetails.vehicle.model && (
-                        <div className="text-right col-span-1">
-                          <label className="text-xs font-semibold text-slate-500 uppercase">Model</label>
-                          <p className="text-xs text-slate-900 mt-1">{viewDetails.vehicle.model}</p>
-                        </div>
-                      )}
-                      {viewDetails.vehicle.number && (
-                        <div className="col-span-2">
-                          <label className="text-xs font-semibold text-slate-500 uppercase">Vehicle Number</label>
-                          <p className="text-sm text-slate-900 mt-1">{viewDetails.vehicle.number}</p>
-                        </div>
-                      )}
-                      {viewDetails.vehicle.type && (
-                        <div>
-                          <label className="text-xs font-semibold text-slate-500 uppercase">Vehicle Type</label>
-                          <p className="text-sm text-slate-900 mt-1 capitalize">{viewDetails.vehicle.type}</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Documents */}
-                {viewDetails.documents && (
-                  <div className="pb-6 border-b border-slate-200">
-                    <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
-                      <FileCheck className="w-4 h-4" /> Documents
-                    </h3>
-                    <div className="grid grid-cols-2 gap-4">
-                      {/* Aadhar */}
-                      {viewDetails.documents.aadhar && (
-                        <div>
-                          <label className="text-xs font-semibold text-slate-500 uppercase">Aadhar Card</label>
-                          <div className="mt-2">
-                            {viewDetails.documents.aadhar.number && (
-                              <p className="text-sm text-slate-700 mb-1">Number: {viewDetails.documents.aadhar.number}</p>
-                            )}
-                            {viewDetails.documents.aadhar.document && (
-                              <a 
-                                href={viewDetails.documents.aadhar.document} 
-                                target="_blank" 
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700"
-                              >
-                                <ExternalLink className="w-3 h-3" /> View Document
-                              </a>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* PAN */}
-                      {viewDetails.documents.pan && (
-                        <div>
-                          <label className="text-xs font-semibold text-slate-500 uppercase">PAN Card</label>
-                          <div className="mt-2">
-                            {viewDetails.documents.pan.number && (
-                              <p className="text-sm text-slate-700 mb-1">Number: {viewDetails.documents.pan.number}</p>
-                            )}
-                            {viewDetails.documents.pan.document && (
-                              <a 
-                                href={viewDetails.documents.pan.document} 
-                                target="_blank" 
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700"
-                              >
-                                <ExternalLink className="w-3 h-3" /> View Document
-                              </a>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Driving License */}
-                      {viewDetails.documents.drivingLicense && (
-                        <div>
-                          <label className="text-xs font-semibold text-slate-500 uppercase">Driving License</label>
-                          <div className="mt-2">
-                            {viewDetails.documents.drivingLicense.number && (
-                              <p className="text-sm text-slate-700 mb-1">Number: {viewDetails.documents.drivingLicense.number}</p>
-                            )}
-                            {viewDetails.documents.drivingLicense.expiryDate && (
-                              <p className="text-xs text-slate-500 mb-1">
-                                Expiry: {new Date(viewDetails.documents.drivingLicense.expiryDate).toLocaleDateString('en-GB')}
-                              </p>
-                            )}
-                            {viewDetails.documents.drivingLicense.document && (
-                              <a 
-                                href={viewDetails.documents.drivingLicense.document} 
-                                target="_blank" 
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700"
-                              >
-                                <ExternalLink className="w-3 h-3" /> View Document
-                              </a>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Vehicle RC */}
-                      {viewDetails.documents.vehicleRC && (viewDetails.documents.vehicleRC.number || viewDetails.documents.vehicleRC.document) && (
-                        <div>
-                          <label className="text-xs font-semibold text-slate-500 uppercase">Vehicle RC</label>
-                          <div className="mt-2">
-                            {viewDetails.documents.vehicleRC.number && (
-                              <p className="text-sm text-slate-700 mb-1">Number: {viewDetails.documents.vehicleRC.number}</p>
-                            )}
-                            {viewDetails.documents.vehicleRC.document && (
-                              <a 
-                                href={viewDetails.documents.vehicleRC.document} 
-                                target="_blank" 
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700"
-                              >
-                                <ExternalLink className="w-3 h-3" /> View Document
-                              </a>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Bank Details */}
-                {viewDetails.documents?.bankDetails && (
-                  <div className="pb-6 border-b border-slate-200">
-                    <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
-                      <CreditCard className="w-4 h-4" /> Bank Details
-                    </h3>
-                    <div className="grid grid-cols-2 gap-4">
-                      {viewDetails.documents.bankDetails.accountHolderName && (
-                        <div>
-                          <label className="text-xs font-semibold text-slate-500 uppercase">Account Holder Name</label>
-                          <p className="text-sm text-slate-900 mt-1">{viewDetails.documents.bankDetails.accountHolderName}</p>
-                        </div>
-                      )}
-                      {viewDetails.documents.bankDetails.accountNumber && (
-                        <div>
-                          <label className="text-xs font-semibold text-slate-500 uppercase">Account Number</label>
-                          <p className="text-sm text-slate-900 mt-1">{viewDetails.documents.bankDetails.accountNumber}</p>
-                        </div>
-                      )}
-                      {viewDetails.documents.bankDetails.ifscCode && (
-                        <div>
-                          <label className="text-xs font-semibold text-slate-500 uppercase">IFSC Code</label>
-                          <p className="text-sm text-slate-900 mt-1">{viewDetails.documents.bankDetails.ifscCode}</p>
-                        </div>
-                      )}
-                      {viewDetails.documents.bankDetails.bankName && (
-                        <div>
-                          <label className="text-xs font-semibold text-slate-500 uppercase">Bank Name</label>
-                          <p className="text-sm text-slate-900 mt-1">{viewDetails.documents.bankDetails.bankName}</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Additional Info */}
-                <div className="grid grid-cols-2 gap-4">
-                  {viewDetails.signupMethod && (
-                    <div>
-                      <label className="text-xs font-semibold text-slate-500 uppercase">Signup Method</label>
-                      <p className="text-sm text-slate-900 mt-1 capitalize">{viewDetails.signupMethod}</p>
-                    </div>
-                  )}
-                  {viewDetails.phoneVerified !== undefined && (
-                    <div>
-                      <label className="text-xs font-semibold text-slate-500 uppercase">Phone Verified</label>
-                      <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium mt-1 ${
-                        viewDetails.phoneVerified ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                      }`}>
-                        {viewDetails.phoneVerified ? 'Verified' : 'Not Verified'}
-                      </span>
-                    </div>
-                  )}
-                  {viewDetails.createdAt && (
-                    <div>
-                      <label className="text-xs font-semibold text-slate-500 uppercase">Joined Date</label>
-                      <p className="text-sm text-slate-900 mt-1">
-                        {new Date(viewDetails.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                      </p>
-                    </div>
-                  )}
-                  {viewDetails.verifiedAt && (
-                    <div>
-                      <label className="text-xs font-semibold text-slate-500 uppercase">Verified At</label>
-                      <p className="text-sm text-slate-900 mt-1">
-                        {new Date(viewDetails.verifiedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
-              </div>
-            )}
-          </div>
-          <DialogFooter className="px-6 pb-6 border-t border-slate-200">
-            <button
-              onClick={() => setIsViewOpen(false)}
-              className="px-4 py-2 text-sm font-medium rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition-all"
-            >
-              Close
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <DeliveryPartnerJoinDetailModal
+        open={isViewOpen}
+        onOpenChange={(open) => {
+          setIsViewOpen(open)
+          if (!open) {
+            setViewDetails(null)
+            setSelectedRequest(null)
+          }
+        }}
+        details={viewDetails}
+        loading={viewLoading}
+        adminService="food"
+        onApproveService={activeTab === "pending" ? handleModalApprove : undefined}
+        onRejectService={activeTab === "pending" ? handleModalReject : undefined}
+        processingService={processingService}
+      />
 
       {/* Filter Panel */}
       <Dialog open={isFilterOpen} onOpenChange={setIsFilterOpen}>

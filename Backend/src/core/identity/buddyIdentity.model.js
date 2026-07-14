@@ -53,11 +53,28 @@ const vehicleSchema = new mongoose.Schema(
     type: { type: String, default: '', trim: true },
     make: { type: String, default: '', trim: true },
     model: { type: String, default: '', trim: true },
+    vehicleTypeId: { type: String, default: '', trim: true },
     number: { type: String, default: '', trim: true },
     color: { type: String, default: '', trim: true },
     photoUrl: { type: String, default: '', trim: true },
     rcUrl: { type: String, default: '', trim: true },
     insuranceUrl: { type: String, default: '', trim: true },
+    commercialPermitUrl: { type: String, default: '', trim: true },
+    pucUrl: { type: String, default: '', trim: true },
+  },
+  { _id: false },
+);
+
+const serviceStatusSchema = new mongoose.Schema(
+  {
+    status: {
+      type: String,
+      enum: ['not_enabled', 'pending', 'approved', 'rejected'],
+      default: 'not_enabled',
+    },
+    rejectionReason: { type: String, default: '', trim: true },
+    rejectedAt: { type: Date, default: null },
+    approvedAt: { type: Date, default: null },
   },
   { _id: false },
 );
@@ -146,8 +163,13 @@ const buddyIdentitySchema = new mongoose.Schema(
     },
     onboardingServices: {
       type: [String],
-      enum: ['food', 'taxi'],
+      enum: ['food', 'quickCommerce', 'taxi'],
       default: [],
+    },
+    serviceStatuses: {
+      food: { type: serviceStatusSchema, default: () => ({ status: 'not_enabled' }) },
+      quickCommerce: { type: serviceStatusSchema, default: () => ({ status: 'not_enabled' }) },
+      taxi: { type: serviceStatusSchema, default: () => ({ status: 'not_enabled' }) },
     },
     kyc: {
       aadhaar: { type: kycDocSchema, default: () => ({}) },

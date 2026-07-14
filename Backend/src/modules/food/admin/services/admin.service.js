@@ -10,6 +10,7 @@ import {
     deleteFoodImageAsset,
 } from '../../services/foodImage.service.js';
 import { FoodDeliveryPartner } from '../../delivery/models/deliveryPartner.model.js';
+import { BuddyIdentity } from '../../../../core/identity/buddyIdentity.model.js';
 import { DeliverySupportTicket } from '../../delivery/models/supportTicket.model.js';
 import { FoodZone } from '../models/zone.model.js';
 import { FoodCategory } from '../models/category.model.js';
@@ -41,6 +42,13 @@ import {
     checkRestaurantPhoneAvailability,
     checkRestaurantEmailAvailability,
 } from '../../restaurant/services/restaurantCreation.service.js';
+import {
+    getOutletTimingsForRestaurant,
+    parseOutletTimingsInput,
+    legacyRestaurantToOutletTimings,
+    upsertOutletTimingsForRestaurant,
+    getDefaultOutletTimingsShape,
+} from '../../restaurant/services/outletTimings.service.js';
 import { FoodTransaction } from '../../orders/models/foodTransaction.model.js';
 import { FoodRestaurantWithdrawal } from '../../restaurant/models/foodRestaurantWithdrawal.model.js';
 import { FoodDeliveryWithdrawal } from '../../delivery/models/foodDeliveryWithdrawal.model.js';
@@ -2218,10 +2226,18 @@ export async function getRestaurantReviews(query = {}) {
 
 export async function getRestaurantById(id) {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
-    return FoodRestaurant.findById(id)
-        .select('-__v')
-        .populate('zoneId', 'name zoneName serviceLocation isActive')
-        .lean();
+    const [restaurant, timings] = await Promise.all([
+        FoodRestaurant.findById(id)
+            .select('-__v')
+            .populate('zoneId', 'name zoneName serviceLocation isActive')
+            .lean(),
+        getOutletTimingsForRestaurant(id).catch(() => ({ outletTimings: getDefaultOutletTimingsShape() })),
+    ]);
+    if (!restaurant) return null;
+    return {
+        ...restaurant,
+        outletTimings: timings?.outletTimings || getDefaultOutletTimingsShape(),
+    };
 }
 
 export async function getRestaurantAnalytics(restaurantId) {
@@ -2440,12 +2456,14 @@ export async function updateRestaurantById(id, body = {}) {
         }
     }
 
-    if (body.openingTime !== undefined) doc.openingTime = normalizeRestaurantTime(body.openingTime) || '';
-    if (body.closingTime !== undefined) doc.closingTime = normalizeRestaurantTime(body.closingTime) || '';
-    validateOpeningClosingTimes(doc.openingTime, doc.closingTime);
-    if (body.openDays !== undefined && Array.isArray(body.openDays)) {
-        doc.openDays = body.openDays.map(d => toStr(d)).filter(Boolean);
+    if (body.outletTimings !== undefined) {
+        const outletTimings = parseOutletTimingsInput(body.outletTimings);
+        if (!outletTimings) {
+            throw new ValidationError('outletTimings must be an object keyed by day name');
+        }
+        await upsertOutletTimingsForRestaurant(id, outletTimings);
     }
+
     if (body.offer !== undefined) doc.offer = toStr(body.offer);
 
     if (body.estimatedDeliveryTime !== undefined) {
@@ -2498,7 +2516,10 @@ export async function updateRestaurantById(id, body = {}) {
     }
 
     await doc.save();
-    return FoodRestaurant.findById(id).select('-__v').populate('zoneId', 'name zoneName serviceLocation isActive').lean();
+    const updated = await FoodRestaurant.findById(id).select('-__v').populate('zoneId', 'name zoneName serviceLocation isActive').lean();
+    if (!updated) return null;
+    const { outletTimings } = await getOutletTimingsForRestaurant(id);
+    return { ...updated, outletTimings };
 }
 
 export async function updateRestaurantStatus(id, body = {}) {
@@ -2842,7 +2863,16 @@ export async function updateCategory(id, body) {
             doc.zoneId = new mongoose.Types.ObjectId(raw);
         }
     }
-    if (body.isActive !== undefined) doc.isActive = body.isActive !== false;
+    if (body.isActive !== undefined) {
+        const nextActive = body.isActive !== false;
+        if (nextActive) {
+            doc.isActive = true;
+            doc.adminDeactivated = false;
+        } else {
+            doc.isActive = false;
+            doc.adminDeactivated = true;
+        }
+    }
     if (body.sortOrder !== undefined) doc.sortOrder = Number(body.sortOrder) || 0;
     if (!doc.createdByRestaurantId && doc.restaurantId) {
         doc.createdByRestaurantId = doc.restaurantId;
@@ -2855,7 +2885,7 @@ export async function deleteCategory(id) {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
     const inUse = await FoodItem.countDocuments({ categoryId: id });
     if (inUse > 0) {
-        throw new ValidationError('Cannot delete category while it has items');
+        throw new ValidationError('This category has items. Deactivate it instead of deleting.');
     }
     const existing = await FoodCategory.findById(id).lean();
     if (!existing) return null;
@@ -2872,7 +2902,10 @@ export async function toggleCategoryStatus(id) {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
     const doc = await FoodCategory.findById(id);
     if (!doc) return null;
-    doc.isActive = !doc.isActive;
+    const currentlyVisible = doc.isActive !== false && doc.adminDeactivated !== true;
+    const nextActive = !currentlyVisible;
+    doc.isActive = nextActive;
+    doc.adminDeactivated = !nextActive;
     if (!doc.createdByRestaurantId && doc.restaurantId) {
         doc.createdByRestaurantId = doc.restaurantId;
     }
@@ -3353,9 +3386,12 @@ export async function createRestaurantByAdmin(body) {
         ? body.menuImages.map((m) => toUrl(m)).filter(Boolean)
         : [];
 
-    const normalizedOpeningTime = normalizeRestaurantTime(body.openingTime) || '09:00';
-    const normalizedClosingTime = normalizeRestaurantTime(body.closingTime) || '22:00';
-    validateOpeningClosingTimes(normalizedOpeningTime, normalizedClosingTime);
+    const outletTimings = parseOutletTimingsInput(body.outletTimings)
+        || legacyRestaurantToOutletTimings({
+            openDays: Array.isArray(body.openDays) ? body.openDays : [],
+            openingTime: normalizeRestaurantTime(body.openingTime) || '09:00',
+            closingTime: normalizeRestaurantTime(body.closingTime) || '22:00',
+        });
 
     const doc = {
         restaurantName: toStr(body.restaurantName) || toStr(body.name),
@@ -3374,9 +3410,6 @@ export async function createRestaurantByAdmin(body) {
         pincode: toStr(loc.pincode),
         landmark: toStr(loc.landmark),
         cuisines: Array.isArray(body.cuisines) ? body.cuisines : [],
-        openingTime: normalizedOpeningTime,
-        closingTime: normalizedClosingTime,
-        openDays: Array.isArray(body.openDays) ? body.openDays : [],
         panNumber: toStr(body.panNumber),
         nameOnPan: toStr(body.nameOnPan),
         gstRegistered: Boolean(body.gstRegistered),
@@ -3446,7 +3479,10 @@ export async function createRestaurantByAdmin(body) {
     }
 
     const restaurant = await createRestaurant(doc, { source: CREATION_SOURCE.ADMIN });
-    return restaurant.toObject ? restaurant.toObject() : restaurant;
+    const restaurantObject = restaurant.toObject ? restaurant.toObject() : restaurant;
+    await upsertOutletTimingsForRestaurant(restaurantObject._id, outletTimings);
+    const { outletTimings: savedOutletTimings } = await getOutletTimingsForRestaurant(restaurantObject._id);
+    return { ...restaurantObject, outletTimings: savedOutletTimings };
 }
 
 export async function checkRestaurantPhoneForAdmin(phone) {
@@ -3767,62 +3803,10 @@ export async function expireExpiredOffers() {
 }
 // ----- Delivery join requests -----
 export async function getDeliveryJoinRequests(query) {
-    const { status = 'pending', page = 1, limit = 1000, search, zone, vehicleType } = query;
-    const filter = {};
-    if (status === 'pending') filter.status = 'pending';
-    else if (status === 'denied' || status === 'rejected') filter.status = 'rejected';
-    else filter.status = status;
-
-    const andParts = [];
-    if (search && typeof search === 'string' && search.trim()) {
-        const term = search.trim();
-        andParts.push({
-            $or: [
-                { name: { $regex: term, $options: 'i' } },
-                { phone: { $regex: term, $options: 'i' } }
-            ]
-        });
-    }
-    if (zone && zone.trim()) {
-        const z = zone.trim();
-        andParts.push({
-            $or: [
-                { city: { $regex: z, $options: 'i' } },
-                { state: { $regex: z, $options: 'i' } },
-                { address: { $regex: z, $options: 'i' } }
-            ]
-        });
-    }
-    if (andParts.length) filter.$and = andParts;
-    if (vehicleType && vehicleType.trim()) {
-        filter.vehicleType = { $regex: vehicleType.trim(), $options: 'i' };
-    }
-
-    const skip = Math.max(0, (Number(page) || 1) - 1) * Math.max(1, Math.min(1000, Number(limit) || 100));
-    const limitNum = Math.max(1, Math.min(1000, Number(limit) || 100));
-
-    const list = await FoodDeliveryPartner.find(filter)
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limitNum)
-        .lean();
-
-    const requests = list.map((doc, index) => ({
-        _id: doc._id,
-        sl: skip + index + 1,
-        name: doc.name || '',
-        email: doc.email || '',
-        phone: doc.phone || '',
-        zone: doc.city || doc.state || doc.address || '',
-        jobType: doc.jobType || '',
-        vehicleType: doc.vehicleType || '',
-        status: doc.status === 'rejected' ? 'denied' : doc.status,
-        rejectionReason: doc.rejectionReason || undefined,
-        profilePhoto: doc.profilePhoto || null,
-        profileImage: doc.profilePhoto ? { url: doc.profilePhoto } : null
-    }));
-
-    return { requests };
+    const { getJoinRequests, ONBOARDING_SERVICES } = await import('../../../../core/identity/driverOnboardingAdmin.service.js');
+    const { service: svcParam, ...rest } = query || {};
+    const svc = svcParam && ONBOARDING_SERVICES.includes(String(svcParam)) ? String(svcParam) : 'food';
+    return getJoinRequests(svc, rest);
 }
 
 export function getDeliveryWalletsStub() {
@@ -4572,46 +4556,172 @@ export async function checkEarningAddonCompletions(deliveryPartnerId, _force = f
     return { completionsFound: globalCompletions };
 }
 
+const pickText = (value) => {
+    if (value == null) return '';
+    const text = String(value).trim();
+    return text;
+};
+
+const buildDeliveryPartnerDetail = (partner, identity = null) => {
+    const kyc = identity?.kyc || {};
+    const bank = identity?.bank || {};
+    const foodVehicle = identity?.foodVehicle || {};
+    const taxiVehicle = identity?.taxiVehicle || {};
+
+    const aadhaarNumber = pickText(kyc.aadhaar?.number) || pickText(partner.aadharNumber);
+    const aadhaarFront = pickText(kyc.aadhaar?.documentUrl) || pickText(partner.aadharPhoto);
+    const aadhaarBack = pickText(kyc.aadhaar?.backDocumentUrl);
+    const panNumber = pickText(kyc.pan?.number) || pickText(partner.panNumber);
+    const panPhoto = pickText(kyc.pan?.documentUrl) || pickText(partner.panPhoto);
+    const dlNumber = pickText(kyc.drivingLicense?.number) || pickText(partner.drivingLicenseNumber);
+    const dlPhoto = pickText(kyc.drivingLicense?.documentUrl) || pickText(partner.drivingLicensePhoto);
+    const selfieUrl = pickText(identity?.onboardingSelfieUrl) || pickText(partner.profilePhoto);
+
+    const vehicleMake = pickText(foodVehicle.make);
+    const vehicleModel = pickText(foodVehicle.model);
+    const vehicleName =
+        [vehicleMake, vehicleModel].filter(Boolean).join(' ').trim() || pickText(partner.vehicleName);
+
+    const accountHolder = pickText(bank.accountHolderName) || pickText(partner.bankAccountHolderName);
+    const accountNumber = pickText(bank.accountNumber) || pickText(partner.bankAccountNumber);
+    const ifscCode = pickText(bank.ifscCode) || pickText(partner.bankIfscCode);
+    const bankName = pickText(bank.bankName) || pickText(partner.bankName);
+    const branchName = pickText(bank.branchName);
+    const upiId = pickText(bank.upiId) || pickText(partner.upiId);
+    const upiQrCode = pickText(bank.upiQrCodeUrl) || pickText(partner.upiQrCode);
+
+    const deliveryId = partner._id
+        ? `DP-${partner._id.toString().slice(-8).toUpperCase()}`
+        : null;
+
+    return {
+        ...partner,
+        identityId: partner.identityId || null,
+        name: pickText(partner.name) || pickText(identity?.name),
+        email: pickText(partner.email) || pickText(identity?.email) || null,
+        phone: pickText(partner.phone) || pickText(identity?.phone),
+        countryCode: partner.countryCode || identity?.countryCode || '+91',
+        city: pickText(partner.city) || pickText(identity?.city),
+        gender: pickText(identity?.gender) || null,
+        deliveryId,
+        status: partner.status === 'rejected' ? 'blocked' : partner.status,
+        rejectionReason: partner.rejectionReason || null,
+        rejectedAt: partner.rejectedAt || null,
+        approvedAt: partner.approvedAt || null,
+        submissionHistory: Array.isArray(partner.submissionHistory) ? partner.submissionHistory : [],
+        isResubmission: Array.isArray(partner.submissionHistory) && partner.submissionHistory.length > 0,
+        onboardingServices: Array.isArray(identity?.onboardingServices)
+            ? identity.onboardingServices
+            : [],
+        serviceStatuses: identity?.serviceStatuses || null,
+        onboardingComplete: Boolean(identity?.onboardingComplete),
+        profileImage: selfieUrl ? { url: selfieUrl } : partner.profilePhoto ? { url: partner.profilePhoto } : null,
+        profilePhoto: selfieUrl || partner.profilePhoto || null,
+        documents: {
+            aadhar:
+                aadhaarNumber || aadhaarFront || aadhaarBack
+                    ? {
+                          number: aadhaarNumber || null,
+                          document: aadhaarFront || null,
+                          backDocument: aadhaarBack || null,
+                      }
+                    : null,
+            pan:
+                panNumber || panPhoto
+                    ? {
+                          number: panNumber || null,
+                          document: panPhoto || null,
+                      }
+                    : null,
+            drivingLicense:
+                dlNumber || dlPhoto
+                    ? {
+                          number: dlNumber || null,
+                          document: dlPhoto || null,
+                      }
+                    : null,
+            selfie: selfieUrl ? { document: selfieUrl } : null,
+            bankDetails:
+                accountHolder || accountNumber || ifscCode || bankName || branchName || upiId || upiQrCode
+                    ? {
+                          accountHolderName: accountHolder || null,
+                          accountNumber: accountNumber || null,
+                          ifscCode: ifscCode || null,
+                          bankName: bankName || null,
+                          branchName: branchName || null,
+                          upiId: upiId || null,
+                          upiQrCode: upiQrCode || null,
+                      }
+                    : null,
+        },
+        location:
+            partner.address || partner.city || partner.state || identity?.city
+                ? {
+                      addressLine1: pickText(partner.address) || null,
+                      city: pickText(partner.city) || pickText(identity?.city) || null,
+                      state: pickText(partner.state) || null,
+                  }
+                : null,
+        vehicle:
+            foodVehicle.type ||
+            foodVehicle.number ||
+            partner.vehicleType ||
+            partner.vehicleNumber ||
+            vehicleName
+                ? {
+                      type: pickText(foodVehicle.type) || pickText(partner.vehicleType) || null,
+                      brand: vehicleMake || vehicleName || null,
+                      model: vehicleModel || null,
+                      name: vehicleName || null,
+                      number: pickText(foodVehicle.number) || pickText(partner.vehicleNumber) || null,
+                      color: pickText(foodVehicle.color) || null,
+                      photoUrl: pickText(foodVehicle.photoUrl) || null,
+                      rcUrl: pickText(foodVehicle.rcUrl) || null,
+                      insuranceUrl: pickText(foodVehicle.insuranceUrl) || null,
+                  }
+                : null,
+        taxiVehicle: taxiVehicle?.number
+            ? {
+                  type: pickText(taxiVehicle.type) || null,
+                  make: pickText(taxiVehicle.make) || null,
+                  model: pickText(taxiVehicle.model) || null,
+                  number: pickText(taxiVehicle.number) || null,
+                  vehicleTypeId: pickText(taxiVehicle.vehicleTypeId) || null,
+                  color: pickText(taxiVehicle.color) || null,
+                  photoUrl: pickText(taxiVehicle.photoUrl) || null,
+                  rcUrl: pickText(taxiVehicle.rcUrl) || null,
+                  insuranceUrl: pickText(taxiVehicle.insuranceUrl) || null,
+                  commercialPermitUrl: pickText(taxiVehicle.commercialPermitUrl) || null,
+                  pucUrl: pickText(taxiVehicle.pucUrl) || null,
+              }
+            : null,
+    };
+};
+
 export async function getDeliveryPartnerById(id) {
     const partner = await FoodDeliveryPartner.findById(id).lean();
     if (!partner) return null;
-    const deliveryId = partner._id ? `DP-${partner._id.toString().slice(-8).toUpperCase()}` : null;
-    return {
-        ...partner,
-        email: partner.email || null,
-        deliveryId,
-        status: partner.status === 'rejected' ? 'blocked' : partner.status,
-        profileImage: partner.profilePhoto ? { url: partner.profilePhoto } : null,
-        documents: {
-            aadhar: (partner.aadharPhoto || partner.aadharNumber)
-                ? { number: partner.aadharNumber || null, document: partner.aadharPhoto || null }
-                : null,
-            pan: (partner.panPhoto || partner.panNumber)
-                ? { number: partner.panNumber || null, document: partner.panPhoto || null }
-                : null,
-            drivingLicense: partner.drivingLicensePhoto ? { document: partner.drivingLicensePhoto } : null,
-            bankDetails:
-                partner.bankAccountHolderName || partner.bankAccountNumber || partner.bankIfscCode || partner.bankName
-                    ? {
-                        accountHolderName: partner.bankAccountHolderName || null,
-                        accountNumber: partner.bankAccountNumber || null,
-                        ifscCode: partner.bankIfscCode || null,
-                        bankName: partner.bankName || null
-                    }
-                    : null
-        },
-        location: (partner.address || partner.city || partner.state)
-            ? { addressLine1: partner.address, city: partner.city, state: partner.state }
-            : null,
-        vehicle: (partner.vehicleType || partner.vehicleName || partner.vehicleNumber)
-            ? {
-                type: partner.vehicleType,
-                brand: partner.vehicleName,
-                model: partner.vehicleName,
-                number: partner.vehicleNumber
-            }
-            : null
-    };
+
+    let identity = null;
+    if (partner.identityId) {
+        identity = await BuddyIdentity.findById(partner.identityId).lean();
+    }
+
+    const detail = buildDeliveryPartnerDetail(partner, identity);
+
+    if (identity) {
+        const { getEffectiveServiceStatus, ONBOARDING_SERVICES } = await import(
+            '../../../../core/identity/driverOnboardingAdmin.service.js'
+        );
+        const { Driver } = await import('../../../taxi/driver/models/Driver.js');
+        const driver = await Driver.findOne({ identityId: identity._id }).lean();
+        detail.serviceStatuses = ONBOARDING_SERVICES.reduce((acc, svc) => {
+            acc[svc] = getEffectiveServiceStatus(identity, svc, partner, driver);
+            return acc;
+        }, {});
+    }
+
+    return detail;
 }
 
 export async function updateDeliveryPartner(id, payload) {
@@ -4690,53 +4800,22 @@ export async function getDeliverymanReviews(query = {}) {
     return { reviews, total, page, limit };
 }
 
-export async function approveDeliveryPartner(id) {
-    const partner = await FoodDeliveryPartner.findById(id);
-    if (!partner) return null;
-    partner.status = 'approved';
-    partner.approvedAt = new Date();
-    partner.rejectedAt = undefined;
-    partner.rejectionReason = undefined;
-    await partner.save();
+export async function approveDeliveryPartner(id, service = 'food') {
+    const { approveDriverService } = await import('../../../../core/identity/driverOnboardingAdmin.service.js');
+    const row = await approveDriverService(id, service || 'food');
+    if (!row) return null;
 
-    // Mirror approval to the linked taxi Driver so the same human is approved
-    // for both pipelines after a single admin action.
-    try {
-        const { Driver } = await import('../../../taxi/driver/models/Driver.js');
-        const lookup = partner.identityId
-            ? { identityId: partner.identityId }
-            : partner.phone
-                ? { phone: partner.phone }
-                : null;
-        if (lookup) {
-            await Driver.updateOne(lookup, {
-                $set: { approve: true, status: 'approved' },
-            });
-        }
-    } catch (err) {
-        console.warn('[admin.approveDeliveryPartner] could not sync taxi driver:', err?.message || err);
+    const partner = row.partnerId
+        ? await FoodDeliveryPartner.findById(row.partnerId)
+        : await FoodDeliveryPartner.findOne({ identityId: row.identityId });
+
+    if (!partner) {
+        return row;
     }
 
-    try {
-        const { notifyOwnerSafely } = await import('../../../../core/notifications/firebase.service.js');
-        await notifyOwnerSafely(
-            { ownerType: 'DELIVERY_PARTNER', ownerId: partner._id },
-            {
-                title: 'Welcome Aboard! Ã°Å¸Å¡Â²',
-                body: `Your delivery partner application has been approved. You can now go online and start earning!`,
-                image: 'https://i.ibb.co/3m2Yh7r/Appzeto-Brand-Image.png',
-                data: {
-                    type: 'onboarding_approved',
-                    partnerId: String(partner._id)
-                }
-            }
-        );
-    } catch (e) {
-        console.error('Failed to send delivery partner approval notification:', e);
-    }
-
-    // Referral crediting: on approval, credit the referrer partner's pocket balance via DeliveryBonusTransaction.
-    try {
+    // Referral crediting only for food service approval
+    if ((service || 'food') === 'food') {
+        try {
         const referrerId = partner.referredBy ? String(partner.referredBy) : '';
         if (referrerId && mongoose.Types.ObjectId.isValid(referrerId)) {
             const already = await FoodReferralLog.findOne({ refereeId: partner._id, role: 'DELIVERY_PARTNER' }).lean();
@@ -4774,28 +4853,49 @@ export async function approveDeliveryPartner(id) {
                 }
             }
         }
-    } catch (e) {
+        } catch (e) {
         // Never fail approval due to referral errors.
         // eslint-disable-next-line no-console
         console.warn('Referral crediting failed (delivery approval):', e?.message || e);
+        }
     }
+
+    try {
+        const { notifyOwnerSafely } = await import('../../../../core/notifications/firebase.service.js');
+        await notifyOwnerSafely(
+            { ownerType: 'DELIVERY_PARTNER', ownerId: partner._id },
+            {
+                title: 'Welcome Aboard!',
+                body: `Your ${service || 'food'} application has been approved. You can now go online and start earning!`,
+                image: 'https://i.ibb.co/3m2Yh7r/Appzeto-Brand-Image.png',
+                data: {
+                    type: 'onboarding_approved',
+                    partnerId: String(partner._id),
+                    service: service || 'food',
+                }
+            }
+        );
+    } catch (e) {
+        console.error('Failed to send delivery partner approval notification:', e);
+    }
+
     return partner.toObject();
 }
 
-export async function rejectDeliveryPartner(id, reason) {
+export async function rejectDeliveryPartner(id, reason, service = 'food') {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
-    const updated = await FoodDeliveryPartner.findByIdAndUpdate(
-        id,
-        {
-            $set: {
-                status: 'rejected',
-                rejectedAt: new Date(),
-                rejectionReason: typeof reason === 'string' ? reason.trim() : undefined,
-                approvedAt: null
-            }
-        },
-        { new: true }
-    ).lean();
+    const normalizedReason = typeof reason === 'string' ? reason.trim() : '';
+    if (!normalizedReason) {
+        throw new ValidationError('Rejection reason is required');
+    }
+
+    const { rejectDriverService } = await import('../../../../core/identity/driverOnboardingAdmin.service.js');
+    const row = await rejectDriverService(id, service || 'food', normalizedReason);
+    if (!row) return null;
+
+    const updated = row.partnerId
+        ? await FoodDeliveryPartner.findById(row.partnerId).lean()
+        : await FoodDeliveryPartner.findOne({ identityId: row.identityId }).lean();
 
     if (updated) {
         try {
@@ -4803,13 +4903,14 @@ export async function rejectDeliveryPartner(id, reason) {
             await notifyOwnerSafely(
                 { ownerType: 'DELIVERY_PARTNER', ownerId: updated._id },
                 {
-                    title: 'Onboarding Update Ã°Å¸â€œâ€¹',
-                    body: `Your application to join as a delivery partner was rejected. Reason: ${reason || 'Incomplete documents'}.`,
+                    title: 'Onboarding Update',
+                    body: `Your ${service || 'food'} application was rejected. Reason: ${normalizedReason}.`,
                     image: 'https://i.ibb.co/3m2Yh7r/Appzeto-Brand-Image.png',
                     data: {
                         type: 'onboarding_rejected',
                         partnerId: String(updated._id),
-                        reason: reason || ''
+                        service: service || 'food',
+                        reason: normalizedReason,
                     }
                 }
             );

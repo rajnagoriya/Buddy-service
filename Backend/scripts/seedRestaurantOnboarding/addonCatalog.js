@@ -1,0 +1,83 @@
+/** Addon templates per cuisine — seeded separately via seedAddons.js */
+export const ADDON_TEMPLATES = {
+    default: [
+        { name: 'Extra Cheese', description: 'Double layer of melted cheese', price: 49 },
+        { name: 'Garlic Mayo Dip', description: 'Creamy garlic-infused mayonnaise', price: 25 },
+        { name: 'Spicy Dip', description: 'House-made spicy chilli dip', price: 20 },
+        { name: 'Extra Portion Rice', description: 'Additional serving of steamed rice', price: 59 },
+        { name: 'Butter Topping', description: 'Extra butter glaze on top', price: 29 },
+        { name: 'Raita Side', description: 'Cooling yogurt raita portion', price: 39 },
+        { name: 'Extra Naan', description: 'One additional butter naan', price: 45 },
+        { name: 'Papad (2 Pcs)', description: 'Crispy roasted papad', price: 15 },
+    ],
+    north_indian: [
+        { name: 'Extra Butter Naan', description: 'Soft naan brushed with butter', price: 49 },
+        { name: 'Paneer Topping', description: 'Extra grilled paneer cubes', price: 59 },
+        { name: 'Boondi Raita', description: 'Classic boondi raita side', price: 39 },
+        { name: 'Green Chutney', description: 'Fresh mint-coriander chutney', price: 15 },
+        { name: 'Pickle Portion', description: 'Spicy Indian pickle', price: 10 },
+        { name: 'Extra Gravy', description: 'Additional curry gravy portion', price: 49 },
+        { name: 'Jeera Rice Portion', description: 'Fragrant cumin rice', price: 69 },
+        { name: 'Salad Side', description: 'Fresh onion-tomato salad', price: 25 },
+    ],
+    italian_bakery: [
+        { name: 'Extra Melted Mozzarella', description: 'Premium gooey mozzarella layer', price: 49 },
+        { name: 'Fiery Jalapeno Slices', description: 'Pickled jalapeno topping', price: 29 },
+        { name: 'Grilled Chicken Shreds', description: 'Seasoned shredded chicken', price: 59 },
+        { name: 'Tangy Tomato Salsa', description: 'House-made zesty salsa', price: 19 },
+        { name: 'Creamy Garlic Mayo Dip', description: 'Rich garlic mayonnaise', price: 25 },
+        { name: 'Crushed Red Pepper', description: 'Spicy chilli flakes', price: 10 },
+        { name: 'Sweet Corn & Capsicum', description: 'Butter-tossed veggies', price: 35 },
+        { name: 'Extra Garlic Bread Slice', description: 'One toasted garlic bread slice', price: 20 },
+    ],
+    pizza: [
+        { name: 'Extra Cheese Topping', description: 'More mozzarella on your pizza', price: 59 },
+        { name: 'Olives Topping', description: 'Black olive topping', price: 39 },
+        { name: 'Jalapeno Topping', description: 'Spicy jalapeno slices', price: 29 },
+        { name: 'Mushroom Topping', description: 'Sautéed button mushrooms', price: 45 },
+        { name: 'BBQ Sauce Drizzle', description: 'Smoky BBQ sauce', price: 19 },
+        { name: 'Peri Peri Sprinkle', description: 'Spicy peri peri seasoning', price: 15 },
+        { name: 'Garlic Dip', description: 'Creamy garlic dip', price: 25 },
+        { name: 'Cheese Burst Crust', description: 'Stuffed cheese crust upgrade', price: 79 },
+    ],
+    chinese: [
+        { name: 'Extra Schezwan Sauce', description: 'Spicy schezwan sauce portion', price: 20 },
+        { name: 'Fried Noodle Topping', description: 'Crispy fried noodle garnish', price: 25 },
+        { name: 'Spring Onion Garnish', description: 'Fresh spring onion topping', price: 10 },
+        { name: 'Extra Egg (1)', description: 'One additional egg in noodles/rice', price: 25 },
+        { name: 'Chilli Oil', description: 'Hot chilli oil drizzle', price: 15 },
+        { name: 'Manchurian Gravy Side', description: 'Extra manchurian gravy', price: 49 },
+        { name: 'Steamed Rice Portion', description: 'Plain steamed rice side', price: 59 },
+        { name: 'Veg Spring Roll (2 Pcs)', description: 'Crispy vegetable spring rolls', price: 69 },
+    ],
+    healthy: [
+        { name: 'Avocado Slices', description: 'Fresh avocado topping', price: 49 },
+        { name: 'Extra Protein (Tofu)', description: 'Grilled tofu portion', price: 59 },
+        { name: 'Quinoa Upgrade', description: 'Replace base with quinoa', price: 39 },
+        { name: 'Super Seed Mix', description: 'Chia, flax and pumpkin seeds', price: 25 },
+        { name: 'Hummus Side', description: 'Creamy hummus dip', price: 35 },
+        { name: 'Balsamic Dressing', description: 'Extra balsamic vinaigrette', price: 15 },
+        { name: 'Almond Butter Drizzle', description: 'Natural almond butter', price: 29 },
+        { name: 'Berry Topping', description: 'Fresh mixed berries', price: 45 },
+    ],
+    seafood: [
+        { name: 'Extra Prawns (4 Pcs)', description: 'Additional grilled prawns', price: 99 },
+        { name: 'Lemon Butter Sauce', description: 'Rich lemon butter drizzle', price: 29 },
+        { name: 'Coconut Chutney', description: 'Coastal coconut chutney', price: 19 },
+        { name: 'Steamed Rice Side', description: 'Plain Kerala rice portion', price: 59 },
+        { name: 'Fish Fry Add-on', description: 'One crispy fish fry piece', price: 79 },
+        { name: 'Tartar Dip', description: 'Creamy tartar sauce', price: 20 },
+    ],
+    cafe: [
+        { name: 'Extra Espresso Shot', description: 'Additional espresso shot', price: 49 },
+        { name: 'Oat Milk Upgrade', description: 'Replace with oat milk', price: 29 },
+        { name: 'Whipped Cream', description: 'Fresh whipped cream topping', price: 25 },
+        { name: 'Caramel Drizzle', description: 'Sweet caramel sauce', price: 19 },
+        { name: 'Chocolate Shavings', description: 'Dark chocolate shavings', price: 15 },
+        { name: 'Extra Cookie', description: 'One chocolate chip cookie', price: 35 },
+    ],
+};
+
+export const getAddonsForCuisine = (cuisineKey) => (
+    ADDON_TEMPLATES[cuisineKey] || ADDON_TEMPLATES.default
+);

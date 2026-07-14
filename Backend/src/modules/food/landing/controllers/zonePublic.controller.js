@@ -31,7 +31,7 @@ export const detectZonePublicController = async (req, res, next) => {
             return res.status(400).json({ success: false, message: 'lat and lng are required' });
         }
 
-        const zones = await FoodZone.find({ isActive: true }).lean();
+        const zones = await FoodZone.find({ isActive: { $ne: false } }).lean();
         for (const zone of zones) {
             const coords = Array.isArray(zone.coordinates) ? zone.coordinates : [];
             if (coords.length < 3) continue;
@@ -57,7 +57,7 @@ export const detectZonePublicController = async (req, res, next) => {
 /** GET /zones/public - list active zones for onboarding/selects */
 export const listZonesPublicController = async (_req, res, next) => {
     try {
-        const zones = await FoodZone.find({ isActive: true })
+        const zones = await FoodZone.find({ isActive: { $ne: false } })
             .select('name zoneName serviceLocation country unit isActive coordinates createdAt')
             .sort({ createdAt: 1 })
             .lean();
@@ -75,7 +75,7 @@ export const listZonesPublicController = async (_req, res, next) => {
 /** GET /zones/nearby - list zones for hotspot/nearby visualization */
 export const listZonesNearbyPublicController = async (req, res, next) => {
     try {
-        const zones = await FoodZone.find({ isActive: true })
+        const zones = await FoodZone.find({ isActive: { $ne: false } })
             .select('name zoneName serviceLocation country unit isActive coordinates createdAt')
             .sort({ createdAt: 1 })
             .lean();

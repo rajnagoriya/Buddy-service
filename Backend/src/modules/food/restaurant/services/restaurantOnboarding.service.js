@@ -16,6 +16,12 @@ import {
   mapDuplicateKeyError,
 } from "./restaurantCreation.service.js";
 import { isRestaurantBanned } from "../utils/restaurantBan.util.js";
+import {
+  getOutletTimingsForRestaurant,
+  parseOutletTimingsInput,
+  legacyRestaurantToOutletTimings,
+  upsertOutletTimingsForRestaurant,
+} from "./outletTimings.service.js";
 
 export { ensureDraftRestaurantForPhone };
 
@@ -95,19 +101,9 @@ export const resolveOnboardingStatus = (doc) => {
   return "NOT_STARTED";
 };
 
-const buildOnboardingPayload = (doc) => {
+const buildOnboardingPayload = (doc, outletTimings = null) => {
   const status = resolveOnboardingStatus(doc);
   const onboarding = doc?.onboarding || {};
-  const openingTime =
-    onboarding?.step2?.openingTime ||
-    doc?.openingTime ||
-    onboarding?.step2?.deliveryTimings?.openingTime ||
-    "";
-  const closingTime =
-    onboarding?.step2?.closingTime ||
-    doc?.closingTime ||
-    onboarding?.step2?.deliveryTimings?.closingTime ||
-    "";
 
   return {
     onboardingStatus: status,
@@ -143,12 +139,10 @@ const buildOnboardingPayload = (doc) => {
           landmark: doc?.landmark,
         },
       },
-      step2: onboarding.step2 || {
-        cuisines: doc?.cuisines,
-        openingTime,
-        closingTime,
-        deliveryTimings: { openingTime, closingTime },
-        openDays: doc?.openDays,
+      step2: {
+        ...(onboarding.step2 || {}),
+        cuisines: onboarding.step2?.cuisines || doc?.cuisines,
+        outletTimings: outletTimings || onboarding.step2?.outletTimings || null,
         menuImageUrls: doc?.menuImages,
         profileImageUrl: doc?.profileImage,
         menuPdfUrl: doc?.menuPdf,
@@ -189,7 +183,8 @@ export const getOnboardingProgress = async (restaurantId) => {
   }
   const doc = await FoodRestaurant.findById(restaurantId).lean();
   if (!doc) throw new ValidationError("Restaurant not found");
-  return buildOnboardingPayload(doc);
+  const { outletTimings } = await getOutletTimingsForRestaurant(restaurantId);
+  return buildOnboardingPayload(doc, outletTimings);
 };
 
 const uploadStepFiles = async (stepNumber, files = {}, restaurant = null) => {
@@ -373,15 +368,25 @@ export const saveOnboardingStep = async (restaurantId, stepNumber, payload, file
 
   if (step === 2) {
     const cuisines = parseCsvOrArray(payload.cuisines);
-    const openDays = parseCsvOrArray(payload.openDays);
-    const openingTime = normalizeRestaurantTime(payload.openingTime);
-    const closingTime = normalizeRestaurantTime(payload.closingTime);
-
     restaurant.cuisines = cuisines;
-    restaurant.openDays = openDays;
-    restaurant.openingTime = openingTime || undefined;
-    restaurant.closingTime = closingTime || undefined;
     restaurant.estimatedDeliveryTime = String(payload.estimatedDeliveryTime || "").trim() || undefined;
+
+    let outletTimings = parseOutletTimingsInput(payload.outletTimings);
+    if (!outletTimings) {
+      const openDays = parseCsvOrArray(payload.openDays);
+      const openingTime = normalizeRestaurantTime(payload.openingTime);
+      const closingTime = normalizeRestaurantTime(payload.closingTime);
+      if (openingTime || closingTime || openDays.length > 0) {
+        outletTimings = legacyRestaurantToOutletTimings({
+          openDays,
+          openingTime,
+          closingTime,
+        });
+      }
+    }
+    if (outletTimings) {
+      await upsertOutletTimingsForRestaurant(restaurantId, outletTimings);
+    }
 
     if (uploads.profileImage) restaurant.profileImage = uploads.profileImage;
     if (uploads.menuImages?.length) restaurant.menuImages = uploads.menuImages;
@@ -393,12 +398,13 @@ export const saveOnboardingStep = async (restaurantId, stepNumber, payload, file
       };
     }
 
+    const savedTimings = outletTimings
+      ? (await getOutletTimingsForRestaurant(restaurantId)).outletTimings
+      : null;
+
     onboarding.step2 = {
       cuisines,
-      openingTime,
-      closingTime,
-      deliveryTimings: { openingTime, closingTime },
-      openDays,
+      outletTimings: savedTimings,
       menuImageUrls: restaurant.menuImages,
       profileImageUrl: restaurant.profileImage,
       menuPdfUrl: restaurant.menuPdf,

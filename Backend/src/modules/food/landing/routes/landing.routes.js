@@ -138,7 +138,7 @@ router.get('/hero-banners/gourmet/public', cacheResponse(300, 'food_landing'), g
 router.get('/landing/settings/public', cacheResponse(600, 'food_landing'), getPublicLandingSettingsController);
 router.get('/zones/detect', cacheResponse(120, 'food_zones'), detectZonePublicController);
 router.get('/zones/nearby', cacheResponse(120, 'food_zones'), listZonesNearbyPublicController);
-router.get('/zones/public', cacheResponse(600, 'food_zones'), listZonesPublicController);
+router.get('/zones/public', cacheResponse(30, 'food_zones'), listZonesPublicController);
 router.get('/public/env', cacheResponse(300, 'food_env'), getPublicEnvController);
 // Admin landing settings (old paths used by admin UI)
 router.get('/hero-banners/landing/settings', getAdminLandingSettingsController);

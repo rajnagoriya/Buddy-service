@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { buildLocationSchema } from '../location/location.schema.js';
 
 const userAddressSchema = new mongoose.Schema(
     {
@@ -39,22 +40,8 @@ const userAddressSchema = new mongoose.Schema(
             trim: true
         },
         location: {
-            type: {
-                type: String,
-                enum: ['Point'],
-                default: 'Point'
-            },
-            coordinates: {
-                // [lng, lat]
-                type: [Number],
-                default: undefined,
-                validate: {
-                    validator: (v) =>
-                        v === undefined ||
-                        (Array.isArray(v) && v.length === 2 && v.every((n) => typeof n === 'number' && Number.isFinite(n))),
-                    message: 'location.coordinates must be [lng, lat]'
-                }
-            }
+            type: buildLocationSchema(),
+            default: undefined
         },
         isDefault: {
             type: Boolean,
@@ -150,6 +137,11 @@ const userSchema = new mongoose.Schema(
             type: [userAddressSchema],
             default: []
         },
+        /** Raw last-known GPS ping, independent of any saved address (see saveActorLocation). */
+        currentLocation: {
+            type: buildLocationSchema(),
+            default: undefined
+        },
         // Compatibility for QC module
         walletBalance: {
             type: Number,
@@ -164,6 +156,7 @@ const userSchema = new mongoose.Schema(
 
 userSchema.index({ phone: 1 }, { unique: true });
 userSchema.index({ 'addresses.location': '2dsphere' });
+userSchema.index({ currentLocation: '2dsphere' });
 
 export const FoodUser = mongoose.model('FoodUser', userSchema);
 

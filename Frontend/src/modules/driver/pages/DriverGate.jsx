@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { driverOnboardingAPI } from "@food/api";
-import Loader from "@food/components/Loader";
+import DriverPageLoader from "../components/DriverPageLoader";
 
 /**
  * Entry route at `/driver`. Decides where to send the driver based on the
@@ -46,6 +46,6 @@ export default function DriverGate() {
     };
   }, []);
 
-  if (!decision) return <Loader />;
+  if (!decision) return <DriverPageLoader />;
   return <Navigate to={decision} replace />;
 }

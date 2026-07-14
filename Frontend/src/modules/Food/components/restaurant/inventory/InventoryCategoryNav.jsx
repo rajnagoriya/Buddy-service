@@ -78,6 +78,11 @@ export function InventoryCategoryHeader({
           >
             {category.inStock ? "All live" : `${outOfStockCount} paused`}
           </span>
+          {category.categoryDisabled ? (
+            <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700">
+              {category.categoryDisabledByAdmin ? "Disabled by admin" : "Category disabled"}
+            </span>
+          ) : null}
           {recommendedCount > 0 ? (
             <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
               {recommendedCount} recommended

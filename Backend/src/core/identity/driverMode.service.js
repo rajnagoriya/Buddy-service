@@ -158,9 +158,11 @@ export const setDriverMode = async (identity, mode, options = {}) => {
     capabilities: {
       food: partner ? partner.status || 'approved' : 'not_enabled',
       taxi: driver
-        ? driver.approve === false
-          ? 'pending'
-          : driver.status || 'approved'
+        ? String(driver.status || '').toLowerCase() === 'rejected'
+          ? 'rejected'
+          : driver.approve === false
+            ? 'pending'
+            : driver.status || 'approved'
         : 'not_enabled',
     },
   };
@@ -181,9 +183,11 @@ export const getDriverMode = async (identity) => {
     capabilities: {
       food: partner ? partner.status || 'approved' : 'not_enabled',
       taxi: driver
-        ? driver.approve === false
-          ? 'pending'
-          : driver.status || 'approved'
+        ? String(driver.status || '').toLowerCase() === 'rejected'
+          ? 'rejected'
+          : driver.approve === false
+            ? 'pending'
+            : driver.status || 'approved'
         : 'not_enabled',
     },
     food: partner

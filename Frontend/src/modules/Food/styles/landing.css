@@ -348,8 +348,8 @@
 .food-mobile-promo {
   position: relative;
   border-radius: 1.25rem;
-  padding: 0.75rem 0.5rem 0.5rem;
-  min-height: 7.5rem;
+  padding: 0.6rem 0.25rem 0.4rem;
+  min-height: 7rem;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -384,18 +384,21 @@
 }
 
 .food-mobile-promo__tag {
-  font-size: 0.5625rem;
+  font-size: 0.5rem;
   font-weight: 800;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: #6b7280;
+  text-align: center;
 }
 
 .food-mobile-promo__value {
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   font-weight: 900;
   margin-top: 0.125rem;
   line-height: 1.1;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .food-mobile-promo__icon-wrap {

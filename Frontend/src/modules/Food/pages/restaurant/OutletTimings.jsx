@@ -5,6 +5,7 @@ import RestaurantSubPageShell from "@food/components/restaurant/panel/Restaurant
 import { RestaurantConfirmModal } from "@food/components/restaurant/panel/RestaurantPanelModal"
 import OutletOnlineStatusCard from "@food/components/restaurant/outlet-timings/OutletOnlineStatusCard"
 import OutletWeeklySchedule from "@food/components/restaurant/outlet-timings/OutletWeeklySchedule"
+import { Button } from "@food/components/ui/button"
 import { RESTAURANT_BASE } from "@food/utils/restaurantNavConfig"
 import {
   evaluateOutletTimingState,
@@ -13,8 +14,10 @@ import {
   getTodaySlotLabel,
   timeToString,
 } from "@food/utils/outletTimingsUtils"
+import { getRestaurantAvailabilityStatus } from "@food/utils/restaurantAvailability"
 import { restaurantAPI } from "@food/api"
 import { toast } from "sonner"
+import { Loader2 } from "lucide-react"
 
 const RESTAURANT_ONLINE_STATUS_KEY = "restaurant_online_status"
 
@@ -23,6 +26,8 @@ const persistRestaurantOnlineStatus = (isOnline) => {
     localStorage.setItem(RESTAURANT_ONLINE_STATUS_KEY, JSON.stringify(Boolean(isOnline)))
   } catch {}
 }
+
+const serializeDays = (days) => JSON.stringify(days || {})
 
 const formatAddress = (location) => {
   if (!location) return ""
@@ -34,13 +39,14 @@ const formatAddress = (location) => {
 
 export default function OutletTimings() {
   const scheduleRef = useRef(null)
-  const saveTimerRef = useRef(null)
 
   const [restaurantData, setRestaurantData] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [savingSchedule, setSavingSchedule] = useState(false)
   const [deliveryStatus, setDeliveryStatus] = useState(false)
   const [currentDateTime, setCurrentDateTime] = useState(new Date())
   const [days, setDays] = useState(getDefaultDays)
+  const [savedDaysKey, setSavedDaysKey] = useState("")
   const [expandedDay, setExpandedDay] = useState(getTodayName())
   const [showOutletClosedDialog, setShowOutletClosedDialog] = useState(false)
   const [showOutsideTimingsDialog, setShowOutsideTimingsDialog] = useState(false)
@@ -55,6 +61,17 @@ export default function OutletTimings() {
 
   const { isDayClosed, isWithinTimings } = timingState
   const todaySlotLabel = useMemo(() => getTodaySlotLabel(days, currentDateTime), [days, currentDateTime])
+  const hasUnsavedChanges = savedDaysKey !== "" && serializeDays(days) !== savedDaysKey
+
+  const canGoOnlineNow = !isUnderReview && !isDayClosed && isWithinTimings
+
+  const isCustomerVisibleOnline = useMemo(() => {
+    if (isUnderReview || !deliveryStatus) return false
+    return getRestaurantAvailabilityStatus(
+      { outletTimings: days, isAcceptingOrders: true },
+      currentDateTime,
+    ).isOpen
+  }, [days, currentDateTime, deliveryStatus, isUnderReview])
 
   const restaurantMeta = useMemo(() => {
     if (!restaurantData) return ""
@@ -97,7 +114,13 @@ export default function OutletTimings() {
         const outletTimings =
           timingsRes?.data?.data?.outletTimings || timingsRes?.data?.outletTimings
         if (outletTimings && typeof outletTimings === "object") {
-          setDays({ ...getDefaultDays(), ...outletTimings })
+          const merged = { ...getDefaultDays(), ...outletTimings }
+          setDays(merged)
+          setSavedDaysKey(serializeDays(merged))
+        } else {
+          const defaults = getDefaultDays()
+          setDays(defaults)
+          setSavedDaysKey(serializeDays(defaults))
         }
       } catch (error) {
         if (
@@ -114,45 +137,30 @@ export default function OutletTimings() {
 
     loadPageData()
 
-    const onTimingsUpdated = () => {
-      restaurantAPI
-        .getOutletTimings()
-        .then((res) => {
-          const outletTimings = res?.data?.data?.outletTimings || res?.data?.outletTimings
-          if (outletTimings && typeof outletTimings === "object") {
-            setDays({ ...getDefaultDays(), ...outletTimings })
-          }
-        })
-        .catch(() => {})
-    }
-
-    window.addEventListener("outletTimingsUpdated", onTimingsUpdated)
     return () => {
       mounted = false
-      window.removeEventListener("outletTimingsUpdated", onTimingsUpdated)
     }
   }, [])
-
-  useEffect(() => {
-    if (loading) return
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(async () => {
-      try {
-        await restaurantAPI.saveOutletTimings(days)
-        window.dispatchEvent(new Event("outletTimingsUpdated"))
-      } catch (error) {
-        console.error("Error saving outlet timings:", error)
-      }
-    }, 500)
-
-    return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    }
-  }, [days, loading])
 
   const scrollToSchedule = () => {
     scheduleRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
     setExpandedDay(todayName)
+  }
+
+  const handleSaveSchedule = async () => {
+    try {
+      setSavingSchedule(true)
+      await restaurantAPI.saveOutletTimings(days)
+      setSavedDaysKey(serializeDays(days))
+      window.dispatchEvent(
+        new CustomEvent("outletTimingsUpdated", { detail: { outletTimings: days } }),
+      )
+      toast.success("Weekly schedule saved")
+    } catch (error) {
+      toast.error(error?.response?.data?.message || "Could not save schedule")
+    } finally {
+      setSavingSchedule(false)
+    }
   }
 
   const handleDeliveryStatusChange = async (checked) => {
@@ -160,12 +168,19 @@ export default function OutletTimings() {
       toast.error("You are under admin review and cannot go online until approved.")
       return
     }
+
+    if (checked && hasUnsavedChanges) {
+      toast.error("Save your schedule changes before going online.")
+      scrollToSchedule()
+      return
+    }
+
     if (checked && isDayClosed) {
       setShowOutletClosedDialog(true)
       return
     }
 
-    if (checked && isWithinTimings === false && !isDayClosed) {
+    if (checked && !isWithinTimings) {
       setShowOutsideTimingsDialog(true)
       return
     }
@@ -181,21 +196,6 @@ export default function OutletTimings() {
       setDeliveryStatus((prev) => !prev)
       persistRestaurantOnlineStatus(!checked)
       toast.error(error?.response?.data?.message || "Could not update online status")
-    }
-  }
-
-  const handleOutsideTimingsConfirm = async () => {
-    setShowOutsideTimingsDialog(false)
-    setDeliveryStatus(true)
-    try {
-      await restaurantAPI.updateAcceptingOrders(true)
-      persistRestaurantOnlineStatus(true)
-      window.dispatchEvent(
-        new CustomEvent("restaurantStatusChanged", { detail: { isOnline: true } }),
-      )
-    } catch {
-      setDeliveryStatus(false)
-      persistRestaurantOnlineStatus(false)
     }
   }
 
@@ -259,11 +259,11 @@ export default function OutletTimings() {
           restaurantMeta={restaurantMeta}
           loading={loading}
           deliveryStatus={deliveryStatus}
+          isCustomerVisibleOnline={isCustomerVisibleOnline}
           onDeliveryStatusChange={handleDeliveryStatusChange}
           todaySlotLabel={todaySlotLabel}
           isDayClosed={isDayClosed}
           isWithinTimings={isWithinTimings}
-          showOutsideWarning={!isWithinTimings && !deliveryStatus}
           isUnderReview={isUnderReview}
         />
 
@@ -276,6 +276,37 @@ export default function OutletTimings() {
           onTimeChange={handleTimeChange}
           todayName={todayName}
         />
+
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          {hasUnsavedChanges ? (
+            <p className="text-xs text-amber-700">You have unsaved schedule changes.</p>
+          ) : (
+            <p className="text-xs text-gray-500">Schedule is saved.</p>
+          )}
+          <Button
+            type="button"
+            onClick={handleSaveSchedule}
+            disabled={!hasUnsavedChanges || savingSchedule}
+            className="w-full sm:w-auto bg-[var(--rt-primary-strong)] hover:opacity-90 text-white"
+          >
+            {savingSchedule ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              "Save schedule"
+            )}
+          </Button>
+        </div>
+
+        {!canGoOnlineNow && !isUnderReview ? (
+          <p className="text-center text-xs text-gray-500">
+            {isDayClosed
+              ? "Open today in the schedule and save to go online."
+              : "Update today's hours to include the current time, save, then turn on accepting orders."}
+          </p>
+        ) : null}
 
         <RestaurantConfirmModal
           open={showOutletClosedDialog}
@@ -291,25 +322,27 @@ export default function OutletTimings() {
           confirmVariant="primary"
         >
           <p className="text-center text-sm text-gray-600">
-            Open today&apos;s schedule or turn the day on before going online.
+            Turn today on in the weekly schedule, save, then you can go online.
           </p>
         </RestaurantConfirmModal>
 
         <RestaurantConfirmModal
           open={showOutsideTimingsDialog}
-          onClose={() => {
+          onClose={() => setShowOutsideTimingsDialog(false)}
+          onConfirm={() => {
             setShowOutsideTimingsDialog(false)
             scrollToSchedule()
           }}
-          onConfirm={handleOutsideTimingsConfirm}
           title="Outside scheduled hours"
-          description="You are currently outside today's opening hours."
-          confirmLabel="Turn on anyway"
-          cancelLabel="Edit hours"
-          confirmVariant="warning"
+          description={`Current time is outside today's hours (${todaySlotLabel}).`}
+          confirmLabel="Update today's hours"
+          showCancel={false}
+          confirmVariant="primary"
         >
           <p className="text-center text-sm text-gray-600">
-            You can still go online, or scroll down to adjust today&apos;s timings.
+            You cannot go online right now. Adjust today&apos;s open and close times so the
+            current time falls within your schedule, save the schedule, then turn on accepting
+            orders.
           </p>
         </RestaurantConfirmModal>
       </RestaurantSubPageShell>

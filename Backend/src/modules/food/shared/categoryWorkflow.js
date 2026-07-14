@@ -23,6 +23,71 @@ export const normalizeFoodTypeForCategory = (value) => {
     return 'Non-Veg';
 };
 
+export const isCategoryPubliclyVisible = (category = {}) => (
+    category?.isActive !== false && category?.adminDeactivated !== true
+);
+
+export const isCategoryDisabled = (category = {}) => !isCategoryPubliclyVisible(category);
+
+export const isCategoryApproved = (category = {}) => getCategoryApprovalStatus(category) === 'approved';
+
+export const isCategoryVisibleToEndUser = (category = {}) => (
+    isCategoryPubliclyVisible(category) && isCategoryApproved(category)
+);
+
+export const isCategoryHiddenFromPublic = (category = {}) => !isCategoryVisibleToEndUser(category);
+
+export const ACTIVE_PUBLIC_CATEGORY_FILTER = {
+    isActive: { $ne: false },
+    adminDeactivated: { $ne: true }
+};
+
+export const HIDDEN_PUBLIC_CATEGORY_FILTER = {
+    $or: [
+        { isActive: false },
+        { adminDeactivated: true },
+        { approvalStatus: 'pending' },
+        { approvalStatus: 'rejected' },
+        { approvalStatus: { $exists: false }, isApproved: false }
+    ]
+};
+
+export const getHiddenFromPublicCategoryIds = async () => {
+    const { FoodCategory } = await import('../admin/models/category.model.js');
+    return FoodCategory.distinct('_id', HIDDEN_PUBLIC_CATEGORY_FILTER);
+};
+
+/** @deprecated Use getHiddenFromPublicCategoryIds */
+export const getInactiveCategoryIds = getHiddenFromPublicCategoryIds;
+
+export const buildFoodVisibleCategoryFilter = async () => {
+    const hiddenCategoryIds = await getHiddenFromPublicCategoryIds();
+    if (!hiddenCategoryIds.length) return null;
+    return {
+        $or: [
+            { categoryId: { $nin: hiddenCategoryIds } },
+            { categoryId: { $exists: false } },
+            { categoryId: null }
+        ]
+    };
+};
+
+export const filterFoodsByVisibleCategories = async (foods = []) => {
+    const list = Array.isArray(foods) ? foods.filter(Boolean) : [];
+    if (!list.length) return [];
+
+    const hiddenCategoryIds = new Set(
+        (await getHiddenFromPublicCategoryIds()).map((id) => String(id))
+    );
+    if (!hiddenCategoryIds.size) return list;
+
+    return list.filter((food) => {
+        const categoryId = food?.categoryId ? String(food.categoryId) : '';
+        if (!categoryId) return true;
+        return !hiddenCategoryIds.has(categoryId);
+    });
+};
+
 export const categoryAllowsFoodType = (scope, foodType) => {
     const normalizedScope = normalizeCategoryFoodTypeScope(scope, 'Both');
     const normalizedFoodType = normalizeFoodTypeForCategory(foodType);
@@ -192,6 +257,8 @@ export const serializeCategoryForResponse = (category = {}, options = {}) => {
         canDelete: options.currentRestaurantId
             ? Boolean(restaurantId && restaurantId === String(options.currentRestaurantId) && Number(stats?.totalFoods || 0) === 0)
             : Number(stats?.totalFoods || 0) === 0,
+        adminDeactivated: category.adminDeactivated === true,
+        canActivate: category.adminDeactivated !== true,
         restaurant: category?.restaurantId?._id
             ? {
                 _id: category.restaurantId._id,

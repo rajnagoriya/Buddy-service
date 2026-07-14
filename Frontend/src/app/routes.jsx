@@ -14,6 +14,15 @@ import ProtectedRoute from '@food/components/ProtectedRoute'
 
 const PageLoader = () => <AppShellSkeleton />
 
+const UserProfilePathRedirect = () => {
+  const location = useLocation()
+  const suffix = location.pathname.replace(/^\/user\/profile\/?/, "")
+  const target = suffix
+    ? `/food/user/profile/${suffix}${location.search}`
+    : `/food/user/profile${location.search}`
+  return <Navigate to={target} replace />
+}
+
 /**
  * FoodAppWrapper — Quick-spicy App. को /food prefix के साथ render करता है.
  * 
@@ -100,7 +109,7 @@ const AppRoutes = () => {
     <Routes>
       {/* Global unified user profile */}
       <Route path="/user/profile" element={<Navigate to="/food/user/profile" replace />} />
-      <Route path="/user/profile/*" element={<Navigate to="/food/user/profile" replace />} />
+      <Route path="/user/profile/*" element={<UserProfilePathRedirect />} />
 
       {/* Auth Module */}
       <Route path="/user/auth/*" element={<AuthApp />} />

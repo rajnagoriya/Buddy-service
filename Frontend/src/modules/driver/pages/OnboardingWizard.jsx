@@ -24,32 +24,49 @@ import apiClient, {
   uploadAPI,
 } from "@food/api";
 import { invalidateDriverGuardCache } from "../components/DriverGuard";
+import DriverPageLoader from "../components/DriverPageLoader";
+import {
+  FIELD_LIMITS,
+  prepareOnboardingStepState,
+  STEP_MEDIA_PATHS,
+  setByPath,
+  validateOnboardingImageFile,
+  validateOnboardingStep,
+} from "../utils/onboardingValidation";
 
-const buildSteps = (services = []) => {
-  const steps = [{ key: "services", label: "Services", Icon: CheckCircle2 }];
-  if (services.includes("food")) {
-    steps.push({ key: "vehicle_food", label: "Food", Icon: Bike });
+const buildSteps = (services = [], resubmitServices = null) => {
+  const steps = [];
+  const needsFoodVehicle = services.includes("food") || services.includes("quickCommerce");
+  const needsTaxiVehicle = services.includes("taxi");
+
+  if (!resubmitServices) {
+    steps.push({ key: "services", label: "Services", Icon: CheckCircle2 });
   }
-  if (services.includes("taxi")) {
+  if (needsFoodVehicle && (!resubmitServices || resubmitServices.some((s) => s === "food" || s === "quickCommerce"))) {
+    steps.push({ key: "vehicle_food", label: "Delivery", Icon: Bike });
+  }
+  if (needsTaxiVehicle && (!resubmitServices || resubmitServices.includes("taxi"))) {
     steps.push({ key: "vehicle_taxi", label: "Taxi", Icon: Car });
   }
-  steps.push(
-    { key: "basics", label: "About You", Icon: User },
-    { key: "kyc", label: "KYC", Icon: IdCard },
-    { key: "bank", label: "Bank", Icon: Banknote },
-    { key: "selfie", label: "Selfie", Icon: Camera },
-  );
+  if (!resubmitServices) {
+    steps.push(
+      { key: "basics", label: "About You", Icon: User },
+      { key: "kyc", label: "KYC", Icon: IdCard },
+      { key: "bank", label: "Bank", Icon: Banknote },
+    );
+  }
+  steps.push({ key: "selfie", label: resubmitServices ? "Submit" : "Selfie", Icon: Camera });
   return steps;
 };
 
 const STEP_META = {
   services: {
     title: "What do you want to drive for?",
-    subtitle: "Pick one or both. You can add the other service later from home.",
+    subtitle: "Pick one or more services. Food and Quick Commerce share the same delivery profile.",
   },
   vehicle_food: {
-    title: "Food delivery vehicle",
-    subtitle: "Choose your two-wheeler and enter the registration number.",
+    title: "Delivery vehicle",
+    subtitle: "Used for Food and Quick Commerce deliveries.",
   },
   vehicle_taxi: {
     title: "Your taxi vehicle",
@@ -78,112 +95,12 @@ const FOOD_VEHICLE_TYPES = [
   { value: "scooter", label: "Scooter", Icon: Bike },
 ];
 
-const UPLOAD_FOLDER = "driver/onboarding";
-
 const resolveStepIndex = (onboardingStep, steps) => {
   const normalized = String(onboardingStep || "services").toLowerCase();
   const stepKey = normalized === "capabilities" ? "services" : normalized;
   if (stepKey === "done") return Math.max(steps.length - 1, 0);
   const idx = steps.findIndex((s) => s.key === stepKey);
   return idx >= 0 ? idx : 0;
-};
-
-/* ----------------------------- validators ------------------------------- */
-
-const RE_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const RE_AADHAAR = /^\d{12}$/;
-const RE_PAN = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
-const RE_DL = /^[A-Z]{2}[ -]?\d{2}[ -]?\d{4,11}$/i;
-const RE_IFSC = /^[A-Z]{4}0[A-Z0-9]{6}$/;
-const RE_UPI = /^[\w.\-]{2,256}@[a-zA-Z]{2,64}$/;
-const RE_VEHICLE = /^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{1,4}$/;
-const RE_URL = /^(https?:\/\/|blob:).+/i;
-
-const required = (label) => (val) => (val && String(val).trim() ? "" : `${label} is required`);
-const minLen = (label, n) => (val) => (String(val || "").trim().length >= n ? "" : `${label} must be at least ${n} characters`);
-const maxLen = (label, n) => (val) => (String(val || "").length <= n ? "" : `${label} is too long (max ${n})`);
-const matches = (re, msg) => (val) => (!val || re.test(String(val || "").trim()) ? "" : msg);
-const optionalMatches = (re, msg) => (val) =>
-  !val || !String(val).trim() ? "" : re.test(String(val).trim()) ? "" : msg;
-
-const compose = (...rules) => (val, ctx) => {
-  for (const rule of rules) {
-    const out = rule(val, ctx);
-    if (out) return out;
-  }
-  return "";
-};
-
-const VALIDATORS = {
-  basics: {
-    "basics.name": compose(required("Full name"), minLen("Full name", 2), maxLen("Full name", 80)),
-    "basics.email": optionalMatches(RE_EMAIL, "Enter a valid email address"),
-  },
-  kyc: {
-    "kyc.aadhaar.number": compose(
-      required("Aadhaar number"),
-      matches(RE_AADHAAR, "Aadhaar must be a 12-digit number"),
-    ),
-    "kyc.aadhaar.documentUrl": compose(
-      required("Aadhaar front photo"),
-      matches(RE_URL, "Please upload your Aadhaar front photo"),
-    ),
-    "kyc.pan.number": optionalMatches(RE_PAN, "PAN must look like ABCDE1234F"),
-    "kyc.pan.documentUrl": optionalMatches(RE_URL, "Please upload your PAN photo"),
-    "kyc.drivingLicense.number": compose(
-      required("Driving licence number"),
-      matches(RE_DL, "Enter a valid driving licence number"),
-    ),
-    "kyc.drivingLicense.documentUrl": compose(
-      required("Driving licence photo"),
-      matches(RE_URL, "Please upload your driving licence photo"),
-    ),
-  },
-  bank: {
-    "bank.mode": (_v, ctx) => {
-      const hasBank = ctx?.accountNumber && ctx?.ifscCode;
-      const hasUpi = ctx?.upiId;
-      return hasBank || hasUpi ? "" : "Provide a bank account or a UPI ID";
-    },
-    "bank.accountHolderName": (val, ctx) =>
-      ctx?.accountNumber ? compose(required("Account holder name"), minLen("Account holder name", 2))(val) : "",
-    "bank.accountNumber": (val, ctx) =>
-      ctx?.accountNumber || ctx?.ifscCode
-        ? compose(
-            required("Account number"),
-            matches(/^\d{9,18}$/, "Account number must be 9–18 digits"),
-          )(val)
-        : "",
-    "bank.ifscCode": (val, ctx) =>
-      ctx?.accountNumber || ctx?.ifscCode
-        ? compose(required("IFSC"), matches(RE_IFSC, "IFSC should look like HDFC0001234"))(val)
-        : "",
-    "bank.upiId": (val) => (val ? matches(RE_UPI, "UPI must look like name@bank")(val) : ""),
-  },
-  vehicle_food: {
-    "foodVehicle.type": required("Vehicle type"),
-    "foodVehicle.number": compose(
-      required("Vehicle number"),
-      matches(RE_VEHICLE, "Vehicle number must look like MH12AB1234"),
-    ),
-    "foodVehicle.make": required("Vehicle Make"),
-    "foodVehicle.model": required("Vehicle Model"),
-  },
-  vehicle_taxi: {
-    "taxiVehicle.type": required("Vehicle type"),
-    "taxiVehicle.number": compose(
-      required("Vehicle number"),
-      matches(RE_VEHICLE, "Vehicle number must look like MH12AB1234"),
-    ),
-    "taxiVehicle.make": required("Vehicle Make"),
-    "taxiVehicle.model": required("Vehicle Model"),
-  },
-  selfie: {
-    "selfie.selfieUrl": compose(required("Selfie"), matches(RE_URL, "Please take or upload a selfie")),
-  },
-  services: {
-    onboardingServices: (val) => (Array.isArray(val) && val.length > 0 ? "" : "Select at least one service"),
-  },
 };
 
 export default function OnboardingWizard() {
@@ -198,7 +115,7 @@ export default function OnboardingWizard() {
   const [state, setState] = useState({
     onboardingServices: [],
     foodVehicle: { type: "bike", number: "", make: "", model: "", color: "", photoUrl: "", rcUrl: "", insuranceUrl: "" },
-    taxiVehicle: { type: "", vehicleTypeId: "", name: "", number: "", make: "", model: "", color: "", photoUrl: "", rcUrl: "", insuranceUrl: "" },
+    taxiVehicle: { type: "", vehicleTypeId: "", name: "", number: "", make: "", model: "", color: "", photoUrl: "", rcUrl: "", insuranceUrl: "", commercialPermitUrl: "", pucUrl: "" },
     basics: { name: "", email: "", gender: "", city: "" },
     kyc: {
       aadhaar: { number: "", documentUrl: "", backDocumentUrl: "" },
@@ -222,6 +139,8 @@ export default function OnboardingWizard() {
   const [bootLoading, setBootLoading] = useState(true);
   const [stepLoading, setStepLoading] = useState(false);
   const [pendingUploads, setPendingUploads] = useState({});
+  const [resubmitMode, setResubmitMode] = useState(false);
+  const [rejectedServices, setRejectedServices] = useState([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -231,14 +150,28 @@ export default function OnboardingWizard() {
         if (cancelled) return;
         const data = res?.data?.data || res?.data || {};
 
-        if (data?.onboardingComplete) {
+        if (data?.onboardingLocked) {
           navigate("/driver/home", { replace: true });
           return;
         }
 
+        if (data?.onboardingComplete && !data?.resubmitAllowed) {
+          navigate("/driver/home", { replace: true });
+          return;
+        }
+
+        setResubmitMode(Boolean(data?.resubmitAllowed));
+        setRejectedServices(
+          Array.isArray(data?.rejectedServices)
+            ? data.rejectedServices
+            : [],
+        );
+
         const services = Array.isArray(data?.onboardingServices) ? data.onboardingServices : [];
-        const steps = buildSteps(services);
-        const stepIdx = resolveStepIndex(data?.onboardingStep, steps);
+        const steps = buildSteps(services, data?.resubmitAllowed ? data.rejectedServices || [] : null);
+        const stepIdx = data?.resubmitAllowed
+          ? 0
+          : resolveStepIndex(data?.onboardingStep, steps);
         setActiveIdx(stepIdx);
         setFurthestIdx(stepIdx);
 
@@ -274,7 +207,7 @@ export default function OnboardingWizard() {
           },
           taxiVehicle: {
             type: taxiVehicle.type || "",
-            vehicleTypeId: taxiVehicle.model || taxiVehicle.vehicleTypeId || "",
+            vehicleTypeId: taxiVehicle.vehicleTypeId || taxiVehicle.model || "",
             name: taxiVehicle.make || taxiVehicle.name || "",
             number: taxiVehicle.number || "",
             make: taxiVehicle.make || "",
@@ -283,6 +216,8 @@ export default function OnboardingWizard() {
             photoUrl: taxiVehicle.photoUrl || "",
             rcUrl: taxiVehicle.rcUrl || "",
             insuranceUrl: taxiVehicle.insuranceUrl || "",
+            commercialPermitUrl: taxiVehicle.commercialPermitUrl || "",
+            pucUrl: taxiVehicle.pucUrl || "",
           },
           basics: {
             name: data?.basics?.name || prev.basics.name,
@@ -375,30 +310,23 @@ export default function OnboardingWizard() {
     };
   }, [state.onboardingServices.includes("taxi")]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const steps = useMemo(() => buildSteps(state.onboardingServices), [state.onboardingServices]);
+  const steps = useMemo(
+    () => buildSteps(state.onboardingServices, resubmitMode ? rejectedServices : null),
+    [state.onboardingServices, resubmitMode, rejectedServices],
+  );
 
   useEffect(() => {
     setActiveIdx((idx) => Math.min(idx, Math.max(steps.length - 1, 0)));
     setFurthestIdx((idx) => Math.min(idx, Math.max(steps.length - 1, 0)));
   }, [steps.length]);
 
-  const current = steps[activeIdx] || steps[0];
+  const current = steps[activeIdx] ?? steps[0] ?? { key: "services", label: "Services", Icon: CheckCircle2 };
   const meta = STEP_META[current.key] || STEP_META.services;
   const progressPct = Math.round(((activeIdx + 1) / steps.length) * 100);
 
-  const validateStep = (stepKey) => {
-    const rules = VALIDATORS[stepKey] || {};
-    const ctx = state[stepKey];
-    const out = {};
-    for (const [path, rule] of Object.entries(rules)) {
-      const value = getByPath(state, path);
-      const err = rule(value, ctx);
-      if (err) out[path] = err;
-    }
-    return out;
-  };
+  const validateStep = (stepKey) => validateOnboardingStep(state, stepKey, { bankMode });
 
-  const stepErrors = useMemo(() => validateStep(current.key), [current.key, state]); // eslint-disable-line react-hooks/exhaustive-deps
+  const stepErrors = useMemo(() => validateStep(current.key), [current.key, state, bankMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const showErr = (path) => (touched[path] ? stepErrors[path] || errors[path] || "" : "");
 
@@ -444,12 +372,13 @@ export default function OnboardingWizard() {
   };
 
   const handleNext = async () => {
-    const rules = VALIDATORS[current.key] || {};
     const freshErrors = validateStep(current.key);
 
     setTouched((prev) => {
       const next = { ...prev };
-      Object.keys(rules).forEach((p) => { next[p] = true; });
+      Object.keys(freshErrors).forEach((p) => {
+        next[p] = true;
+      });
       return next;
     });
 
@@ -460,25 +389,29 @@ export default function OnboardingWizard() {
     }
 
     let finalState = { ...state };
-    const pathsToUpload = Object.keys(pendingUploads).filter((path) => path.startsWith(`${current.key}.`));
-    
-    if (pathsToUpload.length > 0) {
+    const stepMediaPaths = STEP_MEDIA_PATHS[current.key] || [];
+    const hasStepMedia = stepMediaPaths.length > 0;
+
+    if (hasStepMedia) {
       setStepLoading(true);
       try {
-        const uploadPromises = pathsToUpload.map(async (path) => {
-          const file = pendingUploads[path];
-          const url = await uploadDocumentFile(file);
-          return { path, url };
-        });
-        const results = await Promise.all(uploadPromises);
-        
-        const newPending = { ...pendingUploads };
-        results.forEach(({ path, url }) => {
-          finalState = setByPath(finalState, path, url);
-          delete newPending[path];
-        });
+        finalState = await prepareOnboardingStepState(
+          finalState,
+          current.key,
+          pendingUploads,
+          uploadAPI.uploadMedia,
+        );
         setState(finalState);
-        setPendingUploads(newPending);
+        setPendingUploads((prev) => {
+          const next = { ...prev };
+          stepMediaPaths.forEach((path) => {
+            delete next[path];
+          });
+          Object.keys(next).forEach((path) => {
+            if (path.startsWith(`${current.key}.`)) delete next[path];
+          });
+          return next;
+        });
       } catch (err) {
         toast.error(err.message || "Failed to upload files. Please try again.");
         setStepLoading(false);
@@ -504,24 +437,57 @@ export default function OnboardingWizard() {
         name: finalState.taxiVehicle.name,
         make: finalState.taxiVehicle.make,
         model: finalState.taxiVehicle.model,
+        rcUrl: finalState.taxiVehicle.rcUrl,
+        insuranceUrl: finalState.taxiVehicle.insuranceUrl,
+        commercialPermitUrl: finalState.taxiVehicle.commercialPermitUrl,
+        pucUrl: finalState.taxiVehicle.pucUrl,
       });
     } else if (current.key === "basics") {
       await persistAndAdvance(driverOnboardingAPI.saveBasics, finalState.basics);
     } else if (current.key === "kyc") {
       await persistAndAdvance(driverOnboardingAPI.saveKyc, {
-        aadhaar: finalState.kyc.aadhaar,
-        pan: finalState.kyc.pan.number ? finalState.kyc.pan : undefined,
-        drivingLicense: finalState.kyc.drivingLicense,
+        aadhaar: {
+          number: finalState.kyc.aadhaar.number,
+          documentUrl: finalState.kyc.aadhaar.documentUrl,
+          backDocumentUrl: finalState.kyc.aadhaar.backDocumentUrl || "",
+        },
+        pan: finalState.kyc.pan.number
+          ? {
+              number: finalState.kyc.pan.number,
+              documentUrl: finalState.kyc.pan.documentUrl,
+            }
+          : undefined,
+        drivingLicense: {
+          number: finalState.kyc.drivingLicense.number,
+          documentUrl: finalState.kyc.drivingLicense.documentUrl,
+        },
       });
     } else if (current.key === "bank") {
-      await persistAndAdvance(driverOnboardingAPI.saveBank, finalState.bank);
+      const bankPayload =
+        bankMode === "upi"
+          ? { upiId: finalState.bank.upiId }
+          : {
+              accountHolderName: finalState.bank.accountHolderName,
+              accountNumber: finalState.bank.accountNumber,
+              ifscCode: finalState.bank.ifscCode,
+              bankName: finalState.bank.bankName,
+              branchName: finalState.bank.branchName,
+            };
+      await persistAndAdvance(driverOnboardingAPI.saveBank, bankPayload);
     } else if (current.key === "selfie") {
       setStepLoading(true);
       try {
-        await driverOnboardingAPI.saveSelfie(finalState.selfie);
-        await driverOnboardingAPI.complete();
+        await driverOnboardingAPI.saveSelfie({ selfieUrl: finalState.selfie.selfieUrl });
+        const completeRes = await driverOnboardingAPI.complete(finalState.onboardingServices);
+        const wasResubmit = Boolean(
+          completeRes?.data?.data?.resubmitted ?? completeRes?.data?.resubmitted,
+        );
         invalidateDriverGuardCache();
-        toast.success("Onboarding submitted for approval");
+        toast.success(
+          wasResubmit || resubmitMode
+            ? "Application resubmitted for approval"
+            : "Onboarding submitted for approval",
+        );
         navigate("/driver/home", { replace: true });
       } catch (err) {
         toast.error(getApiErrorMessage(err, "Could not submit"));
@@ -537,12 +503,7 @@ export default function OnboardingWizard() {
   };
 
   if (bootLoading) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-[#0c1410] text-white">
-        <Loader2 className="w-7 h-7 animate-spin text-[#88c170]" />
-        <p className="text-sm text-white/50 font-medium">Loading your progress…</p>
-      </div>
-    );
+    return <DriverPageLoader label="Loading your progress…" />;
   }
 
   return (
@@ -552,7 +513,7 @@ export default function OnboardingWizard() {
         <div className="sticky top-0 z-20 shrink-0 bg-gradient-to-br from-[#1f3a23] via-[#2a4e2f] to-[#3a6b41] px-5 pt-[max(1.25rem,env(safe-area-inset-top))] pb-5">
           <div className="flex items-center justify-between mb-3">
             <p className="text-[11px] text-[#9bc78a] font-bold uppercase tracking-[0.2em]">
-              Partner Onboarding
+              {resubmitMode ? "Update & Resubmit" : "Partner Onboarding"}
             </p>
             <span className="text-[11px] font-bold text-white/60 bg-white/10 px-2.5 py-1 rounded-full">
               {activeIdx + 1}/{steps.length}
@@ -598,6 +559,12 @@ export default function OnboardingWizard() {
 
           <h2 className="text-xl font-black tracking-tight">{meta.title}</h2>
           <p className="text-[13px] text-white/60 mt-1 leading-relaxed">{meta.subtitle}</p>
+          {resubmitMode ? (
+            <p className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] font-medium text-amber-100">
+              Update the fields flagged by admin, then submit again. Your existing application will be
+              updated — no new account is created.
+            </p>
+          ) : null}
         </div>
 
         {/* Step body — scrollable middle */}
@@ -627,6 +594,21 @@ export default function OnboardingWizard() {
                     Icon={Bike}
                     title="Food Delivery"
                     subtitle="Deliver restaurant orders nearby"
+                  />
+                  <ServiceToggle
+                    checked={state.onboardingServices.includes("quickCommerce")}
+                    onChange={(checked) => {
+                      markTouched("onboardingServices");
+                      setState((s) => ({
+                        ...s,
+                        onboardingServices: checked
+                          ? Array.from(new Set([...s.onboardingServices, "quickCommerce"]))
+                          : s.onboardingServices.filter((x) => x !== "quickCommerce"),
+                      }));
+                    }}
+                    Icon={Bike}
+                    title="Quick Commerce"
+                    subtitle="Deliver groceries and quick-commerce orders"
                   />
                   <ServiceToggle
                     checked={state.onboardingServices.includes("taxi")}
@@ -665,7 +647,10 @@ export default function OnboardingWizard() {
                           <button
                             key={value}
                             type="button"
-                            onClick={() => setField("foodVehicle.type", value)}
+                            onClick={() => {
+                              setField("foodVehicle.type", value);
+                              markTouched("foodVehicle.type");
+                            }}
                             className={[
                               "flex flex-col items-center gap-1.5 p-4 rounded-xl border transition-all",
                               selected
@@ -684,7 +669,7 @@ export default function OnboardingWizard() {
                     label="Vehicle Number"
                     required
                     value={state.foodVehicle.number}
-                    onChange={(v) => setField("foodVehicle.number", v.toUpperCase().replace(/\s+/g, ""))}
+                    onChange={(v) => setField("foodVehicle.number", v.toUpperCase().replace(/\s+/g, "").slice(0, FIELD_LIMITS.vehicleNumber))}
                     onBlur={() => markTouched("foodVehicle.number")}
                     error={showErr("foodVehicle.number")}
                     placeholder="MH12AB1234"
@@ -693,7 +678,7 @@ export default function OnboardingWizard() {
                     label="Make / Brand"
                     required
                     value={state.foodVehicle.make}
-                    onChange={(v) => setField("foodVehicle.make", v)}
+                    onChange={(v) => setField("foodVehicle.make", v.slice(0, FIELD_LIMITS.vehicleMake))}
                     onBlur={() => markTouched("foodVehicle.make")}
                     error={showErr("foodVehicle.make")}
                     placeholder="e.g. Honda, Hero"
@@ -702,7 +687,7 @@ export default function OnboardingWizard() {
                     label="Model"
                     required
                     value={state.foodVehicle.model}
-                    onChange={(v) => setField("foodVehicle.model", v)}
+                    onChange={(v) => setField("foodVehicle.model", v.slice(0, FIELD_LIMITS.vehicleModel))}
                     onBlur={() => markTouched("foodVehicle.model")}
                     error={showErr("foodVehicle.model")}
                     placeholder="e.g. Activa, Splendor"
@@ -802,7 +787,7 @@ export default function OnboardingWizard() {
                     label="Vehicle Number"
                     required
                     value={state.taxiVehicle.number}
-                    onChange={(v) => setField("taxiVehicle.number", v.toUpperCase().replace(/\s+/g, ""))}
+                    onChange={(v) => setField("taxiVehicle.number", v.toUpperCase().replace(/\s+/g, "").slice(0, FIELD_LIMITS.vehicleNumber))}
                     onBlur={() => markTouched("taxiVehicle.number")}
                     error={showErr("taxiVehicle.number")}
                     placeholder="MH12AB1234"
@@ -811,7 +796,7 @@ export default function OnboardingWizard() {
                     label="Make / Brand"
                     required
                     value={state.taxiVehicle.make}
-                    onChange={(v) => setField("taxiVehicle.make", v)}
+                    onChange={(v) => setField("taxiVehicle.make", v.slice(0, FIELD_LIMITS.vehicleMake))}
                     onBlur={() => markTouched("taxiVehicle.make")}
                     error={showErr("taxiVehicle.make")}
                     placeholder="e.g. Maruti Suzuki, Tata"
@@ -820,10 +805,54 @@ export default function OnboardingWizard() {
                     label="Model"
                     required
                     value={state.taxiVehicle.model}
-                    onChange={(v) => setField("taxiVehicle.model", v)}
+                    onChange={(v) => setField("taxiVehicle.model", v.slice(0, FIELD_LIMITS.vehicleModel))}
                     onBlur={() => markTouched("taxiVehicle.model")}
                     error={showErr("taxiVehicle.model")}
                     placeholder="e.g. Swift Dzire, Indica"
+                  />
+                  <DocumentUpload
+                    label="RC document"
+                    hint="Registration certificate"
+                    value={state.taxiVehicle.rcUrl}
+                    error={showErr("taxiVehicle.rcUrl")}
+                    onChange={(preview, file) => {
+                      setField("taxiVehicle.rcUrl", preview);
+                      setPendingUploads((p) => ({ ...p, "taxiVehicle.rcUrl": file }));
+                      markTouched("taxiVehicle.rcUrl");
+                    }}
+                  />
+                  <DocumentUpload
+                    label="Insurance"
+                    hint="Valid vehicle insurance"
+                    value={state.taxiVehicle.insuranceUrl}
+                    error={showErr("taxiVehicle.insuranceUrl")}
+                    onChange={(preview, file) => {
+                      setField("taxiVehicle.insuranceUrl", preview);
+                      setPendingUploads((p) => ({ ...p, "taxiVehicle.insuranceUrl": file }));
+                      markTouched("taxiVehicle.insuranceUrl");
+                    }}
+                  />
+                  <DocumentUpload
+                    label="Commercial permit"
+                    hint="Mandatory for taxi operations"
+                    value={state.taxiVehicle.commercialPermitUrl}
+                    error={showErr("taxiVehicle.commercialPermitUrl")}
+                    onChange={(preview, file) => {
+                      setField("taxiVehicle.commercialPermitUrl", preview);
+                      setPendingUploads((p) => ({ ...p, "taxiVehicle.commercialPermitUrl": file }));
+                      markTouched("taxiVehicle.commercialPermitUrl");
+                    }}
+                  />
+                  <DocumentUpload
+                    label="PUC certificate"
+                    hint="Pollution under control certificate"
+                    value={state.taxiVehicle.pucUrl}
+                    error={showErr("taxiVehicle.pucUrl")}
+                    onChange={(preview, file) => {
+                      setField("taxiVehicle.pucUrl", preview);
+                      setPendingUploads((p) => ({ ...p, "taxiVehicle.pucUrl": file }));
+                      markTouched("taxiVehicle.pucUrl");
+                    }}
                   />
                 </>
               )}
@@ -834,7 +863,7 @@ export default function OnboardingWizard() {
                     label="Full Name"
                     required
                     value={state.basics.name}
-                    onChange={(v) => setField("basics.name", v)}
+                    onChange={(v) => setField("basics.name", v.slice(0, FIELD_LIMITS.name))}
                     onBlur={() => markTouched("basics.name")}
                     error={showErr("basics.name")}
                     placeholder="As per government ID"
@@ -842,7 +871,7 @@ export default function OnboardingWizard() {
                   <Field
                     label="Email"
                     value={state.basics.email}
-                    onChange={(v) => setField("basics.email", v)}
+                    onChange={(v) => setField("basics.email", v.trimStart().slice(0, FIELD_LIMITS.email))}
                     onBlur={() => markTouched("basics.email")}
                     error={showErr("basics.email")}
                     placeholder="you@example.com (optional)"
@@ -862,7 +891,7 @@ export default function OnboardingWizard() {
                   <Field
                     label="City"
                     value={state.basics.city}
-                    onChange={(v) => setField("basics.city", v)}
+                    onChange={(v) => setField("basics.city", v.slice(0, FIELD_LIMITS.city))}
                     placeholder="e.g. Indore (optional)"
                   />
                 </>
@@ -902,7 +931,7 @@ export default function OnboardingWizard() {
                       label="Licence Number"
                       required
                       value={state.kyc.drivingLicense.number}
-                      onChange={(v) => setField("kyc.drivingLicense.number", v.toUpperCase())}
+                      onChange={(v) => setField("kyc.drivingLicense.number", v.toUpperCase().slice(0, FIELD_LIMITS.dl))}
                       onBlur={() => markTouched("kyc.drivingLicense.number")}
                       error={showErr("kyc.drivingLicense.number")}
                       placeholder="e.g. MH12 20230012345"
@@ -946,7 +975,10 @@ export default function OnboardingWizard() {
                       <button
                         key={tab.key}
                         type="button"
-                        onClick={() => setBankMode(tab.key)}
+                        onClick={() => {
+                          setBankMode(tab.key);
+                          markTouched("bank.mode");
+                        }}
                         className={[
                           "flex-1 py-2.5 rounded-lg text-[12px] font-bold transition-all",
                           bankMode === tab.key
@@ -971,7 +1003,7 @@ export default function OnboardingWizard() {
                       <Field
                         label="Account Holder Name"
                         value={state.bank.accountHolderName}
-                        onChange={(v) => setField("bank.accountHolderName", v)}
+                        onChange={(v) => setField("bank.accountHolderName", v.slice(0, FIELD_LIMITS.accountHolderName))}
                         onBlur={() => markTouched("bank.accountHolderName")}
                         error={showErr("bank.accountHolderName")}
                         placeholder="As per bank passbook"
@@ -979,7 +1011,7 @@ export default function OnboardingWizard() {
                       <Field
                         label="Account Number"
                         value={state.bank.accountNumber}
-                        onChange={(v) => setField("bank.accountNumber", v.replace(/\D/g, ""))}
+                        onChange={(v) => setField("bank.accountNumber", v.replace(/\D/g, "").slice(0, FIELD_LIMITS.accountNumber))}
                         onBlur={() => {
                           markTouched("bank.accountNumber");
                           markTouched("bank.mode");
@@ -1002,7 +1034,7 @@ export default function OnboardingWizard() {
                       <Field
                         label="Bank Name"
                         value={state.bank.bankName}
-                        onChange={(v) => setField("bank.bankName", v)}
+                        onChange={(v) => setField("bank.bankName", v.slice(0, FIELD_LIMITS.bankName))}
                         placeholder="e.g. HDFC Bank (optional)"
                       />
                     </SectionCard>
@@ -1011,7 +1043,7 @@ export default function OnboardingWizard() {
                       <Field
                         label="UPI ID"
                         value={state.bank.upiId}
-                        onChange={(v) => setField("bank.upiId", v.trim())}
+                        onChange={(v) => setField("bank.upiId", v.trim().slice(0, FIELD_LIMITS.upiId))}
                         onBlur={() => {
                           markTouched("bank.upiId");
                           markTouched("bank.mode");
@@ -1070,7 +1102,7 @@ export default function OnboardingWizard() {
               <Loader2 className="w-5 h-5 animate-spin" />
             ) : (
               <>
-                <span>{activeIdx === steps.length - 1 ? "Submit for Approval" : "Save & Continue"}</span>
+                <span>{activeIdx === steps.length - 1 ? (resubmitMode ? "Resubmit for Approval" : "Submit for Approval") : "Save & Continue"}</span>
                 <ChevronRight className="w-5 h-5" />
               </>
             )}
@@ -1088,35 +1120,7 @@ function formatAadhaar(digits) {
   return clean.replace(/(\d{4})(?=\d)/g, "$1 ").trim();
 }
 
-function getByPath(obj, path) {
-  return path.split(".").reduce((acc, key) => (acc == null ? acc : acc[key]), obj);
-}
-
-function setByPath(obj, path, value) {
-  const keys = path.split(".");
-  const clone = Array.isArray(obj) ? [...obj] : { ...obj };
-  let cursor = clone;
-  for (let i = 0; i < keys.length - 1; i += 1) {
-    const key = keys[i];
-    const existing = cursor[key];
-    cursor[key] = Array.isArray(existing) ? [...existing] : { ...(existing || {}) };
-    cursor = cursor[key];
-  }
-  cursor[keys[keys.length - 1]] = value;
-  return clone;
-}
-
-async function uploadDocumentFile(file) {
-  if (file.size > 5 * 1024 * 1024) {
-    throw new Error("Image too large. Max 5 MB.");
-  }
-  const response = await uploadAPI.uploadMedia(file, { folder: UPLOAD_FOLDER });
-  const url = response?.data?.data?.url || response?.data?.url || "";
-  if (!url) throw new Error("Upload failed. Please try again.");
-  return url;
-}
-
-function Field({ label, value, onChange, onBlur, placeholder, type = "text", inputMode, error, required: isRequired }) {
+function Field({ label, value, onChange, onBlur, placeholder, type = "text", inputMode, error, required: isRequired, maxLength }) {
   const invalid = Boolean(error);
   return (
     <div>
@@ -1131,6 +1135,7 @@ function Field({ label, value, onChange, onBlur, placeholder, type = "text", inp
         onChange={(e) => onChange(e.target.value)}
         onBlur={onBlur}
         placeholder={placeholder}
+        maxLength={maxLength}
         aria-invalid={invalid}
         className={[
           "w-full h-12 bg-white/5 rounded-xl px-4 text-white font-semibold outline-none placeholder:text-white/30 transition-colors",
@@ -1192,18 +1197,25 @@ function DocumentUpload({
 }) {
   const inputRef = useRef(null);
   const cameraRef = useRef(null);
-  const [uploading, setUploading] = useState(false);
+  const [validating, setValidating] = useState(false);
   const invalid = Boolean(error);
   const isSelfie = variant === "selfie";
+  const busy = validating;
 
-  const handleFile = (file) => {
+  const handleFile = async (file) => {
     if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      toast.error("Please select an image file");
-      return;
+    setValidating(true);
+    try {
+      const check = await validateOnboardingImageFile(file);
+      if (!check.ok) {
+        toast.error(check.message);
+        return;
+      }
+      const url = URL.createObjectURL(file);
+      onChange(url, file);
+    } finally {
+      setValidating(false);
     }
-    const url = URL.createObjectURL(file);
-    onChange(url, file);
   };
 
   return (
@@ -1224,7 +1236,7 @@ function DocumentUpload({
           <div className="absolute bottom-0 left-0 right-0 p-3 flex gap-2">
             <button
               type="button"
-              disabled={uploading}
+              disabled={busy}
               onClick={() => (capture ? cameraRef : inputRef).current?.click()}
               className="flex-1 h-9 rounded-lg bg-white/20 backdrop-blur text-white text-[11px] font-bold hover:bg-white/30 transition-colors"
             >
@@ -1232,7 +1244,7 @@ function DocumentUpload({
             </button>
             <button
               type="button"
-              disabled={uploading}
+              disabled={busy}
               onClick={() => onChange("", null)}
               className="h-9 px-3 rounded-lg bg-red-500/80 backdrop-blur text-white text-[11px] font-bold hover:bg-red-500 transition-colors"
             >
@@ -1246,7 +1258,7 @@ function DocumentUpload({
       ) : (
         <button
           type="button"
-          disabled={uploading}
+          disabled={busy}
           onClick={() => (capture ? cameraRef : inputRef).current?.click()}
           className={[
             "w-full rounded-xl border-2 border-dashed transition-all flex flex-col items-center justify-center gap-2",
@@ -1254,10 +1266,10 @@ function DocumentUpload({
             invalid
               ? "border-red-400/50 bg-red-400/5"
               : "border-white/15 bg-white/[0.02] hover:border-[#88c170]/50 hover:bg-[#88c170]/5",
-            uploading ? "opacity-60" : "",
+            busy ? "opacity-60" : "",
           ].join(" ")}
         >
-          {uploading ? (
+          {busy ? (
             <Loader2 className="w-6 h-6 animate-spin text-[#88c170]" />
           ) : isSelfie ? (
             <>
@@ -1272,7 +1284,7 @@ function DocumentUpload({
               <span className="text-[11px] font-bold text-white/50">Tap to upload photo</span>
             </>
           )}
-          {hint && !uploading && (
+          {hint && !busy && (
             <span className="text-[10px] text-white/30 px-4 text-center">{hint}</span>
           )}
         </button>
@@ -1281,7 +1293,7 @@ function DocumentUpload({
       {!value && !isSelfie && (
         <button
           type="button"
-          disabled={uploading}
+          disabled={busy}
           onClick={() => cameraRef.current?.click()}
           className="mt-2 w-full flex items-center justify-center gap-1.5 py-2 text-[11px] font-bold text-[#88c170] hover:text-[#9ed086]"
         >
@@ -1295,21 +1307,21 @@ function DocumentUpload({
       <input
         ref={inputRef}
         type="file"
-        accept="image/*"
+        accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
         className="hidden"
         onChange={(e) => {
-          handleFile(e.target.files?.[0]);
+          void handleFile(e.target.files?.[0]);
           e.target.value = "";
         }}
       />
       <input
         ref={cameraRef}
         type="file"
-        accept="image/*"
+        accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
         capture={capture || "environment"}
         className="hidden"
         onChange={(e) => {
-          handleFile(e.target.files?.[0]);
+          void handleFile(e.target.files?.[0]);
           e.target.value = "";
         }}
       />

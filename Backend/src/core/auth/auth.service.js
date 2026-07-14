@@ -103,6 +103,11 @@ export const requestUserOtp = async (phone) => {
     throw new ValidationError("Phone is required");
   }
 
+  const user = await FoodUser.findOne({ phone });
+  if (user && user.isActive === false) {
+    throw new AuthError("Your account has been deactivated. Please contact support.");
+  }
+
   const otp = await createOrUpdateOtp(phone);
   // TODO: integrate SMS provider here
   const shouldExposeOtp =

@@ -42,7 +42,8 @@ import {
 import {
     createRestaurantFoodController,
     bulkCreateRestaurantFoodController,
-    updateRestaurantFoodController
+    updateRestaurantFoodController,
+    deleteRestaurantFoodController,
 } from '../controllers/restaurantFood.controller.js';
 import {
     listAddonsController,
@@ -184,6 +185,7 @@ router.get('/restaurants/:id/addons', cacheResponse(600, 'restaurant_addons'), g
 router.post('/foods', authMiddleware, requireRestaurant, invMenu, createRestaurantFoodController);
 router.post('/foods/bulk', authMiddleware, requireRestaurant, invMenu, bulkCreateRestaurantFoodController);
 router.patch('/foods/:id', authMiddleware, requireRestaurant, invMenu, updateRestaurantFoodController);
+router.delete('/foods/:id', authMiddleware, requireRestaurant, invMenu, deleteRestaurantFoodController);
 
 router.get('/addons', authMiddleware, requireRestaurant, listAddonsController);
 router.post('/addons', authMiddleware, requireRestaurant, invMenu, createAddonController);

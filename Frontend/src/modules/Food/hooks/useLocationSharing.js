@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react';
 import io from 'socket.io-client';
 import { API_BASE_URL } from '@food/api/config';
-import { writeDeliveryLocation, writeOrderTracking } from '@food/realtimeTracking';
 
 function calculateDistance(lat1, lng1, lat2, lng2) {
   const R = 6371000;
@@ -19,12 +18,6 @@ export const useLocationSharing = (orderId, enabled = false) => {
   const socketRef = useRef(null);
   const watchIdRef = useRef(null);
   const isSharingRef = useRef(false);
-  const deliveryIdRef = useRef(
-    localStorage.getItem('deliveryPartnerId') ||
-      localStorage.getItem('deliveryPartnerMongoId') ||
-      localStorage.getItem('deliveryBoyId') ||
-      '',
-  );
 
   const backendUrl = API_BASE_URL ? API_BASE_URL.replace('/api', '') : '';
 
@@ -79,33 +72,11 @@ export const useLocationSharing = (orderId, enabled = false) => {
             lat: latitude,
             lng: longitude,
             heading: heading || 0,
+            speed: speed || 0,
+            accuracy: accuracy || 0,
             timestamp: now
           });
         }
-
-        const deliveryId = String(deliveryIdRef.current || '').trim();
-        if (deliveryId) {
-          writeDeliveryLocation({
-            deliveryId,
-            lat: latitude,
-            lng: longitude,
-            heading: heading || 0,
-            speed: speed || 0,
-            accuracy: accuracy || 0,
-            isOnline: true,
-            activeOrderId: orderId,
-            timestamp: now
-          }).catch(() => {});
-        }
-
-        writeOrderTracking(orderId, {
-          lat: latitude,
-          lng: longitude,
-          heading: heading || 0,
-          speed: speed || 0,
-          status: 'in_transit',
-          timestamp: now
-        }).catch(() => {});
       },
       () => {},
       {

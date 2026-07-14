@@ -8,6 +8,8 @@ import { Label } from "@food/components/ui/label"
 import { Button } from "@food/components/ui/button"
 import { adminAPI, uploadAPI, zoneAPI } from "@food/api"
 import { toast } from "sonner"
+import OutletTimingsEditor from "@food/components/admin/OutletTimingsEditor"
+import { getDefaultDays } from "@food/utils/outletTimingsUtils"
 import { EMAIL_REGEX } from "@/shared/utils/emailValidation"
 import { invalidateApprovedRestaurantsCache } from "@food/utils/adminRestaurantCache"
 const debugLog = (...args) => {}
@@ -231,9 +233,7 @@ export default function AddRestaurant() {
     profileImage: null,
     cuisines: [],
     estimatedDeliveryTime: "",
-    openingTime: "",
-    closingTime: "",
-    openDays: [],
+    outletTimings: getDefaultDays(),
   })
 
   // Step 3: Documents
@@ -475,18 +475,8 @@ export default function AddRestaurant() {
     if (!step2.profileImage) errors.push("Restaurant profile image is required")
     if (!step2.cuisines || step2.cuisines.length === 0) errors.push("Please select at least one cuisine")
     if (!step2.estimatedDeliveryTime?.trim()) errors.push("Estimated delivery time is required")
-    if (!step2.openingTime?.trim()) errors.push("Opening time is required")
-    if (!step2.closingTime?.trim()) errors.push("Closing time is required")
-    const openingMinutes = timeStringToMinutes(step2.openingTime)
-    const closingMinutes = timeStringToMinutes(step2.closingTime)
-    if (openingMinutes !== null && closingMinutes !== null) {
-      if (openingMinutes === closingMinutes) {
-        errors.push("Opening time and closing time cannot be same")
-      } else if (closingMinutes < openingMinutes) {
-        errors.push("Closing time cannot be less than opening time")
-      }
-    }
-    if (!step2.openDays || step2.openDays.length === 0) errors.push("Please select at least one open day")
+    const hasOpenDay = Object.values(step2.outletTimings || {}).some((slot) => slot?.isOpen !== false)
+    if (!hasOpenDay) errors.push("At least one day must be open")
     return errors
   }
 
@@ -629,9 +619,7 @@ export default function AddRestaurant() {
         profileImage: profileImageData,
         cuisines: step2.cuisines,
         estimatedDeliveryTime: step2.estimatedDeliveryTime,
-        openingTime: step2.openingTime,
-        closingTime: step2.closingTime,
-        openDays: step2.openDays,
+        outletTimings: step2.outletTimings,
         // Step 3
         panNumber: step3.panNumber,
         nameOnPan: step3.nameOnPan,
@@ -1348,61 +1336,10 @@ export default function AddRestaurant() {
           </div>
         </div>
 
-        <div className="space-y-3">
-          <Label className="text-xs text-gray-700">Outlet timings*</Label>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <Label className="text-xs text-gray-700 mb-1 block">Opening time</Label>
-              <Input
-                type="time"
-                value={step2.openingTime || ""}
-                onChange={(e) => {
-                  const nextOpening = e.target.value
-                  const closingMinutes = timeStringToMinutes(step2.closingTime)
-                  const openingMinutes = timeStringToMinutes(nextOpening)
-                  if (openingMinutes !== null && closingMinutes !== null) {
-                    if (openingMinutes === closingMinutes) {
-                      toast.error("Opening time and closing time cannot be same")
-                      return
-                    }
-                    if (closingMinutes < openingMinutes) {
-                      toast.error("Closing time cannot be less than opening time")
-                      return
-                    }
-                  }
-                  setStep2({ ...step2, openingTime: nextOpening })
-                }}
-                autoComplete="off"
-                className="bg-white text-sm"
-              />
-            </div>
-            <div>
-              <Label className="text-xs text-gray-700 mb-1 block">Closing time</Label>
-              <Input
-                type="time"
-                value={step2.closingTime || ""}
-                onChange={(e) => {
-                  const nextClosing = e.target.value
-                  const openingMinutes = timeStringToMinutes(step2.openingTime)
-                  const closingMinutes = timeStringToMinutes(nextClosing)
-                  if (openingMinutes !== null && closingMinutes !== null) {
-                    if (openingMinutes === closingMinutes) {
-                      toast.error("Opening time and closing time cannot be same")
-                      return
-                    }
-                    if (closingMinutes < openingMinutes) {
-                      toast.error("Closing time cannot be less than opening time")
-                      return
-                    }
-                  }
-                  setStep2({ ...step2, closingTime: nextClosing })
-                }}
-                autoComplete="off"
-                className="bg-white text-sm"
-              />
-            </div>
-          </div>
-        </div>
+        <OutletTimingsEditor
+          value={step2.outletTimings}
+          onChange={(outletTimings) => setStep2((prev) => ({ ...prev, outletTimings }))}
+        />
 
         <div>
           <Label className="text-xs text-gray-700">Estimated delivery time*</Label>
@@ -1413,34 +1350,6 @@ export default function AddRestaurant() {
             className="mt-1 bg-white text-sm"
             placeholder="e.g., 25-30 mins"
           />
-        </div>
-
-        <div className="space-y-2">
-          <Label className="text-xs text-gray-700 flex items-center gap-1.5">
-            <Calendar className="w-3.5 h-3.5 text-gray-800" />
-            <span>Open days*</span>
-          </Label>
-          <div className="mt-1 grid grid-cols-7 gap-1.5 sm:gap-2">
-            {daysOfWeek.map((day) => {
-              const active = step2.openDays.includes(day)
-              return (
-                <button
-                  key={day}
-                  type="button"
-                  onClick={() => {
-                    setStep2((prev) => {
-                      const exists = prev.openDays.includes(day)
-                      if (exists) return { ...prev, openDays: prev.openDays.filter((d) => d !== day) }
-                      return { ...prev, openDays: [...prev.openDays, day] }
-                    })
-                  }}
-                  className={`aspect-square flex items-center justify-center rounded-md text-[11px] font-medium ${active ? "bg-black text-white" : "bg-gray-100 text-gray-800"}`}
-                >
-                  {day.charAt(0)}
-                </button>
-              )
-            })}
-          </div>
         </div>
       </section>
     </div>

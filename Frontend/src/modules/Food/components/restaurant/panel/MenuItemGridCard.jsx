@@ -61,6 +61,11 @@ export default function MenuItemGridCard({
           <span className={`inline-flex w-fit rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${approvalMeta.className}`}>
             {approvalMeta.label}
           </span>
+          {item.categoryDisabled ? (
+            <span className="inline-flex w-fit rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-700">
+              {item.categoryDisabledByAdmin ? "Category disabled by admin" : "Category disabled"}
+            </span>
+          ) : null}
         </div>
 
         {item.description && (

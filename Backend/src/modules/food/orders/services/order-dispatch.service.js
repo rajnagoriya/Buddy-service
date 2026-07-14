@@ -10,10 +10,11 @@ import { logger } from '../../../../utils/logger.js';
 import { config } from '../../../../config/env.js';
 import { getIO, rooms } from '../../../../config/socket.js';
 import { addOrderJob } from '../../../../queues/producers/order.producer.js';
+import { haversineKm } from '../../../../core/location/haversine.util.js';
+import { getRoadDistanceBatch } from '../../../../core/location/distance.service.js';
 import {
   buildDeliverySocketPayload,
   buildOrderIdentityFilter,
-  haversineKm,
   notifyOwnerSafely,
   notifyOwnersSafely,
 } from './order.helpers.js';
@@ -242,12 +243,27 @@ async function listNearbyOnlineDeliveryPartners(
 
     const d = haversineKm(rLat, rLng, p.lastLat, p.lastLng);
     if (Number.isFinite(d) && d <= maxKm) {
-      scored.push({ partnerId: p._id, distanceKm: d, status: p.status });
+      scored.push({ partnerId: p._id, distanceKm: d, status: p.status, lat: p.lastLat, lng: p.lastLng });
     }
   }
 
   scored.sort((a, b) => a.distanceKm - b.distanceKm);
-  const picked = scored.slice(0, Math.max(1, limit));
+  let picked = scored.slice(0, Math.max(1, limit));
+
+  // Refine the already stale-filtered, straight-line-sorted shortlist with real
+  // road distance. Bounded to `picked.length` (<= limit, default 25) so this
+  // never balloons into a Distance Matrix call per online partner.
+  const withCoords = picked.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  if (withCoords.length > 0) {
+    const roadResults = await getRoadDistanceBatch(
+      { lat: rLat, lng: rLng },
+      withCoords.map((p) => ({ lat: p.lat, lng: p.lng })),
+    );
+    withCoords.forEach((p, i) => {
+      if (roadResults[i]) p.distanceKm = roadResults[i].meters / 1000;
+    });
+    picked = picked.slice().sort((a, b) => a.distanceKm - b.distanceKm);
+  }
 
   if (picked.length === 0) {
     const anyOnline = await FoodDeliveryPartner.find({

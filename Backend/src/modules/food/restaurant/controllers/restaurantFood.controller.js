@@ -1,5 +1,10 @@
 import { sendResponse, sendError } from '../../../../utils/response.js';
-import { createRestaurantFood, updateRestaurantFood, bulkCreateFood } from '../services/restaurantFood.service.js';
+import {
+    createRestaurantFood,
+    updateRestaurantFood,
+    bulkCreateFood,
+    deleteRestaurantFood,
+} from '../services/restaurantFood.service.js';
 
 export const createRestaurantFoodController = async (req, res, next) => {
     try {
@@ -21,6 +26,17 @@ export const updateRestaurantFoodController = async (req, res, next) => {
         next(error);
     }
 };
+export const deleteRestaurantFoodController = async (req, res, next) => {
+    try {
+        const restaurantId = req.user?.userId;
+        const result = await deleteRestaurantFood(restaurantId, req.params.id);
+        if (!result) return sendError(res, 404, 'Food not found');
+        return sendResponse(res, 200, 'Food deleted successfully', result);
+    } catch (error) {
+        next(error);
+    }
+};
+
 export const bulkCreateRestaurantFoodController = async (req, res, next) => {
     try {
         const restaurantId = req.user?.userId;

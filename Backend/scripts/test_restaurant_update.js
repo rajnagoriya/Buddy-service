@@ -59,32 +59,27 @@ async function run() {
             }
         });
 
-        // Fetch fresh document from DB to check live values vs pendingProfile values
+        // Fetch fresh document from DB to check live values
         const dbDoc = await FoodRestaurant.findById(restaurant._id).lean();
 
         console.log('\nResults after update request:');
         console.log(`Status: ${dbDoc.status} (expected: approved)`);
-        console.log(`Profile Review Status: ${dbDoc.profileReviewStatus} (expected: pending)`);
-        console.log(`Live location coordinates: ${dbDoc.location.coordinates} (expected: 77.5946,12.9716 - unchanged)`);
-        console.log(`Live city: ${dbDoc.city} (expected: Bangalore - unchanged)`);
-        console.log(`Pending location:`, dbDoc.pendingProfile?.location);
-        console.log(`Pending zoneId:`, dbDoc.pendingProfile?.zoneId);
-        console.log(`Pending city:`, dbDoc.pendingProfile?.city);
+        console.log(`Profile Review Status: ${dbDoc.profileReviewStatus} (expected: null/undefined)`);
+        console.log(`Live location coordinates: ${dbDoc.location.coordinates} (expected: 80.2707, 13.0827 - updated)`);
+        console.log(`Live city: ${dbDoc.city} (expected: Chennai - updated)`);
 
-        if (dbDoc.profileReviewStatus !== 'pending') {
-            throw new Error(`Assertion failed: profileReviewStatus is not pending, got: ${dbDoc.profileReviewStatus}`);
+        if (dbDoc.profileReviewStatus && dbDoc.profileReviewStatus === 'pending') {
+            throw new Error(`Assertion failed: profileReviewStatus is pending but expected direct update`);
         }
-        if (dbDoc.location.coordinates[0] === 80.2707) {
-            throw new Error('Assertion failed: Live coordinates were updated directly!');
+        if (dbDoc.location.coordinates[0] !== 80.2707) {
+            throw new Error('Assertion failed: Live coordinates were not updated directly!');
         }
-        if (!dbDoc.pendingProfile?.location) {
-            throw new Error('Assertion failed: Location did not save to pendingProfile!');
+        if (dbDoc.city !== 'Chennai') {
+            throw new Error('Assertion failed: City was not updated directly!');
         }
 
-        console.log('\n--- Approving the profile change request (Super Admin action) ---');
-        await approveRestaurant(restaurant._id);
-
-        const approvedDoc = await FoodRestaurant.findById(restaurant._id).lean();
+        console.log('\n--- Bypassed approval (applied directly) ---');
+        const approvedDoc = dbDoc;
         console.log('\nResults after admin approval:');
         console.log(`Status: ${approvedDoc.status} (expected: approved)`);
         console.log(`Profile Review Status: ${approvedDoc.profileReviewStatus} (expected: undefined/null)`);

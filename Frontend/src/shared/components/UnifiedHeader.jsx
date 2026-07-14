@@ -198,7 +198,13 @@ export default function UnifiedHeader({
                     )}
                   </div>
                 </PopoverTrigger>
-                <PopoverContent className="w-80 p-0 overflow-hidden border-none shadow-2xl rounded-2xl mt-2" align="end">
+                <PopoverContent 
+                  className="w-[92vw] sm:w-[380px] p-0 overflow-hidden border-none shadow-2xl rounded-2xl z-[100]" 
+                  align="end" 
+                  side="bottom"
+                  sideOffset={16}
+                  collisionPadding={16}
+                >
                   <div className="bg-white">
                     <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
                       <h3 className="font-bold text-gray-900 flex items-center gap-2 text-sm">
@@ -206,7 +212,7 @@ export default function UnifiedHeader({
                         {unreadCount > 0 && <Badge className="bg-rose-500 text-white border-none text-[10px] h-4">{unreadCount}</Badge>}
                       </h3>
                     </div>
-                    <div className="max-h-80 overflow-y-auto">
+                    <div className="max-h-[65vh] sm:max-h-[400px] overflow-y-auto overscroll-contain">
                       {mergedNotifications.length > 0 ? (
                         mergedNotifications.slice(0, 5).map((notif) => {
                           const Icon = ICON_MAP[notif.icon] || Bell;

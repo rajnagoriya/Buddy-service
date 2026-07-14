@@ -32,13 +32,11 @@ export async function listPendingFoodApprovals(query = {}) {
         .sort({ requestedAt: -1, createdAt: -1 })
         .skip(skip)
         .limit(limit)
-        .select('restaurantId categoryName name price variants image foodType approvalStatus requestedAt createdAt')
         .lean();
 
     const addonList = await FoodAddon.find({ approvalStatus: 'pending' })
         .sort({ requestedAt: -1, createdAt: -1 })
         .limit(limit)
-        .select('restaurantId draft isAvailable requestedAt createdAt')
         .lean();
 
     const restaurantIds = Array.from(new Set([
@@ -58,17 +56,31 @@ export async function listPendingFoodApprovals(query = {}) {
         type: 'food',
         restaurantName: restaurantMap.get(String(f.restaurantId)) || 'Unknown Restaurant',
         restaurantId: toRestaurantDisplayId(f.restaurantId),
+        restaurantMongoId: f.restaurantId ? String(f.restaurantId) : '',
         category: f.categoryName || '',
+        categoryName: f.categoryName || '',
+        categoryId: f.categoryId ? String(f.categoryId) : '',
         itemName: f.name,
+        name: f.name,
+        description: f.description || '',
         foodType: f.foodType || 'Non-Veg',
         sectionName: f.categoryName || '',
         subsectionName: '',
         approvalStatus: f.approvalStatus || 'pending',
+        basePrice: Number(f.price) || 0,
         price: getFoodDisplayPrice(f),
         variants: serializeFoodVariants(f.variants),
         image: f.image || '',
+        imagePublicId: f.imagePublicId || '',
         images: f.image ? [f.image] : [],
+        isAvailable: f.isAvailable !== false,
+        preparationTime: f.preparationTime || '',
+        rejectionReason: f.rejectionReason || '',
         requestedAt: f.requestedAt || f.createdAt,
+        approvedAt: f.approvedAt || null,
+        rejectedAt: f.rejectedAt || null,
+        createdAt: f.createdAt || null,
+        updatedAt: f.updatedAt || null,
         isActionable: (f.approvalStatus || 'pending') === 'pending'
     }));
 
@@ -79,18 +91,31 @@ export async function listPendingFoodApprovals(query = {}) {
         type: 'addon',
         restaurantName: restaurantMap.get(String(a.restaurantId)) || 'Unknown Restaurant',
         restaurantId: toRestaurantDisplayId(a.restaurantId),
+        restaurantMongoId: a.restaurantId ? String(a.restaurantId) : '',
         category: 'Add-on',
         itemName: a.draft?.name || 'Unnamed Add-on',
+        name: a.draft?.name || 'Unnamed Add-on',
         foodType: 'Add-on',
         sectionName: 'Add-on',
         subsectionName: '',
-        approvalStatus: 'pending',
+        approvalStatus: a.approvalStatus || 'pending',
+        basePrice: Number(a.draft?.price) || 0,
         price: a.draft?.price ?? 0,
+        draft: a.draft || null,
+        published: a.published || null,
         image: a.draft?.image || (a.draft?.images && a.draft.images[0]) || '',
-        images: a.draft?.images || (a.draft?.image ? [a.draft.image] : []),
+        images: Array.isArray(a.draft?.images) && a.draft.images.length
+            ? a.draft.images
+            : (a.draft?.image ? [a.draft.image] : []),
+        description: a.draft?.description || '',
+        isAvailable: a.isAvailable !== false,
+        rejectionReason: a.rejectionReason || '',
         requestedAt: a.requestedAt || a.createdAt,
-        isActionable: true,
-        description: a.draft?.description || ''
+        approvedAt: a.approvedAt || null,
+        rejectedAt: a.rejectedAt || null,
+        createdAt: a.createdAt || null,
+        updatedAt: a.updatedAt || null,
+        isActionable: true
     }));
 
     const allRequests = [...foodRequests, ...addonRequests].sort((a, b) => 

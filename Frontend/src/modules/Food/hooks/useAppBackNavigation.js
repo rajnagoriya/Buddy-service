@@ -44,7 +44,17 @@ const resolveBackPath = ({ pathname, search, state }) => {
       normalizedPath,
     )
   ) {
-    return explicitBackPath || "/food/user/profile"
+    return explicitBackPath || "/food/user/profile/about"
+  }
+
+  if (
+    normalizedPath === "/terms" ||
+    normalizedPath === "/privacy" ||
+    normalizedPath === "/refund" ||
+    normalizedPath === "/shipping" ||
+    normalizedPath === "/cancellation"
+  ) {
+    return explicitBackPath || "/user/auth/login"
   }
 
   if (normalizedPath === "/user/wallet") {

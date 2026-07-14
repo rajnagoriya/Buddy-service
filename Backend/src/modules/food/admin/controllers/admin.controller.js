@@ -1356,6 +1356,19 @@ export async function getContactMessages(req, res, next) {
     }
 }
 
+export async function getDeliveryJoinRequestDetail(req, res, next) {
+    try {
+        const { getJoinRequestDetail } = await import('../../../../core/identity/driverOnboardingAdmin.service.js');
+        const detail = await getJoinRequestDetail(req.params.identityId);
+        if (!detail) {
+            return res.status(404).json({ success: false, message: 'Join request not found' });
+        }
+        res.status(200).json({ success: true, data: detail });
+    } catch (error) {
+        next(error);
+    }
+}
+
 export async function getDeliveryPartnerById(req, res, next) {
     try {
         const delivery = await adminService.getDeliveryPartnerById(req.params.id);
@@ -1396,7 +1409,8 @@ export async function updateDeliveryPartner(req, res, next) {
 
 export async function approveDeliveryPartner(req, res, next) {
     try {
-        const partner = await adminService.approveDeliveryPartner(req.params.id);
+        const service = req.body?.service || 'food';
+        const partner = await adminService.approveDeliveryPartner(req.params.id, service);
         if (!partner) {
             return res.status(404).json({
                 success: false,
@@ -1416,7 +1430,14 @@ export async function approveDeliveryPartner(req, res, next) {
 export async function rejectDeliveryPartner(req, res, next) {
     try {
         const reason = req.body?.reason != null ? String(req.body.reason).trim() : '';
-        const partner = await adminService.rejectDeliveryPartner(req.params.id, reason);
+        if (!reason) {
+            return res.status(400).json({
+                success: false,
+                message: 'Rejection reason is required',
+            });
+        }
+        const service = req.body?.service || 'food';
+        const partner = await adminService.rejectDeliveryPartner(req.params.id, reason, service);
         if (!partner) {
             return res.status(404).json({
                 success: false,
