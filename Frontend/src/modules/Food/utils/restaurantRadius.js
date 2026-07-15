@@ -3,7 +3,7 @@ import { calculateDistance } from "@food/utils/common"
 export const CHAIN_RESTAURANT_RADIUS_KM = 5
 
 export const CHAIN_RADIUS_VALIDATION_MESSAGE =
-  "This restaurant is outside the allowed 5 KM radius of the last selected restaurant. To place a single order, please select a nearby restaurant."
+  "This restaurant is outside the allowed 5 KM road distance of the last selected restaurant. To place a single order, please select a nearby restaurant."
 
 export function extractLatLngFromItem(item) {
   if (!item || typeof item !== "object") return null

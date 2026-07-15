@@ -92,10 +92,20 @@ function RestaurantGlobalNotificationListener() {
 
 export default function App() {
   const location = useLocation()
+  const pushModule =
+    location.pathname.includes("/restaurant")
+      ? "restaurant"
+      : location.pathname.includes("/delivery")
+        ? "delivery"
+        : location.pathname.includes("/admin")
+          ? "admin"
+          : "user"
 
+  // Register once per auth module — not on every cart/page navigation.
   useEffect(() => {
+    if (pushModule === "admin") return
     registerWebPushForCurrentModule(location.pathname)
-  }, [location.pathname])
+  }, [pushModule])
 
   return (
     <AuthInitializer>

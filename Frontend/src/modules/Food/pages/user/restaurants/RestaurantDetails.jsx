@@ -1437,7 +1437,7 @@ function RestaurantDetailsContent() {
   }, [selectedItem])
 
   // Helper function to update item quantity in both local state and cart
-  const updateItemQuantity = (item, newQuantity, event = null, preferredVariant = null) => {
+  const updateItemQuantity = async (item, newQuantity, event = null, preferredVariant = null) => {
     // Check authentication
     if (!isModuleAuthenticated('user')) {
       toast.error("Please login to add items to cart")
@@ -1574,9 +1574,9 @@ function RestaurantDetailsContent() {
 
         // If incrementing quantity, trigger add animation with sourcePosition
         if (newQuantity > existingCartItem.quantity && sourcePosition) {
-          const result = addToCart(cartItem, sourcePosition)
+          const result = await addToCart(cartItem, sourcePosition)
           if (result?.ok === false) {
-            toast.error(result.error || 'Cannot add item from different restaurant. Please clear cart first.')
+            toast.error(result.error || 'Cannot add this item to cart.')
             return
           }
           if (newQuantity > existingCartItem.quantity + 1) {
@@ -1594,9 +1594,9 @@ function RestaurantDetailsContent() {
       } else {
         // Add to cart first (adds with quantity 1), then update to desired quantity
         // Pass sourcePosition when adding a new item
-        const result = addToCart(cartItem, sourcePosition)
+        const result = await addToCart(cartItem, sourcePosition)
         if (result?.ok === false) {
-          toast.error(result.error || 'Cannot add item from different restaurant. Please clear cart first.')
+          toast.error(result.error || 'Cannot add this item to cart.')
           return
         }
         if (newQuantity > 1) {

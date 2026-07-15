@@ -133,7 +133,7 @@ export default function ProductDetail() {
     return Math.round((sum / reviews.length) * 10) / 10
   }, [reviews, product])
 
-  const handleAddToCart = () => {
+  const handleAddToCart = async () => {
     if (product) {
       const restaurantData = product.restaurantSlug ? restaurantsData[product.restaurantSlug] : null
       
@@ -145,10 +145,10 @@ export default function ProductDetail() {
       }
 
       for (let i = 0; i < quantity; i++) {
-        const result = addToCart(enrichedProduct)
+        const result = await addToCart(enrichedProduct)
         if (!handleAddToCartFeedback(
           result,
-          "Cannot add item from different restaurant. Please clear cart first.",
+          "Cannot add this item to cart.",
           enrichedProduct.restaurant || product.restaurant || "",
         )) {
           break

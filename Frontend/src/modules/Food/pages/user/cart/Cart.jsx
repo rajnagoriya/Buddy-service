@@ -21,7 +21,7 @@ import { useOrders } from "@food/context/OrdersContext"
 import { useLocation as useUserLocation } from "@food/hooks/useLocation"
 import { useZone } from "@food/hooks/useZone"
 import { useLocationSelector } from "@food/components/user/UserLayout"
-import { orderAPI, restaurantAPI, adminAPI, userAPI } from "@food/api"
+import { orderAPI, restaurantAPI, userAPI } from "@food/api"
 import { API_BASE_URL } from "@food/api/config"
 import { initRazorpayPayment } from "@food/utils/razorpay"
 import { toast } from "sonner"
@@ -94,6 +94,33 @@ function mapDeliverySpeedOptions(list = []) {
     feeModifier: Number(option.feeModifier) || 0,
     icon: DELIVERY_SPEED_ICON_MAP[option.icon] || Bike,
   }))
+}
+
+/** Module cache — avoid remount / StrictMode duplicate hits for static config. */
+let deliverySpeedOptionsCache = null
+let deliverySpeedOptionsInFlight = null
+
+async function loadDeliverySpeedOptionsOnce() {
+  if (deliverySpeedOptionsCache) return deliverySpeedOptionsCache
+  if (deliverySpeedOptionsInFlight) return deliverySpeedOptionsInFlight
+  deliverySpeedOptionsInFlight = restaurantAPI
+    .getDeliverySpeedOptions()
+    .then((response) => {
+      const options = mapDeliverySpeedOptions(response?.data?.data?.options || [])
+      deliverySpeedOptionsCache = {
+        options,
+        defaultOptionId:
+          response?.data?.data?.defaultOptionId ||
+          options.find((o) => o.isDefault)?.id ||
+          options[0]?.id ||
+          null,
+      }
+      return deliverySpeedOptionsCache
+    })
+    .finally(() => {
+      deliverySpeedOptionsInFlight = null
+    })
+  return deliverySpeedOptionsInFlight
 }
 
 
@@ -293,6 +320,7 @@ function Cart() {
 
   const [appliedCoupon, setAppliedCoupon] = useState(null)
   const [couponCode, setCouponCode] = useState("")
+  const [couponErrorPopup, setCouponErrorPopup] = useState({ open: false, message: "" })
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState("cash")
   const [showPaymentSheet, setShowPaymentSheet] = useState(false)
   const [walletBalance, setWalletBalance] = useState(0)
@@ -440,15 +468,15 @@ function Cart() {
   const [loadingCoupons, setLoadingCoupons] = useState(false)
   const [userOrderCount, setUserOrderCount] = useState(0)
 
-  // Fee settings from database (used for platform fee and GST fallback only)
-  const [feeSettings, setFeeSettings] = useState({
+  // Fallback fee defaults only — official amounts always come from calculateOrder / createOrder.
+  const feeSettings = {
     deliveryFee: 25,
     deliveryFeeRanges: [],
     freeDeliveryThreshold: 149,
     platformFee: 5,
     packagingFee: 0,
     gstRate: 5,
-  })
+  }
 
   const subtotal = pricing?.subtotal || cart.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 1), 0)
 
@@ -1055,24 +1083,72 @@ function Cart() {
     const stillListed = availableCoupons.some((c) => c.code === appliedCoupon.code)
     const minOk = isFreeDeliveryCoupon(appliedCoupon)
       || subtotal >= (Number(appliedCoupon.minOrder) || 0)
-    const newOk = appliedCoupon.customerGroup !== "new" || userOrderCount === 0
+    // Platform first-time: block on any prior platform order.
+    // Restaurant first-time: backend validates per-restaurant — don't strip here using global count.
+    const isRestaurantCoupon = appliedCoupon.createdBy === "restaurant"
+    const newOk = appliedCoupon.customerGroup !== "new"
+      || isRestaurantCoupon
+      || userOrderCount === 0
     if (!stillListed || !minOk || !newOk) {
       setAppliedCoupon(null)
       setCouponCode("")
     }
   }, [appliedCoupon, availableCoupons, subtotal, userOrderCount, loadingCoupons])
 
-  // Calculate pricing from backend whenever cart, address, or coupon changes (debounced)
+  // Calculate pricing only when cart/address/coupon/speed meaningfully change (stable fingerprint).
+  const pricingRequestKey = useMemo(() => {
+    if (cart.length === 0 || !hasSavedAddress) return ""
+    const coords = defaultAddress?.location?.coordinates
+    return JSON.stringify({
+      items: cart.map((item) => ({
+        itemId: String(item.itemId || item.id || ""),
+        variantId: String(item.variantId || ""),
+        quantity: Number(item.quantity) || 1,
+        price: Number(item.price) || 0,
+        restaurantId: String(item.restaurantId || item.restaurant?._id || item.restaurant || ""),
+      })),
+      restaurantId: String(restaurantData?.restaurantId || restaurantData?._id || restaurantId || ""),
+      couponCode: String(couponCode || appliedCoupon?.code || "").trim().toUpperCase(),
+      deliveryOption: String(deliveryOption || ""),
+      addressId: String(defaultAddress?._id || defaultAddress?.id || ""),
+      coords: Array.isArray(coords) ? coords : null,
+    })
+  }, [
+    cart,
+    hasSavedAddress,
+    defaultAddress,
+    appliedCoupon?.code,
+    couponCode,
+    restaurantId,
+    restaurantData?.restaurantId,
+    restaurantData?._id,
+    deliveryOption,
+  ])
+
+  const lastPricingKeyRef = useRef("")
+
   useEffect(() => {
-    if (cart.length === 0 || !hasSavedAddress) {
+    if (!pricingRequestKey) {
       setPricing(null)
+      lastPricingKeyRef.current = ""
+      return undefined
+    }
+
+    if (placeOrderInFlightRef.current || isPlacingOrder) {
+      return undefined
+    }
+
+    // Same inputs as last successful/in-flight request — skip duplicate calculate
+    if (pricingRequestKey === lastPricingKeyRef.current && pricing != null) {
       return undefined
     }
 
     let cancelled = false
     const requestId = ++pricingRequestIdRef.current
+    const keyForRequest = pricingRequestKey
 
     const timer = setTimeout(async () => {
+      if (placeOrderInFlightRef.current) return
       try {
         setLoadingPricing(true)
         const items = cart.map(item => ({
@@ -1104,13 +1180,26 @@ function Cart() {
           deliveryOption: selectedSpeed?.name || undefined,
         })
 
-        if (cancelled || requestId !== pricingRequestIdRef.current) return
+        if (cancelled || requestId !== pricingRequestIdRef.current || placeOrderInFlightRef.current) return
 
         if (response?.data?.success && response?.data?.data?.pricing) {
-          setPricing(response.data.data.pricing)
+          lastPricingKeyRef.current = keyForRequest
+          const pricingData = response.data.data.pricing
+          const couponErr =
+            response.data.data.couponError ||
+            pricingData.couponError ||
+            null
+          setPricing(pricingData)
 
-          if (response.data.data.pricing.appliedCoupon && !appliedCoupon) {
-            const coupon = availableCoupons.find(c => c.code === response.data.data.pricing.appliedCoupon.code)
+          if (couponErr?.message) {
+            setAppliedCoupon(null)
+            setCouponCode("")
+            setCouponErrorPopup({
+              open: true,
+              message: couponErr.message,
+            })
+          } else if (pricingData.appliedCoupon && !appliedCoupon) {
+            const coupon = availableCoupons.find(c => c.code === pricingData.appliedCoupon.code)
             if (coupon) {
               setAppliedCoupon(coupon)
             }
@@ -1133,26 +1222,32 @@ function Cart() {
       cancelled = true
       clearTimeout(timer)
     }
-  }, [cart, defaultAddress, appliedCoupon, couponCode, restaurantId, hasSavedAddress, restaurantData, availableCoupons, deliveryOption, configuredSpeedOptions])
+  }, [pricingRequestKey, isPlacingOrder])
 
-  // Fetch wallet balance
+  // Wallet only when user selects Wallet payment (default is COD — no fetch on cart open)
   useEffect(() => {
+    if (selectedPaymentMethod !== "wallet") return undefined
+
+    let cancelled = false
     const fetchWalletBalance = async () => {
       try {
         setIsLoadingWallet(true)
         const response = await userAPI.getWallet()
+        if (cancelled) return
         if (response?.data?.success && response?.data?.data?.wallet) {
           setWalletBalance(response.data.data.wallet.balance || 0)
         }
       } catch (error) {
+        if (cancelled) return
         debugError("Error fetching wallet balance:", error)
         setWalletBalance(0)
       } finally {
-        setIsLoadingWallet(false)
+        if (!cancelled) setIsLoadingWallet(false)
       }
     }
     fetchWalletBalance()
-  }, [])
+    return () => { cancelled = true }
+  }, [selectedPaymentMethod])
 
   // Fetch user order count (used for first-time coupon eligibility)
   useEffect(() => {
@@ -1172,71 +1267,32 @@ function Cart() {
     fetchOrderCount()
   }, [])
 
-  // Fetch fee settings on mount
+  // Delivery speed options once (cached). Do NOT refetch on focus — that fired during Razorpay checkout.
   useEffect(() => {
-    const fetchFeeSettings = async () => {
-      try {
-        const response = await adminAPI.getPublicFeeSettings()
-        if (response.data.success && response.data.data.feeSettings) {
-          setFeeSettings({
-            deliveryFee: response.data.data.feeSettings.deliveryFee ?? 25,
-            deliveryFeeRanges: response.data.data.feeSettings.deliveryFeeRanges ?? [],
-            freeDeliveryThreshold: response.data.data.feeSettings.freeDeliveryThreshold ?? 149,
-            platformFee: response.data.data.feeSettings.platformFee ?? 5,
-            packagingFee: response.data.data.feeSettings.packagingFee ?? 0,
-            gstRate: response.data.data.feeSettings.gstRate ?? 5,
-          })
-        }
-      } catch (error) {
-        debugError('Error fetching fee settings:', error)
-        // Keep default values on error
-      }
-    }
-
-    const handleFocus = () => {
-      fetchFeeSettings()
-    }
-
-    fetchFeeSettings()
-    window.addEventListener("focus", handleFocus)
-    const intervalId = setInterval(fetchFeeSettings, 30000)
-
-    return () => {
-      window.removeEventListener("focus", handleFocus)
-      clearInterval(intervalId)
-    }
-  }, [])
-
-  useEffect(() => {
+    let cancelled = false
     const fetchDeliverySpeedOptions = async () => {
       try {
         setLoadingSpeedOptions(true)
-        const response = await restaurantAPI.getDeliverySpeedOptions()
-        const options = mapDeliverySpeedOptions(response?.data?.data?.options || [])
-        setConfiguredSpeedOptions(options)
+        const data = await loadDeliverySpeedOptionsOnce()
+        if (cancelled) return
+        setConfiguredSpeedOptions(data.options)
         setSpeedOptionsError(false)
-        const defaultId =
-          response?.data?.data?.defaultOptionId ||
-          options.find((o) => o.isDefault)?.id ||
-          options[0]?.id
-        if (defaultId) {
+        if (data.defaultOptionId) {
           setDeliveryOption((prev) => (
-            options.some((o) => o.id === prev) ? prev : defaultId
+            data.options.some((o) => o.id === prev) ? prev : data.defaultOptionId
           ))
         }
       } catch (error) {
+        if (cancelled) return
         debugError("Error fetching delivery speed options:", error)
         setSpeedOptionsError(true)
       } finally {
-        setLoadingSpeedOptions(false)
+        if (!cancelled) setLoadingSpeedOptions(false)
       }
     }
 
-    const handleFocus = () => fetchDeliverySpeedOptions()
-
     fetchDeliverySpeedOptions()
-    window.addEventListener("focus", handleFocus)
-    return () => window.removeEventListener("focus", handleFocus)
+    return () => { cancelled = true }
   }, [])
 
   // Use backend pricing if available, otherwise fallback to database fee settings
@@ -1331,7 +1387,9 @@ function Cart() {
   }, [isMultiRestaurantOrder, appliedCoupon])
 
   const platformFee = pricing != null ? (pricing.platformFee ?? 0) : (feeSettings.platformFee ?? 0)
-  const packagingFee = pricing != null ? (pricing.packagingFee ?? 0) : (feeSettings.packagingFee ?? 0)
+  const packagingFee = pricing != null
+    ? (pricing.packagingFee ?? 0)
+    : (feeSettings.packagingFee ?? 0) * Math.max(1, uniqueRestaurantIds.length)
   const gstCharges = pricing != null ? (pricing.tax ?? 0) : Math.round(subtotal * ((feeSettings.gstRate ?? 0) / 100))
   
   // Calculate discount from backend pricing or applied coupon
@@ -1626,14 +1684,26 @@ function Cart() {
     }
   }
 
+  const showCouponError = (message) => {
+    setCouponErrorPopup({
+      open: true,
+      message: message || "This coupon is not valid",
+    })
+  }
+
   const handleApplyCoupon = (coupon) => {
-    if (coupon?.customerGroup === "new" && userOrderCount > 0) {
-      toast.error("This coupon is only for first-time users")
+    // Quick UX guard for platform first-time only (restaurant first-time is validated server-side).
+    if (
+      coupon?.customerGroup === "new" &&
+      coupon?.createdBy !== "restaurant" &&
+      userOrderCount > 0
+    ) {
+      showCouponError("This coupon is only for first-time users on the platform")
       return
     }
 
     if (!isFreeDeliveryCoupon(coupon) && subtotal < (Number(coupon.minOrder) || 0)) {
-      toast.error(`Min order ${RUPEE_SYMBOL}${Number(coupon.minOrder || 0)}`)
+      showCouponError(`Minimum order amount of ${RUPEE_SYMBOL}${Number(coupon.minOrder || 0)} required for this coupon`)
       return
     }
 
@@ -1726,19 +1796,9 @@ function Cart() {
 
     try {
       const orderPricing = {
-        subtotal: pricing?.subtotal || subtotal,
-        deliveryFee: deliveryFee,
-        tax: pricing?.tax || gstCharges,
-        platformFee: pricing?.platformFee || platformFee,
-        discount: pricing?.discount || billDiscount,
-        total: total,
-        couponCode: pricing?.couponCode || appliedCoupon?.code || null,
-        couponCreatedBy: pricing?.couponCreatedBy || appliedCoupon?.createdBy || null,
+        couponCode: appliedCoupon?.code || pricing?.couponCode || null,
+        couponCreatedBy: appliedCoupon?.createdBy || pricing?.couponCreatedBy || null,
         offerId: pricing?.offerId || null,
-      }
-
-      if (!orderPricing.couponCode && appliedCoupon?.code) {
-        orderPricing.couponCode = appliedCoupon.code
       }
 
       const orderItems = cart.map((item) => ({
@@ -1787,26 +1847,33 @@ function Cart() {
         restaurantId: finalRestaurantId,
         restaurantName: finalRestaurantName,
         itemCount: orderItems.length,
-        totalAmount: orderPricing.total,
-        paymentMethod: orderPayload.paymentMethod
+        paymentMethod: orderPayload.paymentMethod,
+        deliverySpeedOptionId: orderPayload.deliverySpeedOptionId,
+        couponCode: orderPricing.couponCode,
       });
 
-      // Check wallet balance if wallet payment selected
+      // Check wallet balance if wallet payment selected (UI guard; server re-validates)
       if (selectedPaymentMethod === "wallet" && walletBalance < total) {
         toast.error(`Insufficient wallet balance. Required: ${RUPEE_SYMBOL}${total.toFixed(0)}, Available: ${RUPEE_SYMBOL}${walletBalance.toFixed(0)}`)
         releasePlaceOrderLock()
         return
       }
 
-      // Create order in backend
+      // Single create-order call — server validates, prices, and either places COD or returns Razorpay checkout
       const orderResponse = await orderAPI.createOrder(orderPayload)
 
-      debugLog("? Order created successfully:", orderResponse.data)
+      debugLog("? Order/checkout response:", orderResponse.data)
 
-      const { order, razorpay } = orderResponse.data.data
+      const {
+        order,
+        razorpay,
+        checkoutId,
+        requiresPayment,
+        paymentType,
+      } = orderResponse.data.data || {}
 
       // Cash flow: order placed without online payment
-      if (selectedPaymentMethod === "cash") {
+      if (selectedPaymentMethod === "cash" || paymentType === "COD") {
         toast.success("Order placed with Cash on Delivery")
         finalizeSuccessfulOrder(order)
         releasePlaceOrderLock()
@@ -1814,7 +1881,7 @@ function Cart() {
       }
 
       // Wallet flow: order placed with wallet payment (already processed in backend)
-      if (selectedPaymentMethod === "wallet") {
+      if (selectedPaymentMethod === "wallet" || paymentType === "WALLET") {
         toast.success("Order placed with Wallet payment")
         finalizeSuccessfulOrder(order)
         releasePlaceOrderLock()
@@ -1829,12 +1896,14 @@ function Cart() {
         return
       }
 
-      if (!razorpay || !razorpay.orderId || !razorpay.key) {
-        debugError("? Razorpay initialization failed:", { razorpay, order })
+      // Prepaid: pay first, then backend creates FoodOrder on verify
+      if (!razorpay || !razorpay.orderId || !razorpay.key || !checkoutId) {
+        debugError("? Razorpay checkout initialization failed:", { razorpay, checkoutId, order, requiresPayment })
         throw new Error(razorpay ? "Razorpay payment gateway is not configured. Please contact support." : "Failed to initialize payment")
       }
 
-      debugLog("?? Razorpay order created:", {
+      debugLog("?? Razorpay checkout created:", {
+        checkoutId,
         orderId: razorpay.orderId,
         amount: razorpay.amount,
         currency: razorpay.currency,
@@ -1862,6 +1931,15 @@ function Cart() {
       // Flag to prevent double-cancellation (Razorpay can fire both onError + onClose)
       let paymentHandled = false
 
+      const cancelAbandonedCheckout = async (reason) => {
+        try {
+          await orderAPI.cancelCheckout(checkoutId)
+          debugLog("Checkout cancelled:", reason)
+        } catch (cancelErr) {
+          debugError("Failed to cancel checkout:", cancelErr)
+        }
+      }
+
       // Initialize Razorpay payment
       await initRazorpayPayment({
         key: razorpay.key,
@@ -1869,14 +1947,14 @@ function Cart() {
         currency: razorpay.currency || 'INR',
         order_id: razorpay.orderId,
         name: companyName,
-        description: `Order ${order._id || order.orderId} - ${RUPEE_SYMBOL}${(razorpay.amount / 100).toFixed(2)}`,
+        description: `Checkout ${checkoutId} - ${RUPEE_SYMBOL}${(razorpay.amount / 100).toFixed(2)}`,
         prefill: {
           name: userName,
           email: userEmail,
           contact: formattedPhone
         },
         notes: {
-          orderId: order._id || order.orderId,
+          checkoutId,
           userId: userInfo.id || "",
           restaurantId: restaurantId || "unknown"
         },
@@ -1885,16 +1963,12 @@ function Cart() {
           try {
             debugLog("? Payment successful, verifying...", {
               razorpay_order_id: response.razorpay_order_id,
-              razorpay_payment_id: response.razorpay_payment_id
+              razorpay_payment_id: response.razorpay_payment_id,
+              checkoutId,
             })
 
-            // Verify payment with backend
-            const verifyOrderId = order?._id || order?.id || order?.orderMongoId
-            if (!verifyOrderId) {
-              throw new Error("Unable to verify payment: missing order id from create-order response")
-            }
             const verifyResponse = await orderAPI.verifyPayment({
-              orderId: verifyOrderId,
+              checkoutId,
               razorpayOrderId: response.razorpay_order_id,
               razorpayPaymentId: response.razorpay_payment_id,
               razorpaySignature: response.razorpay_signature
@@ -1903,7 +1977,8 @@ function Cart() {
             debugLog("? Payment verification response:", verifyResponse.data)
 
             if (verifyResponse.data.success) {
-              finalizeSuccessfulOrder(order)
+              const placedOrder = verifyResponse.data.data?.order
+              finalizeSuccessfulOrder(placedOrder)
               releasePlaceOrderLock()
             } else {
               throw new Error(verifyResponse.data.message || "Payment verification failed")
@@ -1924,18 +1999,7 @@ function Cart() {
           if (paymentHandled) return
           paymentHandled = true
           debugError("? Razorpay payment error:", error)
-          // Auto-cancel the unpaid order in backend
-          const cancelOrderId = order?._id || order?.id || order?.orderMongoId
-          if (cancelOrderId) {
-            try {
-              await orderAPI.cancelOrder(cancelOrderId, {
-                reason: "Payment failed or was not completed"
-              })
-            } catch (cancelErr) {
-              debugError("Failed to cancel unpaid order:", cancelErr)
-            }
-          }
-          // Don't show alert for user cancellation
+          await cancelAbandonedCheckout("Payment failed or was not completed")
           if (error?.code !== 'PAYMENT_CANCELLED' && error?.message !== 'PAYMENT_CANCELLED') {
             const errorMessage = error?.description || error?.message || "Payment failed. Please try again."
             alert(errorMessage)
@@ -1948,19 +2012,8 @@ function Cart() {
           if (paymentHandled) return
           paymentHandled = true
           debugLog("?? Payment modal closed by user")
-          // Auto-cancel the unpaid order since user left without paying
-          const cancelOrderId = order?._id || order?.id || order?.orderMongoId
-          if (cancelOrderId) {
-            try {
-              await orderAPI.cancelOrder(cancelOrderId, {
-                reason: "User closed payment gateway without paying"
-              })
-              toast.info("Payment was not completed. No order has been placed.")
-            } catch (cancelErr) {
-              debugError("Failed to cancel unpaid order:", cancelErr)
-              toast.warning("Payment was not completed. If you see a pending order, please cancel it manually.")
-            }
-          }
+          await cancelAbandonedCheckout("User closed payment gateway without paying")
+          toast.info("Payment was not completed. No order has been placed.")
           releasePlaceOrderLock()
         }
       })
@@ -2003,14 +2056,25 @@ function Cart() {
       // Handle other axios errors
       else if (error.response) {
         // Server responded with error status
-        errorMessage = error.response.data?.message || `Server error: ${error.response.status}`
+        errorMessage =
+          error.response.data?.message ||
+          error.response.data?.error?.message ||
+          error.response.data?.errors?.[0]?.message ||
+          `Server error: ${error.response.status}`
       }
       // Handle other errors
       else if (error.message) {
         errorMessage = error.message
       }
 
-      alert(errorMessage)
+      const looksLikeCouponError = /coupon/i.test(String(errorMessage || ""))
+      if (looksLikeCouponError) {
+        setAppliedCoupon(null)
+        setCouponCode("")
+        showCouponError(errorMessage)
+      } else {
+        showCouponError(errorMessage)
+      }
       releasePlaceOrderLock()
     }
   }
@@ -2036,6 +2100,38 @@ function Cart() {
 
   return (
     <AnimatedPage className="relative min-h-screen bg-[#FAFAFA] dark:bg-[#0a0a0a]">
+      {couponErrorPopup.open && typeof document !== "undefined" && createPortal(
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setCouponErrorPopup({ open: false, message: "" })}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-white dark:bg-[#1a1a1a] shadow-2xl border border-gray-100 dark:border-gray-800 p-5 text-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-red-50 dark:bg-red-950/40">
+              <AlertCircle className="h-6 w-6 text-red-500" />
+            </div>
+            <h3 className="text-base font-bold text-gray-900 dark:text-white mb-2">
+              Coupon not applied
+            </h3>
+            <p className="text-sm text-gray-600 dark:text-gray-300 mb-5 leading-relaxed">
+              {couponErrorPopup.message}
+            </p>
+            <button
+              type="button"
+              className="w-full rounded-xl bg-[#16A34A] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#15803D]"
+              onClick={() => setCouponErrorPopup({ open: false, message: "" })}
+            >
+              OK
+            </button>
+          </div>
+        </div>,
+        document.body,
+      )}
+
       <CartPageHeader
         restaurantName={restaurantName}
         deliveryTime={restaurantData?.estimatedDeliveryTime || "25-35 mins"}
@@ -2057,6 +2153,7 @@ function Cart() {
                 rupeeSymbol={RUPEE_SYMBOL}
                 onUpdateQuantity={updateQuantity}
                 onAddMore={handleBack}
+                restaurantGroups={pricing?.restaurantGroups || []}
               />
 
               {/* Note & Cutlery */}
@@ -2203,7 +2300,11 @@ function Cart() {
                     <Percent className="h-5 w-5 text-gray-700 dark:text-gray-300 mt-2 shrink-0" />
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5">
-                        {loadingCoupons ? "Loading coupons..." : "Select a coupon (one per order)"}
+                        {loadingCoupons
+                          ? "Loading coupons..."
+                          : isMultiRestaurantOrder
+                            ? "Platform coupons only (multi-restaurant cart)"
+                            : "Select a coupon (one per order)"}
                       </p>
                       {loadingCoupons ? (
                         <div className="h-9 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#0a0a0a] animate-pulse" />
@@ -2230,17 +2331,21 @@ function Cart() {
                             <SelectContent>
                               <SelectItem value="__none__">No coupon</SelectItem>
                               {availableCoupons.map((coupon) => {
+                                const isPlatformFirstTimeBlocked =
+                                  coupon.customerGroup === "new" &&
+                                  coupon.createdBy !== "restaurant" &&
+                                  userOrderCount > 0
                                 const isEligible = (isFreeDeliveryCoupon(coupon) || subtotal >= (Number(coupon.minOrder) || 0))
-                                  && (coupon.customerGroup !== "new" || userOrderCount === 0)
+                                  && !isPlatformFirstTimeBlocked
                                 const source = coupon.sourceLabel || (coupon.createdBy === "restaurant" ? "Restaurant" : "Platform")
                                 return (
-                                  <SelectItem
+                                    <SelectItem
                                     key={coupon.code}
                                     value={coupon.code}
                                     disabled={!isEligible}
-                                  >
+                                    >
                                     {coupon.code} — {coupon.discountDisplay || `Save ${RUPEE_SYMBOL}${coupon.discount}`} ({source})
-                                  </SelectItem>
+                                    </SelectItem>
                                 )
                               })}
                             </SelectContent>
@@ -2654,7 +2759,7 @@ function Cart() {
                 {showBillDetails && (
                   <div className="mt-3 pt-3 border-t border-dashed border-gray-200 dark:border-gray-800 space-y-2">
                     <div className="flex justify-between items-center text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">Item Total</span>
+                      <span className="text-gray-600 dark:text-gray-400">Food Total</span>
                       <span className="text-gray-800 dark:text-gray-200 font-medium">{RUPEE_SYMBOL}{billSubtotal.toFixed(2)}</span>
                     </div>
 
@@ -2746,7 +2851,7 @@ function Cart() {
                       <span className="text-gray-800 dark:text-gray-200 font-medium">{RUPEE_SYMBOL}{billPlatformFee.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">Packaging Charges</span>
+                      <span className="text-gray-600 dark:text-gray-400">Packaging Total</span>
                       <span className="text-gray-800 dark:text-gray-200 font-medium">{RUPEE_SYMBOL}{billPackagingFee.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between text-sm">

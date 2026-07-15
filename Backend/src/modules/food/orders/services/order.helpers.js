@@ -79,35 +79,85 @@ export function calculateRangeDeliveryFee(distanceKm, ranges = []) {
   return null;
 }
 
-export function resolveOrderDistanceKm(restaurants = [], userLoc) {
+function getRestaurantLatLng(restaurant) {
+  const coords = restaurant?.location?.coordinates;
+  if (!Array.isArray(coords) || coords.length < 2) return null;
+  const lng = Number(coords[0]);
+  const lat = Number(coords[1]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return { lat, lng };
+}
+
+/**
+ * Chain distance: R1 → R2 → … → Rn → user (cart order).
+ * Single restaurant: R1 → user.
+ */
+function resolveOrderDistanceKmStraight(restaurants = [], userLoc) {
   if (!Array.isArray(restaurants) || restaurants.length === 0) return 0;
   if (!Array.isArray(userLoc) || userLoc.length < 2) return 0;
 
-  if (restaurants.length === 2) {
-    const r1 = restaurants[0];
-    const r2 = restaurants[1];
-    if (r1?.location?.coordinates?.length === 2 && r2?.location?.coordinates?.length === 2) {
-      return (
-        haversineKm(
-          r1.location.coordinates[1], r1.location.coordinates[0],
-          r2.location.coordinates[1], r2.location.coordinates[0],
-        ) +
-        haversineKm(
-          r2.location.coordinates[1], r2.location.coordinates[0],
-          userLoc[1], userLoc[0],
-        )
-      );
-    }
+  const points = [];
+  for (const restaurant of restaurants) {
+    const point = getRestaurantLatLng(restaurant);
+    if (point) points.push(point);
   }
+  if (points.length === 0) return 0;
 
-  const mainRestaurant = restaurants[0];
-  if (mainRestaurant?.location?.coordinates?.length === 2) {
-    return haversineKm(
-      mainRestaurant.location.coordinates[1], mainRestaurant.location.coordinates[0],
-      userLoc[1], userLoc[0],
+  points.push({ lat: userLoc[1], lng: userLoc[0] });
+
+  let total = 0;
+  for (let i = 0; i < points.length - 1; i += 1) {
+    total += haversineKm(
+      points[i].lat,
+      points[i].lng,
+      points[i + 1].lat,
+      points[i + 1].lng,
     );
   }
-  return 0;
+  return total;
+}
+
+/** Sync fallback (haversine). Prefer resolveOrderDistanceKmAsync for road distance. */
+export function resolveOrderDistanceKm(restaurants = [], userLoc) {
+  return resolveOrderDistanceKmStraight(restaurants, userLoc);
+}
+
+/**
+ * Order delivery distance in km.
+ * Road (driving) when Google Maps is available; otherwise straight-line.
+ * Multi-resto: R1→R2→…→Rn→user. Single: restaurant → user.
+ */
+export async function resolveOrderDistanceKmAsync(restaurants = [], userLoc) {
+  const straight = resolveOrderDistanceKmStraight(restaurants, userLoc);
+  if (!Array.isArray(restaurants) || restaurants.length === 0) return 0;
+  if (!Array.isArray(userLoc) || userLoc.length < 2) return 0;
+
+  try {
+    const { fetchRoadDistancesKm } = await import('../utils/googleMaps.js');
+    const user = { lat: userLoc[1], lng: userLoc[0] };
+
+    const points = [];
+    for (const restaurant of restaurants) {
+      const point = getRestaurantLatLng(restaurant);
+      if (point) points.push(point);
+    }
+    if (points.length === 0) return 0;
+    points.push(user);
+
+    let total = 0;
+    for (let i = 0; i < points.length - 1; i += 1) {
+      const [leg] = (await fetchRoadDistancesKm(points[i], [points[i + 1]])) || [];
+      if (!Number.isFinite(leg)) {
+        return Number.isFinite(straight) ? Number(straight.toFixed(2)) : 0;
+      }
+      total += leg;
+    }
+    return Number(total.toFixed(2));
+  } catch {
+    // fall through to straight-line
+  }
+
+  return Number.isFinite(straight) ? Number(straight.toFixed(2)) : 0;
 }
 
 export function applyDeliverySurcharges(baseFee, { isMultiRestaurant, isSplitOrder, deliveryBoySettings } = {}) {

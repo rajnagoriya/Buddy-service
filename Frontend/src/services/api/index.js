@@ -2607,6 +2607,10 @@ export const orderAPI = {
     apiClient.post("/food/orders/verify-payment", body ?? {}, {
       contextModule: "user",
     }),
+  cancelCheckout: (checkoutId) =>
+    apiClient.post(`/food/orders/checkout/${String(checkoutId)}/cancel`, {}, {
+      contextModule: "user",
+    }),
   getOrders: (() => {
     const inFlight = new Map();
     const cache = new Map();

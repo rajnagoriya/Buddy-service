@@ -694,7 +694,7 @@ export default function Under250() {
   }, []);
 
   // Helper function to update item quantity in bothlocal state and cart
-  const updateItemQuantity = (
+  const updateItemQuantity = async (
     item,
     newQuantity,
     event = null,
@@ -780,10 +780,10 @@ export default function Under250() {
         };
 
         if (newQuantity > existingCartItem.quantity && sourcePosition) {
-          const result = addToCart(cartItem, sourcePosition);
+          const result = await addToCart(cartItem, sourcePosition);
           if (!handleAddToCartFeedback(
             result,
-            "Cannot add item from different restaurant. Please clear cart first.",
+            "Cannot add this item to cart.",
             restaurant,
           )) {
             return;
@@ -797,10 +797,10 @@ export default function Under250() {
           updateQuantity(item.id, newQuantity);
         }
       } else {
-        const result = addToCart(cartItem, sourcePosition);
+        const result = await addToCart(cartItem, sourcePosition);
         if (!handleAddToCartFeedback(
           result,
-          "Cannot add item from different restaurant. Please clear cart first.",
+          "Cannot add this item to cart.",
           restaurant,
         )) {
           return;

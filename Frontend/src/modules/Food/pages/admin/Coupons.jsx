@@ -170,54 +170,54 @@ function CouponForm({ formData, errors, restaurants, onChange, onSubmit, isSubmi
         )}
 
         {!isFreeDelivery && (
-        <div>
-          <label className="block text-xs font-semibold text-slate-600 mb-1">Discount Type</label>
-          <select
-            value={formData.discountType}
-            onChange={(e) => onChange("discountType", e.target.value)}
-            disabled={ro("discountType")}
-            className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100"
-          >
-            <option value="percentage">Percentage</option>
-            <option value="flat-price">Flat Amount</option>
-          </select>
-        </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Discount Type</label>
+            <select
+              value={formData.discountType}
+              onChange={(e) => onChange("discountType", e.target.value)}
+              disabled={ro("discountType")}
+              className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100"
+            >
+              <option value="percentage">Percentage</option>
+              <option value="flat-price">Flat Amount</option>
+            </select>
+          </div>
         )}
 
         {!isFreeDelivery && (
-        <>
-        <div>
-          <label className="block text-xs font-semibold text-slate-600 mb-1">
-            {formData.discountType === "percentage" ? "Discount (%)" : "Discount Amount (₹)"} *
-          </label>
-          <input
-            type="number"
-            min="1"
-            step="0.01"
-            value={formData.discountValue}
-            onChange={(e) => onChange("discountValue", e.target.value)}
-            disabled={ro("discountValue")}
-            className={`w-full px-3 py-2 text-sm rounded-lg border ${errors.discountValue ? "border-red-500" : "border-slate-300"} focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100`}
-          />
-          {errors.discountValue && <p className="mt-1 text-xs text-red-600">{errors.discountValue}</p>}
-        </div>
+          <>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">
+                {formData.discountType === "percentage" ? "Discount (%)" : "Discount Amount (₹)"} *
+              </label>
+              <input
+                type="number"
+                min="1"
+                step="0.01"
+                value={formData.discountValue}
+                onChange={(e) => onChange("discountValue", e.target.value)}
+                disabled={ro("discountValue")}
+                className={`w-full px-3 py-2 text-sm rounded-lg border ${errors.discountValue ? "border-red-500" : "border-slate-300"} focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100`}
+              />
+              {errors.discountValue && <p className="mt-1 text-xs text-red-600">{errors.discountValue}</p>}
+            </div>
 
-        {formData.discountType === "percentage" && (
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">Max Discount (₹) *</label>
-            <input
-              type="number"
-              min="0"
-              value={formData.maxDiscount}
-              onChange={(e) => onChange("maxDiscount", e.target.value)}
-              placeholder="e.g. 100"
-              disabled={ro("maxDiscount")}
-              className={`w-full px-3 py-2 text-sm rounded-lg border ${errors.maxDiscount ? "border-red-500" : "border-slate-300"} focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100`}
-            />
-            {errors.maxDiscount && <p className="mt-1 text-xs text-red-600">{errors.maxDiscount}</p>}
-          </div>
-        )}
-        </>
+            {formData.discountType === "percentage" && (
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Max Discount (₹) *</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={formData.maxDiscount}
+                  onChange={(e) => onChange("maxDiscount", e.target.value)}
+                  placeholder="e.g. 100"
+                  disabled={ro("maxDiscount")}
+                  className={`w-full px-3 py-2 text-sm rounded-lg border ${errors.maxDiscount ? "border-red-500" : "border-slate-300"} focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100`}
+                />
+                {errors.maxDiscount && <p className="mt-1 text-xs text-red-600">{errors.maxDiscount}</p>}
+              </div>
+            )}
+          </>
         )}
 
         <div>
@@ -456,6 +456,11 @@ export default function Coupons() {
     if (field === "customerScope" && value === "first-time" && !next.perUserLimit) {
       next.perUserLimit = "1"
     }
+    if (field === "couponCategory" && value === "free_delivery") {
+      next.discountType = "flat-price"
+      next.discountValue = ""
+      next.maxDiscount = ""
+    }
     setFormData(next)
     validateForm(next)
   }
@@ -476,16 +481,14 @@ export default function Coupons() {
     setEditingOfferId(offer.offerId)
     setEditingRestaurantCoupon(offer.createdBy === "restaurant")
     const isPct = offer.discountType === "percentage"
-    const rawDiscount = offer.couponCategory === "free_delivery"
-      ? ""
-      : isPct
-        ? String(offer.discountValue ?? offer.discountPercentage ?? "")
-        : String(offer.discountValue ?? offer.originalPrice ?? "")
+    const rawDiscount = isPct
+      ? String(offer.discountValue ?? offer.discountPercentage ?? "")
+      : String(offer.discountValue ?? offer.originalPrice ?? "")
     setFormData({
       couponCode: offer.couponCode || "",
       couponCategory: offer.couponCategory || "normal",
-      discountType: offer.couponCategory === "free_delivery" ? "percentage" : (offer.discountType || "percentage"),
-      discountValue: rawDiscount,
+      discountType: offer.discountType || (offer.couponCategory === "free_delivery" ? "flat-price" : "percentage"),
+      discountValue: rawDiscount === "0" && offer.couponCategory === "free_delivery" ? "" : rawDiscount,
       customerScope: offer.customerScope === "first-time" || offer.customerGroup === "new" ? "first-time" : "all",
       restaurantScope: offer.restaurantScope || "all",
       restaurantId: offer.restaurantId || "",
@@ -518,17 +521,20 @@ export default function Coupons() {
 
     try {
       setIsSubmitting(true)
+      const isFreeDelivery = formData.couponCategory === "free_delivery"
       const payload = {
         couponCode: formData.couponCode.trim(),
-        discountType: formData.discountType,
-        discountValue: Number(formData.discountValue),
+        discountType: isFreeDelivery ? "flat-price" : formData.discountType,
+        discountValue: isFreeDelivery
+          ? (formData.discountValue !== "" ? Number(formData.discountValue) : 0)
+          : Number(formData.discountValue),
         customerScope: formData.customerScope,
         restaurantScope: formData.restaurantScope,
         restaurantId: formData.restaurantScope === "selected" ? formData.restaurantId : undefined,
         endDate: formData.endDate || undefined,
         startDate: formData.startDate || undefined,
         minOrderValue: formData.minOrderValue !== "" ? Number(formData.minOrderValue) : undefined,
-        maxDiscount: formData.discountType === "percentage" && formData.maxDiscount !== ""
+        maxDiscount: !isFreeDelivery && formData.discountType === "percentage" && formData.maxDiscount !== ""
           ? Number(formData.maxDiscount) : undefined,
         usageLimit: formData.usageLimit !== "" ? Number(formData.usageLimit) : undefined,
         perUserLimit: formData.perUserLimit !== "" ? Number(formData.perUserLimit) : undefined,

@@ -66,7 +66,7 @@ export default function PartnerSettingsSection({ settings, onChange }) {
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Max Distance (KM)</label>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Max Road Distance (KM)</label>
             <input
               type="number"
               value={settings.multiOrderMaxDistance}

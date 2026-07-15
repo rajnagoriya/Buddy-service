@@ -3,6 +3,7 @@ import {
     calculateOrderController,
     createOrderController,
     verifyPaymentController,
+    cancelCheckoutController,
     listOrdersUserController,
     getOrderPaymentsUserController,
     getOrderByIdUserController,
@@ -19,6 +20,7 @@ router.post('/validate-restaurant-chain', validateRestaurantChainController);
 router.post('/calculate', calculateOrderController);
 router.post('/', createOrderController);
 router.post('/verify-payment', verifyPaymentController);
+router.post('/checkout/:checkoutId/cancel', cancelCheckoutController);
 router.get('/', listOrdersUserController);
 router.get('/:orderId/payments', getOrderPaymentsUserController);
 router.get('/:orderId/drop-otp', getOrderDropOtpUserController);

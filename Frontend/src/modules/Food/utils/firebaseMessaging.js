@@ -758,11 +758,18 @@ export async function registerWebPushForCurrentModule(pathname = window.location
         tokenPreview: `${token.slice(0, 12)}...`,
       });
 
-      // Removed localStorage caching (getSavedToken/setSavedToken) as per user requirements.
-      // The backend 'upsert' already handles duplicates efficiently.
+      // Skip backend save when token is unchanged (pathname changes used to re-POST /fcm-tokens/save).
+      const lastSavedToken = getSavedToken(moduleName);
+      if (lastSavedToken === token) {
+        pushDebugLog(PUSH_DEBUG_PREFIX, "FCM token unchanged — skipping backend save", { moduleName });
+        await attachForegroundListener(app);
+        return;
+      }
+
       try {
         pushDebugLog(PUSH_DEBUG_PREFIX, "Synchronizing FCM token with backend database", { moduleName, tokenPreview: `${token?.slice(0, 10)}...` });
         await saveTokenByModule(moduleName, token);
+        setSavedToken(moduleName, token);
         pushDebugLog(PUSH_DEBUG_PREFIX, "FCM token synchronized with backend successfully");
       } catch (e) {
         pushDebugWarn(PUSH_DEBUG_PREFIX, "Failed to synchronize FCM token to backend", { error: e?.message || e, stack: e?.stack });

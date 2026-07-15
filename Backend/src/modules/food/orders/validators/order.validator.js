@@ -34,14 +34,18 @@ const addressSchema = z.object({
 });
 
 const pricingSchema = z.object({
-    subtotal: z.number().min(0),
+    // Client-sent totals are ignored; server recalculates. Kept optional for backward compat.
+    subtotal: z.number().min(0).optional(),
     tax: z.number().min(0).optional(),
     packagingFee: z.number().min(0).optional(),
     deliveryFee: z.number().min(0).optional(),
     platformFee: z.number().min(0).optional(),
     discount: z.number().min(0).optional(),
-    total: z.number().min(0),
-    currency: z.string().optional()
+    total: z.number().min(0).optional(),
+    currency: z.string().optional(),
+    couponCode: z.string().optional().nullable(),
+    couponCreatedBy: z.string().optional().nullable(),
+    offerId: z.string().optional().nullable(),
 });
 
 export function validateCalculateOrderDto(body) {
@@ -107,10 +111,13 @@ export function validateCreateOrderDto(body) {
 
 export function validateVerifyPaymentDto(body) {
     const schema = z.object({
-        orderId: z.string().min(1, 'Order id required'),
+        checkoutId: z.string().min(1).optional(),
+        orderId: z.string().min(1).optional(),
         razorpayOrderId: z.string().min(1, 'Razorpay order id required'),
         razorpayPaymentId: z.string().min(1, 'Razorpay payment id required'),
         razorpaySignature: z.string().min(1, 'Razorpay signature required')
+    }).refine((data) => Boolean(data.checkoutId || data.orderId), {
+        message: 'checkoutId or orderId required',
     });
     const result = schema.safeParse(body);
     if (!result.success) {

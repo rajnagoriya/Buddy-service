@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { FoodOrder, FoodSettings } from '../models/order.model.js';
+import { FoodCheckoutSession } from '../models/foodCheckoutSession.model.js';
 // import { paymentSnapshotFromOrder } from './foodOrderPayment.service.js';
 import { logger } from '../../../../utils/logger.js';
 import { FoodUser } from '../../../../core/users/user.model.js';
@@ -39,6 +40,7 @@ import {
   validateNewRestaurantAgainstLast,
 } from './restaurant-chain-radius.service.js';
 import * as dispatchService from './order-dispatch.service.js';
+import * as checkoutService from './order-checkout.service.js';
 
 async function clearUserCartAfterOrder(userId) {
   if (!userId) return;
@@ -54,7 +56,7 @@ import {
   enqueueOrderEvent,
   haversineKm,
   calculateDistanceSlabFee,
-  resolveOrderDistanceKm,
+  resolveOrderDistanceKmAsync,
   applyDeliverySurcharges,
   generateFourDigitDeliveryOtp,
   sanitizeOrderForExternal,
@@ -126,7 +128,12 @@ export async function validateRestaurantChain(lastRestaurantId, newRestaurantId)
 }
 
 // ----- Create order -----
-export async function createOrder(userId, dto) {
+/**
+ * @param {object} [options]
+ * @param {{ razorpayOrderId: string, razorpayPaymentId: string, razorpaySignature: string, expectedAmount?: number }} [options.verifiedPrepaid]
+ *        When set, Razorpay was already verified — create FoodOrder as paid (no unpaid order).
+ */
+export async function createOrder(userId, dto, options = {}) {
   const items = Array.isArray(dto.items) ? dto.items : [];
   if (items.length === 0) throw new ValidationError("No items in order");
 
@@ -186,7 +193,9 @@ export async function createOrder(userId, dto) {
   const paymentMethod = dto.paymentMethod === "card" ? "razorpay" : dto.paymentMethod;
   const isCash = paymentMethod === "cash";
   const isWallet = paymentMethod === "wallet";
+  const verifiedPrepaid = options.verifiedPrepaid || null;
 
+  // Always recalculate server-side (coupon validity + fees + catalog prices) before placing
   const recalculated = await calculateOrderPricing(userId, {
     items,
     restaurantId: dto.restaurantId,
@@ -196,10 +205,19 @@ export async function createOrder(userId, dto) {
     deliveryOption: dto.deliveryOption,
   });
 
+  // Prefer hydrated catalog lines for all downstream order creation
+  const pricedItems = Array.isArray(recalculated.items) && recalculated.items.length > 0
+    ? recalculated.items
+    : items;
+
   const normalizedPricing = {
     subtotal: Number(recalculated.pricing?.subtotal ?? 0),
+    foodSubtotal: Number(recalculated.pricing?.foodSubtotal ?? recalculated.pricing?.subtotal ?? 0),
     tax: Number(recalculated.pricing?.tax ?? 0),
     packagingFee: Number(recalculated.pricing?.packagingFee ?? 0),
+    restaurantPackagingTotal: Number(
+      recalculated.pricing?.restaurantPackagingTotal ?? recalculated.pricing?.packagingFee ?? 0,
+    ),
     deliveryFee: Number(recalculated.pricing?.deliveryFee ?? 0),
     platformFee: Number(recalculated.pricing?.platformFee ?? 0),
     discount: Number(recalculated.pricing?.discount ?? 0),
@@ -213,7 +231,24 @@ export async function createOrder(userId, dto) {
     couponCreatedBy: recalculated.pricing?.couponCreatedBy || undefined,
     offerId: recalculated.pricing?.offerId || undefined,
     deliveryFeeBreakdown: recalculated.pricing?.deliveryFeeBreakdown || null,
+    restaurantGroups: recalculated.pricing?.restaurantGroups || undefined,
   };
+
+  if (dto.pricing?.couponCode && !normalizedPricing.couponCode) {
+    const msg =
+      recalculated.couponError?.message ||
+      recalculated.pricing?.couponError?.message ||
+      "Coupon is not valid for this order";
+    throw new ValidationError(msg);
+  }
+
+  if (verifiedPrepaid && Number.isFinite(Number(verifiedPrepaid.expectedAmount))) {
+    const expected = Math.round(Number(verifiedPrepaid.expectedAmount) * 100);
+    const actual = Math.round(normalizedPricing.total * 100);
+    if (expected !== actual) {
+      throw new ValidationError("Order total changed after payment. Contact support for a refund.");
+    }
+  }
 
   const couponCodeMeta = normalizedPricing.couponCode;
   if (couponCodeMeta) {
@@ -222,6 +257,34 @@ export async function createOrder(userId, dto) {
       normalizedPricing.couponCreatedBy = offerDoc.createdBy || 'admin';
       normalizedPricing.offerId = offerDoc._id;
     }
+  }
+
+  // Prepaid Razorpay: validate + lock pricing in checkout session; create FoodOrder only after payment
+  if (paymentMethod === "razorpay" && !verifiedPrepaid) {
+    const lockedDto = {
+      ...dto,
+      items: pricedItems,
+      pricing: {
+        ...(dto.pricing || {}),
+        couponCode: normalizedPricing.couponCode,
+      },
+    };
+    const checkout = await checkoutService.createPrepaidCheckoutSession({
+      userId,
+      dto: lockedDto,
+      pricing: normalizedPricing,
+    });
+    return {
+      order: null,
+      checkoutId: checkout.checkoutId,
+      paymentType: 'PREPAID',
+      amount: normalizedPricing.total,
+      razorpayOrderId: checkout.razorpay?.orderId || null,
+      pricing: checkout.pricing,
+      razorpay: checkout.razorpay,
+      expiresAt: checkout.expiresAt,
+      requiresPayment: true,
+    };
   }
 
   let deliveryBoySettings = await FoodDeliveryBoySettings.findOne({ isActive: true })
@@ -233,7 +296,7 @@ export async function createOrder(userId, dto) {
       .lean();
   }
 
-  const totalItemCount = items.reduce(
+  const totalItemCount = pricedItems.reduce(
     (sum, item) => sum + (Number(item.quantity) || 1),
     0,
   );
@@ -243,7 +306,7 @@ export async function createOrder(userId, dto) {
   const isMultiRestaurant = restaurants.length > 1;
 
   const userLoc = deliveryAddress.location?.coordinates;
-  const totalDistanceKm = resolveOrderDistanceKm(restaurantsWithTimings, userLoc);
+  const totalDistanceKm = await resolveOrderDistanceKmAsync(restaurantsWithTimings, userLoc);
 
   const baseRiderEarning = await getRiderEarning(totalDistanceKm);
   const riderSurcharge = applyDeliverySurcharges(baseRiderEarning, {
@@ -258,16 +321,66 @@ export async function createOrder(userId, dto) {
     restaurantName: r.name || r.restaurantName,
     status: 'pending',
     location: r.location,
-    items: items.filter(it => String(it.restaurantId) === String(r._id)).map(it => it.name)
+    items: pricedItems.filter(it => String(it.restaurantId) === String(r._id)).map(it => it.name)
   }));
 
-  // Calculate restaurant commission from subtotal
-  const { commissionAmount: restaurantCommission } = await foodTransactionService.getRestaurantCommissionSnapshot({
-    pricing: normalizedPricing,
-    restaurantId: dto.restaurantId
-  });
+  // Calculate restaurant commission per restaurant (sum stored on pricing for compat)
+  const restaurantGroups = Array.isArray(recalculated.pricing?.restaurantGroups)
+    ? recalculated.pricing.restaurantGroups
+    : restaurants.map((r) => ({
+        restaurantId: String(r._id),
+        restaurantName: r.name || r.restaurantName,
+        subtotal: pricedItems
+          .filter((it) => String(it.restaurantId) === String(r._id))
+          .reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.quantity) || 1), 0),
+        packagingFee: 0,
+      }));
 
-  normalizedPricing.restaurantCommission = restaurantCommission || 0;
+  const restaurantSettlement = [];
+  let totalRestaurantCommission = 0;
+  for (const group of restaurantGroups) {
+    const foodAmount = Number(group.subtotal) || 0;
+    const packaging = Number(group.packagingFee) || 0;
+    const { commissionAmount } = await foodTransactionService.getRestaurantCommissionSnapshot({
+      pricing: { subtotal: foodAmount },
+      restaurantId: group.restaurantId,
+    });
+    const commission = Number(commissionAmount) || 0;
+    // GST on commission (18% marketplace services GST; informational for settlement reports)
+    const commissionGST = Number((commission * 0.18).toFixed(2));
+    const restaurantPayout = Math.max(0, Number((foodAmount + packaging - commission).toFixed(2)));
+    totalRestaurantCommission += commission;
+    restaurantSettlement.push({
+      restaurantId: group.restaurantId,
+      restaurantName: group.restaurantName || '',
+      foodAmount,
+      packagingFee: packaging,
+      commission,
+      commissionGST,
+      restaurantPayout,
+    });
+  }
+
+  normalizedPricing.restaurantCommission = totalRestaurantCommission || 0;
+
+  const customerDeliveryFeePaid = Math.max(
+    0,
+    normalizedPricing.deliveryFee - Number(normalizedPricing.deliveryDiscount || 0),
+  );
+  const deliveryMargin = Math.max(0, Number((customerDeliveryFeePaid - riderEarning).toFixed(2)));
+
+  const driverSettlement = {
+    deliveryFee: customerDeliveryFeePaid,
+    tip: Number(dto.tip || 0) || 0,
+    incentive: 0,
+    driverPayout: Math.max(0, Number((riderEarning + Number(dto.tip || 0)).toFixed(2))),
+  };
+
+  const platformRevenue = {
+    platformFee: Number(normalizedPricing.platformFee) || 0,
+    commission: totalRestaurantCommission || 0,
+    deliveryMargin,
+  };
 
   const platformProfit = Math.max(
     0,
@@ -278,13 +391,25 @@ export async function createOrder(userId, dto) {
     Number(normalizedPricing.platformSubsidy || 0),
   );
 
-  const payment = {
-    method: paymentMethod,
-    status: isCash ? "cod_pending" : isWallet ? "paid" : "created",
-    amountDue: normalizedPricing.total,
-    razorpay: {},
-    qr: {},
-  };
+  const payment = verifiedPrepaid
+    ? {
+        method: "razorpay",
+        status: "paid",
+        amountDue: normalizedPricing.total,
+        razorpay: {
+          orderId: verifiedPrepaid.razorpayOrderId,
+          paymentId: verifiedPrepaid.razorpayPaymentId,
+          signature: verifiedPrepaid.razorpaySignature,
+        },
+        qr: {},
+      }
+    : {
+        method: paymentMethod,
+        status: isCash ? "cod_pending" : isWallet ? "paid" : "created",
+        amountDue: normalizedPricing.total,
+        razorpay: {},
+        qr: {},
+      };
 
   const isScheduledOrder = dto.scheduledAt && new Date(dto.scheduledAt) > new Date();
 
@@ -294,11 +419,14 @@ export async function createOrder(userId, dto) {
     isMultiRestaurant: restaurants.length > 1,
     pickups,
     zoneId: mainRestaurant.zoneId,
-    items,
+    items: pricedItems,
     deliveryAddress,
     customerName: deliveryAddress.name,
     customerPhone: deliveryAddress.phone,
     pricing: normalizedPricing,
+    restaurantSettlement,
+    driverSettlement,
+    platformRevenue,
     payment,
     orderStatus: isScheduledOrder ? "scheduled" : "created",
     restaurantNote: dto.restaurantNote || "",
@@ -318,30 +446,14 @@ export async function createOrder(userId, dto) {
         byRole: "SYSTEM",
         from: "",
         to: isScheduledOrder ? "scheduled" : "created",
-        note: isScheduledOrder ? "Scheduled order placed" : "Order placed",
+        note: verifiedPrepaid
+          ? "Order placed after prepaid payment"
+          : isScheduledOrder
+            ? "Scheduled order placed"
+            : "Order placed",
       },
     ],
   });
-
-  let razorpayPayload = null;
-  if (paymentMethod === "razorpay" && isRazorpayConfigured()) {
-    const amountPaise = Math.round((normalizedPricing.total ?? 0) * 100);
-    if (amountPaise < 100) throw new ValidationError("Amount too low for online payment");
-    try {
-      const rzOrder = await createRazorpayOrder(amountPaise, "INR", order._id.toString());
-      razorpayPayload = {
-        key: getRazorpayKeyId(),
-        orderId: rzOrder.id,
-        amount: rzOrder.amount,
-        currency: rzOrder.currency || "INR",
-      };
-      payment.razorpay = { orderId: rzOrder.id, paymentId: "", signature: "" };
-      payment.status = "created";
-      order.payment = payment;
-    } catch (err) {
-      throw new ValidationError(err?.message || "Payment gateway error");
-    }
-  }
 
   await order.save();
 
@@ -360,15 +472,27 @@ export async function createOrder(userId, dto) {
     payment,
   });
 
+  if (verifiedPrepaid) {
+    try {
+      await foodTransactionService.updateTransactionStatus(order._id, 'captured', {
+        status: 'captured',
+        razorpayPaymentId: verifiedPrepaid.razorpayPaymentId,
+        razorpaySignature: verifiedPrepaid.razorpaySignature,
+        recordedByRole: "USER",
+        recordedById: new mongoose.Types.ObjectId(userId),
+        note: 'Payment verified before order create',
+      });
+    } catch (err) {
+      logger.warn(`Failed to mark transaction captured for prepaid order ${order._id}: ${err?.message || err}`);
+    }
+  }
+
   try {
-    const isAwaitingOnlinePayment = paymentMethod === "razorpay" && payment.status !== "paid";
     await notifyOwnersSafely([{ ownerType: "USER", ownerId: userId }], {
-      title: isAwaitingOnlinePayment ? "Complete Payment to Confirm Order" : "Order Confirmed! 🍔",
-      body: isAwaitingOnlinePayment
-        ? `Order #${order.order_id || order._id} is created. Please complete payment to confirm.`
-        : `Your order #${order.order_id || order._id} has been placed successfully.`,
+      title: "Order Confirmed! 🍔",
+      body: `Your order #${order.order_id || order._id} has been placed successfully.`,
       data: {
-        type: isAwaitingOnlinePayment ? "order_created_pending_payment" : "order_created",
+        type: "order_created",
         orderId: String(order._id),
         link: `/food/user/orders/${order._id}`,
       },
@@ -384,24 +508,105 @@ export async function createOrder(userId, dto) {
   }
 
   const dispatchableStatuses = ["created", "confirmed", "preparing", "ready_for_pickup", "ready", "picked_up"];
-  if (dispatchMode === "auto" && (isCash || order.payment.status === "paid" || order.payment.status === "cod_pending") && dispatchableStatuses.includes(order.orderStatus)) {
+  if (
+    dispatchMode === "auto"
+    && (isCash || isWallet || order.payment.status === "paid" || order.payment.status === "cod_pending")
+    && dispatchableStatuses.includes(order.orderStatus)
+  ) {
     try {
       await dispatchService.tryAutoAssign(order._id);
     } catch { }
   }
 
-  // Clear server cart once order is confirmed (cash/wallet). Razorpay clears after payment verify.
-  if (isCash || isWallet) {
+  // Cart clear for confirmed orders (COD / wallet / prepaid-verified razorpay)
+  if (isCash || isWallet || verifiedPrepaid) {
     await clearUserCartAfterOrder(userId);
   }
 
-  return { order: normalizeOrderForClient(order), razorpay: razorpayPayload };
+  const clientOrder = normalizeOrderForClient(order);
+  return {
+    order: clientOrder,
+    orderId: String(order._id),
+    orderNumber: order.order_id || clientOrder?.order_id || String(order._id),
+    paymentType: verifiedPrepaid ? 'PREPAID' : (isCash ? 'COD' : (isWallet ? 'WALLET' : 'PREPAID')),
+    amount: normalizedPricing.total,
+    pricing: normalizedPricing,
+    razorpay: null,
+    requiresPayment: false,
+  };
 }
 
 // ----- Verify payment -----
+/**
+ * Prepaid flow: checkoutId + Razorpay proof → verify server-side → create FoodOrder.
+ * Legacy: orderId (unpaid FoodOrder created before pay) still supported.
+ */
 export async function verifyPayment(userId, dto) {
+  // New pay-then-place flow
+  if (dto.checkoutId) {
+    const session = await checkoutService.getCheckoutSessionForUser(dto.checkoutId, userId);
+
+    if (session.status === 'completed' && session.foodOrderId) {
+      const existing = await FoodOrder.findById(session.foodOrderId);
+      if (existing) {
+        return { order: normalizeOrderForClient(existing), payment: existing.payment, checkoutId: String(session._id) };
+      }
+    }
+
+    const { alreadyCompleted } = await checkoutService.verifyCheckoutPayment(session, {
+      razorpayOrderId: dto.razorpayOrderId,
+      razorpayPaymentId: dto.razorpayPaymentId,
+      razorpaySignature: dto.razorpaySignature,
+    });
+
+    if (alreadyCompleted && session.foodOrderId) {
+      const existing = await FoodOrder.findById(session.foodOrderId);
+      if (existing) {
+        return { order: normalizeOrderForClient(existing), payment: existing.payment, checkoutId: String(session._id) };
+      }
+    }
+
+    const claimed = await checkoutService.claimCheckoutForOrderCreate(session._id, {
+      razorpayPaymentId: dto.razorpayPaymentId,
+      razorpaySignature: dto.razorpaySignature,
+    });
+
+    if (!claimed) {
+      const fresh = await checkoutService.getCheckoutSessionForUser(dto.checkoutId, userId);
+      if (fresh.foodOrderId) {
+        const existing = await FoodOrder.findById(fresh.foodOrderId);
+        if (existing) {
+          return { order: normalizeOrderForClient(existing), payment: existing.payment, checkoutId: String(fresh._id) };
+        }
+      }
+      throw new ValidationError('Checkout is being processed. Please wait.');
+    }
+
+    const result = await createOrder(userId, claimed.orderPayload, {
+      verifiedPrepaid: {
+        razorpayOrderId: dto.razorpayOrderId,
+        razorpayPaymentId: dto.razorpayPaymentId,
+        razorpaySignature: dto.razorpaySignature,
+        expectedAmount: claimed.amountDue,
+      },
+    });
+
+    if (!result?.order?._id) {
+      throw new ValidationError('Failed to create order after payment');
+    }
+
+    await checkoutService.markCheckoutCompleted(claimed, result.order._id);
+
+    return {
+      order: result.order,
+      payment: result.order.payment,
+      checkoutId: String(claimed._id),
+    };
+  }
+
+  // Legacy: order already created, mark paid
   const identity = buildOrderIdentityFilter(dto.orderId);
-  if (!identity) throw new ValidationError("Order id required");
+  if (!identity) throw new ValidationError("Order id or checkoutId required");
 
   const order = await FoodOrder.findOne({
     ...identity,
@@ -468,6 +673,55 @@ export async function verifyPayment(userId, dto) {
   await clearUserCartAfterOrder(userId);
 
   return { order: normalizeOrderForClient(order), payment: order.payment };
+}
+
+export async function cancelCheckout(userId, checkoutId) {
+  const session = await checkoutService.cancelCheckoutSession(checkoutId, userId);
+  return {
+    checkoutId: String(session._id),
+    status: session.status,
+  };
+}
+
+/**
+ * Webhook helper: if payment captured for a checkout session, create the FoodOrder.
+ * Idempotent — safe to call alongside client verifyPayment.
+ */
+export async function finalizeCheckoutFromWebhook(rzOrderId, rzPaymentId) {
+  const session = await checkoutService.findCheckoutByRazorpayOrderId(rzOrderId);
+  if (!session) return null;
+  if (session.status === 'completed' && session.foodOrderId) {
+    return FoodOrder.findById(session.foodOrderId);
+  }
+  if (checkoutService.isCheckoutExpired(session) && session.status === 'pending_payment') {
+    session.status = 'expired';
+    await session.save();
+    return null;
+  }
+
+  const claimed = await checkoutService.claimCheckoutForOrderCreate(session._id, {
+    razorpayPaymentId: rzPaymentId,
+  });
+  if (!claimed) {
+    const fresh = await FoodCheckoutSession.findById(session._id);
+    if (fresh?.foodOrderId) return FoodOrder.findById(fresh.foodOrderId);
+    return null;
+  }
+
+  const result = await createOrder(String(claimed.userId), claimed.orderPayload, {
+    verifiedPrepaid: {
+      razorpayOrderId: rzOrderId,
+      razorpayPaymentId: rzPaymentId,
+      razorpaySignature: claimed.razorpay?.signature || 'webhook',
+      expectedAmount: claimed.amountDue,
+    },
+  });
+
+  if (result?.order?._id) {
+    await checkoutService.markCheckoutCompleted(claimed, result.order._id);
+    return result.order;
+  }
+  return null;
 }
 
 // ----- Auto-assign -----

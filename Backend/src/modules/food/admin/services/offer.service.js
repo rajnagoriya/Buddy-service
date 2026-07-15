@@ -46,6 +46,78 @@ function offerAppliesToRestaurant(offer, restaurantId) {
     return String(offer.restaurantId || '') === rid;
 }
 
+/** Orders that still count toward "already ordered" for first-time coupons. */
+const FIRST_TIME_EXCLUDED_STATUSES = [
+    'cancelled_by_user',
+    'rejected_by_restaurant',
+    'cancelled_by_restaurant',
+    'cancelled_by_admin',
+];
+
+/**
+ * Platform coupon → any prior order on the platform.
+ * Restaurant coupon → prior order only at that restaurant (main or multi-pickup).
+ * Uses exists() for O(1)-style short-circuit (no full count).
+ */
+export async function countPriorOrdersForFirstTimeCoupon(userId, offer) {
+    if (!userId) return 0;
+    const uid = new mongoose.Types.ObjectId(userId);
+    const base = {
+        userId: uid,
+        orderStatus: { $nin: FIRST_TIME_EXCLUDED_STATUSES },
+    };
+
+    let filter = base;
+    if (getCreatedByType(offer) === CREATED_BY_TYPE.RESTAURANT) {
+        const rid = offer.restaurantId;
+        if (rid && mongoose.Types.ObjectId.isValid(String(rid))) {
+            const restaurantOid = new mongoose.Types.ObjectId(String(rid));
+            filter = {
+                ...base,
+                $or: [
+                    { restaurantId: restaurantOid },
+                    { 'pickups.restaurantId': restaurantOid },
+                ],
+            };
+        }
+    }
+
+    const found = await FoodOrder.exists(filter);
+    return found ? 1 : 0;
+}
+
+export function mapCouponRejectionMessage(reason, { minOrderValue, createdBy } = {}) {
+    switch (reason) {
+        case 'first_time_only':
+        case 'first_order_only':
+            return createdBy === CREATED_BY_TYPE.RESTAURANT
+                ? 'This coupon is only for your first order at this restaurant'
+                : 'This coupon is only for first-time users on the platform';
+        case 'min_order':
+            return Number(minOrderValue) > 0
+                ? `Minimum order amount of ₹${Number(minOrderValue)} required for this coupon`
+                : 'Minimum order amount not met for this coupon';
+        case 'expired':
+            return 'This coupon has expired';
+        case 'not_started':
+            return 'This coupon is not active yet';
+        case 'usage_exceeded':
+            return 'This coupon has reached its usage limit';
+        case 'per_user_exceeded':
+            return 'You have already used this coupon the maximum number of times';
+        case 'restaurant_mismatch':
+            return 'This coupon is not valid for the restaurant in your cart';
+        case 'multi_restaurant':
+            return 'This coupon cannot be used with items from multiple restaurants';
+        case 'inactive':
+        case 'not_approved':
+            return 'This coupon is not currently available';
+        case 'invalid':
+        default:
+            return 'This coupon is not valid';
+    }
+}
+
 function offerTitle(offer) {
     if (isFreeDeliveryCoupon(offer)) return 'FREE DELIVERY';
     if (offer.discountType === 'percentage') {
@@ -131,13 +203,14 @@ export async function checkOfferEligibility(offer, {
         }
     }
 
-    if (userId && offer.customerScope === 'first-time') {
-        const c = await FoodOrder.countDocuments({ userId: new mongoose.Types.ObjectId(userId) });
-        if (c > 0) return { eligible: false, reason: 'first_time_only' };
-    }
-    if (userId && offer.isFirstOrderOnly === true) {
-        const c2 = await FoodOrder.countDocuments({ userId: new mongoose.Types.ObjectId(userId) });
-        if (c2 > 0) return { eligible: false, reason: 'first_order_only' };
+    if (userId && (offer.customerScope === 'first-time' || offer.isFirstOrderOnly === true)) {
+        const prior = await countPriorOrdersForFirstTimeCoupon(userId, offer);
+        if (prior > 0) {
+            return {
+                eligible: false,
+                reason: offer.customerScope === 'first-time' ? 'first_time_only' : 'first_order_only',
+            };
+        }
     }
 
     return { eligible: true };

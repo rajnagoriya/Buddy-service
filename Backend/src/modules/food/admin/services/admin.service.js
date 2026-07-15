@@ -1887,11 +1887,13 @@ export async function getPublicFeeSettings() {
 export async function getPublicCheckoutSettings() {
     const settings = await getDeliveryBoySettings();
     return {
-        multiOrderEnabled: Boolean(settings.multiOrderEnabled),
+        // Default ON: multi-restaurant carts are allowed unless explicitly disabled
+        multiOrderEnabled: settings.multiOrderEnabled !== false,
         multiOrderMaxDistance: Number(settings.multiOrderMaxDistance) || 0,
         multiOrderAdditionalCharge: Number(settings.multiOrderAdditionalCharge) || 0,
         splitOrderEnabled: settings.splitOrderEnabled !== false,
         splitOrderThreshold: Number(settings.splitOrderThreshold) || 20,
+        packagingFee: undefined,
     };
 }
 
@@ -5673,8 +5675,8 @@ export async function getDeliveryBoySettings() {
             adminCommissionPercentage: 0,
             weeklySalarySlabs: [],
             monthlySalarySlabs: [],
-            multiOrderEnabled: false,
-            multiOrderMaxDistance: 3,
+            multiOrderEnabled: true,
+            multiOrderMaxDistance: 5,
             multiOrderAdditionalCharge: 0,
             deliverySpeedOptions: DEFAULT_DELIVERY_SPEED_OPTIONS,
         };
