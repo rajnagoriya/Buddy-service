@@ -35,6 +35,7 @@ import { getGoogleMapsApiKey } from "@food/utils/googleMapsApiKey"
 import { clearModuleAuth, clearAuthData } from "@food/utils/auth"
 import { invalidateRestaurantAccessGuardCache } from "@food/components/restaurant/RestaurantAccessGuard"
 import { ImageSourcePicker } from "@food/components/ImageSourcePicker"
+import { isFlutterBridgeAvailable } from "@food/utils/imageUploadUtils"
 import { EMAIL_REGEX } from "@/shared/utils/emailValidation"
 import { DAY_NAMES, getDefaultDays } from "@food/utils/outletTimingsUtils"
 const debugLog = (...args) => {}
@@ -148,12 +149,33 @@ let onboardingFileCache = {
   },
 }
 
-// IndexedDB helpers for persistent file storage
+// IndexedDB helpers for persistent file storage.
+// Flutter InAppWebView can stall on indexedDB.open / transactions forever
+// (storage quota, blocked upgrade, or no onsuccess). Always race with a timeout
+// so onboarding hydration never hangs on "Loading...".
 const ONBOARDING_FILES_DB = "RestaurantOnboardingFiles"
 const FILES_STORE = "files"
+const INDEXED_DB_TIMEOUT_MS = 2500
+let indexedDbUnavailable = false
+
+const withIndexedDbTimeout = (promise, label = "IndexedDB") => {
+  let timer
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`${label} timed out`)),
+        INDEXED_DB_TIMEOUT_MS,
+      )
+    }),
+  ]).finally(() => clearTimeout(timer))
+}
 
 const openOnboardingFilesDB = () => {
-  return new Promise((resolve, reject) => {
+  if (indexedDbUnavailable || typeof indexedDB === "undefined") {
+    return Promise.reject(new Error("IndexedDB unavailable"))
+  }
+  const openPromise = new Promise((resolve, reject) => {
     try {
       const request = indexedDB.open(ONBOARDING_FILES_DB, 1)
       request.onupgradeneeded = (e) => {
@@ -163,38 +185,51 @@ const openOnboardingFilesDB = () => {
         }
       }
       request.onsuccess = (e) => resolve(e.target.result)
-      request.onerror = (e) => reject(e.target.error)
+      request.onerror = (e) => reject(e.target.error || new Error("IndexedDB open failed"))
+      request.onblocked = () => reject(new Error("IndexedDB open blocked"))
     } catch (err) {
       reject(err)
     }
   })
+  return withIndexedDbTimeout(openPromise, "IndexedDB open").catch((err) => {
+    indexedDbUnavailable = true
+    throw err
+  })
 }
 
 const saveFileToDB = async (key, file) => {
-  if (!file || !isUploadableFile(file)) return
+  if (!file || !isUploadableFile(file) || indexedDbUnavailable) return
   try {
     const db = await openOnboardingFilesDB()
     const tx = db.transaction(FILES_STORE, "readwrite")
     tx.objectStore(FILES_STORE).put(file, key)
-    await new Promise((resolve, reject) => {
-      tx.oncomplete = () => resolve(true)
-      tx.onerror = () => reject(tx.error || new Error("IndexedDB write transaction failed"))
-      tx.onabort = () => reject(tx.error || new Error("IndexedDB write transaction aborted"))
-    })
+    await withIndexedDbTimeout(
+      new Promise((resolve, reject) => {
+        tx.oncomplete = () => resolve(true)
+        tx.onerror = () => reject(tx.error || new Error("IndexedDB write transaction failed"))
+        tx.onabort = () => reject(tx.error || new Error("IndexedDB write transaction aborted"))
+      }),
+      "IndexedDB write",
+    )
   } catch (err) {
     debugError("IndexedDB save failed:", err)
   }
 }
 
 const getFileFromDB = async (key) => {
+  if (indexedDbUnavailable) return null
   try {
     const db = await openOnboardingFilesDB()
     const tx = db.transaction(FILES_STORE, "readonly")
     const request = tx.objectStore(FILES_STORE).get(key)
-    return new Promise((resolve) => {
-      request.onsuccess = () => resolve(request.result)
-      request.onerror = () => resolve(null)
-    })
+    return await withIndexedDbTimeout(
+      new Promise((resolve) => {
+        request.onsuccess = () => resolve(request.result)
+        request.onerror = () => resolve(null)
+        tx.onabort = () => resolve(null)
+      }),
+      "IndexedDB read",
+    )
   } catch (err) {
     debugError("IndexedDB load failed:", err)
     return null
@@ -202,30 +237,38 @@ const getFileFromDB = async (key) => {
 }
 
 const deleteFileFromDB = async (key) => {
+  if (indexedDbUnavailable) return
   try {
     const db = await openOnboardingFilesDB()
     const tx = db.transaction(FILES_STORE, "readwrite")
     tx.objectStore(FILES_STORE).delete(key)
-    await new Promise((resolve, reject) => {
-      tx.oncomplete = () => resolve(true)
-      tx.onerror = () => reject(tx.error || new Error("IndexedDB delete transaction failed"))
-      tx.onabort = () => reject(tx.error || new Error("IndexedDB delete transaction aborted"))
-    })
+    await withIndexedDbTimeout(
+      new Promise((resolve, reject) => {
+        tx.oncomplete = () => resolve(true)
+        tx.onerror = () => reject(tx.error || new Error("IndexedDB delete transaction failed"))
+        tx.onabort = () => reject(tx.error || new Error("IndexedDB delete transaction aborted"))
+      }),
+      "IndexedDB delete",
+    )
   } catch (err) {
     debugError("IndexedDB delete failed:", err)
   }
 }
 
 const clearAllFilesFromDB = async () => {
+  if (indexedDbUnavailable) return
   try {
     const db = await openOnboardingFilesDB()
     const tx = db.transaction(FILES_STORE, "readwrite")
     tx.objectStore(FILES_STORE).clear()
-    await new Promise((resolve, reject) => {
-      tx.oncomplete = () => resolve(true)
-      tx.onerror = () => reject(tx.error || new Error("IndexedDB clear transaction failed"))
-      tx.onabort = () => reject(tx.error || new Error("IndexedDB clear transaction aborted"))
-    })
+    await withIndexedDbTimeout(
+      new Promise((resolve, reject) => {
+        tx.oncomplete = () => resolve(true)
+        tx.onerror = () => reject(tx.error || new Error("IndexedDB clear transaction failed"))
+        tx.onabort = () => reject(tx.error || new Error("IndexedDB clear transaction aborted"))
+      }),
+      "IndexedDB clear",
+    )
   } catch (err) {
     debugError("IndexedDB clear failed:", err)
   }
@@ -1235,33 +1278,40 @@ export default function RestaurantOnboarding() {
           } else if (savedPhone && normalizedCurrent && savedPhone !== normalizedCurrent) {
              debugLog("? Phone mismatch, data belongs to different user. Clearing local cache.")
              clearOnboardingFromLocalStorage()
-             await clearAllFilesFromDB()
+             if (!isFlutterBridgeAvailable()) {
+               await clearAllFilesFromDB()
+             }
           }
         }
 
-        // 4. Finally re-hydrate heavy files from IndexedDB if they exist 
-        // (IndexedDB is reliable for large files which don't fit in localStorage)
-        const [prof, pan, gst, fs, pdf] = await Promise.all([
-          getFileFromDB("profileImage"),
-          getFileFromDB("panImage"),
-          getFileFromDB("gstImage"),
-          getFileFromDB("fssaiImage"),
-          getFileFromDB("menuPdf")
-        ]);
+        // 4. Re-hydrate draft files from IndexedDB (skipped in Flutter WebView —
+        // IndexedDB often stalls there and blocked the whole onboarding screen).
+        if (!isFlutterBridgeAvailable() && !indexedDbUnavailable) {
+          const [prof, pan, gst, fs, pdf, ...menuResults] = await Promise.all([
+            getFileFromDB("profileImage"),
+            getFileFromDB("panImage"),
+            getFileFromDB("gstImage"),
+            getFileFromDB("fssaiImage"),
+            getFileFromDB("menuPdf"),
+            ...Array.from({ length: 10 }, (_, i) => getFileFromDB(`menuImage_${i}`)),
+          ])
 
-        if (prof) setStep2(p => ({ ...p, profileImage: prof }));
-        if (pan) setStep3(p => ({ ...p, panImage: pan }));
-        if (gst) setStep3(p => ({ ...p, gstImage: gst }));
-        if (fs) setStep3(p => ({ ...p, fssaiImage: fs }));
-        if (pdf) setStep2(p => ({ ...p, menuPdf: pdf }));
+          if (prof) setStep2((p) => ({ ...p, profileImage: prof }))
+          if (pan) setStep3((p) => ({ ...p, panImage: pan }))
+          if (gst) setStep3((p) => ({ ...p, gstImage: gst }))
+          if (fs) setStep3((p) => ({ ...p, fssaiImage: fs }))
+          if (pdf) setStep2((p) => ({ ...p, menuPdf: pdf }))
 
-        const restoredMenuImages = []
-        for (let i = 0; i < 10; i++) {
-          const img = await getFileFromDB(`menuImage_${i}`)
-          if (img) restoredMenuImages.push(img)
-        }
-        if (restoredMenuImages.length) {
-          setStep2(p => ({ ...p, menuImages: [...p.menuImages.filter(im => !isUploadableFile(im)), ...restoredMenuImages] }));
+          const restoredMenuImages = menuResults.filter(Boolean)
+          if (restoredMenuImages.length) {
+            setStep2((p) => ({
+              ...p,
+              menuImages: [
+                ...p.menuImages.filter((im) => !isUploadableFile(im)),
+                ...restoredMenuImages,
+              ],
+            }))
+          }
         }
 
         const savedPhone = normalizePhoneDigits(localData?.step1?.ownerPhone || "")
@@ -1332,8 +1382,10 @@ export default function RestaurantOnboarding() {
   useEffect(() => {
     if (!isOnboardingHydrated) return
     saveOnboardingToLocalStorage(step1, step2, step3, step)
-    
-    // Save images to IndexedDB
+
+    // Draft file persistence via IndexedDB — skip in Flutter WebView (unreliable / can stall).
+    if (isFlutterBridgeAvailable() || indexedDbUnavailable) return
+
     const saveFiles = async () => {
       if (step2.profileImage && isUploadableFile(step2.profileImage)) {
         await saveFileToDB("profileImage", step2.profileImage)
@@ -1349,7 +1401,7 @@ export default function RestaurantOnboarding() {
       if (step3.fssaiImage && isUploadableFile(step3.fssaiImage)) {
         await saveFileToDB("fssaiImage", step3.fssaiImage)
       }
-      
+
       await persistMenuImagesToDB(step2.menuImages || [])
       await persistMenuPdfToDB(step2.menuPdf || null)
     }
