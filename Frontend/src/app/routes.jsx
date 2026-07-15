@@ -100,7 +100,12 @@ const AppRoutes = () => {
     if (!isNativeLikeShell) return
 
     const route = `${location.pathname || ''}${location.search || ''}`
-    if (route.startsWith('/food/') || route.startsWith('/admin')) {
+    if (
+      route.startsWith('/food/') ||
+      route.startsWith('/admin') ||
+      route.startsWith('/driver') ||
+      route.startsWith('/taxi')
+    ) {
       localStorage.setItem(NATIVE_LAST_ROUTE_KEY, route)
     }
   }, [location.pathname, location.search])

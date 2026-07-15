@@ -37,19 +37,68 @@ function isNativeLikeShell() {
   )
 }
 
+function getNativePathname() {
+  if (typeof window === 'undefined') return '/'
+  const rawPathname = String(window.location?.pathname || '')
+  return rawPathname.replace(/\/index\.html$/i, '') || '/'
+}
+
+/** Portals whose server pathname must become the HashRouter location. */
+function isExplicitPortalPath(pathname = '') {
+  return (
+    pathname.startsWith('/driver') ||
+    pathname.startsWith('/taxi') ||
+    pathname.startsWith('/qc') ||
+    pathname.startsWith('/admin') ||
+    pathname.startsWith('/food/') ||
+    pathname.startsWith('/user/auth') ||
+    pathname.startsWith('/restaurant') ||
+    pathname.startsWith('/delivery') ||
+    pathname.startsWith('/user')
+  )
+}
+
+function samePortalFamily(pathname = '', hashPath = '') {
+  const pathOnly = String(hashPath).split('?')[0] || ''
+  if (pathname.startsWith('/driver')) return pathOnly.startsWith('/driver')
+  if (pathname.startsWith('/taxi')) return pathOnly.startsWith('/taxi')
+  if (pathname.startsWith('/qc')) return pathOnly.startsWith('/qc')
+  if (pathname.startsWith('/admin')) return pathOnly.startsWith('/admin')
+  if (pathname.startsWith('/food/') || pathname.startsWith('/restaurant') || pathname.startsWith('/delivery') || pathname.startsWith('/user')) {
+    return (
+      pathOnly.startsWith('/food/') ||
+      pathOnly.startsWith('/restaurant') ||
+      pathOnly.startsWith('/delivery') ||
+      pathOnly.startsWith('/user')
+    )
+  }
+  return false
+}
+
 function resolveNativeInitialRoute() {
   if (typeof window === 'undefined') return '/food/user'
 
-  const rawPathname = String(window.location?.pathname || '')
-  const pathname = rawPathname.replace(/\/index\.html$/i, '') || '/'
+  const pathname = getNativePathname()
   const storedRoute = String(localStorage.getItem(NATIVE_LAST_ROUTE_KEY) || '').trim()
 
+  // Always honor the URL the native shell opened — do not replace /driver/*
+  // with a stale restaurant/user route from localStorage or another role's auth.
+  if (pathname.startsWith('/driver')) return pathname
+  if (pathname.startsWith('/taxi')) return pathname
+  if (pathname.startsWith('/qc')) return pathname
   if (pathname.startsWith('/food/')) return pathname
   if (pathname.startsWith('/restaurant')) return `/food${pathname}`
   if (pathname.startsWith('/delivery')) return `/food${pathname}`
+  if (pathname.startsWith('/user/auth')) return pathname
   if (pathname.startsWith('/user')) return `/food${pathname}`
   if (pathname.startsWith('/admin')) return pathname
-  if (storedRoute.startsWith('/food/') || storedRoute.startsWith('/admin')) {
+
+  if (
+    storedRoute.startsWith('/food/') ||
+    storedRoute.startsWith('/admin') ||
+    storedRoute.startsWith('/driver') ||
+    storedRoute.startsWith('/taxi')
+  ) {
     return storedRoute
   }
 
@@ -64,8 +113,18 @@ function resolveNativeInitialRoute() {
 function bootstrapNativeHashRoute() {
   if (!isNativeLikeShell() || typeof window === 'undefined') return
 
+  const pathname = getNativePathname()
   const currentHash = String(window.location?.hash || '')
-  if (currentHash.startsWith('#/')) return
+  const hashPath = currentHash.startsWith('#') ? currentHash.slice(1) : currentHash
+
+  // Keep an existing hash only when it matches the portal the shell opened.
+  // Otherwise a previous session leaves #/food/restaurant/... on /driver/login.
+  if (currentHash.startsWith('#/') && isExplicitPortalPath(pathname) && samePortalFamily(pathname, hashPath)) {
+    return
+  }
+  if (currentHash.startsWith('#/') && !isExplicitPortalPath(pathname)) {
+    return
+  }
 
   const targetPath = resolveNativeInitialRoute()
   const search = String(window.location?.search || '')
