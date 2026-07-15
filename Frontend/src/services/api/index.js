@@ -722,6 +722,10 @@ export const adminAPI = {
     apiClient.post("/food/admin/offers", body ?? {}, {
       contextModule: "admin",
     }),
+  updateAdminOffer: (offerId, body) =>
+    apiClient.patch(`/food/admin/offers/${String(offerId)}`, body ?? {}, {
+      contextModule: "admin",
+    }),
   updateAdminOfferCartVisibility: (offerId, itemId, showInCart) =>
     apiClient.patch(
       `/food/admin/offers/${String(offerId)}/cart-visibility`,
@@ -730,6 +734,23 @@ export const adminAPI = {
     ),
   deleteAdminOffer: (offerId) =>
     apiClient.delete(`/food/admin/offers/${String(offerId)}`, {
+      contextModule: "admin",
+    }),
+  approveAdminOffer: (offerId) =>
+    apiClient.patch(`/food/admin/offers/${String(offerId)}/approve`, {}, {
+      contextModule: "admin",
+    }),
+  rejectAdminOffer: (offerId, reason) =>
+    apiClient.patch(`/food/admin/offers/${String(offerId)}/reject`, { reason }, {
+      contextModule: "admin",
+    }),
+  getAdminOfferAnalytics: (offerId) =>
+    apiClient.get(`/food/admin/offers/${String(offerId)}/analytics`, {
+      contextModule: "admin",
+    }),
+  getAdminOfferUsageHistory: (offerId, params = {}) =>
+    apiClient.get(`/food/admin/offers/${String(offerId)}/history`, {
+      params,
       contextModule: "admin",
     }),
 
@@ -897,6 +918,8 @@ export const adminAPI = {
   /** Fee Settings (admin) */
   getFeeSettings: () =>
     apiClient.get("/food/admin/fee-settings", { contextModule: "admin" }),
+  getPublicFeeSettings: (config = {}) =>
+    apiClient.get("/food/admin/fee-settings/public", config),
   createOrUpdateFeeSettings: (body) =>
     apiClient.put("/food/admin/fee-settings", body ?? {}, {
       contextModule: "admin",
@@ -1138,39 +1161,115 @@ export const restaurantAPI = {
   },
   /** Public Offers for users (global/selected restaurant) */
   getPublicOffers: () => apiClient.get("/food/restaurant/offers"),
+  getRestaurantPageOffers: (restaurantId) =>
+    apiClient.get(`/food/restaurant/restaurants/${String(restaurantId)}/offers`),
+  getDeliverySpeedOptions: (config = {}) =>
+    apiClient.get("/food/restaurant/delivery-speed-options", config),
+  getPublicCheckoutSettings: (config = {}) =>
+    apiClient.get("/food/restaurant/checkout-settings/public", config),
   /** Backward-compat helper used by Cart: returns coupons array for an item by adapting public offers */
-  getCouponsByItemIdPublic: (restaurantId, _itemId) =>
+  getCouponsByItemIdPublic: (restaurantIds, _itemId) =>
     apiClient.get("/food/restaurant/offers").then((res) => {
       const list = res?.data?.data?.allOffers || res?.data?.allOffers || [];
+      const idList = Array.isArray(restaurantIds)
+        ? restaurantIds.map((id) => String(id || "")).filter(Boolean)
+        : [String(restaurantIds || "")].filter(Boolean);
       const now = Date.now();
       const coupons = list
+        .filter((o) => o.showInCart !== false)
         .filter((o) => {
-          // Guard: respect selected restaurant scope
           if (String(o?.restaurantScope) === "selected") {
-            if (!restaurantId) return false;
-            return String(o.restaurantId || "") === String(restaurantId || "");
+            if (!idList.length) return false;
+            return idList.includes(String(o.restaurantId || ""));
           }
           return true;
         })
         .map((o) => {
+          const isFreeDel = o.couponCategory === "free_delivery" || o.isFreeDelivery
+          if (isFreeDel) {
+            return {
+              couponCode: o.couponCode,
+              code: o.couponCode,
+              discountType: "free_delivery",
+              discountPercentage: 0,
+              discount: 0,
+              discountValue: 0,
+              originalPrice: 0,
+              discountedPrice: 0,
+              minOrderValue: Number(o.minOrderValue || 0),
+              minOrder: Number(o.minOrderValue || 0),
+              maxDiscount: null,
+              customerGroup: o.customerScope === "first-time" ? "new" : "all",
+              customerScope: o.customerScope || "all",
+              isGlobalCoupon: o.restaurantScope !== "selected",
+              restaurantScope: o.restaurantScope || "all",
+              restaurantId: o.restaurantId || null,
+              createdBy: o.createdBy || "admin",
+              couponCategory: "free_delivery",
+              isFreeDelivery: true,
+              freeDelivery: true,
+              discountDisplay: "FREE DELIVERY",
+              sourceLabel: o.createdBy === "restaurant" ? "Restaurant" : "Platform",
+              endDate: o.endDate || null,
+              showInCart: o.showInCart !== false,
+              _ts: now,
+            };
+          }
           const isPct = o.discountType === "percentage";
           return {
             couponCode: o.couponCode,
+            code: o.couponCode,
             discountType: o.discountType,
             discountPercentage: isPct ? Number(o.discountValue) || 0 : 0,
+            discount: isPct ? 0 : Number(o.discountValue) || 0,
+            discountValue: Number(o.discountValue) || 0,
             originalPrice: 0,
             discountedPrice: 0,
             minOrderValue: Number(o.minOrderValue || 0),
             minOrder: Number(o.minOrderValue || 0),
             maxDiscount: o.maxDiscount != null ? Number(o.maxDiscount) : null,
-            customerGroup: o.customerScope || "all",
-            isGlobalCoupon: true,
+            customerGroup: o.customerScope === "first-time" ? "new" : "all",
+            customerScope: o.customerScope || "all",
+            isGlobalCoupon: o.restaurantScope !== "selected",
+            restaurantScope: o.restaurantScope || "all",
+            restaurantId: o.restaurantId || null,
+            createdBy: o.createdBy || "admin",
+            couponCategory: o.couponCategory || "normal",
+            isFreeDelivery: o.couponCategory === "free_delivery",
+            sourceLabel: o.createdBy === "restaurant" ? "Restaurant" : "Platform",
             endDate: o.endDate || null,
             showInCart: o.showInCart !== false,
             _ts: now,
           };
         });
       return { data: { success: true, data: { coupons } } };
+    }),
+  getMyOffers: () =>
+    apiClient.get("/food/restaurant/my-offers", { contextModule: "restaurant" }),
+  createMyOffer: (body) =>
+    apiClient.post("/food/restaurant/my-offers", body ?? {}, {
+      contextModule: "restaurant",
+    }),
+  updateMyOffer: (offerId, body) =>
+    apiClient.patch(`/food/restaurant/my-offers/${String(offerId)}`, body ?? {}, {
+      contextModule: "restaurant",
+    }),
+  reapplyMyOffer: (offerId) =>
+    apiClient.patch(`/food/restaurant/my-offers/${String(offerId)}/reapply`, {}, {
+      contextModule: "restaurant",
+    }),
+  deleteMyOffer: (offerId) =>
+    apiClient.delete(`/food/restaurant/my-offers/${String(offerId)}`, {
+      contextModule: "restaurant",
+    }),
+  getMyOfferAnalytics: (offerId) =>
+    apiClient.get(`/food/restaurant/my-offers/${String(offerId)}/analytics`, {
+      contextModule: "restaurant",
+    }),
+  getMyOfferUsageHistory: (offerId, params = {}) =>
+    apiClient.get(`/food/restaurant/my-offers/${String(offerId)}/history`, {
+      params,
+      contextModule: "restaurant",
     }),
   /** Categories (restaurant dashboard) */
   getCategories: (params = {}) =>
@@ -2522,6 +2621,10 @@ export const orderAPI = {
     apiClient.post("/food/orders", payload ?? {}, { contextModule: "user" }),
   verifyPayment: (body) =>
     apiClient.post("/food/orders/verify-payment", body ?? {}, {
+      contextModule: "user",
+    }),
+  cancelCheckout: (checkoutId) =>
+    apiClient.post(`/food/orders/checkout/${String(checkoutId)}/cancel`, {}, {
       contextModule: "user",
     }),
   getOrders: (() => {

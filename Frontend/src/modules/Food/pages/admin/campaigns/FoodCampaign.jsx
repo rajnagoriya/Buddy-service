@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react"
-import { Search, Download, ChevronDown, ArrowUpDown, Plus, Edit, Trash2, Megaphone, Settings } from "lucide-react"
+import { Search, Download, ChevronDown, ArrowUpDown, Plus, Edit, Trash2, Megaphone, Settings, MoreVertical } from "lucide-react"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { emptyFoodCampaigns } from "@food/utils/adminFallbackData"
 
 export default function FoodCampaign() {
@@ -169,21 +170,29 @@ export default function FoodCampaign() {
                       </button>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-center">
-                      <div className="flex items-center justify-center gap-2">
-                        <button
-                          className="p-1.5 rounded text-blue-600 hover:bg-blue-50 transition-colors"
-                          title="Edit"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(campaign.sl)}
-                          className="p-1.5 rounded text-red-600 hover:bg-red-50 transition-colors"
-                          title="Delete"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button className="p-1.5 rounded text-slate-600 hover:bg-slate-100 transition-colors">
+                            <MoreVertical className="w-4 h-4" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-40 bg-white border border-slate-200 rounded-lg shadow-lg z-50">
+                          <DropdownMenuItem
+                            className="cursor-pointer flex items-center gap-2"
+                          >
+                            <Edit className="w-4 h-4 text-blue-500" />
+                            <span>Edit</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onClick={() => handleDelete(campaign.sl)}
+                            className="cursor-pointer flex items-center gap-2 text-red-600 hover:text-red-700"
+                          >
+                            <Trash2 className="w-4 h-4 text-red-500" />
+                            <span>Delete</span>
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </td>
                   </tr>
                 ))

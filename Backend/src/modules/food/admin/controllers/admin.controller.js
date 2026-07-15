@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import * as adminService from '../services/admin.service.js';
 import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
 import { validateCategoryListQuery, validateCategoryRejectDto, validateCategoryUpsertDto } from '../validators/category.validator.js';
-import { validateCreateOfferDto, validateUpdateOfferCartVisibilityDto } from '../validators/offer.validator.js';
+import { validateCreateOfferDto, validateUpdateOfferDto, validateUpdateOfferCartVisibilityDto } from '../validators/offer.validator.js';
 import { validateAddDeliveryBonusDto } from '../validators/deliveryBonus.validator.js';
 import { validateCheckCompletionsDto, validateEarningAddonHistoryActionDto, validateEarningAddonUpsertDto, validateToggleEarningAddonStatusDto } from '../validators/earningAddon.validator.js';
 import { validateDeliveryCommissionRuleDto, validateOptionalStatusDto, validateRestaurantCommissionUpsertDto } from '../validators/commission.validator.js';
@@ -632,8 +632,27 @@ export async function getAllOffers(req, res, next) {
 export async function createAdminOffer(req, res, next) {
     try {
         const body = validateCreateOfferDto(req.body || {});
-        const created = await adminService.createAdminOffer(body);
-        res.status(201).json({ success: true, message: 'Offer created successfully', data: { offer: created } });
+        const adminId = req.user?.userId || req.user?._id;
+        const created = await adminService.createAdminOffer(body, adminId);
+        res.status(201).json({ success: true, message: 'Offer submitted for approval', data: { offer: created } });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function updateAdminOffer(req, res, next) {
+    try {
+        const { id } = req.params;
+        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ success: false, message: 'Invalid offer id' });
+        }
+        const body = validateUpdateOfferDto(req.body || {});
+        const adminId = req.user?.userId || req.user?._id;
+        const updated = await adminService.updateAdminOffer(id, body, adminId);
+        if (!updated) {
+            return res.status(404).json({ success: false, message: 'Offer not found' });
+        }
+        res.status(200).json({ success: true, message: 'Offer updated successfully', data: { offer: updated } });
     } catch (error) {
         next(error);
     }
@@ -667,6 +686,65 @@ export async function deleteAdminOffer(req, res, next) {
             return res.status(404).json({ success: false, message: 'Offer not found' });
         }
         res.status(200).json({ success: true, message: 'Offer deleted successfully', data: result });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function approveAdminOffer(req, res, next) {
+    try {
+        const { id } = req.params;
+        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ success: false, message: 'Invalid offer id' });
+        }
+        const updated = await adminService.approveAdminOffer(id);
+        if (!updated) {
+            return res.status(404).json({ success: false, message: 'Offer not found' });
+        }
+        res.status(200).json({ success: true, message: 'Offer approved successfully', data: { offer: updated } });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function rejectAdminOffer(req, res, next) {
+    try {
+        const { id } = req.params;
+        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ success: false, message: 'Invalid offer id' });
+        }
+        const reason = req.body?.reason || req.body?.rejectionReason || '';
+        const updated = await adminService.rejectAdminOffer(id, reason);
+        if (!updated) {
+            return res.status(404).json({ success: false, message: 'Offer not found' });
+        }
+        res.status(200).json({ success: true, message: 'Offer rejected successfully', data: { offer: updated } });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function getAdminOfferAnalytics(req, res, next) {
+    try {
+        const { id } = req.params;
+        const data = await adminService.getAdminOfferAnalytics(id);
+        if (!data) {
+            return res.status(404).json({ success: false, message: 'Offer not found' });
+        }
+        res.status(200).json({ success: true, message: 'Analytics fetched', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function getAdminOfferUsageHistory(req, res, next) {
+    try {
+        const { id } = req.params;
+        const data = await adminService.getAdminOfferUsageHistory(id, req.query || {});
+        if (!data) {
+            return res.status(404).json({ success: false, message: 'Offer not found' });
+        }
+        res.status(200).json({ success: true, message: 'Usage history fetched', data });
     } catch (error) {
         next(error);
     }
@@ -1050,6 +1128,15 @@ export async function upsertDeliveryBoySettings(req, res, next) {
 export async function getFeeSettings(req, res, next) {
     try {
         const data = await adminService.getFeeSettings();
+        res.status(200).json({ success: true, message: 'Fee settings fetched successfully', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function getPublicFeeSettings(req, res, next) {
+    try {
+        const data = await adminService.getPublicFeeSettings();
         res.status(200).json({ success: true, message: 'Fee settings fetched successfully', data });
     } catch (error) {
         next(error);

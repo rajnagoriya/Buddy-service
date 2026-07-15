@@ -1144,7 +1144,13 @@ export default function Home() {
   const [selectedRestaurantSlug, setSelectedRestaurantSlug] = useState(null);
 
   // Fetch categories (zone-aware) for the homepage category rail.
+  // Wait for location and zone detection to complete before making a single API call.
   useEffect(() => {
+    // Agar location ya zone abhi bhi load ho raha hai, tab tak wait karo.
+    // Yeh ensure karta hai ki sirf ek hi API call ho (zone-aware), na ki pehle
+    // bina zoneId ke global call aur phir zoneId ke saath dobara call.
+    if (loading || zoneLoading) return;
+
     let cancelled = false
     const run = async () => {
       const zoneKey = String(zoneId || "global")
@@ -1203,7 +1209,7 @@ export default function Home() {
     return () => {
       cancelled = true
     }
-  }, [zoneId, normalizeImageUrl])
+  }, [zoneId, loading, zoneLoading, normalizeImageUrl])
 
   // Memoize cartCount to prevent recalculation on every render - use cart directly
   const cartCount = useMemo(
@@ -2230,6 +2236,8 @@ export default function Home() {
             sortBy={sortBy}
             selectedCuisine={selectedCuisine}
             setIsFilterOpen={setIsFilterOpen}
+            festSlideIndex={festSlideIndex}
+            setFestSlideIndex={setFestSlideIndex}
           />
         </div>
 

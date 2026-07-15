@@ -104,6 +104,8 @@ export default function UserRouter() {
         <Route path="refund" element={<Refund />} />
         <Route path="shipping" element={<Shipping />} />
         <Route path="cancellation" element={<Cancellation />} />
+        <Route path="about" element={<About />} />
+
 
         <Route element={<UserLayout />}>
           {/* Home & Discovery */}

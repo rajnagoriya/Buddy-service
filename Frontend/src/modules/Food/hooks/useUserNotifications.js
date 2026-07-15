@@ -121,9 +121,12 @@ export const useUserNotifications = () => {
           orderMongoId: data.orderMongoId,
           orderId: data.orderId,
           status: data.orderStatus,
-          orderStatus: data.orderStatus, // Ensure compatibility with different UI checks
+          orderStatus: data.orderStatus,
           title,
           message,
+          failureReason: data.failureReason || null,
+          dispatch: data.dispatch || null,
+          payment: data.payment || null,
           deliveryState: data.deliveryState,
           deliveryVerification: data.deliveryVerification,
           timestamp: new Date().toISOString()

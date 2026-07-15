@@ -1,11 +1,12 @@
 import { useState, useMemo, useEffect, useCallback } from "react"
 import { useSearchParams } from "react-router-dom"
-import { Search, Trash2, Loader2, Eye, Pencil, Plus, Save, ChevronDown, ChevronLeft, ChevronRight, Utensils, CheckCircle2, XCircle, RotateCw } from "lucide-react"
+import { Search, Trash2, Loader2, Eye, Pencil, Plus, Save, ChevronDown, ChevronLeft, ChevronRight, Utensils, CheckCircle2, XCircle, RotateCw, MoreVertical } from "lucide-react"
 import { adminAPI, uploadAPI } from "@food/api"
 import { getAdminFoodsCached, getAdminRestaurantsActiveCached, getAdminRestaurantsInactiveCached } from "@food/utils/foodListingsCache"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@food/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@food/components/ui/popover"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { getFoodDisplayPrice, getFoodVariants } from "@food/utils/foodVariants"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
@@ -36,6 +37,8 @@ const createVariantDraft = (variant = {}) => ({
 export default function FoodsList() {
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedRestaurant, setSelectedRestaurant] = useState("all")
+  const [foodTypeFilter, setFoodTypeFilter] = useState("all")
+  const [statusFilter, setStatusFilter] = useState("all")
   const [foods, setFoods] = useState([])
   const [restaurantsForFilter, setRestaurantsForFilter] = useState([])
   const [loading, setLoading] = useState(true)
@@ -223,9 +226,20 @@ export default function FoodsList() {
       result = result.filter((food) => String(food.restaurantId) === selectedRestaurant)
     }
 
+    if (foodTypeFilter !== "all") {
+      result = result.filter((food) => String(food.foodType || "").toLowerCase() === foodTypeFilter.toLowerCase())
+    }
+
+    if (statusFilter !== "all") {
+      result = result.filter((food) => {
+        const isAvail = food.status !== false
+        return statusFilter === "active" ? isAvail : !isAvail
+      })
+    }
+
     result.sort((a, b) => getItemCreatedMs(b) - getItemCreatedMs(a))
     return result
-  }, [foods, searchQuery, selectedRestaurant])
+  }, [foods, searchQuery, selectedRestaurant, foodTypeFilter, statusFilter])
 
   const totalPages = useMemo(() => {
     if (filteredFoods.length === 0) return 1
@@ -239,7 +253,7 @@ export default function FoodsList() {
 
   useEffect(() => {
     setCurrentPage(1)
-  }, [searchQuery, selectedRestaurant, pageSize])
+  }, [searchQuery, selectedRestaurant, foodTypeFilter, statusFilter, pageSize])
 
   useEffect(() => {
     if (currentPage > totalPages) {
@@ -527,6 +541,24 @@ export default function FoodsList() {
                 </option>
               ))}
             </select>
+            <select
+              value={foodTypeFilter}
+              onChange={(e) => setFoodTypeFilter(e.target.value)}
+              className="px-4 py-2.5 min-w-[150px] text-sm rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400"
+            >
+              <option value="all">All Food Types</option>
+              <option value="veg">Veg</option>
+              <option value="non-veg">Non-Veg</option>
+            </select>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="px-4 py-2.5 min-w-[150px] text-sm rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400"
+            >
+              <option value="all">All Statuses</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
           </div>
         </div>
       </div>
@@ -651,36 +683,44 @@ export default function FoodsList() {
                         <span className="text-sm font-medium text-slate-800">{food.categoryName || "-"}</span>
                       </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-center">
-                      <div className="flex items-center justify-center gap-2">
-                        <button
-                          onClick={() => handleViewDetails(food)}
-                          className="p-1.5 rounded text-blue-600 hover:bg-blue-50 transition-colors"
-                          title="View"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => openEditFoodModal(food)}
-                          className="p-1.5 rounded text-amber-600 hover:bg-amber-50 transition-colors"
-                          title="Edit"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(food.id)}
-                          disabled={deleting}
-                          className="p-1.5 rounded text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                          title="Delete"
-                        >
-                          {deleting ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <Trash2 className="w-4 h-4" />
-                          )}
-                        </button>
-                      </div>
-                    </td>
+                     <td className="px-6 py-4 whitespace-nowrap text-center">
+                       <DropdownMenu>
+                         <DropdownMenuTrigger asChild>
+                           <button className="p-1.5 rounded text-slate-600 hover:bg-slate-100 transition-colors">
+                             <MoreVertical className="w-4 h-4" />
+                           </button>
+                         </DropdownMenuTrigger>
+                         <DropdownMenuContent align="end" className="w-40 bg-white border border-slate-200 rounded-lg shadow-lg z-50">
+                           <DropdownMenuItem
+                             onClick={() => handleViewDetails(food)}
+                             className="cursor-pointer flex items-center gap-2"
+                           >
+                             <Eye className="w-4 h-4 text-slate-500" />
+                             <span>View Details</span>
+                           </DropdownMenuItem>
+                           <DropdownMenuItem
+                             onClick={() => openEditFoodModal(food)}
+                             className="cursor-pointer flex items-center gap-2"
+                           >
+                             <Pencil className="w-4 h-4 text-blue-500" />
+                             <span>Edit</span>
+                           </DropdownMenuItem>
+                           <DropdownMenuSeparator />
+                           <DropdownMenuItem
+                             onClick={() => handleDelete(food.id)}
+                             disabled={deleting}
+                             className="cursor-pointer flex items-center gap-2 text-red-600 hover:text-red-700 disabled:opacity-50"
+                           >
+                             {deleting ? (
+                               <Loader2 className="w-4 h-4 animate-spin" />
+                             ) : (
+                               <Trash2 className="w-4 h-4 text-red-500" />
+                             )}
+                             <span>Delete</span>
+                           </DropdownMenuItem>
+                         </DropdownMenuContent>
+                       </DropdownMenu>
+                     </td>
                   </tr>
                 ))
               )}

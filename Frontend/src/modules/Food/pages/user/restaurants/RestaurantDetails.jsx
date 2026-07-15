@@ -303,6 +303,8 @@ function RestaurantDetailsContent() {
 
   // Restaurant data state
   const [restaurant, setRestaurant] = useState(null)
+  const [pageCoupons, setPageCoupons] = useState([])
+  const [pageCouponsSource, setPageCouponsSource] = useState(null)
   const [loadingRestaurant, setLoadingRestaurant] = useState(true)
   const [restaurantError, setRestaurantError] = useState(null)
   const fetchedRestaurantRef = useRef(false) // Track if restaurant has been fetched for current slug
@@ -1269,6 +1271,47 @@ function RestaurantDetailsContent() {
     fetchRestaurant()
   }, [slug, zoneId, restaurant])
 
+  useEffect(() => {
+    const restaurantId = restaurant?.mongoId || restaurant?.id || restaurant?.restaurantId
+    if (!restaurantId) {
+      setPageCoupons([])
+      setPageCouponsSource(null)
+      return
+    }
+    let cancelled = false
+    restaurantAPI.getRestaurantPageOffers(restaurantId)
+      .then((res) => {
+        if (cancelled) return
+        const data = res?.data?.data || res?.data || {}
+        const coupons = Array.isArray(data.coupons) ? data.coupons : []
+        setPageCoupons(coupons)
+        setPageCouponsSource(data.source || null)
+        if (coupons.length > 0) {
+          setRestaurant((prev) => prev ? {
+            ...prev,
+            restaurantOffers: {
+              ...(prev.restaurantOffers || {}),
+              coupons: coupons.map((c) => ({
+                id: c.id || c.offerId,
+                code: c.code || c.couponCode,
+                title: c.title,
+                subtitle: c.subtitle,
+                isFreeDelivery: c.isFreeDelivery,
+                minOrderValue: c.minOrderValue,
+              })),
+            },
+          } : prev)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPageCoupons([])
+          setPageCouponsSource(null)
+        }
+      })
+    return () => { cancelled = true }
+  }, [restaurant?.mongoId, restaurant?.id, restaurant?.restaurantId])
+
   // Track previous values to prevent unnecessary recalculations
   const prevCoordsRef = useRef({ userLat: null, userLng: null, restaurantLat: null, restaurantLng: null })
   const prevDistanceRef = useRef(null)
@@ -1361,7 +1404,7 @@ function RestaurantDetailsContent() {
   }, [selectedItem])
 
   // Helper function to update item quantity in both local state and cart
-  const updateItemQuantity = (item, newQuantity, event = null, preferredVariant = null) => {
+  const updateItemQuantity = async (item, newQuantity, event = null, preferredVariant = null) => {
     // Check authentication
     if (!isModuleAuthenticated('user')) {
       toast.error("Please login to add items to cart")
@@ -1498,9 +1541,9 @@ function RestaurantDetailsContent() {
 
         // If incrementing quantity, trigger add animation with sourcePosition
         if (newQuantity > existingCartItem.quantity && sourcePosition) {
-          const result = addToCart(cartItem, sourcePosition)
+          const result = await addToCart(cartItem, sourcePosition)
           if (result?.ok === false) {
-            toast.error(result.error || 'Cannot add item from different restaurant. Please clear cart first.')
+            toast.error(result.error || 'Cannot add this item to cart.')
             return
           }
           if (newQuantity > existingCartItem.quantity + 1) {
@@ -1518,9 +1561,9 @@ function RestaurantDetailsContent() {
       } else {
         // Add to cart first (adds with quantity 1), then update to desired quantity
         // Pass sourcePosition when adding a new item
-        const result = addToCart(cartItem, sourcePosition)
+        const result = await addToCart(cartItem, sourcePosition)
         if (result?.ok === false) {
-          toast.error(result.error || 'Cannot add item from different restaurant. Please clear cart first.')
+          toast.error(result.error || 'Cannot add this item to cart.')
           return
         }
         if (newQuantity > 1) {
@@ -2176,14 +2219,16 @@ function RestaurantDetailsContent() {
   const activeOfferText = offersForDisplay[highlightIndex % offersForDisplay.length]
   const offerIndicatorCount = Math.min(offersForDisplay.length, 5)
   const activeOfferIndicator = offerIndicatorCount > 0 ? highlightIndex % offerIndicatorCount : 0
-  const primaryOffer = Array.isArray(restaurant?.offers) && restaurant.offers.length > 0
+  const primaryPageCoupon = pageCoupons.length > 0 ? pageCoupons[0] : null
+  const primaryOffer = primaryPageCoupon || (Array.isArray(restaurant?.offers) && restaurant.offers.length > 0
     ? restaurant.offers[0]
-    : null
+    : null)
   const offerHeadline = primaryOffer?.title || restaurant?.offerText || activeOfferText
   const offerSubline =
-    primaryOffer?.description ||
     primaryOffer?.subtitle ||
-    (primaryOffer?.code ? `Use ${primaryOffer.code}` : "Tap to view all offers")
+    primaryOffer?.description ||
+    (primaryOffer?.code || primaryOffer?.couponCode ? `Use ${primaryOffer.code || primaryOffer.couponCode}` : "Tap to view all offers")
+  const hasPageOffers = pageCoupons.length > 0
 
   // Auto-rotate images every 3 seconds
   useEffect(() => {
@@ -2288,13 +2333,15 @@ function RestaurantDetailsContent() {
         onOutletsClick={() => setShowLocationSheet(true)}
       />
 
-      <RestaurantOfferStrip
-        headline={offerHeadline}
-        subline={offerSubline}
-        indicatorCount={offerIndicatorCount}
-        activeIndicator={activeOfferIndicator}
-        onClick={() => setShowOffersSheet(true)}
-      />
+      {hasPageOffers && (
+        <RestaurantOfferStrip
+          headline={offerHeadline}
+          subline={offerSubline}
+          indicatorCount={Math.min(pageCoupons.length, 5)}
+          activeIndicator={activeOfferIndicator}
+          onClick={() => setShowOffersSheet(true)}
+        />
+      )}
 
       {isRestaurantOffline && <RestaurantOfflineBanner />}
 
@@ -3330,16 +3377,18 @@ function RestaurantDetailsContent() {
                       </div>
                     )}
 
-                    {/* Restaurant Coupons Section */}
-                    {restaurant?.restaurantOffers?.coupons && Array.isArray(restaurant.restaurantOffers.coupons) && restaurant.restaurantOffers.coupons.length > 0 && (
+                    {/* Available Offers */}
+                    {pageCoupons.length > 0 && (
                       <div>
                         <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
-                          Restaurant coupons
+                          Available Offers
+                          {pageCouponsSource === "restaurant" ? "" : pageCouponsSource === "admin" ? " (Platform)" : ""}
                         </h3>
                         <div className="space-y-3">
-                          {restaurant.restaurantOffers.coupons.map((coupon, couponIndex) => {
+                          {pageCoupons.map((coupon, couponIndex) => {
                             const couponKey = coupon?.id || coupon?.code || `coupon-${couponIndex}`
                             const isExpanded = expandedCoupons.has(couponKey)
+                            const isFreeDel = coupon?.isFreeDelivery || coupon?.couponCategory === "free_delivery"
                             return (
                               <div
                                 key={couponKey}
@@ -3359,13 +3408,13 @@ function RestaurantDetailsContent() {
                                     })
                                   }}
                                 >
-                                  <Percent className="h-5 w-5 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                                  <Percent className={`h-5 w-5 flex-shrink-0 ${isFreeDel ? "text-green-600 dark:text-green-400" : "text-blue-600 dark:text-blue-400"}`} />
                                   <div className="flex-1 text-left">
                                     <p className="text-sm font-medium text-gray-900 dark:text-white mb-1">
-                                      {coupon?.title || "Restaurant coupon"}
+                                      {coupon?.title || (isFreeDel ? "FREE DELIVERY" : "Offer")}
                                     </p>
                                     <p className="text-xs text-gray-500 dark:text-gray-400">
-                                      Use code {coupon?.code || "N/A"}
+                                      {coupon?.subtitle || (coupon?.minOrderValue > 0 ? `Minimum ₹${coupon.minOrderValue}` : "Use code below")}
                                     </p>
                                   </div>
                                   <div className="flex items-center gap-2">
@@ -3373,13 +3422,14 @@ function RestaurantDetailsContent() {
                                       className="px-3 py-1 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-xs font-medium rounded"
                                       onClick={(e) => {
                                         e.stopPropagation()
-                                        // Copy code to clipboard
-                                        if (coupon?.code) {
-                                          navigator.clipboard.writeText(coupon.code)
+                                        const code = coupon?.code || coupon?.couponCode
+                                        if (code) {
+                                          navigator.clipboard.writeText(code)
+                                          toast.success("Coupon copied")
                                         }
                                       }}
                                     >
-                                      {coupon?.code || "Copy"}
+                                      {coupon?.code || coupon?.couponCode || "Copy"}
                                     </button>
                                     <ChevronDown
                                       className={`h-4 w-4 text-gray-500 dark:text-gray-400 transition-transform ${isExpanded ? "rotate-180" : ""

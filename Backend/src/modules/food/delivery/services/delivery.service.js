@@ -351,7 +351,10 @@ export const getSupportTicketByIdAndPartner = async (ticketId, deliveryPartnerId
 };
 
 export const updateDeliveryAvailability = async (userId, payload) => {
-    const partner = await FoodDeliveryPartner.findById(userId);
+    let partner = await FoodDeliveryPartner.findById(userId);
+    if (!partner && mongoose.Types.ObjectId.isValid(userId)) {
+        partner = await FoodDeliveryPartner.findOne({ identityId: userId });
+    }
     if (!partner) {
         throw new ValidationError('Delivery partner not found');
     }

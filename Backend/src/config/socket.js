@@ -37,6 +37,10 @@ const roomNames = {
     tracking: (orderId) => `tracking:${String(orderId)}`
 };
 
+/** Unified identity uses role=DRIVER; legacy food delivery JWT uses DELIVERY_PARTNER. */
+const isFoodDeliveryRole = (role) =>
+    role === 'DELIVERY_PARTNER' || role === 'DRIVER';
+
 /**
  * Initializes Socket.IO with the provided HTTP server.
  * When REDIS_ENABLED=true and REDIS_URL is set, attaches Redis adapter for horizontal scaling.
@@ -127,7 +131,7 @@ export const initSocket = async (server) => {
         if (userId && role) {
             if (role === 'RESTAURANT') socket.join(roomNames.restaurant(userId));
             if (role === 'USER') socket.join(roomNames.user(userId));
-            if (role === 'DELIVERY_PARTNER') {
+            if (isFoodDeliveryRole(role)) {
                 socket.join(roomNames.delivery(userId));
                 socket.join('all_delivery'); // Global delivery broadcast room
                 logger.info(`[SocketDebug] Delivery Partner ${userId} connected and joined 'all_delivery' room. SocketId: ${socket.id}`);
@@ -150,7 +154,7 @@ export const initSocket = async (server) => {
 
         // Explicit join (used by existing delivery client hook).
         socket.on('join-delivery', (deliveryPartnerId) => {
-            if (socket.user?.role !== 'DELIVERY_PARTNER') {
+            if (!isFoodDeliveryRole(socket.user?.role)) {
                 logDeliverySocket('Rejected join-delivery for non-delivery role', {
                     socketId: socket.id,
                     role: socket.user?.role || 'UNKNOWN',
@@ -185,7 +189,7 @@ export const initSocket = async (server) => {
         socket.on('join-tracking', (orderId) => {
             if (!orderId) return;
             const role = socket.user?.role;
-            if (role !== 'USER' && role !== 'RESTAURANT' && role !== 'DELIVERY_PARTNER') return;
+            if (role !== 'USER' && role !== 'RESTAURANT' && !isFoodDeliveryRole(role)) return;
             const room = roomNames.tracking(orderId);
             socket.join(room);
             logger.info(`Socket ${socket.id} (${role}:${userId}) joined tracking room ${room}`);
@@ -195,7 +199,7 @@ export const initSocket = async (server) => {
         // Delivery partner emits live GPS location for an active order.
         // Broadcasts to the tracking room so users see the bike move in real time.
         socket.on('update-location', async (data) => {
-            if (socket.user?.role !== 'DELIVERY_PARTNER') return;
+            if (!isFoodDeliveryRole(socket.user?.role)) return;
             if (!data || !data.orderId) return;
 
             const lat = Number(data.lat);
@@ -346,7 +350,7 @@ export const initSocket = async (server) => {
 
         socket.on('disconnect', () => {
             logger.info(`Socket client disconnected: ${socket.id}`);
-            if (role === 'DELIVERY_PARTNER') {
+            if (isFoodDeliveryRole(role)) {
                 logDeliverySocket('Delivery socket disconnected', {
                     socketId: socket.id,
                     deliveryPartnerId: String(userId || ''),
@@ -357,7 +361,7 @@ export const initSocket = async (server) => {
         // 🆕 Resync State on Reconnect
         socket.on('resync', async () => {
           try {
-            if (role === 'DELIVERY_PARTNER') {
+            if (isFoodDeliveryRole(role)) {
               logDeliverySocket('Resync requested', {
                 socketId: socket.id,
                 deliveryPartnerId: String(userId || ''),
@@ -368,7 +372,7 @@ export const initSocket = async (server) => {
             if (state.activeOrder) {
               const eventName = role === 'USER' ? 'order_state' : 'active_order';
               socket.emit(eventName, state.activeOrder);
-              if (role === 'DELIVERY_PARTNER') {
+              if (isFoodDeliveryRole(role)) {
                 logDeliverySocket('Resync emitted active order', {
                   socketId: socket.id,
                   deliveryPartnerId: String(userId || ''),
@@ -391,7 +395,7 @@ export const initSocket = async (server) => {
               }
             }
             socket.emit('resync_complete', { timestamp: Date.now() });
-            if (role === 'DELIVERY_PARTNER') {
+            if (isFoodDeliveryRole(role)) {
               logDeliverySocket('Resync complete', {
                 socketId: socket.id,
                 deliveryPartnerId: String(userId || ''),

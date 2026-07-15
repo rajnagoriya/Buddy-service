@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, useRef, useCallback } from "react"
 import { buildCartLineId } from "@food/utils/foodVariants"
-import { adminAPI, userAPI } from "@food/api"
+import { restaurantAPI, userAPI, orderAPI } from "@food/api"
 import { API_BASE_URL } from "@food/api/config"
 import { buildRestaurantMetaFromCart } from "@food/hooks/useCartRestaurantValidation"
 
@@ -166,6 +166,24 @@ const resolveCartEntryId = (items, itemId, variantId = "") => {
 
 const CART_SAVE_DEBOUNCE_MS = 2500
 
+const deriveCartType = (items = []) => {
+  if (!Array.isArray(items) || items.length === 0) {
+    return null
+  }
+
+  const restaurantIds = new Set(
+    items.map((item) => String(item.restaurantId || "").trim()).filter(Boolean),
+  )
+  const lineItemIds = new Set(
+    items.map((item) => String(item.lineItemId || item.itemId || "").trim()).filter(Boolean),
+  )
+
+  return {
+    restaurantScope: restaurantIds.size > 1 ? "multi_restaurant" : "single_restaurant",
+    itemScope: lineItemIds.size > 1 ? "multi_item" : "single_item",
+  }
+}
+
 const isFoodUserAuthenticated = () => {
   if (typeof window === "undefined") return false
   return (
@@ -206,6 +224,7 @@ export function CartProvider({ children }) {
   const saveQueuedRef = useRef(false)
   const skipServerSyncRef = useRef(false)
   const hasRestoredFromServerRef = useRef(false)
+  const lastSyncedPayloadSigRef = useRef("")
   const cartRef = useRef(cart)
   const restaurantMetaRef = useRef(restaurantMeta)
 
@@ -218,18 +237,47 @@ export function CartProvider({ children }) {
   }, [restaurantMeta])
 
   useEffect(() => {
-    setRestaurantMeta((prev) => buildRestaurantMetaFromCart(cart, prev))
+    setRestaurantMeta((prev) => {
+      const next = buildRestaurantMetaFromCart(cart, prev)
+      if (
+        prev.length === next.length &&
+        prev.every((entry, i) => String(entry.restaurantId) === String(next[i]?.restaurantId))
+      ) {
+        return prev
+      }
+      return next
+    })
   }, [cart])
 
   const buildCartPayload = useCallback(() => {
     const items = normalizeCartData(cartRef.current)
     const meta = buildRestaurantMetaFromCart(items, restaurantMetaRef.current)
-    return { items, restaurantMeta: meta }
+    const cartType = deriveCartType(items)
+    return { items, restaurantMeta: meta, cartType }
+  }, [])
+
+  const getCartPayloadSignature = useCallback((payload) => {
+    try {
+      return JSON.stringify({
+        cartType: payload?.cartType || null,
+        restaurantMeta: (payload?.restaurantMeta || []).map((m) => String(m.restaurantId)),
+        items: (payload?.items || []).map((it) => ({
+          itemId: String(it.itemId || it.id || ""),
+          variantId: String(it.variantId || ""),
+          quantity: Number(it.quantity) || 1,
+          restaurantId: String(it.restaurantId || ""),
+          price: Number(it.price) || 0,
+        })),
+      })
+    } catch {
+      return String(Date.now())
+    }
   }, [])
 
   const flushCartSave = useCallback(async () => {
     if (typeof window === "undefined") return
     if (!isFoodUserAuthenticated() || skipServerSyncRef.current) return
+    if (!hasRestoredFromServerRef.current) return
 
     if (saveInFlightRef.current) {
       saveQueuedRef.current = true
@@ -237,11 +285,18 @@ export function CartProvider({ children }) {
     }
 
     const payload = buildCartPayload()
+    const signature = getCartPayloadSignature(payload)
+    if (signature === lastSyncedPayloadSigRef.current) {
+      setCartSyncStatus("idle")
+      return
+    }
+
     setCartSyncStatus("syncing")
 
     const request = userAPI
       .syncCart(payload)
       .then(() => {
+        lastSyncedPayloadSigRef.current = signature
         setCartSyncStatus("idle")
       })
       .catch((err) => {
@@ -258,10 +313,11 @@ export function CartProvider({ children }) {
 
     saveInFlightRef.current = request
     return request
-  }, [buildCartPayload])
+  }, [buildCartPayload, getCartPayloadSignature])
 
   const scheduleCartSave = useCallback(() => {
     if (!isFoodUserAuthenticated() || skipServerSyncRef.current) return
+    if (!hasRestoredFromServerRef.current) return
     if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current)
     saveDebounceRef.current = setTimeout(() => {
       saveDebounceRef.current = null
@@ -271,6 +327,7 @@ export function CartProvider({ children }) {
 
   const flushCartSaveKeepalive = useCallback(() => {
     if (!isFoodUserAuthenticated() || skipServerSyncRef.current) return
+    if (!hasRestoredFromServerRef.current) return
     const token = localStorage.getItem("user_accessToken")
     if (!token) return
 
@@ -281,6 +338,9 @@ export function CartProvider({ children }) {
         : "/api/v1")
 
     const payload = buildCartPayload()
+    const signature = getCartPayloadSignature(payload)
+    if (signature === lastSyncedPayloadSigRef.current) return
+
     try {
       fetch(`${baseURL}/food/user/cart`, {
         method: "PUT",
@@ -291,14 +351,16 @@ export function CartProvider({ children }) {
         body: JSON.stringify(payload),
         keepalive: true,
       }).catch(() => {})
+      lastSyncedPayloadSigRef.current = signature
     } catch {
       // ignore
     }
-  }, [buildCartPayload])
+  }, [buildCartPayload, getCartPayloadSignature])
 
   const restoreCartFromServer = useCallback(async () => {
     if (!isFoodUserAuthenticated()) return
     skipServerSyncRef.current = true
+    let shouldPushLocal = false
     try {
       const res = await userAPI.getCart()
       const data = res?.data?.data
@@ -309,7 +371,7 @@ export function CartProvider({ children }) {
       if (serverItems.length > 0) {
         setCart(serverItems)
       } else if (localItems.length > 0) {
-        scheduleCartSave()
+        shouldPushLocal = true
       }
 
       if (serverMeta.length > 0) {
@@ -320,8 +382,17 @@ export function CartProvider({ children }) {
     } finally {
       skipServerSyncRef.current = false
       hasRestoredFromServerRef.current = true
+      if (shouldPushLocal) {
+        lastSyncedPayloadSigRef.current = ""
+        scheduleCartSave()
+      } else {
+        // Avoid PUT after GET when payload is unchanged — stamp signature after state settles
+        queueMicrotask(() => {
+          lastSyncedPayloadSigRef.current = getCartPayloadSignature(buildCartPayload())
+        })
+      }
     }
-  }, [scheduleCartSave])
+  }, [scheduleCartSave, getCartPayloadSignature, buildCartPayload])
 
   useEffect(() => {
     if (!isFoodUserAuthenticated()) return
@@ -393,10 +464,10 @@ export function CartProvider({ children }) {
   useEffect(() => {
     const fetchSettings = async () => {
       try {
-        const res = await adminAPI.getDeliveryBoySettings()
+        const res = await restaurantAPI.getPublicCheckoutSettings()
         if (res.data?.success) setAdminSettings(res.data.data)
       } catch (err) {
-        debugError('Failed to fetch admin settings for multi-order:', err)
+        debugError('Failed to fetch checkout settings for multi-order:', err)
       }
     }
     fetchSettings()
@@ -415,13 +486,11 @@ export function CartProvider({ children }) {
     }
   }, [cart, restaurantMeta])
 
-  const addToCart = (item, sourcePosition = null) => {
+  const addToCart = async (item, sourcePosition = null) => {
     const safeCart = normalizeCartData(cart)
     const newItemRestaurantId = String(item?.restaurantId || '')
-    const newItemRestaurantName = item?.restaurant || ''
 
     if (safeCart.length > 0) {
-      const uniqueRestaurants = []
       const restaurantMap = new Map()
 
       safeCart.forEach(i => {
@@ -433,41 +502,71 @@ export function CartProvider({ children }) {
             lat: i.latitude,
             lng: i.longitude
           })
-          uniqueRestaurants.push(restaurantMap.get(rid))
         }
       })
 
       const isNewRestaurant = !restaurantMap.has(newItemRestaurantId)
 
       if (isNewRestaurant) {
-        // Feature Check
-        if (adminSettings && !adminSettings.multiOrderEnabled) {
-          const message = `Cart already contains items from "${uniqueRestaurants[0]?.name || 'another restaurant'}". Please clear cart to order from here.`
-          return { ok: false, error: message, code: 'MULTI_ORDER_DISABLED' }
+        const lastRestaurant = getLastRestaurantFromCart(safeCart)
+        const maxKm = Number(adminSettings?.multiOrderMaxDistance) > 0
+          ? Number(adminSettings.multiOrderMaxDistance)
+          : undefined
+
+        // Prefer backend road-distance validation (default 5 km)
+        let backendValidated = false
+        if (lastRestaurant?.restaurantId && newItemRestaurantId) {
+          try {
+            await orderAPI.validateRestaurantChain({
+              lastRestaurantId: lastRestaurant.restaurantId,
+              newRestaurantId: newItemRestaurantId,
+            })
+            backendValidated = true
+          } catch (err) {
+            const apiMessage =
+              err?.response?.data?.message
+              || err?.response?.data?.error
+              || err?.message
+              || CHAIN_RADIUS_VALIDATION_MESSAGE
+            const looksLikeRadius =
+              /outside the allowed|road distance|radius/i.test(String(apiMessage))
+            if (looksLikeRadius || err?.response?.status === 400) {
+              return {
+                ok: false,
+                error: apiMessage || CHAIN_RADIUS_VALIDATION_MESSAGE,
+                code: 'RESTAURANT_CHAIN_RADIUS',
+                lastRestaurantId: lastRestaurant.restaurantId,
+                newRestaurantId: newItemRestaurantId,
+              }
+            }
+            // Network / unexpected: fall through to local haversine check
+          }
         }
 
-        const lastRestaurant = getLastRestaurantFromCart(safeCart)
-        const chainCheck = validateChainRestaurantRadius(
-          {
-            latitude: lastRestaurant?.lat,
-            longitude: lastRestaurant?.lng,
-            restaurantId: lastRestaurant?.restaurantId,
-          },
-          {
-            latitude: item?.latitude,
-            longitude: item?.longitude,
-            restaurantId: newItemRestaurantId,
-          },
-        )
+        if (!backendValidated) {
+          const chainCheck = validateChainRestaurantRadius(
+            {
+              latitude: lastRestaurant?.lat,
+              longitude: lastRestaurant?.lng,
+              restaurantId: lastRestaurant?.restaurantId,
+            },
+            {
+              latitude: item?.latitude,
+              longitude: item?.longitude,
+              restaurantId: newItemRestaurantId,
+            },
+            maxKm,
+          )
 
-        if (!chainCheck.skipped && !chainCheck.valid) {
-          return {
-            ok: false,
-            error: CHAIN_RADIUS_VALIDATION_MESSAGE,
-            code: 'RESTAURANT_CHAIN_RADIUS',
-            distanceKm: chainCheck.distanceKm,
-            lastRestaurantId: lastRestaurant?.restaurantId,
-            newRestaurantId: newItemRestaurantId,
+          if (!chainCheck.skipped && !chainCheck.valid) {
+            return {
+              ok: false,
+              error: CHAIN_RADIUS_VALIDATION_MESSAGE,
+              code: 'RESTAURANT_CHAIN_RADIUS',
+              distanceKm: chainCheck.distanceKm,
+              lastRestaurantId: lastRestaurant?.restaurantId,
+              newRestaurantId: newItemRestaurantId,
+            }
           }
         }
       }
@@ -483,13 +582,26 @@ export function CartProvider({ children }) {
 
     setCart((prev) => {
       const safePrev = normalizeCartData(prev)
-      const existing = safePrev.find((i) => i.id === item.id)
+      const normalizedIncoming = normalizeCartData([
+        {
+          ...item,
+          itemId: item?.itemId || item?.productId || item?.id,
+          productId: item?.productId || item?.itemId || item?.id,
+          variantId: item?.variantId || "",
+          lineItemId: buildCartLineId(
+            item?.itemId || item?.productId || item?.id,
+            item?.variantId || "",
+          ),
+        },
+      ])[0]
+      const incomingId = normalizedIncoming?.id || String(item?.id || "")
+      const existing = safePrev.find((i) => i.id === incomingId)
       if (existing) {
         // Set last add event for animation when incrementing existing item
         if (sourcePosition) {
           setLastAddEvent({
             product: {
-              id: item.id,
+              id: incomingId,
               name: item.name,
               imageUrl: item.image || item.imageUrl,
             },
@@ -499,7 +611,7 @@ export function CartProvider({ children }) {
           setTimeout(() => setLastAddEvent(null), 1500)
         }
         return safePrev.map((i) =>
-          i.id === item.id ? { ...i, quantity: i.quantity + 1 } : i
+          i.id === incomingId ? { ...i, quantity: i.quantity + 1 } : i
         )
       }
       
@@ -509,13 +621,13 @@ export function CartProvider({ children }) {
         return safePrev;
       }
       
-      const newItem = { ...item, quantity: 1 }
+      const newItem = { ...normalizedIncoming, quantity: 1 }
       
       // Set last add event for animation if sourcePosition is provided
       if (sourcePosition) {
         setLastAddEvent({
           product: {
-            id: item.id,
+              id: incomingId,
             name: item.name,
             imageUrl: item.image || item.imageUrl,
           },
@@ -614,7 +726,23 @@ export function CartProvider({ children }) {
     return safeCart.find((i) => i.id === resolvedItemId) || null
   }
 
-  const clearCart = () => setCart([])
+  const clearCart = ({ skipServerSync = false } = {}) => {
+    if (skipServerSync) {
+      skipServerSyncRef.current = true
+      if (saveDebounceRef.current) {
+        clearTimeout(saveDebounceRef.current)
+        saveDebounceRef.current = null
+      }
+    }
+    setCart([])
+    setRestaurantMeta([])
+    if (skipServerSync) {
+      // Allow future cart edits to sync again after React applies empty cart.
+      setTimeout(() => {
+        skipServerSyncRef.current = false
+      }, 0)
+    }
+  }
 
   const removeItemsByRestaurantIds = (restaurantIds = []) => {
     const idSet = new Set((Array.isArray(restaurantIds) ? restaurantIds : []).map(String))

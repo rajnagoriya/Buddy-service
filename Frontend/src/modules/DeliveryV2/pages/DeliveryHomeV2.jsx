@@ -787,7 +787,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                 onClick={() => navigate('/driver/profile')}
                 className="w-10 h-10 rounded-full border border-gray-100 p-0.5 shadow-sm overflow-hidden bg-gray-50 cursor-pointer active:scale-95 transition-all"
              >
-                <img src={profileImage || "https://i.ibb.co/3m2Yh7r/Appzeto-Brand-Image.png"} alt="Profile" className="w-full h-full object-cover rounded-full" />
+                <img src={profileImage || "https://ui-avatars.com/api/?name=Driver&background=f3f4f6&color=111827"} alt="Profile" className="w-full h-full object-cover rounded-full" />
              </div>
                 <button 
                 onClick={async () => {

@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react"
-import { Eye, Printer, ArrowUpDown, Loader2, Check, X, Trash2 } from "lucide-react"
+import { Eye, Printer, ArrowUpDown, Loader2, Check, X, Trash2, MoreVertical } from "lucide-react"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 
 const getStatusColor = (orderStatus) => {
   const colors = {
@@ -406,119 +407,110 @@ export default function OrdersTable({
                 )}
                 {visibleColumns.actions && (
                   <td className="px-6 py-4 whitespace-nowrap text-center">
-                    <div className="flex items-center justify-center gap-2">
-                      {order.orderStatus === "Pending" && onAcceptOrder && (
-                        <button
-                          onClick={() => onAcceptOrder(order)}
-                          disabled={actionLoadingOrderId === (order.id || order.orderId)}
-                          className="px-2.5 py-1.5 rounded text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
-                          title="Accept Order"
-                        >
-                          {actionLoadingOrderId === (order.id || order.orderId) ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          ) : (
-                            <Check className="w-3.5 h-3.5" />
-                          )}
-                          <span>Accept</span>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button className="p-1.5 rounded text-slate-600 hover:bg-slate-100 transition-colors">
+                          <MoreVertical className="w-4 h-4" />
                         </button>
-                      )}
-                      {order.orderStatus === "Pending" && onRejectOrder && (
-                        <button
-                          onClick={() => onRejectOrder(order)}
-                          disabled={actionLoadingOrderId === (order.id || order.orderId)}
-                          className="px-2.5 py-1.5 rounded text-xs font-medium text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
-                          title="Reject Order"
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-48 bg-white border border-slate-200 rounded-lg shadow-lg z-50">
+                        {order.orderStatus === "Pending" && onAcceptOrder && (
+                          <DropdownMenuItem
+                            onClick={() => onAcceptOrder(order)}
+                            disabled={actionLoadingOrderId === (order.id || order.orderId)}
+                            className="cursor-pointer flex items-center gap-2 text-emerald-600 focus:text-emerald-700"
+                          >
+                            {actionLoadingOrderId === (order.id || order.orderId) ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Check className="w-4 h-4" />
+                            )}
+                            <span>Accept Order</span>
+                          </DropdownMenuItem>
+                        )}
+                        {order.orderStatus === "Pending" && onRejectOrder && (
+                          <DropdownMenuItem
+                            onClick={() => onRejectOrder(order)}
+                            disabled={actionLoadingOrderId === (order.id || order.orderId)}
+                            className="cursor-pointer flex items-center gap-2 text-rose-600 focus:text-rose-700"
+                          >
+                            {actionLoadingOrderId === (order.id || order.orderId) ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <X className="w-4 h-4" />
+                            )}
+                            <span>Reject Order</span>
+                          </DropdownMenuItem>
+                        )}
+                        <DropdownMenuItem
+                          onClick={() => onViewOrder(order)}
+                          className="cursor-pointer flex items-center gap-2 text-orange-600"
                         >
-                          {actionLoadingOrderId === (order.id || order.orderId) ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          ) : (
-                            <X className="w-3.5 h-3.5" />
-                          )}
-                          <span>Reject</span>
-                        </button>
-                      )}
-                      <button 
-                        onClick={() => onViewOrder(order)}
-                        className="p-1.5 rounded text-orange-600 hover:bg-orange-50 transition-colors"
-                        title="View Details"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </button>
-                      <button 
-                        onClick={() => onPrintOrder(order)}
-                        className="p-1.5 rounded text-blue-600 hover:bg-blue-50 transition-colors"
-                        title="Print Order"
-                      >
-                        <Printer className="w-4 h-4" />
-                      </button>
-                      {onDeleteOrder && (
-                        <button
-                          onClick={() => onDeleteOrder(order)}
-                          disabled={deletingOrderId === (order.id || order.orderId)}
-                          className="p-1.5 rounded text-rose-600 hover:bg-rose-50 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
-                          title="Delete Order"
+                          <Eye className="w-4 h-4" />
+                          <span>View Details</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => onPrintOrder(order)}
+                          className="cursor-pointer flex items-center gap-2 text-blue-600"
                         >
-                          {deletingOrderId === (order.id || order.orderId) ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <Trash2 className="w-4 h-4" />
-                          )}
-                        </button>
-                      )}
-                      {/* Show Refund button or Refunded status for cancelled orders with Online/Wallet payment (restaurant or user cancelled) */}
-                      {(() => {
-                        // Check if order is cancelled by restaurant or user
-                        const isCancelled = order.orderStatus === "Cancelled by Restaurant" || 
-                                          order.orderStatus === "Cancelled" || 
-                                          order.orderStatus === "Cancelled by User" ||
-                                          (order.status === "cancelled" && (order.cancelledBy === "user" || order.cancelledBy === "restaurant"));
-                        
-                        // Check if payment type is Online or Wallet (not Cash on Delivery)
-                        const paymentMethod = order.payment?.method || order.paymentMethod;
-                        const isOnlinePayment = order.paymentType === "Online" ||
-                                              (order.paymentType !== "Cash on Delivery" && 
-                                               order.payment?.method !== "cash" && 
-                                               order.payment?.method !== "cod" &&
-                                               (order.paymentMethod === "razorpay" || 
-                                                order.paymentMethod === "online" || 
-                                                order.payment?.paymentMethod === "razorpay" || 
-                                                order.payment?.method === "razorpay" ||
-                                                order.payment?.method === "online"));
-                        
-                        const isWalletPayment = order.paymentType === "Wallet" || paymentMethod === "wallet";
-                        
-                        return isCancelled && (isOnlinePayment || isWalletPayment);
-                      })() && (
-                        <>
-                          {order.refundStatus === 'processed' || order.refundStatus === 'initiated' ? (
-                            <span className={`px-3 py-1.5 rounded-md text-xs font-medium ${
-                              order.paymentType === "Wallet" || order.payment?.method === "wallet"
-                                ? "bg-purple-100 text-purple-700"
-                                : "bg-emerald-100 text-emerald-700"
-                            }`}>
-                              {order.paymentType === "Wallet" || order.payment?.method === "wallet" 
-                                ? "Wallet Refunded" 
-                                : "Refunded"}
-                            </span>
-                          ) : onRefund ? (
-                            <button 
-                              onClick={() => onRefund(order)}
-                              className={`px-3 py-1.5 rounded-md text-white text-xs font-medium hover:opacity-90 transition-colors shadow-sm flex items-center gap-1.5 ${
-                                order.paymentType === "Wallet" || order.payment?.method === "wallet"
-                                  ? "bg-purple-600 hover:bg-purple-700"
-                                  : "bg-blue-600 hover:bg-blue-700"
-                              }`}
-                              title={order.paymentType === "Wallet" || order.payment?.method === "wallet"
-                                ? "Process Wallet Refund (Add to user wallet)"
-                                : "Process Refund via Razorpay"}
+                          <Printer className="w-4 h-4" />
+                          <span>Print Invoice</span>
+                        </DropdownMenuItem>
+                        {onDeleteOrder && (
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              onClick={() => onDeleteOrder(order)}
+                              disabled={deletingOrderId === (order.id || order.orderId)}
+                              className="cursor-pointer flex items-center gap-2 text-red-600 hover:text-red-700"
                             >
-                              <span className="text-sm">₹</span>
-                              <span>Refund</span>
-                            </button>
-                          ) : null}
-                        </>
-                      )}
-                    </div>
+                              {deletingOrderId === (order.id || order.orderId) ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="w-4 h-4" />
+                              )}
+                              <span>Delete Order</span>
+                            </DropdownMenuItem>
+                          </>
+                        )}
+                        {(() => {
+                          const isCancelled = order.orderStatus === "Cancelled by Restaurant" || 
+                                            order.orderStatus === "Cancelled" || 
+                                            order.orderStatus === "Cancelled by User" ||
+                                            (order.status === "cancelled" && (order.cancelledBy === "user" || order.cancelledBy === "restaurant"));
+                          const paymentMethod = order.payment?.method || order.paymentMethod;
+                          const isOnlinePayment = order.paymentType === "Online" ||
+                                                (order.paymentType !== "Cash on Delivery" && 
+                                                 order.payment?.method !== "cash" && 
+                                                 order.payment?.method !== "cod" &&
+                                                 (order.paymentMethod === "razorpay" || 
+                                                  order.paymentMethod === "online" || 
+                                                  order.payment?.paymentMethod === "razorpay" || 
+                                                  order.payment?.method === "razorpay" ||
+                                                  order.payment?.method === "online"));
+                          const isWalletPayment = order.paymentType === "Wallet" || paymentMethod === "wallet";
+                          return isCancelled && (isOnlinePayment || isWalletPayment);
+                        })() && (
+                          <>
+                            <DropdownMenuSeparator />
+                            {order.refundStatus === 'processed' || order.refundStatus === 'initiated' ? (
+                              <DropdownMenuItem disabled className="flex items-center gap-2 text-emerald-600">
+                                <span className="text-sm font-semibold">₹</span>
+                                <span>{order.paymentType === "Wallet" || order.payment?.method === "wallet" ? "Wallet Refunded" : "Refunded"}</span>
+                              </DropdownMenuItem>
+                            ) : onRefund ? (
+                              <DropdownMenuItem
+                                onClick={() => onRefund(order)}
+                                className="cursor-pointer flex items-center gap-2 text-blue-600 focus:text-blue-700"
+                              >
+                                <span className="text-sm font-semibold">₹</span>
+                                <span>Refund</span>
+                              </DropdownMenuItem>
+                            ) : null}
+                          </>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </td>
                 )}
               </tr>

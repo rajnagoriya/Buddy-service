@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react"
-import { Search, Plus, Edit, Trash2, ToggleLeft, ToggleRight, Settings, ArrowUpDown, Check, Columns, Package } from "lucide-react"
+import { Search, Plus, Edit, Trash2, ToggleLeft, ToggleRight, Settings, ArrowUpDown, Check, Columns, Package, MoreVertical } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
 import { adminAPI } from "@food/api"
@@ -467,20 +467,30 @@ export default function EarningAddon() {
                                   <ToggleLeft className="w-5 h-5 text-gray-400" />
                                 )}
                               </button>
-                              <button
-                                onClick={() => handleOpenDialog(addon)}
-                                className="p-2 rounded-lg hover:bg-slate-100 transition-colors"
-                                title="Edit"
-                              >
-                                <Edit className="w-4 h-4 text-blue-500" />
-                              </button>
-                              <button
-                                onClick={() => handleDelete(addon._id)}
-                                className="p-2 rounded-lg hover:bg-slate-100 transition-colors"
-                                title="Delete"
-                              >
-                                <Trash2 className="w-4 h-4 text-red-500" />
-                              </button>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <button className="p-1.5 rounded text-slate-600 hover:bg-slate-100 transition-colors">
+                                    <MoreVertical className="w-4 h-4" />
+                                  </button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-40 bg-white border border-slate-200 rounded-lg shadow-lg z-50">
+                                  <DropdownMenuItem
+                                    onClick={() => handleOpenDialog(addon)}
+                                    className="cursor-pointer flex items-center gap-2"
+                                  >
+                                    <Edit className="w-4 h-4 text-blue-500" />
+                                    <span>Edit</span>
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    onClick={() => handleDelete(addon._id)}
+                                    className="cursor-pointer flex items-center gap-2 text-red-600 hover:text-red-700"
+                                  >
+                                    <Trash2 className="w-4 h-4 text-red-500" />
+                                    <span>Delete</span>
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
                             </div>
                           </td>
                         )}

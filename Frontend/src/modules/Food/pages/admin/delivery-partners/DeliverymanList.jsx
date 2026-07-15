@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react"
-import { Search, Download, ChevronDown, Eye, User, Star, ArrowUpDown, Settings, FileText, FileSpreadsheet, Loader2, Check, Columns, ExternalLink, Calendar, MapPin, CreditCard, Mail, Phone, Bike, FileCheck, Pencil, Save, Trash2, X } from "lucide-react"
+import { Search, Download, ChevronDown, Eye, User, Star, ArrowUpDown, Settings, FileText, FileSpreadsheet, Loader2, Check, Columns, ExternalLink, Calendar, MapPin, CreditCard, Mail, Phone, Bike, FileCheck, Pencil, Save, Trash2, X, MoreVertical } from "lucide-react"
 import { adminAPI } from "@food/api"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
@@ -26,6 +26,8 @@ export default function DeliverymanList() {
   const [editValues, setEditValues] = useState({ pocketBalance: "", cashInHand: "" })
   const [savingDeliveryId, setSavingDeliveryId] = useState(null)
   const [deletingDeliveryId, setDeletingDeliveryId] = useState(null)
+  const [statusFilter, setStatusFilter] = useState("all")
+  const [zoneFilter, setZoneFilter] = useState("all")
   const [visibleColumns, setVisibleColumns] = useState({
     si: true,
     name: true,
@@ -203,10 +205,32 @@ export default function DeliverymanList() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchQuery])
 
-  const filteredDeliverymen = useMemo(() => {
-    // Backend already handles search, but we can do client-side filtering if needed
-    return deliverymen
+  const zonesList = useMemo(() => {
+    const list = []
+    const seen = new Set()
+    deliverymen.forEach((dm) => {
+      const z = dm.zoneName || dm.zone
+      if (z) {
+        const zoneStr = String(z)
+        if (!seen.has(zoneStr)) {
+          seen.add(zoneStr)
+          list.push(zoneStr)
+        }
+      }
+    })
+    return list.sort((a, b) => a.localeCompare(b))
   }, [deliverymen])
+
+  const filteredDeliverymen = useMemo(() => {
+    let result = [...deliverymen]
+    if (statusFilter !== "all") {
+      result = result.filter((dm) => String(dm.status || "").toLowerCase() === statusFilter.toLowerCase())
+    }
+    if (zoneFilter !== "all") {
+      result = result.filter((dm) => String(dm.zoneName || dm.zone || "") === zoneFilter)
+    }
+    return result
+  }, [deliverymen, statusFilter, zoneFilter])
 
   const handleView = async (deliveryman) => {
     try {
@@ -459,16 +483,39 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
             </div>
 
             <div className="flex items-center gap-3">
-              <div className="relative flex-1 sm:flex-initial min-w-[250px]">
-                <input
-                  type="text"
-                  placeholder="Search by name or restaur..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 pr-4 py-2.5 w-full text-sm rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400"
-                />
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              </div>
+             <div className="flex items-center gap-3 flex-wrap">
+               <div className="relative flex-1 sm:flex-initial min-w-[200px]">
+                 <input
+                   type="text"
+                   placeholder="Search by name..."
+                   value={searchQuery}
+                   onChange={(e) => setSearchQuery(e.target.value)}
+                   className="pl-10 pr-4 py-2.5 w-full text-sm rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400"
+                 />
+                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+               </div>
+               <select
+                 value={statusFilter}
+                 onChange={(e) => setStatusFilter(e.target.value)}
+                 className="px-3 py-2.5 text-sm rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400 min-w-[140px]"
+               >
+                 <option value="all">All Statuses</option>
+                 <option value="online">Online</option>
+                 <option value="offline">Offline</option>
+               </select>
+               <select
+                 value={zoneFilter}
+                 onChange={(e) => setZoneFilter(e.target.value)}
+                 className="px-3 py-2.5 text-sm rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400 min-w-[160px]"
+               >
+                 <option value="all">All Zones</option>
+                 {zonesList.map((z) => (
+                   <option key={z} value={z}>
+                     {z}
+                   </option>
+                 ))}
+               </select>
+             </div>
 
               <button
                 onClick={handleExportPDF}
@@ -743,33 +790,43 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
                                   </button>
                                 </>
                               ) : (
-                                <button
-                                  onClick={() => startEditingWallet(dm)}
-                                  className="p-1.5 rounded bg-amber-50 text-amber-600 hover:bg-amber-100 transition-colors"
-                                  title="Edit Wallet"
-                                >
-                                  <Pencil className="w-4 h-4" />
-                                </button>
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <button className="p-1.5 rounded text-slate-600 hover:bg-slate-100 transition-colors">
+                                      <MoreVertical className="w-4 h-4" />
+                                    </button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" className="w-44 bg-white border border-slate-200 rounded-lg shadow-lg z-50">
+                                    <DropdownMenuItem
+                                      onClick={() => handleView(dm)}
+                                      className="cursor-pointer flex items-center gap-2"
+                                    >
+                                      <Eye className="w-4 h-4 text-slate-500" />
+                                      <span>View Details</span>
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() => startEditingWallet(dm)}
+                                      className="cursor-pointer flex items-center gap-2"
+                                    >
+                                      <Pencil className="w-4 h-4 text-blue-500" />
+                                      <span>Edit Wallet</span>
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      onClick={() => handleDelete(dm)}
+                                      disabled={deletingDeliveryId === String(dm._id)}
+                                      className="cursor-pointer flex items-center gap-2 text-red-600 hover:text-red-700 disabled:opacity-50"
+                                    >
+                                      {deletingDeliveryId === String(dm._id) ? (
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                      ) : (
+                                        <Trash2 className="w-4 h-4 text-red-500" />
+                                      )}
+                                      <span>Delete Partner</span>
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
                               )}
-                              <button 
-                                onClick={() => handleView(dm)}
-                                className="p-1.5 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors" 
-                                title="View Details"
-                              >
-                                <Eye className="w-4 h-4" />
-                              </button>
-                              <button
-                                onClick={() => handleDelete(dm)}
-                                disabled={deletingDeliveryId === String(dm._id)}
-                                className="p-1.5 rounded bg-red-50 text-red-600 hover:bg-red-100 transition-colors disabled:opacity-50"
-                                title="Delete Delivery Partner"
-                              >
-                                {deletingDeliveryId === String(dm._id) ? (
-                                  <Loader2 className="w-4 h-4 animate-spin" />
-                                ) : (
-                                  <Trash2 className="w-4 h-4" />
-                                )}
-                              </button>
                             </div>
                           </td>
                         )}

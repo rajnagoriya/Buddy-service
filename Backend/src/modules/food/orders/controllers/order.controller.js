@@ -43,7 +43,10 @@ export async function createOrderController(req, res, next) {
         const userId = req.user?.userId;
         const dto = validateCreateOrderDto(req.body);
         const result = await orderService.createOrder(userId, dto);
-        return sendResponse(res, 201, 'Order placed successfully', result);
+        const message = result?.requiresPayment
+            ? 'Checkout created. Complete payment to place order'
+            : 'Order placed successfully';
+        return sendResponse(res, result?.requiresPayment ? 200 : 201, message, result);
     } catch (err) {
         next(err);
     }
@@ -55,6 +58,17 @@ export async function verifyPaymentController(req, res, next) {
         const dto = validateVerifyPaymentDto(req.body);
         const result = await orderService.verifyPayment(userId, dto);
         return sendResponse(res, 200, 'Payment verified', result);
+    } catch (err) {
+        next(err);
+    }
+}
+
+export async function cancelCheckoutController(req, res, next) {
+    try {
+        const userId = req.user?.userId;
+        const checkoutId = req.params.checkoutId || req.body?.checkoutId;
+        const result = await orderService.cancelCheckout(userId, checkoutId);
+        return sendResponse(res, 200, 'Checkout cancelled', result);
     } catch (err) {
         next(err);
     }

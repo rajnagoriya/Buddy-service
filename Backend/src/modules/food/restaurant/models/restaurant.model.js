@@ -185,6 +185,8 @@ const restaurantSchema = new mongoose.Schema(
     fssaiImage: {
       type: String,
     },
+    /** Per-restaurant packaging fee charged to customer (falls back to global fee settings). */
+    packagingFee: { type: Number, min: 0 },
     estimatedDeliveryTime: { type: String },
     /** Numeric delivery time in minutes for filtering/sorting. */
     estimatedDeliveryTimeMinutes: { type: Number, index: true },

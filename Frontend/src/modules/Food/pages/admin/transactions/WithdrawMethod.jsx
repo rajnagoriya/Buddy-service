@@ -1,7 +1,8 @@
 import { useState, useMemo } from "react"
-import { Search, Plus, Eye, Edit, Settings, ArrowUpDown, Check, Columns } from "lucide-react"
+import { Search, Plus, Eye, Edit, Settings, ArrowUpDown, Check, Columns, MoreVertical } from "lucide-react"
 import { emptyWithdrawMethods } from "@food/utils/adminFallbackData"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@food/components/ui/dialog"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 
 export default function WithdrawMethod() {
   const [searchQuery, setSearchQuery] = useState("")
@@ -227,14 +228,27 @@ export default function WithdrawMethod() {
                       )}
                       {visibleColumns.actions && (
                         <td className="px-6 py-4 whitespace-nowrap text-center">
-                          <div className="flex items-center justify-center gap-2">
-                            <button className="p-1.5 rounded text-blue-600 hover:bg-blue-50 transition-colors" title="View">
-                              <Eye className="w-4 h-4" />
-                            </button>
-                            <button className="p-1.5 rounded text-blue-600 hover:bg-blue-50 transition-colors" title="Edit">
-                              <Edit className="w-4 h-4" />
-                            </button>
-                          </div>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button className="p-1.5 rounded text-slate-600 hover:bg-slate-100 transition-colors">
+                                <MoreVertical className="w-4 h-4" />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-40 bg-white border border-slate-200 rounded-lg shadow-lg z-50">
+                              <DropdownMenuItem
+                                className="cursor-pointer flex items-center gap-2"
+                              >
+                                <Eye className="w-4 h-4 text-slate-500" />
+                                <span>View Details</span>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                className="cursor-pointer flex items-center gap-2"
+                              >
+                                <Edit className="w-4 h-4 text-blue-500" />
+                                <span>Edit</span>
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </td>
                       )}
                     </tr>

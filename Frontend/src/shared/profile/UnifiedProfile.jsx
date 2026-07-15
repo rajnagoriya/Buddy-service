@@ -64,9 +64,7 @@ export default function UnifiedProfile() {
   const { openLocationSelector } = useLocationSelector();
   const { setVegMode, vegMode } = useProfile();
 
-  const [activeServiceId, setActiveServiceId] = useState(() =>
-    resolveInitialService(searchParams, window.location.pathname),
-  );
+  const [activeServiceId, setActiveServiceId] = useState("unified");
 
   const {
     userProfile,
@@ -286,7 +284,7 @@ export default function UnifiedProfile() {
           headerActions={headerActionState}
         />
 
-        <ServiceSwitcher activeService={activeServiceId} onChange={handleServiceChange} />
+
 
         <ProfileUserCard
           displayName={displayName}

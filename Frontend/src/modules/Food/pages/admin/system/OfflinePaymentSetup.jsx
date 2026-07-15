@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react"
-import { Briefcase, Search, Plus, Pencil, Trash2, Settings, Download, ChevronDown, FileText, FileSpreadsheet, Code, Check, Columns, ArrowUpDown } from "lucide-react"
+import { Briefcase, Search, Plus, Pencil, Trash2, Settings, Download, ChevronDown, FileText, FileSpreadsheet, Code, Check, Columns, ArrowUpDown, MoreVertical } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@food/components/ui/dialog"
 import { exportPaymentMethodsToCSV, exportPaymentMethodsToExcel, exportPaymentMethodsToPDF, exportPaymentMethodsToJSON } from "@food/components/admin/payment-methods/paymentMethodsExportUtils"
@@ -307,26 +307,32 @@ export default function OfflinePaymentSetup() {
                         </td>
                       )}
                       {visibleColumns.actions && (
-                        <td className="px-3 py-2.5 whitespace-nowrap text-center">
-                          <div className="flex items-center justify-center gap-2">
-                            <button
-                              type="button"
-                              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                              title="Edit"
-                            >
-                              <Pencil className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDelete(method.id)}
-                              className="p-1.5 text-red-600 hover:bg-red-50 rounded transition-colors"
-                              title="Delete"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </td>
-                      )}
+                         <td className="px-3 py-2.5 whitespace-nowrap text-center">
+                           <DropdownMenu>
+                             <DropdownMenuTrigger asChild>
+                               <button type="button" className="p-1.5 rounded text-slate-600 hover:bg-slate-100 transition-colors">
+                                 <MoreVertical className="w-4 h-4" />
+                               </button>
+                             </DropdownMenuTrigger>
+                             <DropdownMenuContent align="end" className="w-40 bg-white border border-slate-200 rounded-lg shadow-lg z-50">
+                               <DropdownMenuItem
+                                 className="cursor-pointer flex items-center gap-2"
+                               >
+                                 <Pencil className="w-4 h-4 text-blue-500" />
+                                 <span>Edit</span>
+                               </DropdownMenuItem>
+                               <DropdownMenuSeparator />
+                               <DropdownMenuItem
+                                 onClick={() => handleDelete(method.id)}
+                                 className="cursor-pointer flex items-center gap-2 text-red-600 hover:text-red-700"
+                               >
+                                 <Trash2 className="w-4 h-4 text-red-500" />
+                                 <span>Delete</span>
+                               </DropdownMenuItem>
+                             </DropdownMenuContent>
+                           </DropdownMenu>
+                         </td>
+                       )}
                     </tr>
                   ))
                 )}

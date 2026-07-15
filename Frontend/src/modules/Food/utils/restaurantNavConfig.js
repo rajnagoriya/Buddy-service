@@ -50,6 +50,8 @@ import {
 
   Grid3x3,
 
+  Tag,
+
 } from "lucide-react"
 
 
@@ -139,6 +141,8 @@ export const SIDEBAR_SECTIONS = [
       { id: "inventory", label: "Menu inventory", icon: Package, route: `${RESTAURANT_BASE}/inventory` },
 
       { id: "menu-categories", label: "Categories", icon: Grid3x3, route: `${RESTAURANT_BASE}/menu-categories` },
+
+      { id: "coupons", label: "Coupons & offers", icon: Tag, route: `${RESTAURANT_BASE}/coupons` },
 
     ],
 
@@ -239,6 +243,8 @@ export const EXPLORE_SECTIONS = [
       { id: "menu-categories", label: "Categories", icon: Grid3x3, route: `${RESTAURANT_BASE}/menu-categories` },
 
       { id: "rush-hour", label: "Rush hour", icon: Clock, route: `${RESTAURANT_BASE}/rush-hour` },
+
+      { id: "coupons", label: "Coupons & offers", icon: Tag, route: `${RESTAURANT_BASE}/coupons` },
 
     ],
 

@@ -40,15 +40,56 @@ const deliveryAddressSchema = new mongoose.Schema(
 const pricingSchema = new mongoose.Schema(
     {
         subtotal: { type: Number, required: true, min: 0 },
+        foodSubtotal: { type: Number, default: 0, min: 0 },
         tax: { type: Number, default: 0, min: 0 },
         packagingFee: { type: Number, default: 0, min: 0 },
+        restaurantPackagingTotal: { type: Number, default: 0, min: 0 },
         deliveryFee: { type: Number, default: 0, min: 0 },
         platformFee: { type: Number, default: 0, min: 0 },
         restaurantCommission: { type: Number, default: 0, min: 0 },
         discount: { type: Number, default: 0, min: 0 },
+        couponCode: { type: String },
+        couponCreatedBy: { type: String, enum: ['admin', 'restaurant'] },
+        couponCategory: { type: String, enum: ['normal', 'free_delivery'] },
+        offerId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodOffer' },
+        platformSubsidy: { type: Number, default: 0, min: 0 },
+        deliveryDiscount: { type: Number, default: 0, min: 0 },
         total: { type: Number, required: true, min: 0 },
         currency: { type: String, default: 'INR' },
-        deliveryFeeBreakdown: { type: mongoose.Schema.Types.Mixed }
+        deliveryFeeBreakdown: { type: mongoose.Schema.Types.Mixed },
+        restaurantGroups: { type: mongoose.Schema.Types.Mixed },
+    },
+    { _id: false }
+);
+
+const restaurantSettlementSchema = new mongoose.Schema(
+    {
+        restaurantId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodRestaurant' },
+        restaurantName: { type: String, default: '' },
+        foodAmount: { type: Number, default: 0, min: 0 },
+        packagingFee: { type: Number, default: 0, min: 0 },
+        commission: { type: Number, default: 0, min: 0 },
+        commissionGST: { type: Number, default: 0, min: 0 },
+        restaurantPayout: { type: Number, default: 0, min: 0 },
+    },
+    { _id: false }
+);
+
+const driverSettlementSchema = new mongoose.Schema(
+    {
+        deliveryFee: { type: Number, default: 0, min: 0 },
+        tip: { type: Number, default: 0, min: 0 },
+        incentive: { type: Number, default: 0, min: 0 },
+        driverPayout: { type: Number, default: 0, min: 0 },
+    },
+    { _id: false }
+);
+
+const platformRevenueSchema = new mongoose.Schema(
+    {
+        platformFee: { type: Number, default: 0, min: 0 },
+        commission: { type: Number, default: 0, min: 0 },
+        deliveryMargin: { type: Number, default: 0, min: 0 },
     },
     { _id: false }
 );
@@ -268,6 +309,18 @@ const orderSchema = new mongoose.Schema(
         pricing: {
             type: pricingSchema,
             required: false
+        },
+        restaurantSettlement: {
+            type: [restaurantSettlementSchema],
+            default: [],
+        },
+        driverSettlement: {
+            type: driverSettlementSchema,
+            default: undefined,
+        },
+        platformRevenue: {
+            type: platformRevenueSchema,
+            default: undefined,
         },
         /**
          * Denormalized payment snapshot for fast reads & legacy clients.

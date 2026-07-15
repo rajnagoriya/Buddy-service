@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react"
-import { Eye, Printer, ArrowUpDown } from "lucide-react"
+import { Eye, Printer, ArrowUpDown, MoreVertical } from "lucide-react"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 
 export default function DispatchOrdersTable({ orders, visibleColumns, onViewOrder, onPrintOrder }) {
   const [currentPage, setCurrentPage] = useState(1)
@@ -162,22 +163,29 @@ export default function DispatchOrdersTable({ orders, visibleColumns, onViewOrde
                 )}
                 {visibleColumns.actions && (
                   <td className="px-6 py-4 whitespace-nowrap text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <button 
-                        onClick={() => onViewOrder(order)}
-                        className="p-1.5 rounded text-orange-600 hover:bg-orange-50 transition-colors"
-                        title="View Details"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </button>
-                      <button 
-                        onClick={() => onPrintOrder(order)}
-                        className="p-1.5 rounded text-blue-600 hover:bg-blue-50 transition-colors"
-                        title="Print Order"
-                      >
-                        <Printer className="w-4 h-4" />
-                      </button>
-                    </div>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button className="p-1.5 rounded text-slate-600 hover:bg-slate-100 transition-colors">
+                          <MoreVertical className="w-4 h-4" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-40 bg-white border border-slate-200 rounded-lg shadow-lg z-50">
+                        <DropdownMenuItem
+                          onClick={() => onViewOrder(order)}
+                          className="cursor-pointer flex items-center gap-2 text-orange-600"
+                        >
+                          <Eye className="w-4 h-4" />
+                          <span>View Details</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => onPrintOrder(order)}
+                          className="cursor-pointer flex items-center gap-2 text-blue-600"
+                        >
+                          <Printer className="w-4 h-4" />
+                          <span>Print Order</span>
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </td>
                 )}
               </tr>

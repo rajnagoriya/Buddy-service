@@ -259,6 +259,7 @@ const userSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
+    collection: 'buddy_users',
   },
 );
 

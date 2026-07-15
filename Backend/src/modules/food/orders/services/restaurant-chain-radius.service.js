@@ -1,11 +1,26 @@
 import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
+import { FoodDeliveryBoySettings } from '../../admin/models/deliveryBoySettings.model.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { haversineKm } from './order.helpers.js';
+import { fetchRoadDistancesKm } from '../utils/googleMaps.js';
 
 export const CHAIN_RESTAURANT_RADIUS_KM = 5;
 
 export const CHAIN_RADIUS_VALIDATION_MESSAGE =
-  'This restaurant is outside the allowed 5 KM radius of the last selected restaurant. To place a single order, please select a nearby restaurant.';
+  'This restaurant is outside the allowed radius of the last selected restaurant. To place a single order, please select a nearby restaurant.';
+
+async function getChainRadiusKm() {
+  let settings = await FoodDeliveryBoySettings.findOne({ isActive: true })
+    .sort({ createdAt: -1 })
+    .lean();
+  if (!settings) {
+    settings = await FoodDeliveryBoySettings.findOne()
+      .sort({ createdAt: -1 })
+      .lean();
+  }
+  const maxKm = Number(settings?.multiOrderMaxDistance);
+  return Number.isFinite(maxKm) && maxKm > 0 ? maxKm : CHAIN_RESTAURANT_RADIUS_KM;
+}
 
 export function getRestaurantCoords(restaurant) {
   const coords = restaurant?.location?.coordinates;
@@ -18,26 +33,46 @@ export function getRestaurantCoords(restaurant) {
   return { lat, lng };
 }
 
-export function validateChainDistanceKm(fromCoords, toCoords, maxKm = CHAIN_RESTAURANT_RADIUS_KM) {
+/** Prefer Google road (driving) distance; fall back to straight-line haversine. */
+export async function resolveChainDistanceKm(fromCoords, toCoords) {
   if (!fromCoords || !toCoords) {
-    return { valid: true, distanceKm: null, skipped: true };
+    return { distanceKm: null, skipped: true, distanceSource: 'none' };
   }
 
-  const distanceKm = haversineKm(
+  const road = await fetchRoadDistancesKm(fromCoords, [toCoords]);
+  const roadKm = Array.isArray(road) ? Number(road[0]) : null;
+  if (Number.isFinite(roadKm) && roadKm >= 0) {
+    return { distanceKm: roadKm, skipped: false, distanceSource: 'road' };
+  }
+
+  const straightKm = haversineKm(
     fromCoords.lat,
     fromCoords.lng,
     toCoords.lat,
     toCoords.lng,
   );
-
-  if (!Number.isFinite(distanceKm)) {
-    return { valid: true, distanceKm: null, skipped: true };
+  if (!Number.isFinite(straightKm)) {
+    return { distanceKm: null, skipped: true, distanceSource: 'none' };
   }
 
   return {
-    valid: distanceKm <= maxKm,
-    distanceKm,
+    distanceKm: Number(straightKm.toFixed(2)),
     skipped: false,
+    distanceSource: 'straight',
+  };
+}
+
+export async function validateChainDistanceKm(fromCoords, toCoords, maxKm = CHAIN_RESTAURANT_RADIUS_KM) {
+  const resolved = await resolveChainDistanceKm(fromCoords, toCoords);
+  if (resolved.skipped || !Number.isFinite(resolved.distanceKm)) {
+    return { valid: true, distanceKm: null, skipped: true, distanceSource: resolved.distanceSource };
+  }
+
+  return {
+    valid: resolved.distanceKm <= maxKm,
+    distanceKm: resolved.distanceKm,
+    skipped: false,
+    distanceSource: resolved.distanceSource,
   };
 }
 
@@ -59,8 +94,11 @@ export function getRestaurantIdsInCartOrder(items) {
 
 export async function validateRestaurantChainForItems(
   items,
-  maxKm = CHAIN_RESTAURANT_RADIUS_KM,
+  maxKm,
 ) {
+  const resolvedMaxKm = Number.isFinite(Number(maxKm)) && Number(maxKm) > 0
+    ? Number(maxKm)
+    : await getChainRadiusKm();
   const restaurantIds = getRestaurantIdsInCartOrder(items);
   if (restaurantIds.length <= 1) {
     return { valid: true, restaurantIds };
@@ -77,10 +115,12 @@ export async function validateRestaurantChainForItems(
     const nextRestaurant = byId.get(restaurantIds[i]);
     const fromCoords = getRestaurantCoords(prevRestaurant);
     const toCoords = getRestaurantCoords(nextRestaurant);
-    const { valid, distanceKm, skipped } = validateChainDistanceKm(fromCoords, toCoords, maxKm);
+    const { valid, skipped } = await validateChainDistanceKm(fromCoords, toCoords, resolvedMaxKm);
 
     if (!skipped && !valid) {
-      throw new ValidationError(CHAIN_RADIUS_VALIDATION_MESSAGE);
+      throw new ValidationError(
+        `This restaurant is outside the allowed ${resolvedMaxKm} KM road distance of the last selected restaurant. To place a single order, please select a nearby restaurant.`,
+      );
     }
   }
 
@@ -90,8 +130,11 @@ export async function validateRestaurantChainForItems(
 export async function validateNewRestaurantAgainstLast(
   lastRestaurantId,
   newRestaurantId,
-  maxKm = CHAIN_RESTAURANT_RADIUS_KM,
+  maxKm,
 ) {
+  const resolvedMaxKm = Number.isFinite(Number(maxKm)) && Number(maxKm) > 0
+    ? Number(maxKm)
+    : await getChainRadiusKm();
   const lastId = String(lastRestaurantId || '').trim();
   const nextId = String(newRestaurantId || '').trim();
 
@@ -110,16 +153,24 @@ export async function validateNewRestaurantAgainstLast(
 
   const fromCoords = getRestaurantCoords(lastRestaurant);
   const toCoords = getRestaurantCoords(newRestaurant);
-  const { valid, distanceKm, skipped } = validateChainDistanceKm(fromCoords, toCoords, maxKm);
+  const { valid, distanceKm, skipped, distanceSource } = await validateChainDistanceKm(
+    fromCoords,
+    toCoords,
+    resolvedMaxKm,
+  );
 
   if (!skipped && !valid) {
-    throw new ValidationError(CHAIN_RADIUS_VALIDATION_MESSAGE);
+    throw new ValidationError(
+      `This restaurant is outside the allowed ${resolvedMaxKm} KM road distance of the last selected restaurant. To place a single order, please select a nearby restaurant.`,
+    );
   }
 
   return {
     valid: true,
     distanceKm,
     skipped,
+    distanceSource,
+    maxKm: resolvedMaxKm,
     fromRestaurantId: lastId,
     toRestaurantId: nextId,
   };

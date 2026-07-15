@@ -17,10 +17,184 @@ export function enqueueOrderEvent(action, payload = {}) {
   }
 }
 
-// Canonical implementation now lives in core/location/haversine.util.js -
-// re-exported here so existing importers (restaurant-chain-radius.service.js,
-// order-pricing.service.js) keep working unchanged.
-export { haversineKm } from '../../../../core/location/haversine.util.js';
+// Canonical implementation lives in core/location/haversine.util.js.
+// Import for local use, then re-export for existing importers.
+import { haversineKm } from '../../../../core/location/haversine.util.js';
+export { haversineKm };
+
+export function calculateDistanceSlabFee(distanceKm, rules = []) {
+  const d = Math.max(0, Number(distanceKm) || 0);
+  const list = Array.isArray(rules) ? rules.filter((r) => r && r.status !== false) : [];
+  if (!list.length) return 0;
+
+  const sorted = [...list].sort(
+    (a, b) => (Number(a.minDistance) || 0) - (Number(b.minDistance) || 0),
+  );
+  const baseRule = sorted.find((r) => Number(r.minDistance || 0) === 0) || sorted[0];
+  if (!baseRule) return 0;
+
+  let fee = Number(baseRule.basePayout || 0);
+
+  for (const rule of sorted) {
+    const perKm = Number(rule.commissionPerKm || 0);
+    if (!Number.isFinite(perKm) || perKm <= 0) continue;
+    const min = Number(rule.minDistance || 0);
+    const max = rule.maxDistance == null ? null : Number(rule.maxDistance);
+    if (d <= min) continue;
+    const upper = max == null ? d : Math.min(d, max);
+    const kmInSlab = Math.max(0, upper - min);
+    if (kmInSlab > 0) fee += kmInSlab * perKm;
+  }
+
+  if (!Number.isFinite(fee) || fee < 0) return 0;
+  return Math.round(fee);
+}
+
+export function calculateRangeDeliveryFee(distanceKm, ranges = []) {
+  const d = Number(distanceKm);
+  if (!Number.isFinite(d) || d < 0) return null;
+  const list = Array.isArray(ranges) ? [...ranges] : [];
+  if (!list.length) return null;
+
+  const sorted = list.sort((a, b) => Number(a.min) - Number(b.min));
+  for (let i = 0; i < sorted.length; i += 1) {
+    const range = sorted[i];
+    const min = Number(range.min);
+    const max = Number(range.max);
+    const fee = Number(range.fee);
+    if (!Number.isFinite(min) || !Number.isFinite(max) || !Number.isFinite(fee)) continue;
+    const isLastRange = i === sorted.length - 1;
+    const inRange = isLastRange
+      ? d >= min && d <= max
+      : d >= min && d < max;
+    if (inRange) return fee;
+  }
+  return null;
+}
+
+function getRestaurantLatLng(restaurant) {
+  const coords = restaurant?.location?.coordinates;
+  if (!Array.isArray(coords) || coords.length < 2) return null;
+  const lng = Number(coords[0]);
+  const lat = Number(coords[1]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return { lat, lng };
+}
+
+/**
+ * Chain distance: R1 → R2 → … → Rn → user (cart order).
+ * Single restaurant: R1 → user.
+ */
+function resolveOrderDistanceKmStraight(restaurants = [], userLoc) {
+  if (!Array.isArray(restaurants) || restaurants.length === 0) return 0;
+  if (!Array.isArray(userLoc) || userLoc.length < 2) return 0;
+
+  const points = [];
+  for (const restaurant of restaurants) {
+    const point = getRestaurantLatLng(restaurant);
+    if (point) points.push(point);
+  }
+  if (points.length === 0) return 0;
+
+  points.push({ lat: userLoc[1], lng: userLoc[0] });
+
+  let total = 0;
+  for (let i = 0; i < points.length - 1; i += 1) {
+    total += haversineKm(
+      points[i].lat,
+      points[i].lng,
+      points[i + 1].lat,
+      points[i + 1].lng,
+    );
+  }
+  return total;
+}
+
+/** Sync fallback (haversine). Prefer resolveOrderDistanceKmAsync for road distance. */
+export function resolveOrderDistanceKm(restaurants = [], userLoc) {
+  return resolveOrderDistanceKmStraight(restaurants, userLoc);
+}
+
+/**
+ * Order delivery distance in km.
+ * Road (driving) when Google Maps is available; otherwise straight-line.
+ * Multi-resto: R1→R2→…→Rn→user. Single: restaurant → user.
+ */
+export async function resolveOrderDistanceKmAsync(restaurants = [], userLoc) {
+  const straight = resolveOrderDistanceKmStraight(restaurants, userLoc);
+  if (!Array.isArray(restaurants) || restaurants.length === 0) return 0;
+  if (!Array.isArray(userLoc) || userLoc.length < 2) return 0;
+
+  try {
+    const { fetchRoadDistancesKm } = await import('../utils/googleMaps.js');
+    const user = { lat: userLoc[1], lng: userLoc[0] };
+
+    const points = [];
+    for (const restaurant of restaurants) {
+      const point = getRestaurantLatLng(restaurant);
+      if (point) points.push(point);
+    }
+    if (points.length === 0) return 0;
+    points.push(user);
+
+    let total = 0;
+    for (let i = 0; i < points.length - 1; i += 1) {
+      const [leg] = (await fetchRoadDistancesKm(points[i], [points[i + 1]])) || [];
+      if (!Number.isFinite(leg)) {
+        return Number.isFinite(straight) ? Number(straight.toFixed(2)) : 0;
+      }
+      total += leg;
+    }
+    return Number(total.toFixed(2));
+  } catch {
+    // fall through to straight-line
+  }
+
+  return Number.isFinite(straight) ? Number(straight.toFixed(2)) : 0;
+}
+
+export function applyDeliverySurcharges(baseFee, { isMultiRestaurant, isSplitOrder, deliveryBoySettings } = {}) {
+  const base = Math.max(0, Number(baseFee) || 0);
+  let surcharge = 0;
+  let multiplier = 1;
+
+  if (isMultiRestaurant) {
+    surcharge += Math.max(0, Number(deliveryBoySettings?.multiOrderAdditionalCharge) || 0);
+  }
+  if (isSplitOrder) {
+    surcharge += base;
+    multiplier = 2;
+  }
+
+  return {
+    baseFee: base,
+    surcharge,
+    multiplier: isSplitOrder ? multiplier : 1,
+    fee: base + surcharge,
+  };
+}
+
+export function resolveSpeedFeeModifier(deliveryBoySettings, deliverySpeedOptionId, deliveryOptionName) {
+  const options = Array.isArray(deliveryBoySettings?.deliverySpeedOptions)
+    ? deliveryBoySettings.deliverySpeedOptions
+    : [];
+  if (!options.length) return 0;
+
+  const id = String(deliverySpeedOptionId || "").trim();
+  if (id) {
+    const byId = options.find((o) => String(o.id) === id);
+    if (byId) return Number(byId.feeModifier) || 0;
+  }
+
+  const name = String(deliveryOptionName || "").trim().toLowerCase();
+  if (name) {
+    const byName = options.find((o) => String(o.name || "").trim().toLowerCase() === name);
+    if (byName) return Number(byName.feeModifier) || 0;
+  }
+
+  const defaultOption = options.find((o) => o.isDefault) || options[0];
+  return Number(defaultOption?.feeModifier) || 0;
+}
 
 export function generateFourDigitDeliveryOtp() {
   return String(Math.floor(1000 + Math.random() * 9000));
@@ -112,10 +286,46 @@ export function pushStatusHistory(order, { byRole, byId, from, to, note = "" }) 
   });
 }
 
+export const MAX_DISPATCH_ATTEMPTS = 10;
+
+export function freeOrderDispatch(orderDoc) {
+  if (!orderDoc) return;
+  orderDoc.dispatch = orderDoc.dispatch || {};
+  orderDoc.dispatch.status = 'cancelled';
+  orderDoc.dispatch.deliveryPartnerId = null;
+  orderDoc.dispatch.sharedPartnerId = null;
+  orderDoc.dispatch.acceptedAt = undefined;
+  orderDoc.dispatch.assignedAt = undefined;
+}
+
+export function computeRiderToRestaurantDistanceKm(orderDoc) {
+  const order = orderDoc?.toObject ? orderDoc.toObject() : orderDoc || {};
+  const riderCoords = order?.lastRiderLocation?.coordinates;
+  if (!Array.isArray(riderCoords) || riderCoords.length < 2) return null;
+
+  const restaurantCoords =
+    order?.restaurantId?.location?.coordinates ||
+    order?.pickups?.[0]?.location?.coordinates ||
+    null;
+  if (!Array.isArray(restaurantCoords) || restaurantCoords.length < 2) return null;
+
+  const [rLng, rLat] = riderCoords;
+  const [restLng, restLat] = restaurantCoords;
+  const km = haversineKm(rLat, rLng, restLat, restLng);
+  return Number.isFinite(km) ? Number(km.toFixed(2)) : null;
+}
+
 export function normalizeOrderForClient(orderDoc) {
   const order = orderDoc?.toObject ? orderDoc.toObject() : orderDoc || {};
   const mongoId = (order._id || orderDoc?._id || "").toString();
   const displayId = order.order_id || mongoId;
+  const phase = order?.deliveryState?.currentPhase;
+  const prePickupPhases = new Set(['en_route_to_pickup', 'at_pickup']);
+  const prePickupStatuses = new Set(['created', 'confirmed', 'preparing', 'ready_for_pickup', 'reached_pickup']);
+  const showRiderToRestaurantDistance =
+    prePickupPhases.has(phase) ||
+    (prePickupStatuses.has(order?.orderStatus) && order?.dispatch?.status === 'accepted');
+
   return {
     ...order,
     orderMongoId: mongoId,
@@ -129,6 +339,17 @@ export function normalizeOrderForClient(orderDoc) {
     restaurantNote: order?.restaurantNote || "",
     cancellationReason: (order?.orderStatus?.includes('cancel') || order?.status?.includes('cancel')) 
       ? (order.statusHistory?.findLast(h => h.to?.includes('cancel'))?.note || "")
+      : null,
+    failureReason: (() => {
+      const cancelNote = String(
+        order.statusHistory?.findLast((h) => h.to?.includes('cancel'))?.note || '',
+      ).toLowerCase();
+      if (cancelNote.includes('no delivery partner')) return 'driver_not_found';
+      if (cancelNote.includes('3 times') || cancelNote.includes('3 attempts')) return 'restaurant_rejected';
+      return null;
+    })(),
+    riderToRestaurantDistanceKm: showRiderToRestaurantDistance
+      ? computeRiderToRestaurantDistanceKm(order)
       : null,
     deliveryState: {
       ...(order?.deliveryState || {}),
