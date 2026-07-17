@@ -366,11 +366,23 @@ export function buildRestaurantScopedOrder(orderDoc, restaurantId) {
   const rid = String(restaurantId || '').trim();
   if (!rid) return order;
 
+  const orderRestaurantId = String(
+    order?.restaurantId?._id || order?.restaurantId || '',
+  ).trim();
+
+  // Keep items that belong to this restaurant. If an item has no restaurantId
+  // (legacy/single-restaurant orders), treat it as belonging to the order's restaurant.
   const filteredItems = Array.isArray(order.items)
-    ? order.items.filter((item) => String(item?.restaurantId || '') === rid)
+    ? order.items.filter((item) => {
+        const itemRid = String(item?.restaurantId?._id || item?.restaurantId || '').trim();
+        if (itemRid) return itemRid === rid;
+        return orderRestaurantId === rid;
+      })
     : [];
   const filteredPickups = Array.isArray(order.pickups)
-    ? order.pickups.filter((pickup) => String(pickup?.restaurantId || '') === rid)
+    ? order.pickups.filter(
+        (pickup) => String(pickup?.restaurantId?._id || pickup?.restaurantId || '') === rid,
+      )
     : [];
 
   const scoped = {
@@ -378,6 +390,9 @@ export function buildRestaurantScopedOrder(orderDoc, restaurantId) {
     items: filteredItems,
     pickups: filteredPickups,
     restaurantId: rid,
+    // Explicit client fields for restaurant live panel / accept popup
+    status: order?.orderStatus || order?.status || '',
+    orderStatus: order?.orderStatus || order?.status || '',
   };
 
   if (filteredPickups.length === 1 && filteredPickups[0]?.restaurantName) {
@@ -483,8 +498,12 @@ export async function notifyRestaurantNewOrder(orderDoc, restaurantIdOverride = 
   try {
     if (!orderDoc || !canExposeOrderToRestaurant(orderDoc)) return;
 
-    const targetRestaurantId =
-      restaurantIdOverride || orderDoc?.restaurantId?._id || orderDoc?.restaurantId;
+    const targetRestaurantId = String(
+      restaurantIdOverride ||
+        orderDoc?.restaurantId?._id ||
+        orderDoc?.restaurantId ||
+        '',
+    ).trim();
     if (!targetRestaurantId) return;
 
     const scopedOrder = buildRestaurantScopedOrder(orderDoc, targetRestaurantId);
@@ -494,6 +513,15 @@ export async function notifyRestaurantNewOrder(orderDoc, restaurantIdOverride = 
         ...scopedOrder,
         orderMongoId: orderDoc._id?.toString?.() || undefined,
         orderId: orderDoc.order_id || orderDoc._id?.toString?.(),
+        status: orderDoc.orderStatus || scopedOrder.status || 'created',
+        orderStatus: orderDoc.orderStatus || scopedOrder.orderStatus || 'created',
+        // Restaurant accept timer must start when rider accepted / restaurant was notified,
+        // not when the customer originally placed the order.
+        restaurantNotifiedAt:
+          orderDoc.dispatch?.acceptedAt ||
+          orderDoc.restaurantNotifiedAt ||
+          new Date(),
+        dispatch: orderDoc.dispatch || scopedOrder.dispatch,
       };
       logger.info(
         `[RestaurantOrders] Emitting new_order to ${rooms.restaurant(targetRestaurantId)} for order ${orderDoc._id?.toString?.() || ''}`,

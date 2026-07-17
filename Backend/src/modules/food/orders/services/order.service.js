@@ -1525,17 +1525,28 @@ export async function updateOrderInstructions(orderId, userId, instructions) {
 export async function listOrdersRestaurant(restaurantId, query) {
   const { page, limit, skip } = buildPaginationOptions(query);
   const restaurantObjectId = new mongoose.Types.ObjectId(restaurantId);
+  // Driver-first flow: restaurant only sees orders after a rider has accepted.
+  // Use $and so restaurant ownership and payment filters do not overwrite each other.
   const filter = {
-    $or: [
-      { restaurantId: restaurantObjectId },
-      { 'pickups.restaurantId': restaurantObjectId },
+    $and: [
+      {
+        $or: [
+          { restaurantId: restaurantObjectId },
+          { 'pickups.restaurantId': restaurantObjectId },
+        ],
+      },
+      { 'dispatch.status': 'accepted' },
+      {
+        $or: [
+          { 'payment.method': { $in: ['cash', 'wallet'] } },
+          {
+            'payment.status': {
+              $in: ['paid', 'authorized', 'captured', 'settled', 'refunded', 'cod_pending'],
+            },
+          },
+        ],
+      },
     ],
-    "dispatch.status": "accepted", // 🔥 ONLY show orders that are accepted by a rider
-    $or: [
-      { "payment.method": { $in: ["cash", "wallet"] } },
-      { "payment.status": { $in: ["paid", "authorized", "captured", "settled", "refunded"] } },
-    ],
-
   };
   const [docs, total] = await Promise.all([
     FoodOrder.find(filter)

@@ -723,6 +723,15 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
           'dispatch.status': 'assigned',
           'dispatch.deliveryPartnerId': partnerId,
         },
+        {
+          'dispatch.status': 'offered',
+          'dispatch.offeredTo': {
+            $elemMatch: {
+              partnerId,
+              action: 'offered',
+            },
+          },
+        },
       ],
     },
     {
@@ -732,13 +741,22 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
         'dispatch.assignedAt': now,
         'dispatch.acceptedAt': now,
         riderEarning: finalRiderEarning,
-        platformProfit: newPlatformProfit
+        platformProfit: newPlatformProfit,
+        'dispatch.offeredTo.$[acceptedOffer].action': 'accepted',
       },
       $push: {
         statusHistory: statusHistoryEntry,
       },
     },
-    { new: true },
+    {
+      new: true,
+      arrayFilters: [
+        {
+          'acceptedOffer.partnerId': partnerId,
+          'acceptedOffer.action': 'offered',
+        },
+      ],
+    },
   ).populate('restaurantId userId');
 
   if (!order) {
@@ -771,6 +789,17 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
       String(existing.dispatch?.deliveryPartnerId || '') !== String(deliveryPartnerId)
     ) {
       throw new ForbiddenError('Order already accepted by another partner');
+    }
+
+    if (existing.dispatch?.status === 'offered') {
+      const wasOffered = (existing.dispatch?.offeredTo || []).some(
+        (entry) =>
+          String(entry?.partnerId || '') === String(deliveryPartnerId) &&
+          entry?.action === 'offered',
+      );
+      if (!wasOffered) {
+        throw new ValidationError('This order was offered to other delivery partners');
+      }
     }
 
     throw new ValidationError('Order is no longer available to accept');
@@ -830,16 +859,31 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
 
     try {
       const io = getIO();
+      const restaurantIdStr =
+        order.restaurantId?._id?.toString?.() ||
+        order.restaurantId?.toString?.() ||
+        String(order.restaurantId || '');
+      const userIdStr =
+        order.userId?._id?.toString?.() ||
+        order.userId?.toString?.() ||
+        String(order.userId || '');
+
       if (io) {
         const payload = {
           orderMongoId: order._id?.toString?.(),
-          orderId: order._id.toString(),
+          orderId: order.order_id || order._id.toString(),
           orderStatus: order.orderStatus,
+          status: order.orderStatus,
           dispatchStatus: order.dispatch?.status,
+          dispatch: order.dispatch,
         };
         io.to(rooms.delivery(deliveryPartnerId)).emit('order_status_update', payload);
-        io.to(rooms.restaurant(order.restaurantId)).emit('order_status_update', payload);
-        io.to(rooms.user(order.userId)).emit('order_status_update', payload);
+        if (restaurantIdStr) {
+          io.to(rooms.restaurant(restaurantIdStr)).emit('order_status_update', payload);
+        }
+        if (userIdStr) {
+          io.to(rooms.user(userIdStr)).emit('order_status_update', payload);
+        }
 
         // Broadcast order_claimed to ALL online delivery partners so every popup is dismissed
         const claimedPayload = {
@@ -878,10 +922,10 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
           await notifyOwnerSafely(
             { ownerType: 'RESTAURANT', ownerId: rid },
             {
-              title: 'Rider assigned',
-              body: `Order #${order._id.toString()} is now assigned to a delivery partner.`,
+              title: 'New order — rider assigned',
+              body: `Order #${order.order_id || order._id.toString()} needs your acceptance.`,
               data: {
-                type: 'delivery_accepted',
+                type: 'new_order',
                 orderId: order._id.toString(),
                 orderMongoId: order._id?.toString?.() || '',
                 dispatchStatus: order.dispatch?.status,
@@ -893,12 +937,12 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
       } else {
         await notifyRestaurantNewOrder(order);
         await notifyOwnerSafely(
-          { ownerType: 'RESTAURANT', ownerId: order.restaurantId },
+          { ownerType: 'RESTAURANT', ownerId: restaurantIdStr || order.restaurantId },
           {
-            title: 'Rider assigned',
-            body: `Order #${order._id.toString()} is now assigned to a delivery partner.`,
+            title: 'New order — rider assigned',
+            body: `Order #${order.order_id || order._id.toString()} needs your acceptance.`,
             data: {
-              type: 'delivery_accepted',
+              type: 'new_order',
               orderId: order._id.toString(),
               orderMongoId: order._id?.toString?.() || '',
               dispatchStatus: order.dispatch?.status,
@@ -972,13 +1016,18 @@ export async function rejectOrderDelivery(orderId, deliveryPartnerId) {
     throw new NotFoundError('Order not found');
   }
 
+  const wasOffered = (order.dispatch?.offeredTo || []).some(
+    (item) =>
+      String(item.partnerId) === String(deliveryPartnerId) &&
+      item.action === 'offered',
+  );
   const isPrimary = order.dispatch?.deliveryPartnerId?.toString() === deliveryPartnerId.toString();
   const isShared = order.dispatch?.sharedPartnerId?.toString() === deliveryPartnerId.toString();
-  if (!isPrimary && !isShared) {
+  if (!isPrimary && !isShared && !wasOffered) {
     throw new ForbiddenError('Not your order');
   }
 
-  const offer = order.dispatch.offeredTo.find(
+  const offer = (order.dispatch?.offeredTo || []).find(
     (item) =>
       String(item.partnerId) === String(deliveryPartnerId) &&
       item.action === 'offered',

@@ -51,10 +51,12 @@ export const PocketV2 = () => {
     const fetchData = async () => {
       try {
         setLoading(true);
+        // Don't fail the entire wallet fetch if profile/auth is temporarily broken.
+        // Backend logs show 401 "Unknown role" for `/food/auth/me`.
         const [profileRes, earningsRes, walletRes] = await Promise.all([
-          deliveryAPI.getProfile(),
+          deliveryAPI.getProfile().catch(() => null),
           deliveryAPI.getEarnings({ period: walletState.period }),
-          deliveryAPI.getWallet()
+          deliveryAPI.getWallet(),
         ]);
 
         const profile = profileRes?.data?.data?.profile || {};

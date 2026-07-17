@@ -1021,14 +1021,26 @@ function ScheduledOrders({ onSelectOrder, refreshToken }) {
   );
 }
 
-// Helper to calculate initial countdown based on order creation time (3 minutes window)
+// Helper: restaurant accept window starts when rider accepted (dispatch.acceptedAt),
+// not when the customer placed the order — otherwise late rider accept auto-rejects instantly.
 const getInitialCountdown = (order) => {
-  if (!order?.createdAt) return 180;
-  const now = Date.now();
-  const created = new Date(order.createdAt).getTime();
-  const diffInSeconds = Math.floor((now - created) / 1000);
-  const remaining = 180 - diffInSeconds;
-  return Math.max(0, Math.min(180, remaining));
+  const windowSeconds = 180;
+  const startRaw =
+    order?.restaurantNotifiedAt ||
+    order?.dispatch?.acceptedAt ||
+    order?.dispatchAcceptedAt ||
+    null;
+
+  // Driver-first: if we don't have rider-accept time yet, always give a fresh full window.
+  // createdAt is when the customer ordered — often minutes earlier while hunting a rider.
+  if (!startRaw) return windowSeconds;
+
+  const startDate = new Date(startRaw);
+  if (Number.isNaN(startDate.getTime())) return windowSeconds;
+
+  const diffInSeconds = Math.floor((Date.now() - startDate.getTime()) / 1000);
+  const remaining = windowSeconds - diffInSeconds;
+  return Math.max(0, Math.min(windowSeconds, remaining));
 }
 
 export default function OrdersLive() {
@@ -1128,11 +1140,17 @@ export default function OrdersLive() {
         const ordersRes = await restaurantAPI.getOrders({ page: 1, limit: 100 });
         if (ordersRes.data.success) {
           const orders = Array.isArray(ordersRes.data.data?.orders) ? ordersRes.data.data.orders : [];
-          const pending = orders.filter(o => 
-            String(o.status).toLowerCase() === 'pending' || 
-            String(o.status).toLowerCase() === 'created' ||
-            String(o.status).toLowerCase() === 'confirmed'
-          ).length;
+          const pending = orders.filter((o) => {
+            const s = String(o.status || o.orderStatus || "").toLowerCase();
+            const dispatchAccepted =
+              String(o.dispatch?.status || "").toLowerCase() === "accepted";
+            return (
+              s === "pending" ||
+              s === "created" ||
+              s === "confirmed" ||
+              (dispatchAccepted && (s === "created" || s === "confirmed"))
+            );
+          }).length;
           setPendingOrdersCount(pending);
         }
       } catch (error) {
@@ -1586,19 +1604,22 @@ export default function OrdersLive() {
         if (response.data?.success && response.data.data?.orders) {
           const now = Date.now();
 
-          // Find orders that should trigger the popup
+          // Find orders that should trigger the popup (driver-first: rider already accepted)
           const targetOrders = response.data.data.orders.filter((order) => {
             if (hasOrderBeenShown(order)) return false;
 
-            const isConfirmed = order.status === "confirmed";
-            const isCreatedScheduled =
-              order.status === "created" && order.scheduledAt;
+            const status = String(order.status || order.orderStatus || "").toLowerCase();
+            const dispatchAccepted =
+              String(order.dispatch?.status || order.dispatchStatus || "").toLowerCase() ===
+              "accepted";
+            const isAwaitingRestaurant =
+              (status === "created" || status === "confirmed") && dispatchAccepted;
 
-            if (isConfirmed && !order.scheduledAt) return true; // ordinary confirmed fallback
+            if (isAwaitingRestaurant && !order.scheduledAt) return true;
 
             if (
               order.scheduledAt &&
-              (order.status === "created" || order.status === "confirmed")
+              (status === "created" || status === "confirmed")
             ) {
               const scheduledTime = new Date(order.scheduledAt).getTime();
               // Show popup if scheduled time is <= 30 mins from now
@@ -1627,7 +1648,13 @@ export default function OrdersLive() {
               total: orderToPopup.pricing?.total || 0,
               customerAddress: orderToPopup.address,
               status: orderToPopup.status,
+              orderStatus: orderToPopup.orderStatus || orderToPopup.status,
               createdAt: orderToPopup.createdAt,
+              restaurantNotifiedAt:
+                orderToPopup.dispatch?.acceptedAt ||
+                orderToPopup.restaurantNotifiedAt ||
+                null,
+              dispatch: orderToPopup.dispatch,
               scheduledAt: orderToPopup.scheduledAt,
               estimatedDeliveryTime: orderToPopup.estimatedDeliveryTime || 30,
               note: orderToPopup.note || "",
@@ -1851,7 +1878,12 @@ export default function OrdersLive() {
         const orders = latest?.data?.data?.orders || [];
         const target = orders.find((o) => {
           const s = String(o?.status || o?.orderStatus || "").toLowerCase();
-          return s === "confirmed" || s === "created";
+          const dispatchAccepted =
+            String(o?.dispatch?.status || "").toLowerCase() === "accepted";
+          return (
+            (s === "confirmed" || s === "created") &&
+            (dispatchAccepted || s === "confirmed")
+          );
         });
         orderId = resolveOrderActionId(target);
       } catch (_) {
@@ -3371,13 +3403,13 @@ function OrderCard({
               )}
               <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[8px] font-bold border uppercase tracking-wider ${isReady
                   ? "bg-emerald-100 text-emerald-700 border-emerald-200"
-                  : normalizedStatus === "confirmed"
+                  : normalizedStatus === "confirmed" || normalizedStatus === "created"
                     ? "bg-amber-100 text-amber-700 border-amber-200"
                     : normalizedStatus === "preparing"
                       ? "bg-blue-100 text-blue-700 border-blue-200"
                       : "bg-slate-100 text-slate-700 border-slate-200"
                 }`}>
-                {statusLabel}
+                {normalizedStatus === "created" ? "New" : statusLabel}
               </span>
 
               {isPreparing && onCancel && (

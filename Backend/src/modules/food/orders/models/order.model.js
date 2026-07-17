@@ -153,7 +153,7 @@ const dispatchSchema = new mongoose.Schema(
         modeAtCreation: { type: String, enum: ['auto'], default: 'auto' },
         status: {
             type: String,
-            enum: ['unassigned', 'assigned', 'accepted', 'rejected', 'cancelled'],
+            enum: ['unassigned', 'offered', 'assigned', 'accepted', 'rejected', 'cancelled', 'timed_out'],
             default: 'unassigned'
         },
         deliveryPartnerId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodDeliveryPartner', default: null },
@@ -163,7 +163,7 @@ const dispatchSchema = new mongoose.Schema(
         offeredTo: [{
             partnerId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodDeliveryPartner' },
             at: { type: Date, default: Date.now },
-            action: { type: String, enum: ['offered', 'rejected', 'timeout'], default: 'offered' },
+            action: { type: String, enum: ['offered', 'accepted', 'rejected', 'timeout'], default: 'offered' },
             allowOverLimit: { type: Boolean, default: false },
             requiredCashForOrder: { type: Number, default: 0 }
         }],
