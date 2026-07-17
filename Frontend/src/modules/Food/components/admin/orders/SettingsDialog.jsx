@@ -8,18 +8,11 @@ import {
 
 export default function SettingsDialog({ isOpen, onOpenChange, visibleColumns, toggleColumn, resetColumns, columnsConfig }) {
   const defaultColumnsConfig = {
-    si: "Serial Number",
     orderId: "Order ID",
-    orderDate: "Order Date",
-    orderOtp: "Order OTP",
-    customer: "Customer Information",
-    restaurant: "Restaurant",
-    foodItems: "Food Items",
-    itemPrice: "Price",
-    deliveryCharge: "Delivery Charge",
-    totalAmount: "Total Amount",
-    paymentType: "Payment Type",
+    customer: "Customer Name",
+    totalAmount: "Price",
     paymentCollectionStatus: "Payment Status",
+    paymentMethodDetail: "Payment Method",
     orderStatus: "Order Status",
     actions: "Actions",
   }

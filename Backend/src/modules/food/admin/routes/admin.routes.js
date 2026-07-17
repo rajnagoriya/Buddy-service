@@ -232,7 +232,8 @@ router.patch('/dining/requests/:id/reject', invDining, diningAdminController.rej
 // ----- Orders -----
 router.get('/orders', orderController.listOrdersAdminController);
 router.get('/orders/:orderId', orderController.getOrderByIdAdminController);
-router.delete('/orders/:orderId', orderController.deleteOrderAdminController);
+router.patch('/orders/:orderId/cancel', orderController.cancelOrderAdminController);
+router.patch('/orders/:orderId/assign-delivery', orderController.assignDeliveryPartnerController);
 
 // ----- CMS Pages (About + legal) -----
 router.get('/pages-social-media/:key', getAdminPageController);

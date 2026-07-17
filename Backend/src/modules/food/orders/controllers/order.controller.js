@@ -383,6 +383,23 @@ export async function assignDeliveryPartnerController(req, res, next) {
     }
 }
 
+export async function cancelOrderAdminController(req, res, next) {
+    try {
+        const adminId = req.user?.userId;
+        const orderId = req.params.orderId;
+        const dto = validateCancelOrderDto(req.body);
+        const order = await orderService.cancelOrderByAdmin(
+            orderId,
+            adminId,
+            dto.reason,
+            dto.refundDestination,
+        );
+        return sendResponse(res, 200, 'Order cancelled by admin', { order });
+    } catch (err) {
+        next(err);
+    }
+}
+
 export async function deleteOrderAdminController(req, res, next) {
     try {
         const adminId = req.user?.userId;
