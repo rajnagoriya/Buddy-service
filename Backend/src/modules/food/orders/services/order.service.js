@@ -2102,28 +2102,278 @@ export async function assignDeliveryPartnerAdmin(
   deliveryPartnerId,
   adminId,
 ) {
-  const order = await FoodOrder.findById(orderId);
+  const identity = buildOrderIdentityFilter(orderId);
+  if (!identity) throw new ValidationError("Order id required");
+
+  const order = await FoodOrder.findOne(identity).populate(
+    "restaurantId",
+    "restaurantName location addressLine1 area city state phone",
+  );
   if (!order) throw new NotFoundError("Order not found");
-  if (order.dispatch.status === "accepted")
-    throw new ValidationError("Order already accepted by partner");
+
+  const nonAssignableStatuses = [
+    "delivered",
+    "cancelled_by_user",
+    "cancelled_by_restaurant",
+    "cancelled_by_admin",
+  ];
+  if (nonAssignableStatuses.includes(order.orderStatus)) {
+    throw new ValidationError("Cannot assign driver for this order");
+  }
+
+  const previousPartnerId =
+    order.dispatch?.deliveryPartnerId?.toString?.() || null;
+  if (previousPartnerId === String(deliveryPartnerId)) {
+    throw new ValidationError("This driver is already assigned to the order");
+  }
 
   const partner = await FoodDeliveryPartner.findById(deliveryPartnerId)
-    .select("status")
+    .select("status name")
     .lean();
-  if (!partner || partner.status !== "approved")
+  if (!partner || partner.status !== "approved") {
     throw new ValidationError("Delivery partner not available");
+  }
 
-  order.dispatch.status = 'assigned';
-  order.dispatch.deliveryPartnerId = new mongoose.Types.ObjectId(deliveryPartnerId);
+  const fromDispatchStatus = order.dispatch?.status || "unassigned";
+  order.dispatch = order.dispatch || {};
+  order.dispatch.status = "assigned";
+  order.dispatch.deliveryPartnerId = new mongoose.Types.ObjectId(
+    deliveryPartnerId,
+  );
   order.dispatch.assignedAt = new Date();
-  pushStatusHistory(order, { byRole: 'ADMIN', byId: adminId, from: order.dispatch.status, to: 'assigned' });
+  pushStatusHistory(order, {
+    byRole: "ADMIN",
+    byId: adminId,
+    from: fromDispatchStatus,
+    to: "assigned",
+    note: previousPartnerId
+      ? `Reassigned from driver ${previousPartnerId}`
+      : "Assigned by admin",
+  });
   await order.save();
-  enqueueOrderEvent('delivery_partner_assigned', {
+
+  const restaurant = order.restaurantId;
+  const payload = buildDeliverySocketPayload(order, restaurant);
+
+  try {
+    const io = getIO();
+    if (io) {
+      if (previousPartnerId) {
+        io.to(rooms.delivery(previousPartnerId)).emit(
+          "order_reassigned_elsewhere",
+          {
+            orderMongoId: order._id?.toString?.(),
+            orderId: order._id.toString(),
+            message:
+              "This order has been reassigned to another delivery partner.",
+          },
+        );
+      }
+      io.to(rooms.delivery(deliveryPartnerId)).emit("new_order_available", payload);
+      io.to(rooms.delivery(deliveryPartnerId)).emit("new_order", payload);
+    }
+  } catch (err) {
+    logger.warn(
+      `assignDeliveryPartnerAdmin socket emit failed: ${err?.message || err}`,
+    );
+  }
+
+  if (previousPartnerId) {
+    await notifyOwnerSafely(
+      { ownerType: "DELIVERY_PARTNER", ownerId: previousPartnerId },
+      {
+        title: "Order reassigned",
+        body: `Order #${order.order_id || order._id} has been reassigned to another driver.`,
+        data: {
+          type: "order_reassigned_elsewhere",
+          orderId: String(order._id),
+          orderMongoId: String(order._id),
+        },
+      },
+    );
+  }
+
+  await notifyOwnerSafely(
+    { ownerType: "DELIVERY_PARTNER", ownerId: deliveryPartnerId },
+    {
+      title: previousPartnerId ? "Order reassigned to you" : "New order assigned",
+      body: `You have been assigned Order #${order.order_id || order._id}.`,
+      data: {
+        type: "new_order",
+        orderId: String(order._id),
+        orderMongoId: String(order._id),
+      },
+    },
+  );
+
+  enqueueOrderEvent("delivery_partner_assigned", {
     orderMongoId: order._id?.toString?.(),
     orderId: order._id.toString(),
     deliveryPartnerId,
-    adminId
+    previousPartnerId,
+    adminId,
   });
+  return normalizeOrderForClient(order);
+}
+
+/**
+ * Admin manually cancels an order. Notifies user, restaurant, and assigned driver.
+ */
+export async function cancelOrderByAdmin(
+  orderId,
+  adminId,
+  reason = "",
+  refundDestination,
+) {
+  const identity = buildOrderIdentityFilter(orderId);
+  if (!identity) throw new ValidationError("Order id required");
+
+  const order = await FoodOrder.findOne(identity);
+  if (!order) throw new NotFoundError("Order not found");
+
+  const nonCancellableStatuses = [
+    "delivered",
+    "cancelled_by_user",
+    "cancelled_by_restaurant",
+    "cancelled_by_admin",
+  ];
+  if (nonCancellableStatuses.includes(order.orderStatus)) {
+    throw new ValidationError("Order cannot be cancelled");
+  }
+
+  const from = order.orderStatus;
+  const assignedRiderId = order.dispatch?.deliveryPartnerId;
+  const restaurantId = order.restaurantId;
+  const cancelNote = reason?.trim() || "Order cancelled by admin";
+
+  order.orderStatus = "cancelled_by_admin";
+  freeOrderDispatch(order);
+  pushStatusHistory(order, {
+    byRole: "ADMIN",
+    byId: adminId,
+    from,
+    to: "cancelled_by_admin",
+    note: cancelNote,
+  });
+
+  await applyOrderRefundIfPaid(order, {
+    recordedByRole: "ADMIN",
+    recordedById: adminId,
+    note: cancelNote,
+    preferWallet: refundDestination === "wallet",
+  });
+  await order.save();
+
+  const refundDetail =
+    order.payment?.status === "refunded"
+      ? order.payment?.refund?.destination === "wallet"
+        ? ` ₹${order.pricing.total} has been credited to your wallet.`
+        : ` Your refund of ₹${order.pricing.total} is being processed.`
+      : "";
+  const userMessage = `Order #${order.order_id || order._id} has been cancelled by admin.${refundDetail}`;
+  const restaurantMessage = `Order #${order.order_id || order._id} has been cancelled by admin.`;
+  const riderMessage = `Order #${order.order_id || order._id} has been cancelled by admin. You are now free to accept new orders.`;
+
+  try {
+    const io = getIO();
+    if (io) {
+      const payload = {
+        orderMongoId: order._id?.toString?.(),
+        orderId: order._id.toString(),
+        orderStatus: order.orderStatus,
+        title: "Order cancelled by admin",
+        message: userMessage,
+        failureReason: "admin_cancelled",
+        cancelledBy: "admin",
+      };
+      io.to(rooms.user(order.userId)).emit("order_status_update", payload);
+      io.to(rooms.restaurant(restaurantId)).emit("order_status_update", {
+        ...payload,
+        message: restaurantMessage,
+      });
+      if (assignedRiderId) {
+        io.to(rooms.delivery(assignedRiderId)).emit("order_status_update", {
+          ...payload,
+          message: riderMessage,
+        });
+        io.to(rooms.delivery(assignedRiderId)).emit("order_cancelled", {
+          ...payload,
+          message: riderMessage,
+        });
+      }
+    }
+  } catch (err) {
+    logger.warn(`cancelOrderByAdmin socket emit failed: ${err?.message || err}`);
+  }
+
+  await notifyOwnerSafely(
+    { ownerType: "USER", ownerId: order.userId },
+    {
+      title: "Order cancelled by admin",
+      body: userMessage,
+      data: {
+        type: "order_cancelled_by_admin",
+        orderId: String(order._id),
+        orderMongoId: String(order._id),
+        cancelledBy: "admin",
+      },
+    },
+  );
+
+  await notifyOwnerSafely(
+    { ownerType: "RESTAURANT", ownerId: restaurantId },
+    {
+      title: "Order cancelled by admin",
+      body: restaurantMessage,
+      data: {
+        type: "order_cancelled_by_admin",
+        orderId: String(order._id),
+        orderMongoId: String(order._id),
+        cancelledBy: "admin",
+      },
+    },
+  );
+
+  if (assignedRiderId) {
+    await notifyOwnerSafely(
+      { ownerType: "DELIVERY_PARTNER", ownerId: assignedRiderId },
+      {
+        title: "Order cancelled by admin",
+        body: riderMessage,
+        data: {
+          type: "order_cancelled_by_admin",
+          orderId: String(order._id),
+          orderMongoId: String(order._id),
+          cancelledBy: "admin",
+        },
+      },
+    );
+  }
+
+  try {
+    await foodTransactionService.updateTransactionStatus(
+      order._id,
+      "cancelled_by_admin",
+      {
+        status:
+          order.payment?.status === "refunded" ? "refunded" : "failed",
+        note: cancelNote,
+        recordedByRole: "ADMIN",
+        recordedById: adminId,
+      },
+    );
+  } catch (err) {
+    logger.warn(`cancelOrderByAdmin transaction sync failed: ${err?.message || err}`);
+  }
+
+  enqueueOrderEvent("order_cancelled_by_admin", {
+    orderMongoId: order._id?.toString?.(),
+    orderId: order._id.toString(),
+    adminId: adminId ? String(adminId) : null,
+    deliveryPartnerId: assignedRiderId ? String(assignedRiderId) : null,
+    reason: cancelNote,
+  });
+
   return normalizeOrderForClient(order);
 }
 
