@@ -38,14 +38,15 @@ export default function DesktopNavbar({ showLogo = true }) {
     const cityName = userLocation?.city || "Indore"
     const fullAddress = userLocation?.address || userLocation?.formattedAddress || ""
     
-    // Main location name: Show area
+    // Main location name: Show area or city
     const mainLocationName = useMemo(() => {
-        let name = areaName || "Select Location"
+        let name = areaName || cityName || "Select Location"
         if (/^-?\d+(\.\d+)?$/.test(name.trim())) {
             return "Current Location"
         }
+        // Truncate manually if it's too long, but CSS truncate should handle it
         return name
-    }, [areaName])
+    }, [areaName, cityName])
     
     // Middle location: Show full address (base address) - Cleaned up
     const baseAddress = useMemo(() => {
@@ -161,7 +162,7 @@ export default function DesktopNavbar({ showLogo = true }) {
                                                 className="h-4 w-4 lg:h-5 lg:w-5 text-primary shrink-0"
                                                 fill="currentColor"
                                             />
-                                            <span className="text-sm lg:text-base font-semibold text-foreground truncate">
+                                            <span className="text-sm lg:text-base font-semibold text-foreground truncate max-w-[100px] lg:max-w-[200px]">
                                                 {mainLocationName}
                                             </span>
                                             <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" strokeWidth={2.5} />
