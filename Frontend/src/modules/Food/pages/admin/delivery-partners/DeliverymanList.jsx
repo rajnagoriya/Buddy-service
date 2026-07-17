@@ -22,6 +22,9 @@ export default function DeliverymanList() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isViewOpen, setIsViewOpen] = useState(false)
   const [viewDetails, setViewDetails] = useState(null)
+  const [isEmploymentOpen, setIsEmploymentOpen] = useState(false)
+  const [employmentDetails, setEmploymentDetails] = useState(null)
+  const [employmentLoading, setEmploymentLoading] = useState(false)
   const [editingDeliveryId, setEditingDeliveryId] = useState(null)
   const [editValues, setEditValues] = useState({ pocketBalance: "", cashInHand: "" })
   const [savingDeliveryId, setSavingDeliveryId] = useState(null)
@@ -262,18 +265,71 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
   }
 
   const [employmentUpdating, setEmploymentUpdating] = useState(false)
-  const handleEmploymentUpdate = async (type, value) => {
-    if (!viewDetails || !viewDetails._id) return
+  const [employmentForm, setEmploymentForm] = useState({
+    employmentType: "per_order",
+    salaryDuration: "weekly",
+  })
+
+  const handleOpenEmploymentEdit = async (deliveryman) => {
+    try {
+      setEmploymentLoading(true)
+      setEmploymentDetails(null)
+      setEmploymentForm({ employmentType: "per_order", salaryDuration: "weekly" })
+      setIsEmploymentOpen(true)
+      const response = await adminAPI.getDeliveryPartnerById(deliveryman._id)
+      if (response.data?.success) {
+        const delivery = response.data.data.delivery
+        setEmploymentDetails(delivery)
+        setEmploymentForm({
+          employmentType: delivery.employmentType || "per_order",
+          salaryDuration: delivery.salaryDuration || "weekly",
+        })
+      } else {
+        toast.error("Failed to load employment details")
+        setIsEmploymentOpen(false)
+      }
+    } catch (err) {
+      debugError("Error fetching employment details:", err)
+      toast.error(err.response?.data?.message || "Failed to load employment details")
+      setIsEmploymentOpen(false)
+    } finally {
+      setEmploymentLoading(false)
+    }
+  }
+
+  const handleEmploymentFormChange = (field, value) => {
+    setEmploymentForm((prev) => ({ ...prev, [field]: value }))
+  }
+
+  const hasEmploymentChanges = Boolean(
+    employmentDetails &&
+    (
+      employmentForm.employmentType !== (employmentDetails.employmentType || "per_order") ||
+      (employmentForm.employmentType === "salary" &&
+        employmentForm.salaryDuration !== (employmentDetails.salaryDuration || "weekly"))
+    )
+  )
+
+  const handleEmploymentSave = async () => {
+    if (!employmentDetails || !employmentDetails._id || !hasEmploymentChanges) return
     try {
       setEmploymentUpdating(true)
-      const data = { [type]: value }
-      const res = await adminAPI.updateDeliveryPartner(viewDetails._id, data)
+      const data = {
+        employmentType: employmentForm.employmentType,
+        ...(employmentForm.employmentType === "salary"
+          ? { salaryDuration: employmentForm.salaryDuration }
+          : {}),
+      }
+      const res = await adminAPI.updateDeliveryPartner(employmentDetails._id, data)
       if (res.data?.success) {
-        setViewDetails(prev => ({ ...prev, [type]: value }))
-        setDeliverymen(prev => prev.map(dm => 
-          dm._id === viewDetails._id ? { ...dm, [type]: value } : dm
-        ))
+        setEmploymentDetails((prev) => ({ ...prev, ...data }))
+        setDeliverymen((prev) =>
+          prev.map((dm) =>
+            dm._id === employmentDetails._id ? { ...dm, ...data } : dm
+          )
+        )
         toast.success("Employment settings updated successfully")
+        setIsEmploymentOpen(false)
       }
     } catch (err) {
       debugError("Error updating employment:", err)
@@ -811,6 +867,13 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
                                       <Pencil className="w-4 h-4 text-blue-500" />
                                       <span>Edit Wallet</span>
                                     </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() => handleOpenEmploymentEdit(dm)}
+                                      className="cursor-pointer flex items-center gap-2"
+                                    >
+                                      <FileText className="w-4 h-4 text-slate-500" />
+                                      <span>Employment & Payout</span>
+                                    </DropdownMenuItem>
                                     <DropdownMenuSeparator />
                                     <DropdownMenuItem
                                       onClick={() => handleDelete(dm)}
@@ -920,59 +983,6 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
                       <div>
                         <label className="text-xs font-semibold text-slate-500 uppercase">Gender</label>
                         <p className="text-sm text-slate-900 mt-1 capitalize">{viewDetails.gender || "N/A"}</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Employment & Payout Settings */}
-                <div className="pb-6 border-b border-slate-200">
-                  <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
-                    <FileText className="w-4 h-4" /> Employment & Payout Model
-                  </h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 relative">
-                      {employmentUpdating && (
-                        <div className="absolute inset-0 bg-white/50 flex items-center justify-center z-10">
-                          <Loader2 className="w-5 h-5 animate-spin text-blue-600" />
-                        </div>
-                      )}
-                      <label className="text-xs font-semibold text-slate-500 uppercase">Employment Type</label>
-                      <select 
-                        value={viewDetails.employmentType || "per_order"} 
-                        onChange={(e) => handleEmploymentUpdate("employmentType", e.target.value)}
-                        className="mt-2 block w-full text-sm rounded-md border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                      >
-                        <option value="per_order">Per Order (Commission)</option>
-                        <option value="salary">Salary Base</option>
-                        <option value="seller_base">Seller Base (Fixed)</option>
-                      </select>
-                      <p className="text-xs text-slate-500 mt-2">
-                        {viewDetails.employmentType === 'salary' ? 'Partner receives a fixed salary based on slab.' : 
-                         viewDetails.employmentType === 'seller_base' ? 'Partner is managed on a fixed base pay model by the seller/platform.' :
-                         'Partner earns per delivery based on distance rules.'}
-                      </p>
-                    </div>
-
-                    {viewDetails.employmentType === 'salary' && (
-                      <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 relative">
-                        {employmentUpdating && (
-                          <div className="absolute inset-0 bg-white/50 flex items-center justify-center z-10">
-                            <Loader2 className="w-5 h-5 animate-spin text-blue-600" />
-                          </div>
-                        )}
-                        <label className="text-xs font-semibold text-slate-500 uppercase">Salary Duration</label>
-                        <select 
-                          value={viewDetails.salaryDuration || "weekly"} 
-                          onChange={(e) => handleEmploymentUpdate("salaryDuration", e.target.value)}
-                          className="mt-2 block w-full text-sm rounded-md border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                        >
-                          <option value="weekly">Weekly Slab</option>
-                          <option value="monthly">Monthly Slab</option>
-                        </select>
-                        <p className="text-xs text-slate-500 mt-2">
-                          Choose the payout cycle. Slabs are defined in global settings.
-                        </p>
                       </div>
                     )}
                   </div>
@@ -1283,6 +1293,84 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
               className="px-4 py-2 text-sm font-medium rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition-all"
             >
               Close
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Employment & Payout Dialog */}
+      <Dialog open={isEmploymentOpen} onOpenChange={setIsEmploymentOpen}>
+        <DialogContent className="max-w-lg bg-white p-0 opacity-0 data-[state=open]:opacity-100 data-[state=closed]:opacity-0 transition-opacity duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 data-[state=open]:scale-100 data-[state=closed]:scale-100">
+          <DialogHeader className="px-6 pt-6 pb-4 border-b border-slate-200">
+            <DialogTitle className="text-xl font-bold text-slate-900 flex items-center gap-2">
+              <FileText className="w-5 h-5" />
+              Employment & Payout Model
+            </DialogTitle>
+            {employmentDetails?.name && (
+              <p className="text-sm text-slate-500 mt-1">{employmentDetails.name}</p>
+            )}
+          </DialogHeader>
+          <div className="px-6 py-6">
+            {employmentLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+              </div>
+            ) : employmentDetails ? (
+              <div className="grid grid-cols-1 gap-4">
+                <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
+                  <label className="text-xs font-semibold text-slate-500 uppercase">Employment Type</label>
+                  <select
+                    value={employmentForm.employmentType}
+                    onChange={(e) => handleEmploymentFormChange("employmentType", e.target.value)}
+                    disabled={employmentUpdating}
+                    className="mt-2 block w-full text-sm rounded-md border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  >
+                    <option value="per_order">Per Order (Commission)</option>
+                    <option value="salary">Salary Base</option>
+                    <option value="seller_base">Seller Base (Fixed)</option>
+                  </select>
+                  <p className="text-xs text-slate-500 mt-2">
+                    {employmentForm.employmentType === 'salary' ? 'Partner receives a fixed salary based on slab.' :
+                     employmentForm.employmentType === 'seller_base' ? 'Partner is managed on a fixed base pay model by the seller/platform.' :
+                     'Partner earns per delivery based on distance rules.'}
+                  </p>
+                </div>
+
+                {employmentForm.employmentType === 'salary' && (
+                  <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
+                    <label className="text-xs font-semibold text-slate-500 uppercase">Salary Duration</label>
+                    <select
+                      value={employmentForm.salaryDuration}
+                      onChange={(e) => handleEmploymentFormChange("salaryDuration", e.target.value)}
+                      disabled={employmentUpdating}
+                      className="mt-2 block w-full text-sm rounded-md border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                    >
+                      <option value="weekly">Weekly Slab</option>
+                      <option value="monthly">Monthly Slab</option>
+                    </select>
+                    <p className="text-xs text-slate-500 mt-2">
+                      Choose the payout cycle. Slabs are defined in global settings.
+                    </p>
+                  </div>
+                )}
+              </div>
+            ) : null}
+          </div>
+          <DialogFooter className="px-6 pb-6 border-t border-slate-200 flex items-center justify-end gap-3">
+            <button
+              onClick={() => setIsEmploymentOpen(false)}
+              disabled={employmentUpdating}
+              className="px-4 py-2 text-sm font-medium rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition-all disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleEmploymentSave}
+              disabled={employmentUpdating || employmentLoading || !employmentDetails || !hasEmploymentChanges}
+              className="px-4 py-2 text-sm font-medium rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              {employmentUpdating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              Save
             </button>
           </DialogFooter>
         </DialogContent>
