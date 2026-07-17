@@ -35,6 +35,7 @@ import CartPageHeader, { CartSavingsBanner } from "@food/components/user/cart/Ca
 import CartItemsCard from "@food/components/user/cart/CartItemsCard"
 import CartCheckoutBar from "@food/components/user/cart/CartCheckoutBar"
 import RestaurantUnavailableModal from "@food/components/user/cart/RestaurantUnavailableModal"
+import AddMoneyModal from "@food/components/user/AddMoneyModal"
 import { useCartRestaurantValidation } from "@food/hooks/useCartRestaurantValidation"
 const zoopSound = "/zomato_sms.mp3"
 const debugLog = (...args) => { }
@@ -325,6 +326,7 @@ function Cart() {
   const [showPaymentSheet, setShowPaymentSheet] = useState(false)
   const [walletBalance, setWalletBalance] = useState(0)
   const [isLoadingWallet, setIsLoadingWallet] = useState(false)
+  const [showAddMoneyModal, setShowAddMoneyModal] = useState(false)
   const [restaurantNote, setRestaurantNote] = useState(() => {
     try {
       if (typeof window === "undefined") return ""
@@ -1224,9 +1226,27 @@ function Cart() {
     }
   }, [pricingRequestKey, isPlacingOrder])
 
-  // Wallet only when user selects Wallet payment (default is COD — no fetch on cart open)
+  const refreshWalletBalance = async () => {
+    try {
+      setIsLoadingWallet(true)
+      const response = await userAPI.getWallet()
+      if (response?.data?.success && response?.data?.data?.wallet) {
+        const balance = response.data.data.wallet.balance || 0
+        setWalletBalance(balance)
+        return balance
+      }
+      return walletBalance
+    } catch (error) {
+      debugError("Error fetching wallet balance:", error)
+      return walletBalance
+    } finally {
+      setIsLoadingWallet(false)
+    }
+  }
+
+  // Fetch wallet when user selects Wallet, or when opening the payment sheet (to show balance / low-balance CTA)
   useEffect(() => {
-    if (selectedPaymentMethod !== "wallet") return undefined
+    if (selectedPaymentMethod !== "wallet" && !showPaymentSheet) return undefined
 
     let cancelled = false
     const fetchWalletBalance = async () => {
@@ -1247,7 +1267,7 @@ function Cart() {
     }
     fetchWalletBalance()
     return () => { cancelled = true }
-  }, [selectedPaymentMethod])
+  }, [selectedPaymentMethod, showPaymentSheet])
 
   // Fetch user order count (used for first-time coupon eligibility)
   useEffect(() => {
@@ -2947,6 +2967,19 @@ function Cart() {
         onContinueReviewing={handleContinueReviewingCart}
       />
 
+      <AddMoneyModal
+        open={showAddMoneyModal}
+        onOpenChange={setShowAddMoneyModal}
+        initialAmount={Math.max(1, Math.ceil(Math.max(0, total - walletBalance)))}
+        onSuccess={async () => {
+          const balance = await refreshWalletBalance()
+          if (balance >= total) {
+            setSelectedPaymentMethod("wallet")
+            setShowPaymentSheet(false)
+          }
+        }}
+      />
+
       {/* Savings Congratulations Page */}
       {showSavingsCongrats && (
         <div
@@ -3211,9 +3244,12 @@ function Cart() {
                       icon: <Wallet className="w-5 h-5" />,
                       color: 'bg-blue-50 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400',
                       selectedColor: 'bg-blue-500 text-white',
-                      subInfo: `Bal: ${RUPEE_SYMBOL}${walletBalance.toFixed(0)}`,
-                      disabled: walletBalance < total,
-                      disabledText: 'Low Balance'
+                      subInfo: isLoadingWallet
+                        ? 'Loading…'
+                        : `Bal: ${RUPEE_SYMBOL}${walletBalance.toFixed(0)}`,
+                      disabled: !isLoadingWallet && walletBalance < total,
+                      disabledText: 'Low Balance',
+                      allowAddMoney: !isLoadingWallet && walletBalance < total,
                     },
                     {
                       id: 'cash',
@@ -3226,7 +3262,13 @@ function Cart() {
                   ].map((option) => (
                     <button
                       key={option.id}
+                      type="button"
                       onClick={() => {
+                        if (option.allowAddMoney) {
+                          setShowPaymentSheet(false)
+                          setShowAddMoneyModal(true)
+                          return
+                        }
                         if (!option.disabled) {
                           setSelectedPaymentMethod(option.id)
                           setShowPaymentSheet(false)
@@ -3234,8 +3276,10 @@ function Cart() {
                       }}
                       className={`w-full flex items-center justify-between p-4 rounded-2xl border-2 transition-all duration-300 group ${selectedPaymentMethod === option.id
                         ? 'border-[#16A34A] bg-[#16A34A] shadow-lg shadow-[#16A34A]/30'
-                        : 'border-gray-100 dark:border-gray-800/80 bg-white dark:bg-[#222222] hover:border-[#16A34A]/30 dark:hover:border-[#16A34A]/30 shadow-sm'
-                        } ${option.disabled ? 'opacity-40 grayscale-[0.8] cursor-not-allowed' : 'cursor-pointer active:scale-[0.98]'}`}
+                        : option.allowAddMoney
+                          ? 'border-amber-200 dark:border-amber-800/60 bg-amber-50/50 dark:bg-amber-950/20 hover:border-amber-400 dark:hover:border-amber-600 shadow-sm cursor-pointer active:scale-[0.98]'
+                          : 'border-gray-100 dark:border-gray-800/80 bg-white dark:bg-[#222222] hover:border-[#16A34A]/30 dark:hover:border-[#16A34A]/30 shadow-sm'
+                        } ${option.disabled && !option.allowAddMoney ? 'opacity-40 grayscale-[0.8] cursor-not-allowed' : option.allowAddMoney ? '' : 'cursor-pointer active:scale-[0.98]'}`}
                     >
                       <div className="flex items-center gap-4">
                         <div className={`w-11 h-11 rounded-xl flex items-center justify-center transition-all duration-300 ${selectedPaymentMethod === option.id
@@ -3264,18 +3308,27 @@ function Cart() {
                               }`}>
                               {option.description}
                             </p>
-                            {option.subInfo && !option.disabled && (
+                            {option.subInfo && (
                               <>
                                 <span className={`w-1 h-1 rounded-full ${selectedPaymentMethod === option.id ? 'bg-white/40' : 'bg-orange-300 dark:bg-orange-700'
                                   }`} />
-                                <p className={`text-[10px] font-black uppercase tracking-tighter transition-colors ${selectedPaymentMethod === option.id ? 'text-white' : 'text-green-600 dark:text-green-500'
+                                <p className={`text-[10px] font-black uppercase tracking-tighter transition-colors ${selectedPaymentMethod === option.id
+                                  ? 'text-white'
+                                  : option.allowAddMoney
+                                    ? 'text-amber-600 dark:text-amber-400'
+                                    : 'text-green-600 dark:text-green-500'
                                   }`}>
                                   {option.subInfo}
                                 </p>
                               </>
                             )}
                           </div>
-                          {option.disabled && (
+                          {option.allowAddMoney && (
+                            <p className="text-[10px] font-bold text-amber-600 dark:text-amber-400 mt-1.5">
+                              {option.disabledText} · Tap to add money
+                            </p>
+                          )}
+                          {option.disabled && !option.allowAddMoney && (
                             <p className="text-[9px] font-black text-red-500 mt-1 uppercase tracking-wide">
                               {option.disabledText}
                             </p>
@@ -3283,12 +3336,19 @@ function Cart() {
                         </div>
                       </div>
 
-                      <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all duration-300 ${selectedPaymentMethod === option.id
-                        ? 'bg-white border-white'
-                        : 'border-gray-200 dark:border-gray-700'
-                        }`}>
-                        {selectedPaymentMethod === option.id && <Check className="w-3.5 h-3.5 text-[#16A34A]" strokeWidth={4} />}
-                      </div>
+                      {option.allowAddMoney ? (
+                        <span className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-[#16A34A] text-white text-[11px] font-bold shadow-sm shrink-0">
+                          <Plus className="w-3.5 h-3.5" />
+                          Add
+                        </span>
+                      ) : (
+                        <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all duration-300 ${selectedPaymentMethod === option.id
+                          ? 'bg-white border-white'
+                          : 'border-gray-200 dark:border-gray-700'
+                          }`}>
+                          {selectedPaymentMethod === option.id && <Check className="w-3.5 h-3.5 text-[#16A34A]" strokeWidth={4} />}
+                        </div>
+                      )}
                     </button>
                   ))}
                 </div>

@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@food/components/ui/dialog"
 import { Button } from "@food/components/ui/button"
 import { Input } from "@food/components/ui/input"
@@ -16,6 +16,7 @@ export default function AddMoneyModal({
   open, 
   onOpenChange, 
   onSuccess,
+  initialAmount,
   createOrder = (amount) => userAPI.createWalletTopupOrder(amount),
   verifyPayment = (data) => userAPI.verifyWalletTopupPayment(data),
   getUserProfile = () => userAPI.getProfile()
@@ -25,6 +26,14 @@ export default function AddMoneyModal({
   const [processing, setProcessing] = useState(false)
 
   const quickAmounts = [100, 250, 500, 1000, 2000, 5000]
+
+  useEffect(() => {
+    if (!open) return
+    const suggested = Number(initialAmount)
+    if (Number.isFinite(suggested) && suggested >= 1) {
+      setAmount(String(Math.min(50000, Math.ceil(suggested))))
+    }
+  }, [open, initialAmount])
 
   const handleAmountSelect = (selectedAmount) => {
     setAmount(selectedAmount.toString())
