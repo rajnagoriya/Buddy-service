@@ -1,13 +1,13 @@
 // Export utility functions for commission rules
 export const exportCommissionToCSV = (commissions, filename = "delivery-boy-commission") => {
-  const headers = ["SI", "Name", "Min Distance (km)", "Max Distance (km)", "Commission Per Km (₹)", "Base Payout (₹)", "Status"]
+  const headers = ["SI", "Name", "Min Distance (km)", "Max Distance (km)", "User Charge (₹)", "Delivery Boy Fee (₹)", "Status"]
   const rows = commissions.map((commission) => [
     commission.sl,
     commission.name,
     commission.minDistance,
     commission.maxDistance === null ? "Unlimited" : commission.maxDistance,
-    commission.commissionPerKm,
-    commission.basePayout,
+    commission.userCharge ?? commission.basePayout ?? 0,
+    commission.deliveryBoyFee ?? commission.basePayout ?? 0,
     commission.status ? "Active" : "Inactive"
   ])
   
@@ -28,14 +28,14 @@ export const exportCommissionToCSV = (commissions, filename = "delivery-boy-comm
 }
 
 export const exportCommissionToExcel = (commissions, filename = "delivery-boy-commission") => {
-  const headers = ["SI", "Name", "Min Distance (km)", "Max Distance (km)", "Commission Per Km (₹)", "Base Payout (₹)", "Status"]
+  const headers = ["SI", "Name", "Min Distance (km)", "Max Distance (km)", "User Charge (₹)", "Delivery Boy Fee (₹)", "Status"]
   const rows = commissions.map((commission) => [
     commission.sl,
     commission.name,
     commission.minDistance,
     commission.maxDistance === null ? "Unlimited" : commission.maxDistance,
-    commission.commissionPerKm,
-    commission.basePayout,
+    commission.userCharge ?? commission.basePayout ?? 0,
+    commission.deliveryBoyFee ?? commission.basePayout ?? 0,
     commission.status ? "Active" : "Inactive"
   ])
   
@@ -56,7 +56,7 @@ export const exportCommissionToExcel = (commissions, filename = "delivery-boy-co
 }
 
 export const exportCommissionToPDF = (commissions, filename = "delivery-boy-commission") => {
-  const headers = ["SI", "Name", "Min Distance (km)", "Max Distance (km)", "Commission Per Km (₹)", "Base Payout (₹)", "Status"]
+  const headers = ["SI", "Name", "Min Distance (km)", "Max Distance (km)", "User Charge (₹)", "Delivery Boy Fee (₹)", "Status"]
   
   let htmlContent = `
     <!DOCTYPE html>
@@ -88,8 +88,8 @@ export const exportCommissionToPDF = (commissions, filename = "delivery-boy-comm
               <td>${commission.name}</td>
               <td>${commission.minDistance}</td>
               <td>${commission.maxDistance === null ? "Unlimited" : commission.maxDistance}</td>
-              <td>₹${commission.commissionPerKm}</td>
-              <td>₹${commission.basePayout}</td>
+              <td>₹${commission.userCharge ?? commission.basePayout ?? 0}</td>
+              <td>₹${commission.deliveryBoyFee ?? commission.basePayout ?? 0}</td>
               <td>${commission.status ? "Active" : "Inactive"}</td>
             </tr>
           `).join("")}

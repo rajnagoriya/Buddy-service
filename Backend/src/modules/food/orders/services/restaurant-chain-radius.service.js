@@ -7,7 +7,7 @@ import { fetchRoadDistancesKm } from '../utils/googleMaps.js';
 export const CHAIN_RESTAURANT_RADIUS_KM = 5;
 
 export const CHAIN_RADIUS_VALIDATION_MESSAGE =
-  'This restaurant is outside the allowed radius of the last selected restaurant. To place a single order, please select a nearby restaurant.';
+  'This restaurant is outside the allowed radius of the first restaurant in your cart. To place a single order, please select a nearby restaurant.';
 
 async function getChainRadiusKm() {
   let settings = await FoodDeliveryBoySettings.findOne({ isActive: true })
@@ -19,7 +19,9 @@ async function getChainRadiusKm() {
       .lean();
   }
   const maxKm = Number(settings?.multiOrderMaxDistance);
-  return Number.isFinite(maxKm) && maxKm > 0 ? maxKm : CHAIN_RESTAURANT_RADIUS_KM;
+  if (!Number.isFinite(maxKm) || maxKm <= 0) return CHAIN_RESTAURANT_RADIUS_KM;
+  // Admin-configured chain radius is limited to 2–5 km
+  return Math.min(5, Math.max(2, maxKm));
 }
 
 export function getRestaurantCoords(restaurant) {
@@ -92,6 +94,11 @@ export function getRestaurantIdsInCartOrder(items) {
   return ordered;
 }
 
+/**
+ * Multi-restaurant rule: every other restaurant must be within maxKm of the
+ * FIRST restaurant in the cart (anchor A). B and C are both checked vs A,
+ * not B→C sequentially.
+ */
 export async function validateRestaurantChainForItems(
   items,
   maxKm,
@@ -109,49 +116,53 @@ export async function validateRestaurantChainForItems(
     .lean();
 
   const byId = new Map(restaurants.map((r) => [String(r._id), r]));
+  const anchorRestaurant = byId.get(restaurantIds[0]);
+  const fromCoords = getRestaurantCoords(anchorRestaurant);
 
   for (let i = 1; i < restaurantIds.length; i += 1) {
-    const prevRestaurant = byId.get(restaurantIds[i - 1]);
     const nextRestaurant = byId.get(restaurantIds[i]);
-    const fromCoords = getRestaurantCoords(prevRestaurant);
     const toCoords = getRestaurantCoords(nextRestaurant);
     const { valid, skipped } = await validateChainDistanceKm(fromCoords, toCoords, resolvedMaxKm);
 
     if (!skipped && !valid) {
       throw new ValidationError(
-        `This restaurant is outside the allowed ${resolvedMaxKm} KM road distance of the last selected restaurant. To place a single order, please select a nearby restaurant.`,
+        `This restaurant is outside the allowed ${resolvedMaxKm} KM road distance of the first restaurant in your cart. To place a single order, please select a nearby restaurant.`,
       );
     }
   }
 
-  return { valid: true, restaurantIds };
+  return { valid: true, restaurantIds, anchorRestaurantId: restaurantIds[0] };
 }
 
+/**
+ * Validate a candidate restaurant against the cart's FIRST (anchor) restaurant.
+ * `anchorRestaurantId` may also be passed as legacy `lastRestaurantId`.
+ */
 export async function validateNewRestaurantAgainstLast(
-  lastRestaurantId,
+  anchorRestaurantId,
   newRestaurantId,
   maxKm,
 ) {
   const resolvedMaxKm = Number.isFinite(Number(maxKm)) && Number(maxKm) > 0
     ? Number(maxKm)
     : await getChainRadiusKm();
-  const lastId = String(lastRestaurantId || '').trim();
+  const anchorId = String(anchorRestaurantId || '').trim();
   const nextId = String(newRestaurantId || '').trim();
 
-  if (!lastId || !nextId || lastId === nextId) {
+  if (!anchorId || !nextId || anchorId === nextId) {
     return { valid: true, distanceKm: null };
   }
 
-  const [lastRestaurant, newRestaurant] = await Promise.all([
-    FoodRestaurant.findById(lastId).select('name location').lean(),
+  const [anchorRestaurant, newRestaurant] = await Promise.all([
+    FoodRestaurant.findById(anchorId).select('name location').lean(),
     FoodRestaurant.findById(nextId).select('name location').lean(),
   ]);
 
-  if (!lastRestaurant || !newRestaurant) {
+  if (!anchorRestaurant || !newRestaurant) {
     throw new ValidationError('Restaurant not found');
   }
 
-  const fromCoords = getRestaurantCoords(lastRestaurant);
+  const fromCoords = getRestaurantCoords(anchorRestaurant);
   const toCoords = getRestaurantCoords(newRestaurant);
   const { valid, distanceKm, skipped, distanceSource } = await validateChainDistanceKm(
     fromCoords,
@@ -161,7 +172,7 @@ export async function validateNewRestaurantAgainstLast(
 
   if (!skipped && !valid) {
     throw new ValidationError(
-      `This restaurant is outside the allowed ${resolvedMaxKm} KM road distance of the last selected restaurant. To place a single order, please select a nearby restaurant.`,
+      `This restaurant is outside the allowed ${resolvedMaxKm} KM road distance of the first restaurant in your cart. To place a single order, please select a nearby restaurant.`,
     );
   }
 
@@ -171,7 +182,11 @@ export async function validateNewRestaurantAgainstLast(
     skipped,
     distanceSource,
     maxKm: resolvedMaxKm,
-    fromRestaurantId: lastId,
+    fromRestaurantId: anchorId,
     toRestaurantId: nextId,
+    anchorRestaurantId: anchorId,
   };
 }
+
+/** Alias with clearer name for callers. */
+export const validateNewRestaurantAgainstAnchor = validateNewRestaurantAgainstLast;

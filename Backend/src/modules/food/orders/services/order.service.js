@@ -41,22 +41,13 @@ import {
 } from './restaurant-chain-radius.service.js';
 import * as dispatchService from './order-dispatch.service.js';
 import * as checkoutService from './order-checkout.service.js';
-
-async function clearUserCartAfterOrder(userId) {
-  if (!userId) return;
-  try {
-    await syncUserCart(userId, { items: [], restaurantMeta: [], cartType: null });
-  } catch (err) {
-    logger.warn(`Failed to clear cart after order for user ${userId}: ${err?.message || err}`);
-  }
-}
 import * as deliveryService from './order-delivery.service.js';
 import * as paymentService from './order-payment.service.js';
 import { getRoadDistanceMeters } from '../../../../core/location/distance.service.js';
 import {
   enqueueOrderEvent,
   haversineKm,
-  calculateDistanceSlabFee,
+  calculateDistanceSlabRiderFee,
   resolveOrderDistanceKmAsync,
   applyDeliverySurcharges,
   generateFourDigitDeliveryOtp,
@@ -75,10 +66,27 @@ import {
   isStatusAdvance,
   freeOrderDispatch,
 } from './order.helpers.js';
+import {
+  assertMaxRestaurants,
+  assertMultiOrderAllowed,
+  assertCanCancel,
+  assertCanShareSecondDriver,
+  computeDroppedRestaurantRefundAmount,
+  getActivePickups,
+  isActivePickup,
+  MAX_PICKUP_RESEND_ATTEMPTS,
+  shouldPermanentlyDropPickup,
+  pushSettlementSnapshot,
+} from './order-lifecycle.policy.js';
 
-
-
-
+async function clearUserCartAfterOrder(userId) {
+  if (!userId) return;
+  try {
+    await syncUserCart(userId, { items: [], restaurantMeta: [], cartType: null });
+  } catch (err) {
+    logger.warn(`Failed to clear cart after order for user ${userId}: ${err?.message || err}`);
+  }
+}
 const COMMISSION_CACHE_MS = 10 * 1000;
 let commissionRulesCache = null;
 let commissionRulesLoadedAt = 0;
@@ -104,7 +112,7 @@ async function getActiveCommissionRules() {
 
 async function getRiderEarning(distanceKm) {
   const rules = await getActiveCommissionRules();
-  return calculateDistanceSlabFee(distanceKm, rules);
+  return calculateDistanceSlabRiderFee(distanceKm, rules);
 }
 
 /** Append-only food_order_payments row; never blocks main flow on failure */
@@ -124,8 +132,8 @@ export async function calculateOrder(userId, dto) {
   return calculateOrderPricing(userId, dto);
 }
 
-export async function validateRestaurantChain(lastRestaurantId, newRestaurantId) {
-  return validateNewRestaurantAgainstLast(lastRestaurantId, newRestaurantId);
+export async function validateRestaurantChain(anchorRestaurantId, newRestaurantId) {
+  return validateNewRestaurantAgainstLast(anchorRestaurantId, newRestaurantId);
 }
 
 // ----- Create order -----
@@ -145,6 +153,13 @@ export async function createOrder(userId, dto, options = {}) {
   if (dto.restaurantId && !restaurantIds.includes(dto.restaurantId)) {
     restaurantIds.push(dto.restaurantId);
   }
+
+  assertMaxRestaurants(items);
+  const deliveryBoySettingsEarly = await FoodDeliveryBoySettings.findOne({ isActive: true })
+    .sort({ createdAt: -1 })
+    .lean()
+    || await FoodDeliveryBoySettings.findOne().sort({ createdAt: -1 }).lean();
+  assertMultiOrderAllowed(deliveryBoySettingsEarly, restaurantIds.length);
 
   const restaurants = await FoodRestaurant.find({ _id: { $in: restaurantIds } })
     .select("status restaurantName zoneId location isAcceptingOrders name profileReviewStatus")
@@ -456,6 +471,7 @@ export async function createOrder(userId, dto, options = {}) {
     ],
   });
 
+  pushSettlementSnapshot(order, 'create', 'Initial pricing and rider earning frozen at create');
   await order.save();
 
   if (isWallet) {
@@ -1234,7 +1250,12 @@ export async function resyncState(userId, role) {
       "dispatch.deliveryPartnerId": new mongoose.Types.ObjectId(userId),
       "dispatch.status": { $in: ["assigned", "accepted"] },
       orderStatus: {
-        $nin: ["delivered", "cancelled_by_user", "cancelled_by_restaurant"],
+        $nin: [
+          "delivered",
+          "cancelled_by_user",
+          "cancelled_by_restaurant",
+          "cancelled_by_admin",
+        ],
       },
     })
       .populate("restaurantId")
@@ -1254,6 +1275,11 @@ export async function cancelOrder(orderId, userId, reason, refundDestination = "
     userId: new mongoose.Types.ObjectId(userId),
   });
   if (!order) throw new NotFoundError("Order not found");
+
+  const boySettings =
+    (await FoodDeliveryBoySettings.findOne({ isActive: true }).sort({ createdAt: -1 }).lean()) ||
+    (await FoodDeliveryBoySettings.findOne().sort({ createdAt: -1 }).lean());
+  assertCanCancel({ role: 'USER', order, settings: boySettings || {} });
 
   const allowed = ["created", "scheduled"];
   if (!allowed.includes(order.orderStatus))
@@ -1565,14 +1591,244 @@ function computeAggregateOrderStatus(orderDoc) {
   const pickups = Array.isArray(orderDoc?.pickups) ? orderDoc.pickups : [];
   if (pickups.length === 0) return orderDoc?.orderStatus || 'created';
 
-  const statuses = pickups.map((p) => String(p?.status || '')).filter(Boolean);
-  if (statuses.some((s) => s === 'cancelled')) return 'rejected_by_restaurant';
+  // Only active (non-dropped) pickups drive the aggregate status
+  const active = pickups.filter((p) => isActivePickup(p));
+  if (active.length === 0) {
+    // All permanently dropped / cancelled — caller should full-cancel
+    return 'cancelled_by_restaurant';
+  }
+
+  const statuses = active.map((p) => String(p?.status || '')).filter(Boolean);
+
+  // Awaiting resend: at least one cancelled pickup that is NOT permanently dropped
+  const awaitingResend = pickups.some(
+    (p) =>
+      !p.permanentlyDropped &&
+      String(p.status || '') === 'cancelled',
+  );
+  if (awaitingResend) {
+    return 'rejected_by_restaurant';
+  }
+
   if (statuses.length && statuses.every((s) => ['ready', 'picked_up'].includes(s))) {
     return 'ready_for_pickup';
   }
   if (statuses.some((s) => s === 'preparing')) return 'preparing';
   if (statuses.some((s) => s === 'accepted')) return 'confirmed';
+  if (statuses.some((s) => s === 'pending')) return 'created';
   return 'created';
+}
+
+/**
+ * Permanently drop a multi-restaurant pickup after 3 failed attempts.
+ * Continues order with remaining restaurants + partial wallet refund.
+ * If no active pickups remain → full cancel + refund.
+ */
+async function finalizeDroppedRestaurantPartialContinue(order, restaurantId, note = '') {
+  const rid = String(restaurantId || '');
+  const pickup = (order.pickups || []).find(
+    (p) => String(p.restaurantId || '') === rid,
+  );
+  if (!pickup) {
+    throw new ValidationError('Pickup not found for restaurant');
+  }
+
+  pickup.permanentlyDropped = true;
+  pickup.status = 'cancelled';
+  pickup.droppedAt = new Date();
+
+  const active = getActivePickups(order);
+  const restaurantName = pickup.restaurantName || 'a restaurant';
+
+  // No restaurants left → full cancel
+  if (active.length === 0) {
+    return finalizeRestaurantRejectionExhausted(
+      order,
+      restaurantId,
+      note ||
+        `${restaurantName} rejected after ${MAX_PICKUP_RESEND_ATTEMPTS} attempts. No restaurants remaining.`,
+    );
+  }
+
+  const refundBreakdown = computeDroppedRestaurantRefundAmount(order, restaurantId);
+  const refundAmount = refundBreakdown.amount;
+
+  // Soft-reprice: reduce food/packaging/tax for dropped restaurant only.
+  // Delivery fee + platform fee + rider earning stay locked at original order amounts.
+  if (order.pricing) {
+    const lockedDeliveryFee = Number(order.pricing.deliveryFee) || 0;
+    const lockedPlatformFee = Number(order.pricing.platformFee) || 0;
+    const lockedDeliveryDiscount = Number(order.pricing.deliveryDiscount) || 0;
+    const prevTotal = Number(order.pricing.total) || 0;
+    order.pricing.foodSubtotal = Math.max(
+      0,
+      Number(order.pricing.foodSubtotal || order.pricing.subtotal || 0) - refundBreakdown.foodAmount,
+    );
+    order.pricing.subtotal = order.pricing.foodSubtotal;
+    order.pricing.packagingFee = Math.max(
+      0,
+      Number(order.pricing.packagingFee || 0) - refundBreakdown.packagingFee,
+    );
+    order.pricing.restaurantPackagingTotal = order.pricing.packagingFee;
+    order.pricing.tax = Math.max(0, Number(order.pricing.tax || 0) - refundBreakdown.taxShare);
+    order.pricing.deliveryFee = lockedDeliveryFee;
+    order.pricing.platformFee = lockedPlatformFee;
+    order.pricing.deliveryDiscount = lockedDeliveryDiscount;
+    order.pricing.total = Math.max(0, Number((prevTotal - refundAmount).toFixed(2)));
+    if (Array.isArray(order.pricing.restaurantGroups)) {
+      order.pricing.restaurantGroups = order.pricing.restaurantGroups.filter(
+        (g) => String(g?.restaurantId || '') !== rid,
+      );
+    }
+  }
+
+  if (Array.isArray(order.restaurantSettlement)) {
+    order.restaurantSettlement = order.restaurantSettlement.filter(
+      (s) => String(s?.restaurantId || '') !== rid,
+    );
+  }
+
+  // Remove dropped restaurant items from active items list (keep for audit in statusHistory)
+  const droppedItems = (order.items || []).filter(
+    (it) => String(it?.restaurantId || '') === rid,
+  );
+  order.items = (order.items || []).filter(
+    (it) => String(it?.restaurantId || '') !== rid,
+  );
+  if (order.items.length === 0) {
+    // Safety: should have been caught by active.length === 0
+    return finalizeRestaurantRejectionExhausted(order, restaurantId, note);
+  }
+
+  // If primary restaurantId was dropped, point to first remaining active pickup
+  if (String(order.restaurantId || '') === rid) {
+    order.restaurantId = active[0].restaurantId;
+  }
+
+  // Multi flag if still 2+ active
+  order.isMultiRestaurant = active.length > 1;
+
+  let refundStatus = 'processed';
+  if (refundAmount > 0 && order.userId) {
+    try {
+      await userWalletService.refundWalletBalance(
+        order.userId,
+        refundAmount,
+        `Partial refund: ${restaurantName} rejected order #${order.order_id || order._id}`,
+        {
+          orderId: order._id,
+          restaurantId: rid,
+          source: 'multi_restaurant_partial_drop',
+        },
+      );
+    } catch (err) {
+      refundStatus = 'failed';
+      logger.warn(
+        `Partial wallet refund failed for order ${order._id}: ${err?.message || err}`,
+      );
+    }
+  }
+
+  if (!Array.isArray(order.partialRefunds)) order.partialRefunds = [];
+  order.partialRefunds.push({
+    restaurantId: pickup.restaurantId,
+    restaurantName,
+    amount: refundAmount,
+    foodAmount: refundBreakdown.foodAmount,
+    packagingFee: refundBreakdown.packagingFee,
+    taxShare: refundBreakdown.taxShare,
+    destination: 'wallet',
+    status: refundStatus,
+    at: new Date(),
+    note:
+      note ||
+      `Dropped after ${MAX_PICKUP_RESEND_ATTEMPTS} rejection attempts`,
+  });
+
+  const nextStatus = computeAggregateOrderStatus(order);
+  const from = order.orderStatus;
+  if (nextStatus && nextStatus !== 'cancelled_by_restaurant') {
+    order.orderStatus = nextStatus;
+  }
+
+  pushStatusHistory(order, {
+    byRole: 'SYSTEM',
+    byId: restaurantId,
+    from,
+    to: order.orderStatus,
+    note: `${restaurantName} permanently dropped after ${MAX_PICKUP_RESEND_ATTEMPTS} attempts. ₹${refundAmount} refunded to wallet. Continuing with ${active.length} restaurant(s). Dropped items: ${droppedItems.map((i) => i.name).join(', ')}`,
+  });
+
+  pushSettlementSnapshot(
+    order,
+    'partial_drop',
+    `${restaurantName} dropped; partial refund ₹${refundAmount}`,
+  );
+  await order.save();
+
+  const userMessage =
+    refundAmount > 0
+      ? `${restaurantName} rejected your order. ₹${refundAmount.toFixed(0)} has been refunded to your wallet. Your order continues with the remaining restaurant(s).`
+      : `${restaurantName} rejected your order. Your order continues with the remaining restaurant(s).`;
+
+  const payload = {
+    orderMongoId: order._id?.toString?.(),
+    orderId: order._id.toString(),
+    orderStatus: order.orderStatus,
+    type: 'order_partial_restaurant_dropped',
+    title: 'Restaurant removed from your order',
+    message: userMessage,
+    restaurantId: rid,
+    restaurantName,
+    refundAmount,
+    refundDestination: 'wallet',
+    pricing: order.pricing,
+    pickups: order.pickups,
+  };
+
+  try {
+    const io = getIO();
+    if (io) {
+      io.to(rooms.user(order.userId)).emit('order_partial_restaurant_dropped', payload);
+      io.to(rooms.user(order.userId)).emit('order_status_update', {
+        ...payload,
+        failureReason: 'restaurant_partially_dropped',
+      });
+      const riderId = order.dispatch?.deliveryPartnerId;
+      if (riderId) {
+        io.to(rooms.delivery(riderId)).emit('order_status_update', {
+          ...payload,
+          message: `${restaurantName} dropped after ${MAX_PICKUP_RESEND_ATTEMPTS} attempts. Continue with remaining pickups.`,
+        });
+      }
+    }
+  } catch (err) {
+    logger.warn(`partial drop socket emit failed: ${err?.message || err}`);
+  }
+
+  await notifyOwnersSafely(
+    [{ ownerType: 'USER', ownerId: order.userId }],
+    {
+      title: 'Restaurant removed from your order',
+      body: userMessage,
+      data: {
+        type: 'order_partial_restaurant_dropped',
+        orderId: String(order._id),
+        orderMongoId: String(order._id),
+        refundAmount: String(refundAmount),
+        restaurantName,
+      },
+    },
+  );
+
+  enqueueOrderEvent('order_partial_restaurant_dropped', {
+    orderMongoId: order._id?.toString?.(),
+    orderId: order._id.toString(),
+    restaurantId: rid,
+    refundAmount,
+  });
+
+  return order;
 }
 
 export async function updateOrderStatusRestaurant(
@@ -1599,18 +1855,39 @@ export async function updateOrderStatusRestaurant(
   if (order.isMultiRestaurant && !pickup) {
     throw new ForbiddenError("Not your restaurant order");
   }
+  if (pickup?.permanentlyDropped) {
+    throw new ValidationError('This restaurant has already been removed from the order');
+  }
+
   const isMulti = Boolean(order.isMultiRestaurant && pickup);
   let finalStatus = orderStatus;
   let skipRefund = false;
 
+  const isReject =
+    orderStatus === 'cancelled_by_restaurant' || orderStatus === 'rejected_by_restaurant';
+
+  if (isReject) {
+    const boySettings =
+      (await FoodDeliveryBoySettings.findOne({ isActive: true }).sort({ createdAt: -1 }).lean()) ||
+      (await FoodDeliveryBoySettings.findOne().sort({ createdAt: -1 }).lean());
+    assertCanCancel({ role: 'RESTAURANT', order, settings: boySettings || {} });
+  }
+
   if (isMulti) {
-    if (orderStatus === 'cancelled_by_restaurant' || orderStatus === 'rejected_by_restaurant') {
+    if (isReject) {
       pickup.status = 'cancelled';
+      pickup.rejectionAttempts = (Number(pickup.rejectionAttempts) || 0) + 1;
       order.restaurantRejectionCount = (order.restaurantRejectionCount || 0) + 1;
-      if (order.restaurantRejectionCount >= 3) {
-        const finalized = await finalizeRestaurantRejectionExhausted(order, restaurantId, note);
+
+      if (shouldPermanentlyDropPickup(pickup) || pickup.rejectionAttempts >= MAX_PICKUP_RESEND_ATTEMPTS) {
+        const finalized = await finalizeDroppedRestaurantPartialContinue(
+          order,
+          restaurantId,
+          note,
+        );
         return normalizeOrderForClient(finalized);
       }
+
       finalStatus = 'rejected_by_restaurant';
       skipRefund = true;
     } else if (orderStatus === 'confirmed') {
@@ -1626,12 +1903,17 @@ export async function updateOrderStatusRestaurant(
     const nextAggregate = computeAggregateOrderStatus(order);
     if (isStatusAdvance(from, nextAggregate)) {
       order.orderStatus = nextAggregate;
-    } else if (from === 'rejected_by_restaurant' && ['created', 'confirmed'].includes(nextAggregate)) {
+    } else if (
+      from === 'rejected_by_restaurant' &&
+      ['created', 'confirmed', 'preparing', 'ready_for_pickup'].includes(nextAggregate)
+    ) {
+      order.orderStatus = nextAggregate;
+    } else if (nextAggregate === 'rejected_by_restaurant') {
       order.orderStatus = nextAggregate;
     }
   } else {
     // Handle rejection retry logic for single-restaurant flow
-    if (orderStatus === 'cancelled_by_restaurant' || orderStatus === 'rejected_by_restaurant') {
+    if (isReject) {
       order.restaurantRejectionCount = (order.restaurantRejectionCount || 0) + 1;
       if (order.restaurantRejectionCount < 3) {
         finalStatus = 'rejected_by_restaurant';
@@ -1674,9 +1956,12 @@ export async function updateOrderStatusRestaurant(
     title = "Food is ready! 🛍️";
     body = "Your order is ready and waiting to be picked up.";
   } else if (statusForMessage === "rejected_by_restaurant" || finalStatus === "rejected_by_restaurant") {
-    title = `Order Rejected by Restaurant (${order.restaurantRejectionCount}/3) ⚠️`;
+    const attempt = isMulti
+      ? Number(pickup?.rejectionAttempts) || 0
+      : order.restaurantRejectionCount || 0;
+    title = `Order Rejected by Restaurant (${attempt}/${MAX_PICKUP_RESEND_ATTEMPTS}) ⚠️`;
     body = isMulti
-      ? `One restaurant has rejected the order. Reason: ${note || "Not specified"}. You can resend it from the delivery partner app.`
+      ? `One restaurant has rejected the order (attempt ${attempt}/${MAX_PICKUP_RESEND_ATTEMPTS}). Reason: ${note || "Not specified"}. Resend from the delivery partner app, or after ${MAX_PICKUP_RESEND_ATTEMPTS} attempts the order continues without that restaurant.`
       : `The restaurant has rejected the order. Reason: ${note || "Not specified"}. You can try resending it up to 3 times.`;
   } else if (String(statusForMessage).includes("cancel") || String(finalStatus).includes("cancel")) {
     const isOnlinePaid = order.payment.method === "razorpay" && (order.payment.status === "paid" || order.payment.status === "refunded");
@@ -1699,6 +1984,10 @@ export async function updateOrderStatusRestaurant(
         orderStatus: order.orderStatus,
         title,
         message: body,
+        pickups: order.pickups || [],
+        dispatch: order.dispatch || null,
+        deliveryState: order.deliveryState || null,
+        isMultiRestaurant: Boolean(order.isMultiRestaurant),
       };
 
       const restRoom = rooms.restaurant(restaurantId);
@@ -1708,12 +1997,16 @@ export async function updateOrderStatusRestaurant(
       io.to(restRoom).emit("order_status_update", payload);
       io.to(userRoom).emit("order_status_update", payload);
 
-      // Notify assigned rider via socket if they exist
+      // Notify assigned riders (primary + shared) so DP UI updates without refresh
       const assignedRiderId = order.dispatch?.deliveryPartnerId;
+      const sharedRiderId = order.dispatch?.sharedPartnerId;
       if (assignedRiderId) {
         const riderRoom = rooms.delivery(assignedRiderId);
         console.log(`[DEBUG] Emitting order_status_update to rider room: ${riderRoom}`);
         io.to(riderRoom).emit("order_status_update", payload);
+      }
+      if (sharedRiderId) {
+        io.to(rooms.delivery(sharedRiderId)).emit("order_status_update", payload);
       }
     }
 
@@ -2452,10 +2745,243 @@ export async function deleteOrderAdmin(orderId, adminId) {
 }
 
 /**
- * Resends the order to the restaurant (up to 3 times).
+ * Soft-cancel by admin (refund + release drivers). Prefer this over hard delete.
+ */
+export async function cancelOrderAdmin(orderId, adminId, reason = '') {
+  const identity = buildOrderIdentityFilter(orderId);
+  if (!identity) throw new ValidationError('Order id required');
+
+  const order = await FoodOrder.findOne(identity);
+  if (!order) throw new NotFoundError('Order not found');
+
+  assertCanCancel({ role: 'ADMIN', order });
+
+  const from = order.orderStatus;
+  const assignedRiderId = order.dispatch?.deliveryPartnerId
+    ? String(order.dispatch.deliveryPartnerId)
+    : null;
+  const sharedRiderId = order.dispatch?.sharedPartnerId
+    ? String(order.dispatch.sharedPartnerId)
+    : null;
+  const cancelNote = reason || 'Order cancelled by admin';
+
+  order.orderStatus = 'cancelled_by_admin';
+  freeOrderDispatch(order);
+  if (order.deliveryState) {
+    order.deliveryState.currentPhase = 'cancelled';
+    order.deliveryState.status = 'cancelled';
+  }
+  pushStatusHistory(order, {
+    byRole: 'ADMIN',
+    byId: adminId,
+    from,
+    to: 'cancelled_by_admin',
+    note: cancelNote,
+  });
+
+  await applyOrderRefundIfPaid(order, {
+    recordedByRole: 'ADMIN',
+    recordedById: adminId,
+    note: cancelNote,
+    preferWallet: true,
+  });
+  pushSettlementSnapshot(order, 'admin_cancel', cancelNote);
+  await order.save();
+
+  const refundDetail =
+    order.payment?.status === 'refunded' || order.payment?.refund?.status === 'processed'
+      ? ` Refund of ₹${order.pricing?.total || 0} has been initiated.`
+      : '';
+  const userMessage = `Your order was cancelled by support.${refundDetail}`;
+  const riderMessage = `Order #${order.order_id || order._id} was cancelled by admin. You are free to accept new orders.`;
+
+  const payload = {
+    orderMongoId: order._id?.toString?.(),
+    orderId: order._id.toString(),
+    order_id: order.order_id || null,
+    orderStatus: 'cancelled_by_admin',
+    status: 'cancelled',
+    title: 'Order cancelled by admin',
+    message: userMessage,
+    failureReason: 'cancelled_by_admin',
+    cancelledBy: 'admin',
+  };
+
+  try {
+    const io = getIO();
+    if (io) {
+      io.to(rooms.user(order.userId)).emit('order_status_update', payload);
+      if (order.restaurantId) {
+        io.to(rooms.restaurant(order.restaurantId)).emit('order_status_update', payload);
+      }
+      for (const p of order.pickups || []) {
+        if (p?.restaurantId) {
+          io.to(rooms.restaurant(p.restaurantId)).emit('order_status_update', payload);
+        }
+      }
+      for (const riderId of [assignedRiderId, sharedRiderId].filter(Boolean)) {
+        const riderPayload = { ...payload, message: riderMessage };
+        io.to(rooms.delivery(riderId)).emit('order_status_update', riderPayload);
+        // Dedicated event so Delivery V2 clears live trip immediately
+        io.to(rooms.delivery(riderId)).emit('order_cancelled', riderPayload);
+      }
+    }
+  } catch (err) {
+    logger.warn(`cancelOrderAdmin socket emit failed: ${err?.message || err}`);
+  }
+
+  await notifyOwnersSafely(
+    [{ ownerType: 'USER', ownerId: order.userId }],
+    {
+      title: 'Order cancelled by admin',
+      body: userMessage,
+      data: {
+        type: 'order_cancelled_by_admin',
+        orderId: String(order._id),
+        orderMongoId: String(order._id),
+        cancelledBy: 'admin',
+      },
+    },
+  );
+
+  const riderNotifyTargets = [assignedRiderId, sharedRiderId].filter(Boolean);
+  for (const riderId of riderNotifyTargets) {
+    await notifyOwnersSafely(
+      [{ ownerType: 'DELIVERY_PARTNER', ownerId: riderId }],
+      {
+        title: 'Order cancelled by admin',
+        body: riderMessage,
+        data: {
+          type: 'order_cancelled_by_admin',
+          orderId: String(order._id),
+          orderMongoId: String(order._id),
+          cancelledBy: 'admin',
+        },
+      },
+    );
+  }
+
+  enqueueOrderEvent('order_cancelled_by_admin', {
+    orderMongoId: order._id?.toString?.(),
+    orderId: order._id.toString(),
+    adminId: adminId ? String(adminId) : null,
+  });
+
+  return normalizeOrderForClient(order);
+}
+
+/**
+ * Admin report: multi-restaurant drops, partial refunds, fee-stack / settlement snapshots.
+ */
+export async function getMultiOrderSettlementReport(query = {}) {
+  const page = Math.max(parseInt(query.page, 10) || 1, 1);
+  const limit = Math.min(Math.max(parseInt(query.limit, 10) || 50, 1), 200);
+  const skip = (page - 1) * limit;
+
+  const filter = {
+    $or: [
+      { isMultiRestaurant: true },
+      { 'partialRefunds.0': { $exists: true } },
+      { 'settlementSnapshots.event': { $in: ['partial_drop', 'share', 'complete'] } },
+      { 'pricing.deliveryFeeBreakdown.isSplitOrder': true },
+    ],
+  };
+
+  if (query.fromDate || query.toDate) {
+    filter.createdAt = {};
+    if (query.fromDate) {
+      const from = new Date(query.fromDate);
+      if (!Number.isNaN(from.getTime())) {
+        from.setHours(0, 0, 0, 0);
+        filter.createdAt.$gte = from;
+      }
+    }
+    if (query.toDate) {
+      const to = new Date(query.toDate);
+      if (!Number.isNaN(to.getTime())) {
+        to.setHours(23, 59, 59, 999);
+        filter.createdAt.$lte = to;
+      }
+    }
+  }
+
+  if (query.onlyPartialRefunds === 'true' || query.onlyPartialRefunds === true) {
+    filter['partialRefunds.0'] = { $exists: true };
+  }
+
+  const [docs, total] = await Promise.all([
+    FoodOrder.find(filter)
+      .select(
+        'order_id orderId userId restaurantId isMultiRestaurant orderStatus pricing riderEarning sharedRiderEarning platformProfit partialRefunds settlementSnapshots pickups createdAt dispatch',
+      )
+      .populate('userId', 'name phone')
+      .populate('restaurantId', 'restaurantName name')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    FoodOrder.countDocuments(filter),
+  ]);
+
+  const rows = (docs || []).map((o) => {
+    const breakdown = o.pricing?.deliveryFeeBreakdown || {};
+    const partialTotal = (o.partialRefunds || []).reduce(
+      (sum, r) => sum + (Number(r?.amount) || 0),
+      0,
+    );
+    return {
+      orderId: o.order_id || o.orderId || String(o._id),
+      orderMongoId: String(o._id),
+      createdAt: o.createdAt,
+      orderStatus: o.orderStatus,
+      isMultiRestaurant: Boolean(o.isMultiRestaurant),
+      isSplitOrder: Boolean(breakdown.isSplitOrder),
+      deliveryFee: Number(o.pricing?.deliveryFee) || 0,
+      deliveryFeeBreakdown: breakdown,
+      total: Number(o.pricing?.total) || 0,
+      riderEarning: Number(o.riderEarning) || 0,
+      sharedRiderEarning: Number(o.sharedRiderEarning) || 0,
+      platformProfit: Number(o.platformProfit) || 0,
+      partialRefundTotal: partialTotal,
+      partialRefunds: o.partialRefunds || [],
+      settlementSnapshots: o.settlementSnapshots || [],
+      droppedPickups: (o.pickups || []).filter((p) => p.permanentlyDropped),
+      customer: o.userId
+        ? { name: o.userId.name, phone: o.userId.phone }
+        : null,
+      primaryRestaurant: o.restaurantId
+        ? {
+            name: o.restaurantId.restaurantName || o.restaurantId.name,
+            id: String(o.restaurantId._id || o.restaurantId),
+          }
+        : null,
+    };
+  });
+
+  const summary = {
+    totalOrders: total,
+    withPartialRefunds: rows.filter((r) => r.partialRefundTotal > 0).length,
+    withShareSplit: rows.filter((r) => (r.sharedRiderEarning || 0) > 0).length,
+    multiRestaurant: rows.filter((r) => r.isMultiRestaurant).length,
+    splitBulk: rows.filter((r) => r.isSplitOrder).length,
+    partialRefundAmountSum: rows.reduce((s, r) => s + (r.partialRefundTotal || 0), 0),
+  };
+
+  return {
+    summary,
+    orders: rows,
+    page,
+    limit,
+    total,
+    pages: Math.ceil(total / limit) || 1,
+  };
+}
+
+/**
+ * Resends the order to the restaurant (up to 3 rejection attempts per pickup).
  * Triggered by the delivery partner when a restaurant rejects an order they accepted.
  */
-export async function resendOrderToRestaurant(orderId, deliveryPartnerId) {
+export async function resendOrderToRestaurant(orderId, deliveryPartnerId, restaurantId = null) {
   const identity = buildOrderIdentityFilter(orderId);
   if (!identity) throw new ValidationError("Order id required");
 
@@ -2466,20 +2992,26 @@ export async function resendOrderToRestaurant(orderId, deliveryPartnerId) {
 
   if (!order) throw new NotFoundError("Order not found or not assigned to you");
 
-  if ((order.restaurantRejectionCount || 0) >= 3) {
-    throw new ValidationError("Order has reached maximum rejection limit (3 times) and is now dead.");
-  }
-
-  if (order.orderStatus !== 'rejected_by_restaurant') {
-    throw new ValidationError("Order can only be resent if it was rejected by the restaurant");
-  }
-
   const from = order.orderStatus;
 
   if (order.isMultiRestaurant && Array.isArray(order.pickups) && order.pickups.length > 0) {
-    const cancelledPickups = order.pickups.filter((p) => p.status === 'cancelled');
+    let cancelledPickups = order.pickups.filter(
+      (p) =>
+        !p.permanentlyDropped &&
+        String(p.status || '') === 'cancelled' &&
+        (Number(p.rejectionAttempts) || 0) < MAX_PICKUP_RESEND_ATTEMPTS,
+    );
+
+    if (restaurantId) {
+      cancelledPickups = cancelledPickups.filter(
+        (p) => String(p.restaurantId || '') === String(restaurantId),
+      );
+    }
+
     if (cancelledPickups.length === 0) {
-      throw new ValidationError("No rejected restaurant to resend");
+      throw new ValidationError(
+        'No rejected restaurant available to resend (max attempts may be exhausted)',
+      );
     }
 
     for (const pickup of cancelledPickups) {
@@ -2493,7 +3025,7 @@ export async function resendOrderToRestaurant(orderId, deliveryPartnerId) {
       byId: deliveryPartnerId,
       from,
       to,
-      note: `Resent to restaurant by delivery partner (Attempt ${order.restaurantRejectionCount}/3)`
+      note: `Resent to restaurant(s) by delivery partner. Attempts used: ${cancelledPickups.map((p) => `${p.restaurantName || p.restaurantId}:${p.rejectionAttempts}/${MAX_PICKUP_RESEND_ATTEMPTS}`).join(', ')}`,
     });
 
     await order.save();
@@ -2503,6 +3035,14 @@ export async function resendOrderToRestaurant(orderId, deliveryPartnerId) {
     }
 
     return normalizeOrderForClient(order);
+  }
+
+  if ((order.restaurantRejectionCount || 0) >= 3) {
+    throw new ValidationError("Order has reached maximum rejection limit (3 times) and is now dead.");
+  }
+
+  if (order.orderStatus !== 'rejected_by_restaurant') {
+    throw new ValidationError("Order can only be resent if it was rejected by the restaurant");
   }
 
   const to = 'created';
@@ -2585,6 +3125,7 @@ export async function shareOrderDelivery(orderId, deliveryPartnerId) {
   if (order.dispatch?.sharedPartnerId) {
     throw new ValidationError('Order already has a shared partner');
   }
+  assertCanShareSecondDriver(order);
 
   // Set sharing flags
   order.dispatch.isShared = true;
@@ -2605,6 +3146,11 @@ export async function shareOrderDelivery(orderId, deliveryPartnerId) {
     note: "Order marked as shared with other partners"
   });
 
+  pushSettlementSnapshot(
+    order,
+    'share',
+    `50/50 split: primary ₹${order.riderEarning}, shared ₹${order.sharedRiderEarning}`,
+  );
   await order.save();
 
   // Notify nearby riders via socket (broadcast to all_delivery room)

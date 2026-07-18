@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   ChefHat, MapPin, Phone, 
@@ -42,6 +42,25 @@ export const PickupActionModal = ({
     { label: "Vehicle Issue", icon: "🛵", value: "Vehicle Issue 🛵" },
     { label: "Rain/Weather", icon: "🌧️", value: "Rain/Weather 🌧️" }
   ];
+
+  // Current multi-restaurant stop — bill must be captured again at each restaurant
+  const currentPickupKey = useMemo(() => {
+    if (order?.isMultiRestaurant && Array.isArray(order.pickups) && order.pickups.length > 0) {
+      const next = order.pickups.find(
+        (p) => !p.permanentlyDropped && !['picked_up', 'ready_for_handover', 'cancelled'].includes(String(p.status || '')),
+      );
+      if (next) {
+        return String(next.restaurantId || next._id || next.restaurantName || '');
+      }
+    }
+    return String(order?._id || order?.orderId || 'single');
+  }, [order?._id, order?.orderId, order?.isMultiRestaurant, order?.pickups]);
+
+  useEffect(() => {
+    setBillImageUploaded(false);
+    setBillImageUrl(null);
+    setIsUploadingBill(false);
+  }, [currentPickupKey]);
 
   const handleReportDelay = async (reason) => {
     try {
@@ -415,20 +434,26 @@ export const PickupActionModal = ({
                  />
               </div>
 
-              {/* Share Order Option for Large Orders */}
-              {totalQuantity >= splitThreshold && !order.dispatch?.isShared && !order.dispatch?.sharedPartnerId && (
+              {/* Share Order Option for Large Orders (required before complete) */}
+              {totalQuantity >= splitThreshold && !order.dispatch?.sharedPartnerId && (
                 <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 flex flex-col gap-3 mt-2">
                   <div className="flex gap-3 items-start">
                     <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 shrink-0">
                       <Users className="w-5 h-5" />
                     </div>
                     <div className="flex-1">
-                      <p className="text-[10px] font-bold text-blue-700 uppercase tracking-widest mb-1">Large Order detected</p>
+                      <p className="text-[10px] font-bold text-blue-700 uppercase tracking-widest mb-1">
+                        Second partner required
+                      </p>
                       <p className="text-xs font-medium text-blue-900 leading-tight">
-                        This order has {totalQuantity} items. You can share this with another delivery partner to split the load and earnings.
+                        This bulk order has {totalQuantity} items. A second delivery partner must join before you can complete delivery.
+                        {order.dispatch?.isShared
+                          ? ' Waiting for a partner to accept the share…'
+                          : ' Share now to open the order for another rider.'}
                       </p>
                     </div>
                   </div>
+                  {!order.dispatch?.isShared && (
                   <button
                     onClick={handleShareOrder}
                     disabled={isSharing}
@@ -437,6 +462,7 @@ export const PickupActionModal = ({
                     {isSharing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Share2 className="w-4 h-4" />}
                     <span>Share with Partner</span>
                   </button>
+                  )}
                 </div>
               )}
 

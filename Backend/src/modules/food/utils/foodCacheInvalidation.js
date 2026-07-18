@@ -44,6 +44,14 @@ export async function invalidateFoodDiningCaches() {
     await invalidateCache('food_dining:*');
 }
 
+/** Multi-order / delivery-speed settings shown on user cart checkout. */
+export async function invalidateAfterDeliveryBoySettingsMutation() {
+    await invalidatePatterns([
+        'checkout_settings:*',
+        'delivery_speed_options:*',
+    ]);
+}
+
 /** Restaurant profile / images / availability changes. */
 export async function invalidateAfterRestaurantProfileUpdate() {
     await invalidateFoodRestaurantListCaches();

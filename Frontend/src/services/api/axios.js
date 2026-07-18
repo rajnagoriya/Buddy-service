@@ -83,6 +83,15 @@ function getAccessToken(config) {
     const moduleToken = localStorage.getItem(key);
     if (moduleToken) return moduleToken;
 
+    // Unified BuddyIdentity DRIVER login writes both driver_* and delivery_* slots,
+    // but older sessions / partial writes may only have one — accept either.
+    if (module === "delivery") {
+      return localStorage.getItem("driver_accessToken") || null;
+    }
+    if (module === "driver") {
+      return localStorage.getItem("delivery_accessToken") || null;
+    }
+
     // 2. Fallback to legacy generic token only for user module.
     // Using generic token for delivery/restaurant can send wrong role token
     // and trigger 403 on protected role-based endpoints.
@@ -100,6 +109,13 @@ function getRefreshToken(module) {
     // 1. Try module-specific refresh token
     const moduleRefreshToken = localStorage.getItem(`${module}_refreshToken`);
     if (moduleRefreshToken) return moduleRefreshToken;
+
+    if (module === "delivery") {
+      return localStorage.getItem("driver_refreshToken") || null;
+    }
+    if (module === "driver") {
+      return localStorage.getItem("delivery_refreshToken") || null;
+    }
 
     // 2. Fallback to legacy generic refresh token only for user module.
     if (module === "user") {

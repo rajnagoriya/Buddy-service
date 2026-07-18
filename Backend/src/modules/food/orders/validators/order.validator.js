@@ -182,15 +182,24 @@ export function validateDispatchSettingsDto(body) {
 
 export function validateRestaurantChainDto(body) {
     const schema = z.object({
-        lastRestaurantId: z.string().min(1, 'Last restaurant id required'),
+        // Preferred: first restaurant already in cart (anchor A)
+        anchorRestaurantId: z.string().min(1).optional(),
+        // Legacy alias — treated as the same anchor id
+        lastRestaurantId: z.string().min(1).optional(),
         newRestaurantId: z.string().min(1, 'New restaurant id required'),
-    });
+    }).refine(
+        (data) => Boolean(data.anchorRestaurantId || data.lastRestaurantId),
+        { message: 'First restaurant id required' },
+    );
     const result = schema.safeParse(body || {});
     if (!result.success) {
         const first = result.error.issues?.[0];
         throw new ValidationError(first?.message || 'Validation failed');
     }
-    return result.data;
+    return {
+        ...result.data,
+        anchorRestaurantId: result.data.anchorRestaurantId || result.data.lastRestaurantId,
+    };
 }
 
 export function validateOrderRatingsDto(body) {

@@ -3,7 +3,7 @@ import { calculateDistance } from "@food/utils/common"
 export const CHAIN_RESTAURANT_RADIUS_KM = 5
 
 export const CHAIN_RADIUS_VALIDATION_MESSAGE =
-  "This restaurant is outside the allowed 5 KM road distance of the last selected restaurant. To place a single order, please select a nearby restaurant."
+  "This restaurant is outside the allowed road distance of the first restaurant in your cart. To place a single order, please select a nearby restaurant."
 
 export function extractLatLngFromItem(item) {
   if (!item || typeof item !== "object") return null
@@ -27,25 +27,35 @@ export function extractLatLngFromItem(item) {
   return null
 }
 
-/** Restaurant of the most recently added cart line (chain reference). */
-export function getLastRestaurantFromCart(cartItems) {
+/**
+ * First restaurant added to the cart (anchor A).
+ * B and C are both validated against this restaurant.
+ */
+export function getFirstRestaurantFromCart(cartItems) {
   const items = Array.isArray(cartItems) ? cartItems : []
   if (items.length === 0) return null
 
-  const last = items[items.length - 1]
-  const restaurantId = String(last?.restaurantId || "").trim()
-  if (!restaurantId) return null
+  const firstId = String(items[0]?.restaurantId || "").trim()
+  if (!firstId) return null
 
-  const coords = extractLatLngFromItem(last)
+  const firstItem = items.find((item) => String(item?.restaurantId || "").trim() === firstId)
+  if (!firstItem) return null
+
+  const coords = extractLatLngFromItem(firstItem)
 
   return {
-    restaurantId,
-    name: last?.restaurant || "",
+    restaurantId: firstId,
+    name: firstItem?.restaurant || "",
     lat: coords?.lat,
     lng: coords?.lng,
     latitude: coords?.lat,
     longitude: coords?.lng,
   }
+}
+
+/** @deprecated Use getFirstRestaurantFromCart — multi-order anchors on the first restaurant. */
+export function getLastRestaurantFromCart(cartItems) {
+  return getFirstRestaurantFromCart(cartItems)
 }
 
 export function getRestaurantIdsInCartOrder(cartItems) {
@@ -93,10 +103,11 @@ export function validateChainRestaurantRadius(
   }
 }
 
-export function getChainDistanceBadge(lastRestaurant, targetRestaurant) {
-  if (!lastRestaurant) return null
+/** Badge distance from the cart's first (anchor) restaurant. */
+export function getChainDistanceBadge(anchorRestaurant, targetRestaurant) {
+  if (!anchorRestaurant) return null
 
-  const check = validateChainRestaurantRadius(lastRestaurant, targetRestaurant)
+  const check = validateChainRestaurantRadius(anchorRestaurant, targetRestaurant)
   if (check.skipped || !Number.isFinite(check.distanceKm)) return null
 
   return {

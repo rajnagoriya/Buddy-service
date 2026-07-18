@@ -1,10 +1,35 @@
 import { useState } from "react"
 import { Plus, Trash2 } from "lucide-react"
 
-export default function PartnerSettingsSection({ settings, onChange }) {
+export const MULTI_ORDER_DISTANCE_MIN_KM = 2
+export const MULTI_ORDER_DISTANCE_MAX_KM = 5
+
+export function clampMultiOrderDistanceKm(value) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return MULTI_ORDER_DISTANCE_MAX_KM
+  return Math.min(
+    MULTI_ORDER_DISTANCE_MAX_KM,
+    Math.max(MULTI_ORDER_DISTANCE_MIN_KM, n),
+  )
+}
+
+export default function PartnerSettingsSection({
+  settings,
+  onChange,
+  onPersistPatch,
+  persisting = false,
+}) {
   const [activeTab, setActiveTab] = useState("weekly")
 
   const update = (patch) => onChange({ ...settings, ...patch })
+
+  const toggleAndPersist = async (field) => {
+    const nextValue = !settings[field]
+    update({ [field]: nextValue })
+    if (typeof onPersistPatch === "function") {
+      await onPersistPatch({ [field]: nextValue })
+    }
+  }
 
   const addSalarySlab = (type) => {
     const key = type === "weekly" ? "weeklySalarySlabs" : "monthlySalarySlabs"
@@ -54,27 +79,43 @@ export default function PartnerSettingsSection({ settings, onChange }) {
           <span className="text-sm text-slate-600">Enable Multi-Restaurant Orders</span>
           <button
             type="button"
-            onClick={() => update({ multiOrderEnabled: !settings.multiOrderEnabled })}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+            disabled={persisting}
+            onClick={() => toggleAndPersist("multiOrderEnabled")}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors disabled:opacity-60 ${
               settings.multiOrderEnabled ? "bg-green-600" : "bg-slate-300"
             }`}
+            aria-pressed={Boolean(settings.multiOrderEnabled)}
           >
-            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-              settings.multiOrderEnabled ? "translate-x-6" : "translate-x-1"
-            }`} />
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                settings.multiOrderEnabled ? "translate-x-6" : "translate-x-1"
+              }`}
+            />
           </button>
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Max Road Distance (KM)</label>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
+              Max Road Distance (KM)
+            </label>
             <input
               type="number"
+              min={MULTI_ORDER_DISTANCE_MIN_KM}
+              max={MULTI_ORDER_DISTANCE_MAX_KM}
+              step="0.5"
               value={settings.multiOrderMaxDistance}
               onChange={(e) => update({ multiOrderMaxDistance: e.target.value })}
+              onBlur={(e) => {
+                const clamped = clampMultiOrderDistanceKm(e.target.value)
+                update({ multiOrderMaxDistance: clamped })
+              }}
               className="w-full px-3 py-2 rounded-lg border border-slate-200 outline-none focus:ring-1 focus:ring-green-500"
-              placeholder="3"
+              placeholder="5"
             />
-            <p className="text-xs text-slate-500 mt-1">Max km between restaurants in one cart</p>
+            <p className="text-xs text-slate-500 mt-1">
+              Allowed range: {MULTI_ORDER_DISTANCE_MIN_KM}–{MULTI_ORDER_DISTANCE_MAX_KM} km from
+              the first restaurant in the cart
+            </p>
           </div>
           <div>
             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Extra Charge (₹)</label>
@@ -96,14 +137,18 @@ export default function PartnerSettingsSection({ settings, onChange }) {
           <span className="text-sm text-slate-600">Enable split delivery for large carts</span>
           <button
             type="button"
-            onClick={() => update({ splitOrderEnabled: !settings.splitOrderEnabled })}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+            disabled={persisting}
+            onClick={() => toggleAndPersist("splitOrderEnabled")}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors disabled:opacity-60 ${
               settings.splitOrderEnabled !== false ? "bg-green-600" : "bg-slate-300"
             }`}
+            aria-pressed={settings.splitOrderEnabled !== false}
           >
-            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-              settings.splitOrderEnabled !== false ? "translate-x-6" : "translate-x-1"
-            }`} />
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                settings.splitOrderEnabled !== false ? "translate-x-6" : "translate-x-1"
+              }`}
+            />
           </button>
         </div>
         <div>

@@ -277,6 +277,7 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
     deliveryPartner: false,
     address: false,
     bill: false,
+    settlement: false,
   })
 
   useEffect(() => {
@@ -1204,6 +1205,99 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
               </div>
             </AccordionSection>
           ) : null}
+
+          {((Array.isArray(data?.partialRefunds) && data.partialRefunds.length > 0) ||
+            (Array.isArray(data?.settlementSnapshots) && data.settlementSnapshots.length > 0) ||
+            data?.isMultiRestaurant ||
+            data?.pricing?.deliveryFeeBreakdown?.isSplitOrder) && (
+            <AccordionSection
+              id="settlement"
+              title="Settlement Audit"
+              icon={Receipt}
+              open={openSections.settlement}
+              onToggle={toggleSection}
+              badge={
+                Array.isArray(data?.partialRefunds) && data.partialRefunds.length > 0
+                  ? `${data.partialRefunds.length} refund${data.partialRefunds.length > 1 ? "s" : ""}`
+                  : data?.isMultiRestaurant
+                    ? "Multi"
+                    : null
+              }
+            >
+              <div className="flex flex-wrap gap-2 mb-3">
+                {data?.isMultiRestaurant && (
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-full bg-violet-100 text-violet-700">
+                    Multi-restaurant
+                  </span>
+                )}
+                {data?.pricing?.deliveryFeeBreakdown?.isSplitOrder && (
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-full bg-amber-100 text-amber-700">
+                    Bulk / split fee
+                  </span>
+                )}
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-full bg-slate-100 text-slate-700">
+                  Rider ₹{Number(data?.riderEarning || 0).toFixed(0)}
+                  {Number(data?.sharedRiderEarning || 0) > 0
+                    ? ` + Shared ₹${Number(data.sharedRiderEarning || 0).toFixed(0)}`
+                    : ""}
+                </span>
+              </div>
+
+              {Array.isArray(data?.partialRefunds) && data.partialRefunds.length > 0 && (
+                <div className="mb-3 space-y-2">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                    Partial wallet refunds
+                  </p>
+                  {data.partialRefunds.map((r, idx) => (
+                    <div
+                      key={`pr-${idx}`}
+                      className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-3 text-sm"
+                    >
+                      <div className="flex justify-between gap-2">
+                        <span className="font-medium text-slate-800">
+                          {r.restaurantName || "Restaurant"}
+                        </span>
+                        <span className="font-bold text-emerald-700">
+                          ₹{Number(r.amount || 0).toFixed(2)}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Food ₹{Number(r.foodAmount || 0).toFixed(0)} · Pack ₹
+                        {Number(r.packagingFee || 0).toFixed(0)} · Tax ₹
+                        {Number(r.taxShare || 0).toFixed(0)} · {r.destination || "wallet"}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {Array.isArray(data?.settlementSnapshots) && data.settlementSnapshots.length > 0 && (
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                    Snapshots
+                  </p>
+                  {[...data.settlementSnapshots].reverse().map((s, idx) => (
+                    <div
+                      key={`snap-${idx}`}
+                      className="rounded-lg border border-slate-100 bg-slate-50 p-2.5 text-xs"
+                    >
+                      <div className="flex justify-between gap-2 font-semibold text-slate-700">
+                        <span className="uppercase tracking-wide">{s.event}</span>
+                        <span>₹{Number(s.pricing?.total ?? 0).toFixed(0)}</span>
+                      </div>
+                      <p className="text-slate-500 mt-0.5">
+                        Rider ₹{Number(s.riderEarning || 0).toFixed(0)}
+                        {Number(s.sharedRiderEarning || 0) > 0
+                          ? ` / Shared ₹${Number(s.sharedRiderEarning || 0).toFixed(0)}`
+                          : ""}
+                        {s.note ? ` — ${s.note}` : ""}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </AccordionSection>
+          )}
         </div>
       </DialogContent>
     </Dialog>

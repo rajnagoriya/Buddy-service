@@ -7,7 +7,10 @@ import {
 import { Button } from "@food/components/ui/button"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
-import PartnerSettingsSection from "./PartnerSettingsSection"
+import PartnerSettingsSection, {
+  clampMultiOrderDistanceKm,
+  MULTI_ORDER_DISTANCE_MAX_KM,
+} from "./PartnerSettingsSection"
 import DistanceRulesSection from "./DistanceRulesSection"
 
 const ADMIN_SPEED_ICONS = [
@@ -39,7 +42,7 @@ const DEFAULT_PARTNER_SETTINGS = {
   weeklySalarySlabs: [],
   monthlySalarySlabs: [],
   multiOrderEnabled: true,
-  multiOrderMaxDistance: 5,
+  multiOrderMaxDistance: MULTI_ORDER_DISTANCE_MAX_KM,
   multiOrderAdditionalCharge: 0,
   splitOrderEnabled: true,
   splitOrderThreshold: 20,
@@ -62,6 +65,7 @@ export default function FeeSettings() {
   const [deliverySpeedOptions, setDeliverySpeedOptions] = useState([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [togglingPartner, setTogglingPartner] = useState(false)
 
   const fetchAll = async () => {
     try {
@@ -100,7 +104,9 @@ export default function FeeSettings() {
           weeklySalarySlabs: data.weeklySalarySlabs || [],
           monthlySalarySlabs: data.monthlySalarySlabs || [],
           multiOrderEnabled: data.multiOrderEnabled !== false,
-          multiOrderMaxDistance: data.multiOrderMaxDistance || 0,
+          multiOrderMaxDistance: clampMultiOrderDistanceKm(
+            data.multiOrderMaxDistance || MULTI_ORDER_DISTANCE_MAX_KM,
+          ),
           multiOrderAdditionalCharge: data.multiOrderAdditionalCharge || 0,
           splitOrderEnabled: data.splitOrderEnabled !== false,
           splitOrderThreshold: data.splitOrderThreshold || 20,
@@ -116,6 +122,27 @@ export default function FeeSettings() {
   useEffect(() => {
     fetchAll()
   }, [])
+
+  const persistPartnerPatch = async (patch) => {
+    const previous = partnerSettings
+    try {
+      setTogglingPartner(true)
+      const response = await adminAPI.updateDeliveryBoySettings(patch)
+      if (response.data?.success) {
+        toast.success("Partner setting updated")
+        return true
+      }
+      setPartnerSettings(previous)
+      toast.error(response.data?.message || "Failed to update partner setting")
+      return false
+    } catch (error) {
+      setPartnerSettings(previous)
+      toast.error(error.response?.data?.message || "Failed to update partner setting")
+      return false
+    } finally {
+      setTogglingPartner(false)
+    }
+  }
 
   const handleSave = async () => {
     if (pageTab === "rules") return
@@ -135,10 +162,15 @@ export default function FeeSettings() {
         isActive: true,
       }
 
+      const clampedDistance = clampMultiOrderDistanceKm(partnerSettings.multiOrderMaxDistance)
+      if (Number(partnerSettings.multiOrderMaxDistance) !== clampedDistance) {
+        setPartnerSettings((prev) => ({ ...prev, multiOrderMaxDistance: clampedDistance }))
+      }
+
       const partnerPayload = {
         adminCommissionPercentage: Number(partnerSettings.adminCommissionPercentage) || 0,
         multiOrderEnabled: Boolean(partnerSettings.multiOrderEnabled),
-        multiOrderMaxDistance: Number(partnerSettings.multiOrderMaxDistance) || 0,
+        multiOrderMaxDistance: clampedDistance,
         multiOrderAdditionalCharge: Number(partnerSettings.multiOrderAdditionalCharge) || 0,
         splitOrderEnabled: partnerSettings.splitOrderEnabled !== false,
         splitOrderThreshold: Number(partnerSettings.splitOrderThreshold) || 20,
@@ -310,9 +342,9 @@ export default function FeeSettings() {
                     min="0"
                     step="1"
                     className="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
-                    placeholder="25"
+                    placeholder="0"
                   />
-                  <p className="text-xs text-slate-500">Fallback fee when no distance rule matches</p>
+                  <p className="text-xs text-slate-500">Not used for cart pricing. Delivery fee comes only from active Distance Rules (+ speed if enabled).</p>
                 </div>
                 <div className="space-y-2">
                   <label className="block text-sm font-semibold text-slate-700">Free Delivery Threshold (₹)</label>
@@ -542,7 +574,12 @@ export default function FeeSettings() {
             </div>
           </div>
         ) : pageTab === "partner" ? (
-          <PartnerSettingsSection settings={partnerSettings} onChange={setPartnerSettings} />
+          <PartnerSettingsSection
+            settings={partnerSettings}
+            onChange={setPartnerSettings}
+            onPersistPatch={persistPartnerPatch}
+            persisting={togglingPartner}
+          />
         ) : pageTab === "rules" ? (
           <DistanceRulesSection />
         ) : null}

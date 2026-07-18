@@ -919,7 +919,12 @@ export const useDeliveryNotifications = () => {
       const sharedId = sharedOrder?.orderId || sharedOrder?._id || sharedOrder?.orderMongoId;
       
       if (updatedId && sharedId && String(updatedId) === String(sharedId)) {
-        if (['delivered', 'cancelled', 'deleted'].includes(status)) {
+        if (
+          status === 'delivered' ||
+          status === 'deleted' ||
+          status === 'cancelled' ||
+          status.startsWith('cancelled_')
+        ) {
           setSharedOrder(null);
           stopAlertLoop();
         }
@@ -930,7 +935,8 @@ export const useDeliveryNotifications = () => {
       debugLog('?? Delivery order cancelled event received via socket:', statusData);
       setOrderStatusUpdate({
         ...(statusData || {}),
-        status: 'cancelled'
+        status: 'cancelled',
+        orderStatus: statusData?.orderStatus || 'cancelled_by_admin',
       });
     });
 

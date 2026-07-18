@@ -44,7 +44,7 @@ import Footer from "@food/components/user/Footer";
 import AddToCartButton from "@food/components/user/AddToCartButton";
 import StickyCartCard from "@food/components/user/StickyCartCard";
 import RestaurantChainDistanceBadge from "@food/components/user/RestaurantChainDistanceBadge";
-import { getLastRestaurantFromCart } from "@food/utils/restaurantRadius";
+import { getFirstRestaurantFromCart } from "@food/utils/restaurantRadius";
 import OrderTrackingCard from "@food/components/user/OrderTrackingCard";
 import VegModePopups from "@food/components/user/VegModePopups";
 import {
@@ -1121,7 +1121,7 @@ export default function Home() {
   } = profileContext;
   const { addToCart, cart } = useCart();
   const lastCartRestaurant = useMemo(
-    () => getLastRestaurantFromCart(cart),
+    () => getFirstRestaurantFromCart(cart),
     [cart],
   );
   const { location, loading, requestLocation } = useLocation();
