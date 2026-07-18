@@ -18,7 +18,13 @@ const supportsBrowserNotifications = () =>
 const buildRestaurantOrderNotification = (orderData = {}) => {
   const orderId = orderData.orderId || orderData.orderMongoId || 'New';
   const itemCount = Array.isArray(orderData.items) ? orderData.items.length : 0;
-  const total = Number(orderData.total || orderData.pricing?.total || 0);
+  const total = Number(
+    orderData.restaurantPayout ??
+      orderData.restaurantEarnings?.payout ??
+      orderData.pricing?.total ??
+      orderData.total ??
+      0,
+  );
 
   return {
     title: `New order #${orderId}`,

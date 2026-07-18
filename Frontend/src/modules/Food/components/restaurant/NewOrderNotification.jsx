@@ -56,10 +56,16 @@ export default function NewOrderNotification({ order, onClose, onViewOrder }) {
               <div className="flex items-center justify-between p-4 bg-green-50 rounded-xl">
                 <div className="flex items-center gap-2">
                   <IndianRupee className="w-5 h-5 text-green-600" />
-                  <span className="text-gray-600 font-medium">Total Amount</span>
+                  <span className="text-gray-600 font-medium">You get</span>
                 </div>
                 <span className="text-2xl font-bold text-green-600">
-                  ₹{order.total?.toFixed(2) || '0.00'}
+                  ₹{Number(
+                    order.restaurantPayout ??
+                      order.restaurantEarnings?.payout ??
+                      order.pricing?.total ??
+                      order.total ??
+                      0
+                  ).toFixed(2)}
                 </span>
               </div>
 

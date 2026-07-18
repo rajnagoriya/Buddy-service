@@ -7,13 +7,27 @@ const TERMINAL_ORDER_STATUSES = new Set([
   "Canceled",
   "Cancelled",
   "Cancelled by Restaurant",
+  "Rejected by Restaurant",
   "Cancelled by User",
   "Cancelled by Admin",
   "Refunded",
   "Payment Failed",
 ])
 
+const RESTAURANT_REJECTED_STATUSES = new Set([
+  "Cancelled by Restaurant",
+  "Rejected by Restaurant",
+  "cancelled_by_restaurant",
+  "rejected_by_restaurant",
+])
+
 const isActiveOrder = (order) => !TERMINAL_ORDER_STATUSES.has(order.orderStatus)
+
+const canReassignDriver = (order) => {
+  if (!isActiveOrder(order)) return false
+  const status = String(order?.orderStatus || order?.status || "").trim()
+  return !RESTAURANT_REJECTED_STATUSES.has(status)
+}
 
 const getStatusColor = (orderStatus) => {
   const colors = {
@@ -25,6 +39,7 @@ const getStatusColor = (orderStatus) => {
     "Food On The Way": "bg-yellow-100 text-yellow-700",
     "Canceled": "bg-rose-100 text-rose-700",
     "Cancelled by Restaurant": "bg-red-100 text-red-700",
+    "Rejected by Restaurant": "bg-red-100 text-red-700",
     "Cancelled by User": "bg-orange-100 text-orange-700",
     "Cancelled by Admin": "bg-red-100 text-red-700",
     "Payment Failed": "bg-red-100 text-red-700",
@@ -446,7 +461,7 @@ export default function OrdersTable({
                             <span>Cancel Order</span>
                           </DropdownMenuItem>
                         )}
-                        {isActiveOrder(order) && onReassignDriver && (
+                        {canReassignDriver(order) && onReassignDriver && (
                           <DropdownMenuItem
                             onClick={() => onReassignDriver(order)}
                             disabled={actionLoadingOrderId === (order.id || order.orderId)}
@@ -456,7 +471,8 @@ export default function OrdersTable({
                             <span>Reassign Driver</span>
                           </DropdownMenuItem>
                         )}
-                        {(isActiveOrder(order) && (onCancelOrder || onReassignDriver)) && (
+                        {((isActiveOrder(order) && onCancelOrder) ||
+                          (canReassignDriver(order) && onReassignDriver)) && (
                           <DropdownMenuSeparator />
                         )}
                         <DropdownMenuItem
@@ -522,13 +538,17 @@ export default function OrdersTable({
       </div>
       
       {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
+      {(totalPages > 1 || (isServerPaginated && totalItems > 0)) && (
+        <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="text-sm text-slate-600">
             Showing <span className="font-semibold">{rangeStart}</span> to{" "}
             <span className="font-semibold">{rangeEnd}</span> of{" "}
             <span className="font-semibold">{totalItems}</span> orders
+            {isServerPaginated && (
+              <span className="text-slate-400"> · {itemsPerPage} per page</span>
+            )}
           </div>
+          {totalPages > 1 && (
           <div className="flex items-center gap-2">
             <button
               onClick={() => handlePageChange(currentPage - 1)}
@@ -572,6 +592,7 @@ export default function OrdersTable({
               Next
             </button>
           </div>
+          )}
         </div>
       )}
     </div>

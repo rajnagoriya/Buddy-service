@@ -848,9 +848,13 @@ export const getDeliveryPartnerTripHistory = async (deliveryPartnerId, query = {
     const period = query.period || 'daily';
     const date = query.date ? new Date(query.date) : new Date();
     const statusFilter = normalizeStatusFilter(query.status);
+    const page = Math.max(parseInt(query.page, 10) || 1, 1);
     const limit = Math.min(Math.max(parseInt(query.limit, 10) || 50, 1), 1000);
+    const skip = (page - 1) * limit;
+    const periodKey = String(period || 'daily').toLowerCase();
+    const isAllTime = periodKey === 'all' || periodKey === 'lifetime';
 
-    const { start, end } = computeRange(period, date);
+    const range = isAllTime ? null : computeRange(period, date);
 
     const partnerId = new mongoose.Types.ObjectId(deliveryPartnerId);
     const match = {
@@ -863,12 +867,18 @@ export const getDeliveryPartnerTripHistory = async (deliveryPartnerId, query = {
     const sf = String(statusFilter || '').toLowerCase();
     if (sf === 'completed') {
         match.orderStatus = 'delivered';
-        match['deliveryState.deliveredAt'] = { $gte: start, $lte: end };
+        if (range) {
+            match['deliveryState.deliveredAt'] = { $gte: range.start, $lte: range.end };
+        }
     } else if (sf === 'cancelled') {
         match.orderStatus = { $regex: '^cancelled', $options: 'i' };
-        match.createdAt = { $gte: start, $lte: end };
+        if (range) {
+            match.createdAt = { $gte: range.start, $lte: range.end };
+        }
     } else if (sf === 'pending') {
-        match.createdAt = { $gte: start, $lte: end };
+        if (range) {
+            match.createdAt = { $gte: range.start, $lte: range.end };
+        }
         // Pending = not delivered and not cancelled
         match.$and = [
             { orderStatus: { $ne: 'delivered' } },
@@ -876,20 +886,37 @@ export const getDeliveryPartnerTripHistory = async (deliveryPartnerId, query = {
         ];
     } else {
         // ALL TRIPS: show anything created in range, and compute earnings only for delivered orders.
-        match.createdAt = { $gte: start, $lte: end };
+        if (range) {
+            match.createdAt = { $gte: range.start, $lte: range.end };
+        }
     }
 
-    const orders = await FoodOrder.find(match)
-        .populate({ path: 'restaurantId', select: 'restaurantName' })
-        .sort({ 'deliveryState.deliveredAt': -1, createdAt: -1 })
-        .limit(limit)
-        .lean();
+    const [total, orders] = await Promise.all([
+        FoodOrder.countDocuments(match),
+        FoodOrder.find(match)
+            .populate({ path: 'restaurantId', select: 'restaurantName' })
+            .sort({ 'deliveryState.deliveredAt': -1, createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .lean()
+    ]);
+
+    const trips = (orders || []).map(o => toTripDto(o, deliveryPartnerId));
+    const hasMore = skip + trips.length < total;
 
     return {
         period,
         date: (date || new Date()).toISOString(),
-        range: { start: start.toISOString(), end: end.toISOString() },
-        trips: (orders || []).map(o => toTripDto(o, deliveryPartnerId))
+        range: range
+            ? { start: range.start.toISOString(), end: range.end.toISOString() }
+            : null,
+        trips,
+        pagination: {
+            page,
+            limit,
+            total,
+            hasMore
+        }
     };
 };
 

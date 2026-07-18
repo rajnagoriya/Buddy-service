@@ -1,10 +1,9 @@
 import { motion } from "framer-motion"
 import { Leaf } from "lucide-react"
-import BottomNavOrders from "@food/components/restaurant/BottomNavOrders"
 
 export default function Hyperpure() {
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col pb-24">
+    <div className="min-h-screen bg-gray-100 flex flex-col pb-8">
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -17,7 +16,6 @@ export default function Hyperpure() {
           <p className="text-gray-600">This page is under development</p>
         </div>
       </motion.div>
-      <BottomNavOrders />
     </div>
   )
 }

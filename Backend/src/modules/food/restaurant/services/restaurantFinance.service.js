@@ -3,6 +3,7 @@ import { FoodOrder } from '../../orders/models/order.model.js';
 import { FoodTransaction } from '../../orders/models/foodTransaction.model.js';
 import { FoodRestaurant } from '../models/restaurant.model.js';
 import { FoodRestaurantWithdrawal } from '../models/foodRestaurantWithdrawal.model.js';
+import { buildPaginationMeta, buildPaginationOptions } from '../../../../utils/helpers.js';
 
 function toTwoDigitYearString(dateObj) {
     const y = String(dateObj.getFullYear());
@@ -85,20 +86,25 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
         status: { $in: ['captured', 'authorized'] },
         createdAt: { $gte: nowWindow.start, $lte: nowWindow.end }
     })
-        .populate('orderId', 'orderId createdAt items pricing deliveryState orderStatus')
+        .populate('orderId', 'orderId order_id createdAt items pricing deliveryState orderStatus')
         .sort({ createdAt: -1 })
         .lean();
 
-    const currentCycleOrders = currentTransactions.map((tx) => {
-        const order = tx.orderId || {};
+    const mapTxToRestaurantOrder = (tx) => {
+        const order = tx.orderId && typeof tx.orderId === 'object' ? tx.orderId : {};
         const items = Array.isArray(order.items) ? order.items : [];
         const foodNames = items.map((it) => it?.name).filter(Boolean).join(', ');
         const orderTotalExclTax = Math.max(
             0,
             Number(order?.pricing?.total ?? 0) - Number(order?.pricing?.tax ?? 0) || 0
         );
+        const mongoId =
+            order?._id?.toString?.() ||
+            (tx.orderId && typeof tx.orderId !== 'object' ? String(tx.orderId) : '') ||
+            '';
         return {
-            orderId: order?.orderId || tx.orderReadableId,
+            orderId: order?.orderId || order?.order_id || tx.orderReadableId,
+            mongoId,
             createdAt: tx.createdAt,
             items,
             foodNames,
@@ -110,7 +116,9 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
             orderStatus: order?.orderStatus || order?.deliveryState?.currentPhase || order?.deliveryState?.status,
             status: tx.status
         };
-    });
+    };
+
+    const currentCycleOrders = currentTransactions.map(mapTxToRestaurantOrder);
 
     const currentCycleEstimatedPayout = currentCycleOrders.reduce(
         (sum, o) => sum + (Number(o.payout) || 0),
@@ -167,48 +175,42 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
         gross: currentCycleOrders.reduce((sum, o) => sum + (Number(o.totalAmount) || 0), 0)
     };
 
-    // Past cycles: build from provided startDate/endDate query.
+    // Past cycles: build from provided startDate/endDate query (paginated).
     const startDate = parseISODateParam(query.startDate);
     const endDate = parseISODateParamEnd(query.endDate);
+    const { page, limit, skip } = buildPaginationOptions(query, {
+        defaultLimit: 10,
+        maxLimit: 50,
+    });
 
-    let pastCyclesResult = { orders: [], totalOrders: 0 };
+    let pastCyclesResult = {
+        orders: [],
+        totalOrders: 0,
+        pagination: buildPaginationMeta({ page, limit, total: 0 }),
+    };
     if (startDate && endDate) {
-        const pastTransactions = await FoodTransaction.find({
+        const pastFilter = {
             restaurantId: rid,
             status: { $in: ['captured', 'authorized'] },
-            createdAt: { $gte: startDate, $lte: endDate }
-        })
-            .populate('orderId', 'orderId createdAt items pricing deliveryState orderStatus')
-            .sort({ createdAt: -1 })
-            .lean();
+            createdAt: { $gte: startDate, $lte: endDate },
+        };
 
-        const pastCycleOrders = pastTransactions.map((tx) => {
-            const order = tx.orderId || {};
-            const items = Array.isArray(order.items) ? order.items : [];
-            const foodNames = items.map((it) => it?.name).filter(Boolean).join(', ');
-            const orderTotalExclTax = Math.max(
-                0,
-                Number(order?.pricing?.total ?? 0) - Number(order?.pricing?.tax ?? 0) || 0
-            );
+        const [pastTransactions, pastTotal] = await Promise.all([
+            FoodTransaction.find(pastFilter)
+                .populate('orderId', 'orderId order_id createdAt items pricing deliveryState orderStatus')
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .lean(),
+            FoodTransaction.countDocuments(pastFilter),
+        ]);
 
-            return {
-                orderId: order?.orderId || tx.orderReadableId,
-                createdAt: tx.createdAt,
-                items,
-                foodNames,
-                orderTotal: orderTotalExclTax,
-                totalAmount: tx.amounts?.totalCustomerPaid || 0,
-                payout: tx.amounts?.restaurantShare || 0,
-                commission: tx.amounts?.restaurantCommission || 0,
-                paymentMethod: tx.paymentMethod || order?.payment?.method,
-                orderStatus: order?.orderStatus || order?.deliveryState?.currentPhase || order?.deliveryState?.status,
-                status: tx.status
-            };
-        });
+        const pastCycleOrders = pastTransactions.map(mapTxToRestaurantOrder);
 
         pastCyclesResult = {
             orders: pastCycleOrders,
-            totalOrders: pastCycleOrders.length
+            totalOrders: pastTotal,
+            pagination: buildPaginationMeta({ page, limit, total: pastTotal }),
         };
     }
 

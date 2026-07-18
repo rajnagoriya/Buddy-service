@@ -105,12 +105,9 @@ export const HistoryV2 = () => {
            );
            const total = Number(trip.orderTotal || trip.amountToCollect || trip.pricing?.total || 0);
            acc.earnings += e || (total * 0.1);
-           
-           const isCOD = (trip.paymentMethod || '').toLowerCase() === 'cash' || (trip.paymentMethod || '').toLowerCase() === 'cod';
-           if (isCOD) acc.cod += total || Number(trip.codCollectedAmount || 0);
         }
         return acc;
-     }, { earnings: 0, cod: 0 });
+     }, { earnings: 0 });
   }, [trips]);
 
   const extractItems = (trip) => {
@@ -210,12 +207,8 @@ export const HistoryV2 = () => {
        {/* 4. Page Content */}
        <div className="px-4 py-4 space-y-4">
           {/* Performance Summary Banner */}
-          <div className="header-blend rounded-2xl p-5 shadow-lg flex justify-between items-center relative overflow-hidden">
+          <div className="header-blend rounded-2xl p-5 shadow-lg relative overflow-hidden">
              <div className="relative z-10 text-left">
-                <p className="text-[8px] font-black text-white/70 uppercase tracking-[0.2em] mb-0.5">COD Collected</p>
-                <h3 className="text-lg font-black text-white tracking-tighter">₹{metrics.cod.toFixed(0)}</h3>
-             </div>
-             <div className="relative z-10 text-right">
                 <p className="text-[8px] font-black text-white/70 uppercase tracking-[0.2em] mb-0.5">Total Earnings</p>
                 <h3 className="text-lg font-black text-white tracking-tighter">₹{metrics.earnings.toFixed(0)}</h3>
              </div>

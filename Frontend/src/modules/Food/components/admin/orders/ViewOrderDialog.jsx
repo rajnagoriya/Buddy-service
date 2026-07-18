@@ -63,6 +63,7 @@ const humanizeStatus = (status) => {
     delivered: "Delivered",
     cancelled_by_user: "Cancelled by User",
     cancelled_by_restaurant: "Cancelled by Restaurant",
+    rejected_by_restaurant: "Rejected by Restaurant",
     cancelled_by_admin: "Cancelled by Admin",
     cancelled: "Cancelled",
     pending: "Pending",
@@ -71,6 +72,7 @@ const humanizeStatus = (status) => {
     assigned: "Delivery Partner Assigned",
     unassigned: "Unassigned",
     rejected: "Rejected",
+    reassigned: "Driver Reassigned",
     en_route_to_pickup: "En Route to Pickup",
     at_pickup: "At Pickup",
     en_route_to_delivery: "En Route to Delivery",
@@ -94,6 +96,7 @@ const getStatusColor = (orderStatus) => {
     "Food On The Way": "bg-yellow-100 text-yellow-700",
     Canceled: "bg-rose-100 text-rose-700",
     "Cancelled by Restaurant": "bg-red-100 text-red-700",
+    "Rejected by Restaurant": "bg-red-100 text-red-700",
     "Cancelled by User": "bg-orange-100 text-orange-700",
     "Payment Failed": "bg-red-100 text-red-700",
     Refunded: "bg-sky-100 text-sky-700",
@@ -1139,6 +1142,83 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
             ) : (
               <p className="text-sm text-slate-500">No delivery partner assigned yet</p>
             )}
+
+            {Array.isArray(data?.dispatch?.assignmentHistory) &&
+              data.dispatch.assignmentHistory.length > 0 && (
+                <div className="mt-4 pt-4 border-t border-slate-100">
+                  <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-3">
+                    Assignment history
+                  </p>
+                  <div className="space-y-3">
+                    {[...data.dispatch.assignmentHistory]
+                      .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+                      .map((entry, index) => {
+                        const isReassign = entry.action === "reassigned"
+                        return (
+                          <div
+                            key={`${entry.at}-${index}`}
+                            className="rounded-lg border border-slate-200 bg-slate-50 p-3"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                                  isReassign
+                                    ? "bg-amber-100 text-amber-800"
+                                    : "bg-emerald-100 text-emerald-800"
+                                }`}
+                              >
+                                {isReassign ? "Reassigned" : "Assigned"}
+                              </span>
+                              <span className="text-xs text-slate-500">
+                                {formatDateTime(entry.at)}
+                              </span>
+                            </div>
+                            {isReassign ? (
+                              <p className="text-sm text-slate-800">
+                                <span className="font-medium">
+                                  {entry.fromPartnerName || "Previous driver"}
+                                </span>
+                                {entry.fromPartnerPhone ? (
+                                  <span className="text-slate-500">
+                                    {" "}
+                                    ({entry.fromPartnerPhone})
+                                  </span>
+                                ) : null}
+                                <span className="text-slate-400"> → </span>
+                                <span className="font-medium">
+                                  {entry.toPartnerName || "New driver"}
+                                </span>
+                                {entry.toPartnerPhone ? (
+                                  <span className="text-slate-500">
+                                    {" "}
+                                    ({entry.toPartnerPhone})
+                                  </span>
+                                ) : null}
+                              </p>
+                            ) : (
+                              <p className="text-sm text-slate-800">
+                                Assigned to{" "}
+                                <span className="font-medium">
+                                  {entry.toPartnerName || "Driver"}
+                                </span>
+                                {entry.toPartnerPhone ? (
+                                  <span className="text-slate-500">
+                                    {" "}
+                                    ({entry.toPartnerPhone})
+                                  </span>
+                                ) : null}
+                              </p>
+                            )}
+                            <p className="text-[11px] text-slate-500 mt-1">
+                              By {humanizeStatus(entry.byRole || "ADMIN")}
+                              {entry.note ? ` · ${entry.note}` : ""}
+                            </p>
+                          </div>
+                        )
+                      })}
+                  </div>
+                </div>
+              )}
           </AccordionSection>
 
           {address ? (

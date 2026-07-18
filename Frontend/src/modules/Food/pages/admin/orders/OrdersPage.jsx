@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { useSearchParams, useNavigate } from "react-router-dom"
 import io from "socket.io-client"
-import { FileText, Calendar, Package, ArrowLeft } from "lucide-react"
+import { FileText, Calendar, Package, ArrowLeft, CheckCircle, XCircle, Truck, IndianRupee } from "lucide-react"
 import { adminAPI } from "@food/api"
 import { API_BASE_URL } from "@food/api/config"
 import { toast } from "sonner"
@@ -39,13 +39,22 @@ const statusConfig = {
   "offline-payments": { title: "Offline Payments", color: "slate", icon: Package },
 }
 
-const ORDERS_PAGE_LIMIT = 20
+const ORDERS_PAGE_LIMIT = 30
+
+const EMPTY_ORDER_STATS = {
+  total: 0,
+  delivered: 0,
+  cancelled: 0,
+  inProgress: 0,
+  totalSpent: 0,
+}
 
 export default function OrdersPage({ statusKey = "all" }) {
   const config = statusConfig[statusKey] || statusConfig["all"]
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const userIdFromUrl = searchParams.get("userId")
+  const deliveryPartnerIdFromUrl = searchParams.get("deliveryPartnerId")
   const orderIdFromUrl = searchParams.get("orderId")
   const [orders, setOrders] = useState([])
   const [isLoading, setIsLoading] = useState(true)
@@ -56,6 +65,7 @@ export default function OrdersPage({ statusKey = "all" }) {
     page: 1,
     limit: ORDERS_PAGE_LIMIT,
   })
+  const [orderStats, setOrderStats] = useState({ ...EMPTY_ORDER_STATS })
   const [processingRefund, setProcessingRefund] = useState(null)
   const [processingActionOrderId, setProcessingActionOrderId] = useState(null)
   const [refundModalOpen, setRefundModalOpen] = useState(false)
@@ -347,6 +357,9 @@ export default function OrdersPage({ statusKey = "all" }) {
               : statusKey,
         cancelledBy: statusKey === "restaurant-cancelled" ? "restaurant" : undefined,
         ...(userIdFromUrl ? { userId: userIdFromUrl } : {}),
+        ...(deliveryPartnerIdFromUrl
+          ? { deliveryPartnerId: deliveryPartnerIdFromUrl }
+          : {}),
       }
 
       const response = await adminAPI.getOrders(params)
@@ -380,6 +393,17 @@ export default function OrdersPage({ statusKey = "all" }) {
           page: resolvedPage,
           limit,
         })
+        if (payload?.stats) {
+          setOrderStats({
+            total: Number(payload.stats.total || 0),
+            delivered: Number(payload.stats.delivered || 0),
+            cancelled: Number(payload.stats.cancelled || 0),
+            inProgress: Number(payload.stats.inProgress || 0),
+            totalSpent: Number(payload.stats.totalSpent || 0),
+          })
+        } else {
+          setOrderStats({ ...EMPTY_ORDER_STATS, total })
+        }
         if (resolvedPage !== currentPageRef.current) {
           setCurrentPage(resolvedPage)
         }
@@ -387,6 +411,7 @@ export default function OrdersPage({ statusKey = "all" }) {
         debugError("Failed to fetch orders:", response.data)
         if (!silent) toast.error("Failed to fetch orders")
         setOrders([])
+        setOrderStats({ ...EMPTY_ORDER_STATS })
         setPaginationMeta({
           total: 0,
           totalPages: 0,
@@ -400,6 +425,7 @@ export default function OrdersPage({ statusKey = "all" }) {
         toast.error(error.response?.data?.message || "Failed to fetch orders")
       }
       setOrders([])
+      setOrderStats({ ...EMPTY_ORDER_STATS })
       setPaginationMeta({
         total: 0,
         totalPages: 0,
@@ -409,7 +435,7 @@ export default function OrdersPage({ statusKey = "all" }) {
     } finally {
       if (!silent) setIsLoading(false)
     }
-  }, [statusKey, userIdFromUrl])
+  }, [statusKey, userIdFromUrl, deliveryPartnerIdFromUrl])
 
   const normalizedOrders = useMemo(() => {
     const safeOrders = Array.isArray(orders) ? orders : []
@@ -494,6 +520,8 @@ export default function OrdersPage({ statusKey = "all" }) {
         displayStatus = "Delivered"
       } else if (backendStatus === "cancelled_by_restaurant") {
         displayStatus = "Cancelled by Restaurant"
+      } else if (backendStatus === "rejected_by_restaurant") {
+        displayStatus = "Rejected by Restaurant"
       } else if (backendStatus === "cancelled_by_user") {
         displayStatus = "Cancelled by User"
       } else if (backendStatus === "cancelled_by_admin") {
@@ -570,6 +598,20 @@ export default function OrdersPage({ statusKey = "all" }) {
     })
   }, [orders])
 
+  useEffect(() => {
+    setCurrentPage(1)
+    currentPageRef.current = 1
+    fetchOrders({ silent: false, page: 1 })
+  }, [statusKey, fetchOrders])
+
+  const handlePageChange = useCallback((page) => {
+    const nextPage = Math.max(1, Number(page) || 1)
+    if (nextPage === currentPageRef.current) return
+    currentPageRef.current = nextPage
+    setCurrentPage(nextPage)
+    fetchOrders({ silent: true, page: nextPage })
+  }, [fetchOrders])
+
   const {
     searchQuery,
     setSearchQuery,
@@ -596,19 +638,15 @@ export default function OrdersPage({ statusKey = "all" }) {
     resetColumns,
   } = useOrdersManagement(normalizedOrders, statusKey, config.title)
 
-  useEffect(() => {
-    setCurrentPage(1)
-    currentPageRef.current = 1
-    fetchOrders({ silent: false, page: 1 })
-  }, [statusKey, fetchOrders])
+  // Local search/filters → client-side pagination.
+  // No local filters → server-side pagination.
+  const hasClientFilters = Boolean(searchQuery.trim()) || activeFiltersCount > 0
 
-  const handlePageChange = useCallback((page) => {
-    const nextPage = Math.max(1, Number(page) || 1)
-    if (nextPage === currentPageRef.current) return
-    currentPageRef.current = nextPage
-    setCurrentPage(nextPage)
-    fetchOrders({ silent: true, page: nextPage })
-  }, [fetchOrders])
+  const formatMoney = (amount) =>
+    `₹${Number(amount || 0).toLocaleString("en-IN", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    })}`
 
   useEffect(() => {
     if (statusKey !== "all") return undefined
@@ -744,6 +782,16 @@ export default function OrdersPage({ statusKey = "all" }) {
   }
 
   const handleReassignDriver = (order) => {
+    const status = String(order?.orderStatus || order?.status || "").toLowerCase()
+    if (
+      status.includes("rejected by restaurant") ||
+      status.includes("cancelled by restaurant") ||
+      status === "rejected_by_restaurant" ||
+      status === "cancelled_by_restaurant"
+    ) {
+      toast.error("Cannot reassign driver for restaurant-rejected orders")
+      return
+    }
     setSelectedOrderForReassign(order)
     setReassignModalOpen(true)
   }
@@ -941,9 +989,30 @@ export default function OrdersPage({ statusKey = "all" }) {
           </p>
         </div>
       )}
+      {deliveryPartnerIdFromUrl && (
+        <div className="mb-4 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => navigate("/admin/food/delivery-partners")}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back to Deliverymen
+          </button>
+          <p className="text-sm text-slate-500">
+            Showing all orders assigned to this driver, including admin assignments.
+          </p>
+        </div>
+      )}
       <OrdersTopbar 
-        title={userIdFromUrl ? "Customer Order History" : config.title} 
-        count={paginationMeta.total || count} 
+        title={
+          userIdFromUrl
+            ? "Customer Order History"
+            : deliveryPartnerIdFromUrl
+              ? "Driver Order History"
+              : config.title
+        } 
+        count={hasClientFilters ? count : (paginationMeta.total || count)} 
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
         onFilterClick={() => setIsFilterOpen(true)}
@@ -951,6 +1020,73 @@ export default function OrdersPage({ statusKey = "all" }) {
         onExport={handleExport}
         onSettingsClick={() => setIsSettingsOpen(true)}
       />
+
+      {/* Stats */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
+        {[
+          {
+            label: "Total orders",
+            value: orderStats.total,
+            icon: Package,
+            iconBg: "bg-blue-50",
+            iconColor: "text-blue-600",
+            display: String(orderStats.total || 0),
+          },
+          {
+            label: "Delivered",
+            value: orderStats.delivered,
+            icon: CheckCircle,
+            iconBg: "bg-emerald-50",
+            iconColor: "text-emerald-600",
+            display: String(orderStats.delivered || 0),
+          },
+          {
+            label: "In progress",
+            value: orderStats.inProgress,
+            icon: Truck,
+            iconBg: "bg-amber-50",
+            iconColor: "text-amber-600",
+            display: String(orderStats.inProgress || 0),
+          },
+          {
+            label: "Cancelled",
+            value: orderStats.cancelled,
+            icon: XCircle,
+            iconBg: "bg-rose-50",
+            iconColor: "text-rose-600",
+            display: String(orderStats.cancelled || 0),
+          },
+          {
+            label: "Total spent",
+            value: orderStats.totalSpent,
+            icon: IndianRupee,
+            iconBg: "bg-slate-100",
+            iconColor: "text-slate-700",
+            display: formatMoney(orderStats.totalSpent),
+          },
+        ].map((card) => {
+          const Icon = card.icon
+          return (
+            <div
+              key={card.label}
+              className="bg-white rounded-xl border border-slate-200 shadow-sm p-4"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-xs font-medium text-slate-500 truncate">{card.label}</p>
+                  <p className="mt-1.5 text-xl font-bold text-slate-900 tabular-nums truncate">
+                    {card.display}
+                  </p>
+                </div>
+                <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${card.iconBg}`}>
+                  <Icon className={`w-4 h-4 ${card.iconColor}`} />
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
       <FilterPanel
         isOpen={isFilterOpen}
         onClose={() => setIsFilterOpen(false)}
@@ -995,11 +1131,15 @@ export default function OrdersPage({ statusKey = "all" }) {
         onCancelOrder={handleCancelOrder}
         onReassignDriver={handleReassignDriver}
         actionLoadingOrderId={processingActionOrderId}
-        currentPage={paginationMeta.page || currentPage}
-        totalPages={paginationMeta.totalPages}
-        totalItems={paginationMeta.total}
-        pageSize={paginationMeta.limit || ORDERS_PAGE_LIMIT}
-        onPageChange={handlePageChange}
+        {...(hasClientFilters
+          ? { pageSize: ORDERS_PAGE_LIMIT }
+          : {
+              currentPage: paginationMeta.page || currentPage,
+              totalPages: paginationMeta.totalPages,
+              totalItems: paginationMeta.total,
+              pageSize: paginationMeta.limit || ORDERS_PAGE_LIMIT,
+              onPageChange: handlePageChange,
+            })}
       />
     </div>
   )

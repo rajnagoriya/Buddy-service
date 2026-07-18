@@ -1251,7 +1251,7 @@ export async function getTaxReportDetail(restaurantId, query = {}) {
 
 // ----- Customers / Users (admin) -----
 export async function getCustomers(query = {}) {
-    const limit = Math.min(Math.max(parseInt(query.limit, 10) || 50, 1), 1000);
+    const limit = Math.min(Math.max(parseInt(query.limit, 10) || 30, 1), 100);
     const page = Math.max(parseInt(query.page, 10) || 1, 1);
     const skip = (page - 1) * limit;
 
@@ -1260,6 +1260,11 @@ export async function getCustomers(query = {}) {
     if (query.status) {
         if (String(query.status) === 'active') filter.isActive = true;
         if (String(query.status) === 'inactive') filter.isActive = false;
+    }
+
+    if (query.codStatus) {
+        if (String(query.codStatus) === 'enabled') filter.isCodEnabled = true;
+        if (String(query.codStatus) === 'disabled') filter.isCodEnabled = false;
     }
 
     if (query.joiningDate && String(query.joiningDate).trim()) {
@@ -1273,6 +1278,21 @@ export async function getCustomers(query = {}) {
         }
     }
 
+    if (query.orderDate && String(query.orderDate).trim()) {
+        const d = new Date(String(query.orderDate));
+        if (!Number.isNaN(d.getTime())) {
+            const start = new Date(d);
+            start.setHours(0, 0, 0, 0);
+            const end = new Date(d);
+            end.setHours(23, 59, 59, 999);
+            const orderedUserIds = await FoodOrder.distinct('userId', {
+                createdAt: { $gte: start, $lte: end },
+                userId: { $ne: null }
+            });
+            filter._id = { $in: orderedUserIds };
+        }
+    }
+
     if (query.search && String(query.search).trim()) {
         const raw = String(query.search).trim().slice(0, 80);
         const term = raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -1283,13 +1303,111 @@ export async function getCustomers(query = {}) {
         ];
     }
 
-    const sort = {};
+    const sanitizeUrl = (s) => {
+        if (!s) return '';
+        const str = String(s).trim();
+        return str.replace(/^`+|`+$/g, '').trim();
+    };
+
+    const mapCustomer = (u, stats = { totalOrder: 0, totalOrderAmount: 0 }) => ({
+        id: u._id,
+        _id: u._id,
+        name: u.name || 'Unnamed',
+        email: u.email || '',
+        phone: u.phone || '',
+        profileImage: sanitizeUrl(u.profileImage || ''),
+        countryCode: u.countryCode || '+91',
+        status: u.isActive !== false,
+        isActive: u.isActive !== false,
+        isCodEnabled: u.isCodEnabled !== false,
+        isVerified: u.isVerified === true,
+        totalOrder: Number(stats.totalOrder || 0),
+        totalOrderAmount: Number(stats.totalOrderAmount || 0),
+        joiningDate: u.createdAt,
+        createdAt: u.createdAt
+    });
+
     const sortBy = String(query.sortBy || '').trim();
+    const needsOrderSort = sortBy === 'orders-asc' || sortBy === 'orders-desc';
+
+    let docs = [];
+    let total = 0;
+
+    if (needsOrderSort) {
+        const orderSortDir = sortBy === 'orders-asc' ? 1 : -1;
+        const [aggResult] = await FoodUser.aggregate([
+            { $match: filter },
+            {
+                $lookup: {
+                    from: 'food_orders',
+                    let: { uid: '$_id' },
+                    pipeline: [
+                        { $match: { $expr: { $eq: ['$userId', '$$uid'] } } },
+                        {
+                            $group: {
+                                _id: null,
+                                totalOrder: { $sum: 1 },
+                                totalOrderAmount: { $sum: { $ifNull: ['$pricing.total', 0] } }
+                            }
+                        }
+                    ],
+                    as: '_orderStats'
+                }
+            },
+            {
+                $addFields: {
+                    totalOrder: { $ifNull: [{ $arrayElemAt: ['$_orderStats.totalOrder', 0] }, 0] },
+                    totalOrderAmount: { $ifNull: [{ $arrayElemAt: ['$_orderStats.totalOrderAmount', 0] }, 0] }
+                }
+            },
+            { $project: { _orderStats: 0 } },
+            {
+                $facet: {
+                    items: [
+                        { $sort: { totalOrder: orderSortDir, createdAt: -1 } },
+                        { $skip: skip },
+                        { $limit: limit },
+                        {
+                            $project: {
+                                name: 1,
+                                email: 1,
+                                phone: 1,
+                                countryCode: 1,
+                                isVerified: 1,
+                                isActive: 1,
+                                isCodEnabled: 1,
+                                createdAt: 1,
+                                profileImage: 1,
+                                totalOrder: 1,
+                                totalOrderAmount: 1
+                            }
+                        }
+                    ],
+                    meta: [{ $count: 'total' }]
+                }
+            }
+        ]);
+        docs = aggResult?.items || [];
+        total = Number(aggResult?.meta?.[0]?.total || 0);
+
+        const customers = docs.map((u) =>
+            mapCustomer(u, {
+                totalOrder: u.totalOrder,
+                totalOrderAmount: u.totalOrderAmount
+            })
+        );
+        const totalPages = total > 0 ? Math.ceil(total / limit) : 0;
+        const stats = await getCustomerOverviewStats();
+        return { customers, total, page, limit, totalPages, stats };
+    }
+
+    const sort = {};
     if (sortBy === 'name-asc') sort.name = 1;
     else if (sortBy === 'name-desc') sort.name = -1;
+    else if (sortBy === 'joined-asc') sort.createdAt = 1;
     else sort.createdAt = -1;
 
-    const [docs, total] = await Promise.all([
+    const listResult = await Promise.all([
         FoodUser.find(filter)
             .sort(sort)
             .skip(skip)
@@ -1298,12 +1416,8 @@ export async function getCustomers(query = {}) {
             .lean(),
         FoodUser.countDocuments(filter)
     ]);
-
-    const sanitizeUrl = (s) => {
-        if (!s) return '';
-        const str = String(s).trim();
-        return str.replace(/^`+|`+$/g, '').trim();
-    };
+    docs = listResult[0];
+    total = listResult[1];
 
     const userIds = docs.map((u) => u._id).filter(Boolean);
     const orderStats = userIds.length > 0
@@ -1329,33 +1443,13 @@ export async function getCustomers(query = {}) {
         ])
     );
 
-    let customers = docs.map((u) => {
-        const stats = orderStatsMap.get(String(u._id)) || { totalOrder: 0, totalOrderAmount: 0 };
-        return ({
-        id: u._id,
-        _id: u._id,
-        name: u.name || 'Unnamed',
-        email: u.email || '',
-        phone: u.phone || '',
-        profileImage: sanitizeUrl(u.profileImage || ''),
-        countryCode: u.countryCode || '+91',
-        status: u.isActive !== false,
-        isActive: u.isActive !== false,
-        isCodEnabled: u.isCodEnabled !== false,
-        isVerified: u.isVerified === true,
-        totalOrder: stats.totalOrder,
-        totalOrderAmount: stats.totalOrderAmount,
-        joiningDate: u.createdAt,
-        createdAt: u.createdAt
-        });
-    });
+    const customers = docs.map((u) =>
+        mapCustomer(u, orderStatsMap.get(String(u._id)) || { totalOrder: 0, totalOrderAmount: 0 })
+    );
 
-    const chooseFirst = parseInt(query.chooseFirst, 10);
-    if (Number.isFinite(chooseFirst) && chooseFirst > 0) {
-        customers = customers.slice(0, chooseFirst);
-    }
-
-    return { customers, total, page, limit };
+    const totalPages = total > 0 ? Math.ceil(total / limit) : 0;
+    const stats = await getCustomerOverviewStats();
+    return { customers, total, page, limit, totalPages, stats };
 }
 
 export async function getCustomerById(id) {
@@ -1363,15 +1457,22 @@ export async function getCustomerById(id) {
     const u = await FoodUser.findById(id).select('-__v').lean();
     if (!u) return null;
     const customerObjectId = new mongoose.Types.ObjectId(id);
-    const orderStats = await FoodOrder.aggregate([
-        { $match: { userId: customerObjectId } },
-        {
-            $group: {
-                _id: '$userId',
-                totalOrders: { $sum: 1 },
-                totalOrderAmount: { $sum: { $ifNull: ['$pricing.total', 0] } }
+    const [orderStats, recentOrders] = await Promise.all([
+        FoodOrder.aggregate([
+            { $match: { userId: customerObjectId } },
+            {
+                $group: {
+                    _id: '$userId',
+                    totalOrders: { $sum: 1 },
+                    totalOrderAmount: { $sum: { $ifNull: ['$pricing.total', 0] } }
+                }
             }
-        }
+        ]),
+        FoodOrder.find({ userId: customerObjectId })
+            .sort({ createdAt: -1 })
+            .limit(5)
+            .select('orderId order_id restaurantName status pricing.total createdAt')
+            .lean()
     ]);
     const stats = orderStats?.[0] || {};
     const sanitizeUrl = (s) => {
@@ -1385,17 +1486,29 @@ export async function getCustomerById(id) {
         name: u.name || 'Unnamed',
         email: u.email || '',
         phone: u.phone || '',
+        phoneVerified: u.isVerified === true,
         profileImage: sanitizeUrl(u.profileImage || ''),
         countryCode: u.countryCode || '+91',
         status: u.isActive !== false,
         isActive: u.isActive !== false,
+        isCodEnabled: u.isCodEnabled !== false,
         isVerified: u.isVerified === true,
+        gender: u.gender || '',
+        dateOfBirth: u.dateOfBirth || null,
+        addresses: Array.isArray(u.addresses) ? u.addresses : [],
         totalOrders: Number(stats.totalOrders || 0),
         totalOrder: Number(stats.totalOrders || 0),
         totalOrderAmount: Number(stats.totalOrderAmount || 0),
         joiningDate: u.createdAt,
         createdAt: u.createdAt,
-        updatedAt: u.updatedAt
+        updatedAt: u.updatedAt,
+        orders: (recentOrders || []).map((o) => ({
+            orderId: o.orderId || o.order_id || String(o._id),
+            restaurantName: o.restaurantName || '—',
+            status: o.status || '',
+            total: Number(o?.pricing?.total || 0),
+            createdAt: o.createdAt
+        }))
     };
 }
 
@@ -1404,14 +1517,33 @@ export async function updateCustomerStatus(id, isActive) {
     const updatedDoc = await FoodUser.findByIdAndUpdate(
         id,
         { $set: { isActive: Boolean(isActive) } },
-        { new: true }
+        { new: true, select: '_id isActive' }
     );
     if (!updatedDoc) return null;
-    const updated = updatedDoc.toObject();
-    if (updated.isActive === false) {
-        await FoodRefreshToken.deleteMany({ userId: updated._id });
+    if (updatedDoc.isActive === false) {
+        await FoodRefreshToken.deleteMany({ userId: updatedDoc._id });
     }
-    return updated;
+    return true;
+}
+
+async function getCustomerOverviewStats() {
+    const base = { role: 'USER' };
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const [total, active, inactive, newToday, codEnabled] = await Promise.all([
+        FoodUser.countDocuments(base),
+        FoodUser.countDocuments({ ...base, isActive: { $ne: false } }),
+        FoodUser.countDocuments({ ...base, isActive: false }),
+        FoodUser.countDocuments({ ...base, createdAt: { $gte: startOfDay } }),
+        FoodUser.countDocuments({ ...base, isCodEnabled: { $ne: false } })
+    ]);
+    return {
+        total: Number(total || 0),
+        active: Number(active || 0),
+        inactive: Number(inactive || 0),
+        newToday: Number(newToday || 0),
+        codEnabled: Number(codEnabled || 0)
+    };
 }
 
 export async function getSupportTickets(query = {}) {
@@ -2114,40 +2246,13 @@ export async function getContactMessages(query = {}) {
     };
 }
 
-// ----- Delivery Cash Limit (admin) -----
+// ----- Delivery Cash Limit (settings used by delivery wallet / withdrawal min) -----
 export async function getDeliveryCashLimitSettings() {
     const doc = await FoodDeliveryCashLimit.findOne({ isActive: true }).sort({ createdAt: -1 }).lean();
     const settings = doc || { deliveryCashLimit: 0, deliveryWithdrawalLimit: 100, isActive: true };
     return {
         deliveryCashLimit: Number(settings.deliveryCashLimit) || 0,
         deliveryWithdrawalLimit: Number(settings.deliveryWithdrawalLimit) || 100
-    };
-}
-
-export async function upsertDeliveryCashLimitSettings(body = {}) {
-    const existing = await FoodDeliveryCashLimit.findOne({ isActive: true }).sort({ createdAt: -1 });
-    const nextCashLimit = body.deliveryCashLimit;
-    const nextWithdrawalLimit = body.deliveryWithdrawalLimit;
-
-    if (existing) {
-        if (nextCashLimit !== undefined) existing.deliveryCashLimit = Math.max(0, Number(nextCashLimit) || 0);
-        if (nextWithdrawalLimit !== undefined) existing.deliveryWithdrawalLimit = Math.max(0, Number(nextWithdrawalLimit) || 0);
-        await existing.save();
-        return {
-            deliveryCashLimit: existing.deliveryCashLimit,
-            deliveryWithdrawalLimit: existing.deliveryWithdrawalLimit
-        };
-    }
-
-    const created = await FoodDeliveryCashLimit.create({
-        deliveryCashLimit: nextCashLimit !== undefined ? Math.max(0, Number(nextCashLimit) || 0) : 0,
-        deliveryWithdrawalLimit: nextWithdrawalLimit !== undefined ? Math.max(0, Number(nextWithdrawalLimit) || 0) : 100,
-        isActive: true
-    });
-
-    return {
-        deliveryCashLimit: created.deliveryCashLimit,
-        deliveryWithdrawalLimit: created.deliveryWithdrawalLimit
     };
 }
 
@@ -4086,7 +4191,7 @@ export async function updateDeliverySupportTicket(id, body = {}) {
 
 // ----- Delivery partners (approved list) -----
 export async function getDeliveryPartners(query) {
-    const { page = 1, limit = 1000, search } = query;
+    const { page = 1, limit = 30, search } = query;
     const filter = { status: 'approved' };
     if (search && typeof search === 'string' && search.trim()) {
         const term = search.trim();
@@ -4099,8 +4204,8 @@ export async function getDeliveryPartners(query) {
         ];
     }
 
-    const skip = Math.max(0, (Number(page) || 1) - 1) * Math.max(1, Math.min(1000, Number(limit) || 100));
-    const limitNum = Math.max(1, Math.min(1000, Number(limit) || 100));
+    const skip = Math.max(0, (Number(page) || 1) - 1) * Math.max(1, Math.min(100, Number(limit) || 30));
+    const limitNum = Math.max(1, Math.min(100, Number(limit) || 30));
 
     const [list, total] = await Promise.all([
         FoodDeliveryPartner.find(filter)
@@ -5193,15 +5298,32 @@ export async function getWithdrawals(query = {}) {
         filter.restaurantId = new mongoose.Types.ObjectId(query.restaurantId);
     }
 
-    const [withdrawals, total] = await Promise.all([
+    const [withdrawals, total, statusCountsAgg] = await Promise.all([
         FoodRestaurantWithdrawal.find(filter)
             .populate('restaurantId', 'restaurantName profileImage ownerName phone ownerPhone accountHolderName accountNumber ifscCode accountType upiId upiQrImage')
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit)
             .lean(),
-        FoodRestaurantWithdrawal.countDocuments(filter)
+        FoodRestaurantWithdrawal.countDocuments(filter),
+        FoodRestaurantWithdrawal.aggregate([
+            { $group: { _id: '$status', count: { $sum: 1 }, amount: { $sum: '$amount' } } },
+        ]),
     ]);
+
+    const statusCounts = { all: 0, pending: 0, approved: 0, rejected: 0 };
+    const amountTotals = { all: 0, pending: 0, approved: 0, rejected: 0 };
+    for (const row of statusCountsAgg || []) {
+        const key = String(row._id || '').toLowerCase();
+        const count = Number(row.count) || 0;
+        const amount = Number(row.amount) || 0;
+        if (Object.prototype.hasOwnProperty.call(statusCounts, key)) {
+            statusCounts[key] = count;
+            amountTotals[key] = amount;
+        }
+        statusCounts.all += count;
+        amountTotals.all += amount;
+    }
 
     // UI expects status with first letter capitalized, and data in 'requests' key
     const requests = withdrawals.map((w) => ({
@@ -5220,7 +5342,7 @@ export async function getWithdrawals(query = {}) {
         status: w.status.charAt(0).toUpperCase() + w.status.slice(1)
     }));
 
-    return { requests, total, page, limit };
+    return { requests, total, page, limit, statusCounts, amountTotals };
 }
 
 export async function updateWithdrawalStatus(id, { status, adminNote, rejectionReason, transactionId }) {
@@ -5245,80 +5367,203 @@ export async function updateWithdrawalStatus(id, { status, adminNote, rejectionR
 }
 
 export async function getDeliveryWithdrawals(query = {}) {
-    const limit = parseInt(query.limit, 10) || 100;
-    const page = parseInt(query.page, 10) || 1;
+    const limit = Math.min(Math.max(parseInt(query.limit, 10) || 30, 1), 100);
+    const page = Math.max(parseInt(query.page, 10) || 1, 1);
     const skip = (page - 1) * limit;
 
     const filter = {};
-    if (query.status && query.status !== 'All') {
-        filter.status = query.status.toLowerCase();
+    if (query.status && String(query.status).toLowerCase() !== 'all') {
+        filter.status = String(query.status).toLowerCase();
     }
 
-    if (query.search) {
-        // Search by amount or placeholder for name (name requires join usually)
-        if (!isNaN(query.search)) {
-            filter.amount = Number(query.search);
+    if (query.from || query.to) {
+        filter.createdAt = {};
+        if (query.from) {
+            const from = new Date(query.from);
+            if (!Number.isNaN(from.getTime())) {
+                from.setHours(0, 0, 0, 0);
+                filter.createdAt.$gte = from;
+            }
+        }
+        if (query.to) {
+            const to = new Date(query.to);
+            if (!Number.isNaN(to.getTime())) {
+                to.setHours(23, 59, 59, 999);
+                filter.createdAt.$lte = to;
+            }
+        }
+        if (!Object.keys(filter.createdAt).length) {
+            delete filter.createdAt;
         }
     }
 
-    const [withdrawals, total] = await Promise.all([
+    const search = String(query.search || '').trim();
+    if (search) {
+        const partnerOr = [
+            { name: new RegExp(search, 'i') },
+            { phone: new RegExp(search, 'i') },
+        ];
+        if (mongoose.Types.ObjectId.isValid(search)) {
+            partnerOr.push({ _id: new mongoose.Types.ObjectId(search) });
+        }
+
+        const matchedPartners = await FoodDeliveryPartner.find({ $or: partnerOr })
+            .select('_id')
+            .limit(200)
+            .lean();
+        const partnerIds = matchedPartners.map((p) => p._id);
+
+        const searchClauses = [];
+        if (partnerIds.length) {
+            searchClauses.push({ deliveryPartnerId: { $in: partnerIds } });
+        }
+        if (!Number.isNaN(Number(search))) {
+            searchClauses.push({ amount: Number(search) });
+        }
+        if (searchClauses.length) {
+            filter.$or = searchClauses;
+        } else {
+            // Force empty result when search has no matches
+            filter._id = { $exists: false };
+        }
+    }
+
+    const [withdrawals, total, statusCountsAgg] = await Promise.all([
         FoodDeliveryWithdrawal.find(filter)
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit)
-            .populate('deliveryPartnerId', 'name phone profilePartnerId upiId upiQrCode')
+            .populate('deliveryPartnerId', 'name phone upiId upiQrCode bankAccountNumber bankIfscCode bankName bankAccountHolderName')
             .lean(),
-        FoodDeliveryWithdrawal.countDocuments(filter)
+        FoodDeliveryWithdrawal.countDocuments(filter),
+        FoodDeliveryWithdrawal.aggregate([
+            { $group: { _id: '$status', count: { $sum: 1 }, amount: { $sum: '$amount' } } },
+        ]),
     ]);
 
-    const requests = withdrawals.map((w) => ({
-        ...w,
-        id: w._id,
-        deliveryName: w.deliveryPartnerId?.name || 'N/A',
-        deliveryPhone: w.deliveryPartnerId?.phone || 'N/A',
-        deliveryIdString: w.deliveryPartnerId?.profilePartnerId || 'N/A',
-        status: w.status.charAt(0).toUpperCase() + w.status.slice(1)
-    }));
+    const statusCounts = { all: 0, pending: 0, approved: 0, rejected: 0 };
+    const amountTotals = { all: 0, pending: 0, approved: 0, rejected: 0 };
+    for (const row of statusCountsAgg || []) {
+        const key = String(row._id || '').toLowerCase();
+        const count = Number(row.count) || 0;
+        const amount = Number(row.amount) || 0;
+        if (Object.prototype.hasOwnProperty.call(statusCounts, key)) {
+            statusCounts[key] = count;
+            amountTotals[key] = amount;
+        }
+        statusCounts.all += count;
+        amountTotals.all += amount;
+    }
 
-    return { requests, total, page, limit };
+    const requests = withdrawals.map((w) => {
+        const partner = w.deliveryPartnerId || {};
+        const partnerId = partner?._id || w.deliveryPartnerId;
+        return {
+            ...w,
+            id: w._id,
+            deliveryPartnerId: partnerId,
+            deliveryName: partner?.name || 'N/A',
+            deliveryPhone: partner?.phone || 'N/A',
+            deliveryIdString: partnerId
+                ? `DP-${String(partnerId).slice(-8).toUpperCase()}`
+                : 'N/A',
+            upiId: w.upiId || partner?.upiId || '',
+            upiQrCode: w.upiQrCode || partner?.upiQrCode || '',
+            bankDetails: w.bankDetails || {
+                accountNumber: partner?.bankAccountNumber || '',
+                ifscCode: partner?.bankIfscCode || '',
+                bankName: partner?.bankName || '',
+                accountHolderName: partner?.bankAccountHolderName || '',
+            },
+            status: w.status
+                ? w.status.charAt(0).toUpperCase() + w.status.slice(1)
+                : 'Pending',
+        };
+    });
+
+    const pages = Math.max(1, Math.ceil(total / limit));
+
+    return {
+        requests,
+        total,
+        page,
+        limit,
+        pages,
+        pagination: { page, limit, total, pages },
+        statusCounts,
+        amountTotals,
+    };
 }
 
 export async function updateDeliveryWithdrawalStatus(id, { status, adminNote, rejectionReason, transactionId }) {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) throw new ValidationError('Invalid withdrawal ID');
-    
-    const update = {
-        status: String(status).toLowerCase(),
-        adminNote,
-        rejectionReason,
-        transactionId,
-        processedAt: new Date()
-    };
 
-    const updated = await FoodDeliveryWithdrawal.findByIdAndUpdate(
-        id,
+    const nextStatus = String(status || '').toLowerCase();
+    if (!['approved', 'rejected'].includes(nextStatus)) {
+        throw new ValidationError('Status must be Approved or Rejected');
+    }
+
+    const existing = await FoodDeliveryWithdrawal.findById(id);
+    if (!existing) throw new ValidationError('Withdrawal request not found');
+
+    if (existing.status !== 'pending') {
+        throw new ValidationError(`Withdrawal is already ${existing.status}`);
+    }
+
+    const update = {
+        status: nextStatus,
+        processedAt: new Date(),
+    };
+    if (adminNote !== undefined) update.adminNote = adminNote;
+    if (rejectionReason !== undefined) update.rejectionReason = rejectionReason;
+    if (transactionId !== undefined) update.transactionId = transactionId;
+
+    // Atomic pending → nextStatus to avoid double processing
+    const updated = await FoodDeliveryWithdrawal.findOneAndUpdate(
+        { _id: id, status: 'pending' },
         { $set: update },
         { new: true }
-    ).populate('deliveryPartnerId', 'name phone profilePartnerId').lean();
+    )
+        .populate('deliveryPartnerId', 'name phone')
+        .lean();
 
-    if (!updated) throw new ValidationError('Withdrawal request not found');
+    if (!updated) {
+        throw new ValidationError('Withdrawal was already processed by another admin');
+    }
 
-    // If approved, deduct from wallet balance
-    if (status.toLowerCase() === 'approved' || status.toLowerCase() === 'processed') {
+    // On approve, deduct from driver wallet ledger (idempotent via pending guard above)
+    if (nextStatus === 'approved') {
         const amount = Number(updated.amount || 0);
-        if (amount > 0) {
+        const partnerId = updated.deliveryPartnerId?._id || updated.deliveryPartnerId;
+        if (amount > 0 && partnerId) {
             await FoodDeliveryWallet.findOneAndUpdate(
-                { deliveryPartnerId: updated.deliveryPartnerId?._id || updated.deliveryPartnerId },
-                { 
-                    $inc: { 
+                { deliveryPartnerId: partnerId },
+                {
+                    $inc: {
                         balance: -amount,
-                        totalSettled: amount 
-                    } 
-                }
+                        totalSettled: amount,
+                    },
+                    $setOnInsert: {
+                        deliveryPartnerId: partnerId,
+                        lockedAmount: 0,
+                        cashInHand: 0,
+                        totalEarnings: 0,
+                        totalBonus: 0,
+                        totalDeliveries: 0,
+                    },
+                },
+                { upsert: true, new: true }
             );
         }
     }
 
-    return updated;
+    return {
+        ...updated,
+        id: updated._id,
+        status: updated.status.charAt(0).toUpperCase() + updated.status.slice(1),
+        deliveryName: updated.deliveryPartnerId?.name || 'N/A',
+        deliveryPhone: updated.deliveryPartnerId?.phone || 'N/A',
+    };
 }
 
 /**
@@ -5447,54 +5692,6 @@ export async function getDeliveryWallets(query = {}) {
 
     return { 
         wallets, 
-        pagination: { 
-            total, 
-            page, 
-            limit, 
-            pages: Math.ceil(total / limit) || 1 
-        } 
-    };
-}
-
-/**
- * Fetch cash limit settlement (deposit) transactions
- */
-export async function getCashLimitSettlements(query = {}) {
-    const limit = parseInt(query.limit, 10) || 20;
-    const page = parseInt(query.page, 10) || 1;
-    const skip = (page - 1) * limit;
-
-    const filter = {};
-    if (query.search) {
-        // Search by razorpay ID or find partner IDs to search by partner
-        if (query.search.startsWith('pay_')) {
-            filter.razorpayPaymentId = query.search;
-        }
-    }
-
-    const [deposits, total] = await Promise.all([
-        FoodDeliveryCashDeposit.find(filter)
-            .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(limit)
-            .populate('deliveryPartnerId', 'name phone')
-            .lean(),
-        FoodDeliveryCashDeposit.countDocuments(filter)
-    ]);
-
-    const transactions = deposits.map((d) => ({
-        id: d._id,
-        createdAt: d.createdAt,
-        deliveryId: d.deliveryPartnerId?._id,
-        deliveryName: d.deliveryPartnerId?.name || 'N/A',
-        deliveryIdString: d.deliveryPartnerId?.phone || 'N/A',
-        amount: Number(d.amount || 0),
-        status: d.status,
-        razorpayPaymentId: d.razorpayPaymentId || '-'
-    }));
-
-    return { 
-        transactions, 
         pagination: { 
             total, 
             page, 

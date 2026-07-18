@@ -35,7 +35,6 @@ import { DateRangeCalendar } from "@food/components/ui/date-range-calendar"
 import { clearModuleAuth, clearAuthData, getCurrentUser } from "@food/utils/auth"
 import { restaurantAPI } from "@food/api"
 import { firebaseAuth, ensureFirebaseInitialized } from "@food/firebase"
-import BottomNavOrders from "@food/components/restaurant/BottomNavOrders"
 import RestaurantPanelHeader from "@food/components/restaurant/panel/RestaurantPanelHeader"
 import RestaurantPanelModal, { RestaurantConfirmModal } from "@food/components/restaurant/panel/RestaurantPanelModal"
 import { EXPLORE_SECTIONS, RESTAURANT_BASE } from "@food/utils/restaurantNavConfig"
@@ -866,7 +865,7 @@ export default function ExploreMore() {
         duration: 0.2,
         ease: [0.25, 0.1, 0.25, 1]
       }}
-      className="rt-panel-bg min-h-screen overflow-x-hidden pb-24 lg:pb-8"
+      className="rt-panel-bg min-h-screen overflow-x-hidden pb-8"
     >
       <div className="hidden lg:block">
         <RestaurantPanelHeader title="Settings" subtitle={restaurantDisplayName} showSearch />
@@ -1512,7 +1511,6 @@ export default function ExploreMore() {
           </>
         ) : null}
       </RestaurantPanelModal>
-      <BottomNavOrders />
     </motion.div>
   )
 }

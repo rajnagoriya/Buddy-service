@@ -7,7 +7,6 @@ export default function useRestaurantLayout() {
 
   return {
     isDesktop,
-    hideBottomNav: isDesktop,
     showSidebar: isDesktop,
   }
 }

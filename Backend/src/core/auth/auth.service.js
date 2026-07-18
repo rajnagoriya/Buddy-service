@@ -26,6 +26,7 @@ const ROLES = {
   USER: "USER",
   RESTAURANT: "RESTAURANT",
   DELIVERY_PARTNER: "DELIVERY_PARTNER",
+  DRIVER: "DRIVER",
   ADMIN: "ADMIN",
 };
 
@@ -709,8 +710,13 @@ export const getProfile = async (userId, role) => {
         };
       }
       break;
-    case ROLES.DELIVERY_PARTNER: {
-      const partner = await FoodDeliveryPartner.findById(id).populate('zone').lean();
+    case ROLES.DELIVERY_PARTNER:
+    case ROLES.DRIVER: {
+      // Unified identity login uses role=DRIVER with userId=partner._id (or identity._id).
+      let partner = await FoodDeliveryPartner.findById(id).populate('zone').lean();
+      if (!partner && mongoose.Types.ObjectId.isValid(id)) {
+        partner = await FoodDeliveryPartner.findOne({ identityId: id }).populate('zone').lean();
+      }
       if (!partner) break;
       const deliveryId = partner._id
         ? `DP-${partner._id.toString().slice(-8).toUpperCase()}`

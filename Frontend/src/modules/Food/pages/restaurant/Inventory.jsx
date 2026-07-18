@@ -1929,7 +1929,6 @@ export default function Inventory() {
     <RestaurantSubPageShell
       title="Menu inventory"
       subtitle="Manage dishes, stock, and add-ons"
-      showBottomNav
       contentClassName="space-y-4 pb-28 lg:pb-8"
     >
       <InventoryStatsRow activeTab={activeTab} stats={inventoryStats} />

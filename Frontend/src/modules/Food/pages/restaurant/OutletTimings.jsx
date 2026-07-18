@@ -238,7 +238,6 @@ export default function OutletTimings() {
         title="Hours & status"
         subtitle="Online availability and weekly schedule"
         backTo={`${RESTAURANT_BASE}/explore`}
-        showBottomNav
       >
         <div className="py-12 text-center text-sm text-gray-500">Loading outlet hours...</div>
       </RestaurantSubPageShell>
@@ -251,7 +250,6 @@ export default function OutletTimings() {
         title="Hours & status"
         subtitle="Online availability and weekly schedule"
         backTo={`${RESTAURANT_BASE}/explore`}
-        showBottomNav
         contentClassName="space-y-5 pb-10"
       >
         <OutletOnlineStatusCard

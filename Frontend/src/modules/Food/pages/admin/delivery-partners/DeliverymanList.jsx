@@ -1,12 +1,15 @@
-import { useState, useMemo, useEffect } from "react"
-import { Search, Download, ChevronDown, Eye, User, Star, ArrowUpDown, Settings, FileText, FileSpreadsheet, Loader2, Check, Columns, ExternalLink, Calendar, MapPin, CreditCard, Mail, Phone, Bike, FileCheck, Pencil, Save, Trash2, X, MoreVertical } from "lucide-react"
+import { useState, useMemo, useEffect, useCallback } from "react"
+import { useNavigate } from "react-router-dom"
+import { Search, ChevronLeft, ChevronRight, Eye, User, Star, ArrowUpDown, Settings, FileText, FileSpreadsheet, Loader2, Check, Columns, ExternalLink, Calendar, MapPin, CreditCard, Mail, Phone, Bike, FileCheck, Save, Trash2, MoreVertical, History } from "lucide-react"
 import { adminAPI } from "@food/api"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
 import { exportDeliverymenToExcel, exportDeliverymenToPDF } from "@food/components/admin/deliveryman/deliverymanExportUtils"
+import { extractPagination } from "@food/utils/pagination"
 import { toast } from "sonner"
 const debugError = () => {}
 
+const PAGE_SIZE = 30
 
 const formatCurrency = (amount) => {
   const numericAmount = Number(amount)
@@ -14,8 +17,34 @@ const formatCurrency = (amount) => {
   return `\u20B9${numericAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
+const mergePartnersWithWallets = (partners, walletRows = []) => {
+  const walletMap = new Map(
+    walletRows.map((wallet) => [String(wallet.deliveryId), wallet]),
+  )
+
+  return partners.map((partner) => {
+    const wallet = walletMap.get(String(partner._id))
+    return {
+      ...partner,
+      walletSummary: wallet || null,
+      pocketBalance: wallet?.pocketBalance || 0,
+      cashInHand: wallet?.cashInHand || 0,
+      remainingCashLimit: wallet?.remainingCashLimit || 0,
+      totalEarning: wallet?.totalEarning || 0,
+      bonus: wallet?.bonus || 0,
+      totalWithdrawn: wallet?.totalWithdrawn || 0,
+      availableCashLimit: wallet?.availableCashLimit || 0,
+    }
+  })
+}
+
 export default function DeliverymanList() {
+  const navigate = useNavigate()
   const [searchQuery, setSearchQuery] = useState("")
+  const [debouncedSearch, setDebouncedSearch] = useState("")
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalPartners, setTotalPartners] = useState(0)
+  const [totalPages, setTotalPages] = useState(0)
   const [deliverymen, setDeliverymen] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -25,9 +54,6 @@ export default function DeliverymanList() {
   const [isEmploymentOpen, setIsEmploymentOpen] = useState(false)
   const [employmentDetails, setEmploymentDetails] = useState(null)
   const [employmentLoading, setEmploymentLoading] = useState(false)
-  const [editingDeliveryId, setEditingDeliveryId] = useState(null)
-  const [editValues, setEditValues] = useState({ pocketBalance: "", cashInHand: "" })
-  const [savingDeliveryId, setSavingDeliveryId] = useState(null)
   const [deletingDeliveryId, setDeletingDeliveryId] = useState(null)
   const [statusFilter, setStatusFilter] = useState("all")
   const [zoneFilter, setZoneFilter] = useState("all")
@@ -44,89 +70,63 @@ export default function DeliverymanList() {
     actions: true,
   })
 
-  const fetchAllWalletRows = async (search = "") => {
-    const walletLimit = 100
-    let currentPage = 1
-    let totalPages = 1
-    const allRows = []
-
-    do {
-      const response = await adminAPI.getDeliveryBoyWallets({
-        search: search || undefined,
-        page: currentPage,
-        limit: walletLimit,
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const nextSearch = searchQuery.trim()
+      setDebouncedSearch((prev) => {
+        if (prev !== nextSearch) {
+          setCurrentPage(1)
+        }
+        return nextSearch
       })
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
 
-      if (!response?.data?.success) {
-        break
-      }
-
-      const data = response.data.data || {}
-      const rows = data.wallets || []
-      allRows.push(...rows)
-      totalPages = Number(data.pagination?.pages) || 1
-      currentPage += 1
-    } while (currentPage <= totalPages)
-
-    return allRows
-  }
-
-  // Fetch delivery partners from API
-  const fetchDeliverymen = async () => {
+  const fetchDeliverymen = useCallback(async () => {
     try {
       setLoading(true)
       setError(null)
-      
+
       const params = {
-        page: 1,
-        limit: 1000, // Get all for now
+        page: currentPage,
+        limit: PAGE_SIZE,
+        ...(debouncedSearch ? { search: debouncedSearch } : {}),
       }
 
-      // Add search to params if provided
-      if (searchQuery.trim()) {
-        params.search = searchQuery.trim()
-      }
-
-      const [partnersResponse, walletRowsResult] = await Promise.allSettled([
+      const [partnersResponse, walletsResponse] = await Promise.allSettled([
         adminAPI.getDeliveryPartners(params),
-        fetchAllWalletRows(searchQuery.trim()),
+        adminAPI.getDeliveryBoyWallets(params),
       ])
 
       if (partnersResponse.status === "fulfilled" && partnersResponse.value?.data?.success) {
-        const partners = partnersResponse.value.data.data.deliveryPartners || []
-        const walletRows = walletRowsResult.status === "fulfilled" ? walletRowsResult.value || [] : []
+        const data = partnersResponse.value.data.data || {}
+        const partners = data.deliveryPartners || []
+        const pagination = extractPagination(data)
+        const walletRows =
+          walletsResponse.status === "fulfilled" && walletsResponse.value?.data?.success
+            ? walletsResponse.value.data.data?.wallets || []
+            : []
 
-        const walletMap = new Map(
-          walletRows.map((wallet) => [String(wallet.deliveryId), wallet]),
+        setDeliverymen(mergePartnersWithWallets(partners, walletRows))
+        setTotalPartners(pagination.total || 0)
+        setTotalPages(
+          pagination.totalPages ||
+            Math.ceil((pagination.total || 0) / PAGE_SIZE) ||
+            0,
         )
-
-        const mergedPartners = partners.map((partner) => {
-          const wallet = walletMap.get(String(partner._id))
-          return {
-            ...partner,
-            walletSummary: wallet || null,
-            pocketBalance: wallet?.pocketBalance || 0,
-            cashInHand: wallet?.cashInHand || 0,
-            remainingCashLimit: wallet?.remainingCashLimit || 0,
-            totalEarning: wallet?.totalEarning || 0,
-            bonus: wallet?.bonus || 0,
-            totalWithdrawn: wallet?.totalWithdrawn || 0,
-            availableCashLimit: wallet?.availableCashLimit || 0,
-          }
-        })
-
-        setDeliverymen(mergedPartners)
       } else {
         setError("Failed to fetch delivery partners")
         setDeliverymen([])
+        setTotalPartners(0)
+        setTotalPages(0)
       }
     } catch (err) {
       debugError("Error fetching delivery partners:", err)
-      
-      // Better error handling
+
       let errorMessage = "Failed to fetch delivery partners. Please try again."
-      
-      if (err.code === 'ERR_NETWORK') {
+
+      if (err.code === "ERR_NETWORK") {
         errorMessage = "Network error. Please check if backend server is running."
       } else if (err.response?.status === 401) {
         errorMessage = "Unauthorized. Please login again."
@@ -137,76 +137,19 @@ export default function DeliverymanList() {
       } else if (err.message) {
         errorMessage = err.message
       }
-      
+
       setError(errorMessage)
       setDeliverymen([])
+      setTotalPartners(0)
+      setTotalPages(0)
     } finally {
       setLoading(false)
     }
-  }
+  }, [currentPage, debouncedSearch])
 
-  // Fetch on mount and setup polling for real-time updates
   useEffect(() => {
     fetchDeliverymen()
-    
-    // Polling interval: every 8 seconds refresh data (real-time request)
-    const interval = setInterval(() => {
-      // Pass a flag or just call fetchDeliverymen
-      // To avoid showing loading spinner on every poll, we could add a quietFetch
-      fetchDeliverymenQuietly()
-    }, 8000)
-
-    return () => clearInterval(interval)
-  }, [])
-
-  const fetchDeliverymenQuietly = async () => {
-    try {
-      const params = { page: 1, limit: 1000 }
-      if (searchQuery.trim()) {
-        params.search = searchQuery.trim()
-      }
-
-      const [partnersResponse, walletRowsResult] = await Promise.allSettled([
-        adminAPI.getDeliveryPartners(params),
-        fetchAllWalletRows(searchQuery.trim()),
-      ])
-
-      if (partnersResponse.status === "fulfilled" && partnersResponse.value?.data?.success) {
-        const partners = partnersResponse.value.data.data.deliveryPartners || []
-        const walletRows = walletRowsResult.status === "fulfilled" ? walletRowsResult.value || [] : []
-        const walletMap = new Map(walletRows.map((wallet) => [String(wallet.deliveryId), wallet]))
-
-        const mergedPartners = partners.map((partner) => {
-          const wallet = walletMap.get(String(partner._id))
-          return {
-            ...partner,
-            walletSummary: wallet || null,
-            pocketBalance: wallet?.pocketBalance || 0,
-            cashInHand: wallet?.cashInHand || 0,
-            remainingCashLimit: wallet?.remainingCashLimit || 0,
-            totalEarning: wallet?.totalEarning || 0,
-            bonus: wallet?.bonus || 0,
-            totalWithdrawn: wallet?.totalWithdrawn || 0,
-            availableCashLimit: wallet?.availableCashLimit || 0,
-          }
-        })
-
-        setDeliverymen(mergedPartners)
-      }
-    } catch (err) {
-      debugError("Quiet fetch failed", err)
-    }
-  }
-
-  // Debounced search effect
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      fetchDeliverymen()
-    }, 500) // Wait 500ms after user stops typing
-
-    return () => clearTimeout(timer)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchQuery])
+  }, [fetchDeliverymen])
 
   const zonesList = useMemo(() => {
     const list = []
@@ -234,6 +177,15 @@ export default function DeliverymanList() {
     }
     return result
   }, [deliverymen, statusFilter, zoneFilter])
+
+  const handleViewOrderHistory = (deliveryman) => {
+    const partnerId = deliveryman?._id || deliveryman?.id
+    if (!partnerId) {
+      toast.error("Delivery partner ID not found")
+      return
+    }
+    navigate(`/admin/food/orders/all?deliveryPartnerId=${partnerId}`)
+  }
 
   const handleView = async (deliveryman) => {
     try {
@@ -387,106 +339,6 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
     actions: "Actions",
   }
 
-  const startEditingWallet = (deliveryman) => {
-    setEditingDeliveryId(String(deliveryman._id))
-    setEditValues({
-      pocketBalance: String(Number(deliveryman.pocketBalance) || 0),
-      cashInHand: String(Number(deliveryman.cashInHand) || 0),
-    })
-  }
-
-  const cancelEditingWallet = () => {
-    setEditingDeliveryId(null)
-    setEditValues({ pocketBalance: "", cashInHand: "" })
-  }
-
-  const updateWalletFieldValue = (field, value) => {
-    setEditValues((prev) => ({ ...prev, [field]: value }))
-  }
-
-  const saveWalletChanges = async (deliveryman) => {
-    const nextPocketBalance = Number(editValues.pocketBalance)
-    const nextCashInHand = Number(editValues.cashInHand)
-
-    if (!Number.isFinite(nextPocketBalance) || nextPocketBalance < 0) {
-      toast.error("Pocket balance must be a valid non-negative number")
-      return
-    }
-
-    if (!Number.isFinite(nextCashInHand) || nextCashInHand < 0) {
-      toast.error("Cash in hand must be a valid non-negative number")
-      return
-    }
-
-    try {
-      setSavingDeliveryId(String(deliveryman._id))
-      const response = await adminAPI.updateDeliveryBoyWallet({
-        walletId: deliveryman.walletSummary?.walletId,
-        deliveryId: deliveryman._id,
-        pocketBalance: nextPocketBalance,
-        cashInHand: nextCashInHand,
-      })
-
-      if (!response?.data?.success) {
-        toast.error(response?.data?.message || "Failed to update wallet")
-        return
-      }
-
-      const updatedWallet = response.data.data || {}
-      setDeliverymen((prev) =>
-        prev.map((item) =>
-          String(item._id) === String(deliveryman._id)
-            ? {
-                ...item,
-                pocketBalance: updatedWallet.pocketBalance ?? nextPocketBalance,
-                cashInHand: updatedWallet.cashInHand ?? nextCashInHand,
-                remainingCashLimit: updatedWallet.remainingCashLimit ?? item.remainingCashLimit,
-                availableCashLimit: updatedWallet.availableCashLimit ?? item.availableCashLimit,
-                walletSummary: {
-                  ...(item.walletSummary || {}),
-                  walletId: updatedWallet.walletId || item.walletSummary?.walletId,
-                  pocketBalance: updatedWallet.pocketBalance ?? nextPocketBalance,
-                  cashCollected: updatedWallet.cashInHand ?? nextCashInHand,
-                  remainingCashLimit: updatedWallet.remainingCashLimit ?? item.remainingCashLimit,
-                  availableCashLimit: updatedWallet.availableCashLimit ?? item.availableCashLimit,
-                },
-              }
-            : item,
-        ),
-      )
-
-      setViewDetails((prev) => {
-        if (!prev || String(prev._id) !== String(deliveryman._id)) {
-          return prev
-        }
-
-        return {
-          ...prev,
-          pocketBalance: updatedWallet.pocketBalance ?? nextPocketBalance,
-          cashInHand: updatedWallet.cashInHand ?? nextCashInHand,
-          remainingCashLimit: updatedWallet.remainingCashLimit ?? prev.remainingCashLimit,
-          availableCashLimit: updatedWallet.availableCashLimit ?? prev.availableCashLimit,
-          walletSummary: {
-            ...(prev.walletSummary || {}),
-            walletId: updatedWallet.walletId || prev.walletSummary?.walletId,
-            pocketBalance: updatedWallet.pocketBalance ?? nextPocketBalance,
-            cashCollected: updatedWallet.cashInHand ?? nextCashInHand,
-            remainingCashLimit: updatedWallet.remainingCashLimit ?? prev.remainingCashLimit,
-            availableCashLimit: updatedWallet.availableCashLimit ?? prev.availableCashLimit,
-          },
-        }
-      })
-
-      toast.success("Wallet updated")
-      cancelEditingWallet()
-    } catch (err) {
-      debugError("Error updating delivery wallet:", err)
-      toast.error(err.response?.data?.message || "Failed to update wallet")
-    } finally {
-      setSavingDeliveryId(null)
-    }
-  }
-
   const handleDelete = async (deliveryman) => {
     const deliverymanId = String(deliveryman?._id || "")
     if (!deliverymanId) {
@@ -514,7 +366,14 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
       const wasViewingDeletedPartner = Boolean(
         viewDetails && String(viewDetails._id) === deliverymanId,
       )
-      setDeliverymen((prev) => prev.filter((item) => String(item._id) !== deliverymanId))
+      setDeliverymen((prev) => {
+        const next = prev.filter((item) => String(item._id) !== deliverymanId)
+        if (next.length === 0 && currentPage > 1) {
+          setCurrentPage((p) => Math.max(1, p - 1))
+        }
+        return next
+      })
+      setTotalPartners((prev) => Math.max(0, prev - 1))
       setViewDetails((prev) => (prev && String(prev._id) === deliverymanId ? null : prev))
       if (wasViewingDeletedPartner) {
         setIsViewOpen(false)
@@ -602,7 +461,7 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
             <div className="flex items-center gap-2">
               <span className="text-sm font-semibold text-slate-700">Deliveryman</span>
               <span className="px-3 py-1 rounded-full text-sm font-semibold bg-slate-100 text-slate-700">
-                {filteredDeliverymen.length}
+                {totalPartners}
               </span>
             </div>
           </div>
@@ -779,34 +638,12 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
                         )}
                         {visibleColumns.pocketBalance && (
                           <td className="px-6 py-4 whitespace-nowrap">
-                            {editingDeliveryId === String(dm._id) ? (
-                              <input
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                value={editValues.pocketBalance}
-                                onChange={(e) => updateWalletFieldValue("pocketBalance", e.target.value)}
-                                className="w-28 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400"
-                              />
-                            ) : (
-                              <span className="text-sm text-slate-700">{formatCurrency(dm.pocketBalance)}</span>
-                            )}
+                            <span className="text-sm text-slate-700">{formatCurrency(dm.pocketBalance)}</span>
                           </td>
                         )}
                         {visibleColumns.cashInHand && (
                           <td className="px-6 py-4 whitespace-nowrap">
-                            {editingDeliveryId === String(dm._id) ? (
-                              <input
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                value={editValues.cashInHand}
-                                onChange={(e) => updateWalletFieldValue("cashInHand", e.target.value)}
-                                className="w-28 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400"
-                              />
-                            ) : (
-                              <span className="text-sm text-slate-700">{formatCurrency(dm.cashInHand)}</span>
-                            )}
+                            <span className="text-sm text-slate-700">{formatCurrency(dm.cashInHand)}</span>
                           </td>
                         )}
                         {visibleColumns.remainingCashLimit && (
@@ -826,70 +663,49 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
                         {visibleColumns.actions && (
                           <td className="px-6 py-4 whitespace-nowrap text-center">
                             <div className="flex items-center justify-center gap-2">
-                              {editingDeliveryId === String(dm._id) ? (
-                                <>
-                                  <button
-                                    onClick={() => saveWalletChanges(dm)}
-                                    disabled={savingDeliveryId === String(dm._id)}
-                                    className="p-1.5 rounded bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors disabled:opacity-50"
-                                    title="Save Wallet"
-                                  >
-                                    {savingDeliveryId === String(dm._id) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <button className="p-1.5 rounded text-slate-600 hover:bg-slate-100 transition-colors">
+                                    <MoreVertical className="w-4 h-4" />
                                   </button>
-                                  <button
-                                    onClick={cancelEditingWallet}
-                                    disabled={savingDeliveryId === String(dm._id)}
-                                    className="p-1.5 rounded bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors disabled:opacity-50"
-                                    title="Cancel"
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-44 bg-white border border-slate-200 rounded-lg shadow-lg z-50">
+                                  <DropdownMenuItem
+                                    onClick={() => handleView(dm)}
+                                    className="cursor-pointer flex items-center gap-2"
                                   >
-                                    <X className="w-4 h-4" />
-                                  </button>
-                                </>
-                              ) : (
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <button className="p-1.5 rounded text-slate-600 hover:bg-slate-100 transition-colors">
-                                      <MoreVertical className="w-4 h-4" />
-                                    </button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="end" className="w-44 bg-white border border-slate-200 rounded-lg shadow-lg z-50">
-                                    <DropdownMenuItem
-                                      onClick={() => handleView(dm)}
-                                      className="cursor-pointer flex items-center gap-2"
-                                    >
-                                      <Eye className="w-4 h-4 text-slate-500" />
-                                      <span>View Details</span>
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      onClick={() => startEditingWallet(dm)}
-                                      className="cursor-pointer flex items-center gap-2"
-                                    >
-                                      <Pencil className="w-4 h-4 text-blue-500" />
-                                      <span>Edit Wallet</span>
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      onClick={() => handleOpenEmploymentEdit(dm)}
-                                      className="cursor-pointer flex items-center gap-2"
-                                    >
-                                      <FileText className="w-4 h-4 text-slate-500" />
-                                      <span>Employment & Payout</span>
-                                    </DropdownMenuItem>
-                                    <DropdownMenuSeparator />
-                                    <DropdownMenuItem
-                                      onClick={() => handleDelete(dm)}
-                                      disabled={deletingDeliveryId === String(dm._id)}
-                                      className="cursor-pointer flex items-center gap-2 text-red-600 hover:text-red-700 disabled:opacity-50"
-                                    >
-                                      {deletingDeliveryId === String(dm._id) ? (
-                                        <Loader2 className="w-4 h-4 animate-spin" />
-                                      ) : (
-                                        <Trash2 className="w-4 h-4 text-red-500" />
-                                      )}
-                                      <span>Delete Partner</span>
-                                    </DropdownMenuItem>
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              )}
+                                    <Eye className="w-4 h-4 text-slate-500" />
+                                    <span>View Details</span>
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => handleViewOrderHistory(dm)}
+                                    className="cursor-pointer flex items-center gap-2"
+                                  >
+                                    <History className="w-4 h-4 text-emerald-600" />
+                                    <span>Order History</span>
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => handleOpenEmploymentEdit(dm)}
+                                    className="cursor-pointer flex items-center gap-2"
+                                  >
+                                    <FileText className="w-4 h-4 text-slate-500" />
+                                    <span>Employment & Payout</span>
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    onClick={() => handleDelete(dm)}
+                                    disabled={deletingDeliveryId === String(dm._id)}
+                                    className="cursor-pointer flex items-center gap-2 text-red-600 hover:text-red-700 disabled:opacity-50"
+                                  >
+                                    {deletingDeliveryId === String(dm._id) ? (
+                                      <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : (
+                                      <Trash2 className="w-4 h-4 text-red-500" />
+                                    )}
+                                    <span>Delete Partner</span>
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
                             </div>
                           </td>
                         )}
@@ -900,6 +716,66 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
               </table>
             )}
           </div>
+
+          {totalPages > 0 && (
+            <div className="mt-4 pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <p className="text-sm text-slate-500">
+                Page <span className="font-semibold text-slate-700">{currentPage}</span> of{" "}
+                <span className="font-semibold text-slate-700">{totalPages}</span>
+                <span className="text-slate-400"> · {PAGE_SIZE} per page</span>
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={currentPage <= 1 || loading}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  Previous
+                </button>
+
+                {Array.from({ length: Math.min(totalPages, 5) }).map((_, idx) => {
+                  let pageNum
+                  if (totalPages <= 5) {
+                    pageNum = idx + 1
+                  } else if (currentPage <= 3) {
+                    pageNum = idx + 1
+                  } else if (currentPage >= totalPages - 2) {
+                    pageNum = totalPages - 4 + idx
+                  } else {
+                    pageNum = currentPage - 2 + idx
+                  }
+
+                  return (
+                    <button
+                      key={pageNum}
+                      type="button"
+                      disabled={loading}
+                      onClick={() => setCurrentPage(pageNum)}
+                      className={`w-8 h-8 text-sm rounded-lg transition-colors ${
+                        currentPage === pageNum
+                          ? "bg-blue-600 text-white font-semibold"
+                          : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                      }`}
+                    >
+                      {pageNum}
+                    </button>
+                  )
+                })}
+
+                <button
+                  type="button"
+                  disabled={currentPage >= totalPages || loading}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  Next
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1287,7 +1163,18 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
               </div>
             )}
           </div>
-          <DialogFooter className="px-6 pb-6 border-t border-slate-200">
+          <DialogFooter className="px-6 pb-6 border-t border-slate-200 gap-2">
+            <button
+              onClick={() => {
+                setIsViewOpen(false)
+                handleViewOrderHistory(viewDetails)
+              }}
+              disabled={!viewDetails?._id && !viewDetails?.id}
+              className="px-4 py-2 text-sm font-medium rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-all inline-flex items-center gap-2 disabled:opacity-50"
+            >
+              <History className="w-4 h-4" />
+              Order History
+            </button>
             <button
               onClick={() => setIsViewOpen(false)}
               className="px-4 py-2 text-sm font-medium rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition-all"

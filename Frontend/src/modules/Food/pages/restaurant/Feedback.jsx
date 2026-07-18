@@ -3,7 +3,6 @@ import { useNavigate, useSearchParams } from "react-router-dom"
 import { AnimatePresence } from "framer-motion"
 import { HelpCircle, Search, SlidersHorizontal, Calendar, Loader2, Star } from "lucide-react"
 import { DateRangeCalendar } from "@food/components/ui/date-range-calendar"
-import BottomNavOrders from "@food/components/restaurant/BottomNavOrders"
 import RestaurantPanelHeader from "@food/components/restaurant/panel/RestaurantPanelHeader"
 import RestaurantPanelModal from "@food/components/restaurant/panel/RestaurantPanelModal"
 import { PanelPill, PanelSurface } from "@food/components/restaurant/panel/panelUi"
@@ -416,7 +415,7 @@ export default function Feedback() {
   }
 
   return (
-    <div className="rt-panel-bg flex min-h-screen flex-col pb-24 lg:pb-8" onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
+    <div className="rt-panel-bg flex min-h-screen flex-col pb-8" onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
       <div className="hidden lg:block">
         <RestaurantPanelHeader
           title="Feedback"
@@ -803,7 +802,6 @@ export default function Feedback() {
           </div>
         </div>
       </RestaurantPanelModal>
-      <BottomNavOrders />
     </div>
   )
 }

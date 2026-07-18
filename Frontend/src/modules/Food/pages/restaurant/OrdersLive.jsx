@@ -24,7 +24,7 @@ import {
   FileText,
 } from "lucide-react";
 import { toast } from "sonner";
-import BottomNavOrders from "@food/components/restaurant/BottomNavOrders";
+;
 import RestaurantNavbar from "@food/components/restaurant/RestaurantNavbar";
 import RestaurantPanelHeader from "@food/components/restaurant/panel/RestaurantPanelHeader";
 import RestaurantPanelModal from "@food/components/restaurant/panel/RestaurantPanelModal";
@@ -1241,14 +1241,16 @@ export default function OrdersLive() {
   const getPopupOrderTotal = (orderLike) => {
     if (!orderLike) return 0;
 
-    const directTotal = Number(orderLike.total);
-    if (Number.isFinite(directTotal) && directTotal > 0) return directTotal;
+    const payout = Number(
+      orderLike.restaurantPayout ?? orderLike.restaurantEarnings?.payout,
+    );
+    if (Number.isFinite(payout) && payout >= 0) return payout;
 
     const pricingTotal = Number(orderLike.pricing?.total);
     if (Number.isFinite(pricingTotal) && pricingTotal > 0) return pricingTotal;
 
-    const amountDue = Number(orderLike.payment?.amountDue);
-    if (Number.isFinite(amountDue) && amountDue > 0) return amountDue;
+    const directTotal = Number(orderLike.total);
+    if (Number.isFinite(directTotal) && directTotal > 0) return directTotal;
 
     const items = Array.isArray(orderLike.items) ? orderLike.items : [];
     const itemsTotal = items.reduce((sum, item) => {
@@ -2558,7 +2560,7 @@ export default function OrdersLive() {
           {/* Left Content */}
           <div
             ref={contentRef}
-            className="flex-1 overflow-y-auto px-4 pb-24 lg:max-w-none lg:px-6 lg:pb-6 scrollbar-hide"
+            className="flex-1 overflow-y-auto px-4 pb-8 lg:max-w-none lg:px-6 lg:pb-6 scrollbar-hide"
             style={{
               overflowY: 'auto',
               overflowX: 'hidden',
@@ -3111,7 +3113,7 @@ export default function OrdersLive() {
                         />
                       </svg>
                       <span className="text-sm font-semibold text-gray-900">
-                        Total bill
+                        You get
                       </span>
                     </div>
                     <span className="text-base font-bold text-gray-900">
@@ -3303,9 +3305,6 @@ export default function OrdersLive() {
           />
         </RestaurantPanelModal>
       )}
-
-      {/* Bottom Navigation - Sticky */}
-      <BottomNavOrders />
     </div>
     </SelectedOrderContext.Provider>
   );

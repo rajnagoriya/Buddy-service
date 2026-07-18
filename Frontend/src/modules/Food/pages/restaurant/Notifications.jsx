@@ -137,7 +137,6 @@ export default function Notifications() {
       title="Notifications"
       subtitle="Order updates and admin announcements"
       backTo={RESTAURANT_BASE}
-      showBottomNav
       headerRight={
         <button
           type="button"

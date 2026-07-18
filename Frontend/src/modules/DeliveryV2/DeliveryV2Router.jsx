@@ -14,19 +14,13 @@ import DriverLayout from '../taxi/driver/components/DriverLayout';
 
 // V2 Pages
 import DeliveryHomeV2 from './pages/DeliveryHomeV2';
-import { PayoutV2 } from './pages/pocket/PayoutV2';
-import { PocketStatementV2 } from './pages/pocket/PocketStatementV2';
-import { DeductionStatementV2 } from './pages/pocket/DeductionStatementV2';
-import { LimitSettlementV2 } from './pages/pocket/LimitSettlementV2';
 import { PocketBalanceV2 } from './pages/pocket/PocketBalanceV2';
-import { CashLimitInfoV2 } from './pages/pocket/CashLimitInfoV2';
 import { ProfileBankV2 } from './pages/profile/ProfileBankV2';
 import { ProfileDocsV2 } from './pages/profile/ProfileDocsV2';
 import { SupportTicketsV2 } from './pages/help/SupportTicketsV2';
 import { CreateSupportTicketV2 } from './pages/help/CreateSupportTicketV2';
 import { ViewSupportTicketV2 } from './pages/help/ViewSupportTicketV2';
 import ShowIdCardV2 from './pages/help/ShowIdCardV2';
-import { PocketDetailsV2 } from './pages/pocket/PocketDetailsV2';
 import { ProfileDetailsV2 } from './pages/profile/ProfileDetailsV2';
 import TermsAndConditionsV2 from './pages/TermsAndConditionsV2';
 import PrivacyPolicyV2 from './pages/PrivacyPolicyV2';
@@ -242,13 +236,14 @@ const DeliveryV2Router = () => {
         <Route path="/profile/privacy" element={<ProtectedRoute><PrivacyPolicyV2 /></ProtectedRoute>} />
         
         {/* Financial Deep-Pages */}
-        <Route path="/pocket/payout" element={<ProtectedRoute><PayoutV2 /></ProtectedRoute>} />
-        <Route path="/pocket/statement" element={<ProtectedRoute><PocketStatementV2 /></ProtectedRoute>} />
-        <Route path="/pocket/deductions" element={<ProtectedRoute><DeductionStatementV2 /></ProtectedRoute>} />
-        <Route path="/pocket/limit-settlement" element={<ProtectedRoute><LimitSettlementV2 /></ProtectedRoute>} />
+        <Route path="/pocket/withdraw" element={<ProtectedRoute><PocketBalanceV2 /></ProtectedRoute>} />
         <Route path="/pocket/balance" element={<ProtectedRoute><PocketBalanceV2 /></ProtectedRoute>} />
-        <Route path="/pocket/cash-limit" element={<ProtectedRoute><CashLimitInfoV2 /></ProtectedRoute>} />
-        <Route path="/pocket/details" element={<ProtectedRoute><PocketDetailsV2 /></ProtectedRoute>} />
+        <Route path="/pocket/payout" element={<Navigate to="/food/delivery/pocket" replace />} />
+        <Route path="/pocket/statement" element={<Navigate to="/food/delivery/pocket" replace />} />
+        <Route path="/pocket/deductions" element={<Navigate to="/food/delivery/pocket" replace />} />
+        <Route path="/pocket/limit-settlement" element={<Navigate to="/food/delivery/pocket" replace />} />
+        <Route path="/pocket/cash-limit" element={<Navigate to="/food/delivery/pocket" replace />} />
+        <Route path="/pocket/details" element={<Navigate to="/food/delivery/pocket" replace />} />
 
         <Route path="/taxi" element={
           <ProtectedRoute>

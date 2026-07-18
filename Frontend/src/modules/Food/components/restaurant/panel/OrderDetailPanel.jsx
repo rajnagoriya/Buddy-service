@@ -100,7 +100,7 @@ export default function OrderDetailPanel({ order, onClose, className = "" }) {
           {order.amount != null && order.amount > 0 ? (
             <div className="rounded-xl border border-[var(--rt-border)] px-3.5 py-2.5 bg-white shadow-sm">
               <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
-                Amount
+                You get
               </p>
               <p className="mt-1 font-bold text-gray-900 text-base">
                 ₹{Number(order.amount).toFixed(2)}

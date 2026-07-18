@@ -8,7 +8,6 @@ export default function DishRatings() {
       title="Dish ratings"
       subtitle="Ratings appear when customers review dishes"
       backTo={`${RESTAURANT_BASE}/explore`}
-      showBottomNav
     >
       <PanelSurface className="py-16 text-center">
         <p className="text-sm text-gray-600">You haven&apos;t received any dish ratings yet.</p>

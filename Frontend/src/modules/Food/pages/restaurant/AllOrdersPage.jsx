@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useOutletContext } from "react-router-dom"
 import useRestaurantBackNavigation from "@food/hooks/useRestaurantBackNavigation"
 import {
   ArrowLeft,
@@ -11,6 +11,8 @@ import {
   Copy,
   ChevronRight,
   HelpCircle,
+  Menu,
+  Loader2,
 } from "lucide-react"
 import { DateRangeCalendar } from "@food/components/ui/date-range-calendar"
 import RestaurantPanelModal from "@food/components/restaurant/panel/RestaurantPanelModal"
@@ -19,6 +21,8 @@ import { useRestaurantNotifications } from "@food/hooks/useRestaurantNotificatio
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
+
+const ORDERS_PAGE_SIZE = 10
 
 const formatMoney = (value) => `₹${Number(value || 0).toFixed(2)}`
 
@@ -120,7 +124,9 @@ const filterOptions = {
 export default function AllOrdersPage() {
   const navigate = useNavigate()
   const goBack = useRestaurantBackNavigation()
+  const { openSidebar } = useOutletContext() || {}
   const [searchQuery, setSearchQuery] = useState("")
+  const [debouncedSearch, setDebouncedSearch] = useState("")
   const [showCalendar, setShowCalendar] = useState(false)
   const [showDateRangePopup, setShowDateRangePopup] = useState(false)
   const [selectedDateRange, setSelectedDateRange] = useState(dateRangeOptions[1]) // Default to "this week"
@@ -147,9 +153,28 @@ export default function AllOrdersPage() {
   // Real data states
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState(null)
+  const [page, setPage] = useState(1)
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: ORDERS_PAGE_SIZE,
+    total: 0,
+    totalPages: 0,
+    hasNextPage: false,
+    hasPreviousPage: false,
+  })
   const [restaurantData, setRestaurantData] = useState(null)
   const { newOrder } = useRestaurantNotifications()
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
+
+  useEffect(() => {
+    setPage(1)
+  }, [startDate, endDate, debouncedSearch])
 
   // Fetch restaurant data
   useEffect(() => {
@@ -236,7 +261,11 @@ export default function AllOrdersPage() {
       address,
       customer: customerName,
       items,
-      totalPrice: order.pricing?.total || 0,
+      totalPrice:
+        order.restaurantPayout ??
+        order.restaurantEarnings?.payout ??
+        order.pricing?.total ??
+        0,
       reason,
       tags: tags.length > 0 ? tags : undefined,
       createdAt: order.createdAt,
@@ -244,60 +273,55 @@ export default function AllOrdersPage() {
     }
   }, [restaurantData])
 
-  // Fetch orders from backend
+  // Fetch orders from backend (paginated)
   useEffect(() => {
     const fetchOrders = async () => {
       try {
-        setLoading(true)
+        if (page === 1) setLoading(true)
+        else setLoadingMore(true)
         setError(null)
-        
-        // Build query params
+
         const params = {
-          page: 1,
-          limit: 1000 // Get all orders, we'll filter by date on frontend
+          page,
+          limit: ORDERS_PAGE_SIZE,
+          startDate: startDate.toISOString().split("T")[0],
+          endDate: endDate.toISOString().split("T")[0],
         }
-        
-        // Fetch all orders (we'll filter by date range on frontend)
+        if (debouncedSearch) params.search = debouncedSearch
+
         const response = await restaurantAPI.getOrders(params)
-        
-        if (response.data?.success && response.data.data?.orders) {
-          // Transform orders
-          const transformedOrders = response.data.data.orders.map(transformOrder)
-          
-          // Filter by date range
-          const filteredByDate = transformedOrders.filter(order => {
-            if (!order.createdAt) return false
-            const orderDate = new Date(order.createdAt)
-            const start = new Date(startDate)
-            start.setHours(0, 0, 0, 0)
-            const end = new Date(endDate)
-            end.setHours(23, 59, 59, 999)
-            return orderDate >= start && orderDate <= end
-          })
-          
-          setOrders(filteredByDate)
-        } else {
-          setOrders([])
-        }
+        const payload = response.data?.data
+        const rows = payload?.orders || []
+        const meta = payload?.meta || payload?.pagination || {}
+
+        const transformedOrders = rows.map(transformOrder)
+        setOrders((prev) => (page === 1 ? transformedOrders : [...prev, ...transformedOrders]))
+        setPagination({
+          page: meta.page || page,
+          limit: meta.limit || ORDERS_PAGE_SIZE,
+          total: meta.total || transformedOrders.length,
+          totalPages: meta.totalPages || 1,
+          hasNextPage: Boolean(meta.hasNextPage),
+          hasPreviousPage: Boolean(meta.hasPreviousPage),
+        })
       } catch (err) {
-        // Suppress 401 errors as they're handled by axios interceptor
         if (err.response?.status !== 401) {
           debugError('Error fetching orders:', err)
           setError(err.message || 'Failed to fetch orders')
         }
-        setOrders([])
+        if (page === 1) setOrders([])
       } finally {
         setLoading(false)
+        setLoadingMore(false)
       }
     }
     
     fetchOrders()
-  }, [startDate, endDate, transformOrder])
+  }, [startDate, endDate, transformOrder, page, debouncedSearch])
 
   // Realtime: instantly prepend new orders (no refresh)
   useEffect(() => {
-    if (!newOrder) return
-    // Transform & prepend if not already present.
+    if (!newOrder || page !== 1) return
     setOrders((prev) => {
       const id = String(newOrder?.orderId || newOrder?._id || "")
       if (!id) return prev
@@ -307,7 +331,7 @@ export default function AllOrdersPage() {
       const transformed = transformOrder(newOrder)
       return [transformed, ...prev]
     })
-  }, [newOrder, transformOrder])
+  }, [newOrder, transformOrder, page])
 
   // Close calendar when clicking outside
   useEffect(() => {
@@ -438,17 +462,6 @@ export default function AllOrdersPage() {
   }
 
   const filteredOrders = orders.filter(order => {
-    // Search filter - search in order ID (both full ID and numeric part)
-    if (searchQuery) {
-      const searchLower = searchQuery.toLowerCase().trim()
-      const orderIdLower = order.id.toLowerCase()
-      // Extract numeric part from order ID (e.g., "ORD-1768751659979-588" -> "1768751659979588")
-      const numericPart = order.id.replace(/\D/g, '')
-      if (!orderIdLower.includes(searchLower) && !numericPart.includes(searchLower)) {
-        return false
-      }
-    }
-
     // Order status filter
     if (filters.orderStatus.length > 0) {
       const statusMap = {
@@ -479,22 +492,31 @@ export default function AllOrdersPage() {
 
   return (
     <div className="min-h-screen bg-gray-100">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-4 py-3 sticky top-0 z-50">
+      {/* Order history header — fixed, respects sidebar on desktop */}
+      <div className="sticky top-0 z-40 border-b border-gray-200 bg-white/95 px-4 py-3 backdrop-blur-md">
         <div className="flex items-center gap-3">
           <button
+            type="button"
+            onClick={() => openSidebar?.()}
+            className="inline-flex rounded-xl border border-gray-200 p-2 hover:bg-gray-50 lg:hidden"
+            aria-label="Open menu"
+          >
+            <Menu className="h-5 w-5 text-gray-700" />
+          </button>
+          <button
             onClick={goBack}
-            className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+            className="hidden p-1.5 hover:bg-gray-100 rounded-lg transition-colors lg:inline-flex"
             aria-label="Go back"
           >
             <ArrowLeft className="w-6 h-6 text-gray-900" />
           </button>
-          <div className="flex-1">
+          <div className="flex-1 min-w-0">
             <h1 className="text-lg font-bold text-gray-900">
               Order History
             </h1>
             <p className="text-xs text-gray-500">
-              {filteredOrders.length} {filteredOrders.length === 1 ? 'order' : 'orders'} found
+              {pagination.total || filteredOrders.length}{" "}
+              {(pagination.total || filteredOrders.length) === 1 ? "order" : "orders"} found
             </p>
           </div>
           <button
@@ -580,7 +602,7 @@ export default function AllOrdersPage() {
       )}
 
       {/* Orders List */}
-      <div className="px-4 pb-24 space-y-3">
+      <div className="px-4 pb-8 space-y-3">
         {loading && (
           <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
             <div className="flex flex-col items-center gap-3">
@@ -685,7 +707,7 @@ export default function AllOrdersPage() {
 
             {/* Price Footer */}
             <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between">
-              <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Amount</span>
+              <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">You get</span>
               <span className="text-base font-bold text-gray-900">{formatMoney(order.totalPrice)}</span>
             </div>
 
@@ -699,6 +721,33 @@ export default function AllOrdersPage() {
             ))}
           </AnimatePresence>
         )}
+
+        {!loading && !error && pagination.hasNextPage ? (
+          <button
+            type="button"
+            disabled={loadingMore}
+            onClick={() => setPage((p) => p + 1)}
+            className="w-full flex items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-60"
+          >
+            {loadingMore ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading...
+              </>
+            ) : (
+              <>
+                Load more orders
+                <ChevronRight className="h-4 w-4" />
+              </>
+            )}
+          </button>
+        ) : null}
+
+        {!loading && !error && pagination.totalPages > 1 ? (
+          <p className="text-center text-xs text-gray-500">
+            Showing {filteredOrders.length} of {pagination.total} orders
+          </p>
+        ) : null}
       </div>
 
       <RestaurantPanelModal

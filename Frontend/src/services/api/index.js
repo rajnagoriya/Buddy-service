@@ -625,7 +625,7 @@ export const adminAPI = {
   /** Orders (admin) – list, get by id, assign delivery partner */
   getOrders: (params = {}) =>
     apiClient.get("/food/admin/orders", {
-      params: { limit: 20, page: 1, ...params },
+      params: { limit: 30, page: 1, ...params },
       contextModule: "admin",
     }),
   getOrderById: (orderId) =>
@@ -848,11 +848,6 @@ export const adminAPI = {
     apiClient.patch(`/food/admin/delivery/withdrawals/${String(id)}`, body, {
       contextModule: "admin",
     }),
-  getCashLimitSettlements: (params = {}) =>
-    apiClient.get("/food/admin/delivery/cash-limit-settlements", {
-      params,
-      contextModule: "admin",
-    }),
 
   /** Restaurant Commission (admin) */
   getRestaurantCommissionBootstrap: () =>
@@ -959,16 +954,6 @@ export const adminAPI = {
     ),
   deleteSafetyEmergencyReport: (id) =>
     apiClient.delete(`/food/admin/safety-emergency-reports/${String(id)}`, {
-      contextModule: "admin",
-    }),
-
-  /** Delivery Cash Limit (admin) */
-  getDeliveryCashLimit: () =>
-    apiClient.get("/food/admin/delivery-cash-limit", {
-      contextModule: "admin",
-    }),
-  updateDeliveryCashLimit: (body) =>
-    apiClient.patch("/food/admin/delivery-cash-limit", body ?? {}, {
       contextModule: "admin",
     }),
 
@@ -1425,12 +1410,12 @@ export const restaurantAPI = {
             const paymentMethod = o.payment?.method || o.paymentMethod || null;
             return { ...o, status, address, total, paymentMethod };
           });
-          const meta = payload.meta || {};
+          const meta = payload.meta || payload.pagination || {};
           const normalized = {
             ...res,
             data: {
               ...res.data,
-              data: { orders: rows, meta },
+              data: { orders: rows, meta, pagination: meta },
             },
           };
 

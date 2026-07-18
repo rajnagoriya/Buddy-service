@@ -43,7 +43,7 @@ export async function updateCustomerStatus(req, res, next) {
         const isActive = req.body?.isActive;
         const updated = await adminService.updateCustomerStatus(id, isActive);
         if (!updated) return res.status(404).json({ success: false, message: 'Customer not found' });
-        res.status(200).json({ success: true, message: 'Customer status updated successfully', data: { user: updated, customer: updated } });
+        res.status(200).json({ success: true, message: 'Customer status updated successfully' });
     } catch (error) {
         next(error);
     }
@@ -1173,25 +1173,6 @@ export async function createOrUpdateReferralSettings(req, res, next) {
     }
 }
 
-// ----- Delivery Cash Limit (admin) -----
-export async function getDeliveryCashLimit(req, res, next) {
-    try {
-        const data = await adminService.getDeliveryCashLimitSettings();
-        res.status(200).json({ success: true, message: 'Delivery cash limit fetched successfully', data });
-    } catch (error) {
-        next(error);
-    }
-}
-
-export async function updateDeliveryCashLimit(req, res, next) {
-    try {
-        const data = await adminService.upsertDeliveryCashLimitSettings(req.body || {});
-        res.status(200).json({ success: true, message: 'Delivery cash limit updated successfully', data });
-    } catch (error) {
-        next(error);
-    }
-}
-
 // ----- Delivery Emergency Help (admin) -----
 export async function getEmergencyHelp(req, res, next) {
     try {
@@ -1711,15 +1692,6 @@ export async function getDeliveryWallets(req, res, next) {
     try {
         const data = await adminService.getDeliveryWallets(req.query || {});
         res.status(200).json({ success: true, message: 'Delivery wallets fetched successfully', data });
-    } catch (error) {
-        next(error);
-    }
-}
-
-export async function getCashLimitSettlements(req, res, next) {
-    try {
-        const data = await adminService.getCashLimitSettlements(req.query || {});
-        res.status(200).json({ success: true, message: 'Cash limit settlements fetched successfully', data });
     } catch (error) {
         next(error);
     }

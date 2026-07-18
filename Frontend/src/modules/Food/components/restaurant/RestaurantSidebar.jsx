@@ -28,7 +28,7 @@ export default function RestaurantSidebar({ isOpen = false, onClose }) {
       {isOpen ? (
         <button
           type="button"
-          className="fixed inset-0 z-40 bg-gray-900/40 backdrop-blur-[1px] lg:hidden"
+          className="fixed inset-0 z-[60] bg-gray-900/40 backdrop-blur-[1px] lg:hidden"
           onClick={onClose}
           aria-label="Close navigation"
         />
@@ -36,7 +36,7 @@ export default function RestaurantSidebar({ isOpen = false, onClose }) {
 
       <aside
         className={`
-          fixed inset-y-0 left-0 z-50 flex w-[270px] flex-col border-r border-[var(--rt-border)] bg-white
+          fixed inset-y-0 left-0 z-[70] flex w-[270px] flex-col border-r border-[var(--rt-border)] bg-white
           transition-transform duration-300 ease-in-out
           lg:translate-x-0
           ${isOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full lg:translate-x-0"}

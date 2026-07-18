@@ -6,6 +6,9 @@ import RestaurantPanelHeader from "./panel/RestaurantPanelHeader"
 export default function RestaurantPanelLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const location = useLocation()
+  const hideMobilePanelHeader =
+    location.pathname.includes("/orders/all") ||
+    location.pathname.includes("/orders/live")
 
   return (
     <div className="rt-panel-bg min-h-screen">
@@ -15,13 +18,15 @@ export default function RestaurantPanelLayout() {
       />
 
       <div className="lg:ml-[270px]">
-        <RestaurantPanelHeader
-          onMenuClick={() => setSidebarOpen(true)}
-          className="lg:hidden"
-        />
+        {!hideMobilePanelHeader ? (
+          <RestaurantPanelHeader
+            onMenuClick={() => setSidebarOpen(true)}
+            className="lg:hidden"
+          />
+        ) : null}
 
         <main key={location.pathname} className="min-h-screen">
-          <Outlet />
+          <Outlet context={{ openSidebar: () => setSidebarOpen(true) }} />
         </main>
       </div>
     </div>

@@ -167,6 +167,28 @@ const dispatchSchema = new mongoose.Schema(
             allowOverLimit: { type: Boolean, default: false },
             requiredCashForOrder: { type: Number, default: 0 }
         }],
+        /** Admin (and system) driver assign/reassign audit trail */
+        assignmentHistory: [{
+            at: { type: Date, default: Date.now },
+            action: {
+                type: String,
+                enum: ['assigned', 'reassigned'],
+                default: 'assigned'
+            },
+            fromPartnerId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodDeliveryPartner', default: null },
+            fromPartnerName: { type: String, default: '' },
+            fromPartnerPhone: { type: String, default: '' },
+            toPartnerId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodDeliveryPartner', default: null },
+            toPartnerName: { type: String, default: '' },
+            toPartnerPhone: { type: String, default: '' },
+            byRole: {
+                type: String,
+                enum: ['USER', 'RESTAURANT', 'DELIVERY_PARTNER', 'ADMIN', 'SYSTEM'],
+                default: 'ADMIN'
+            },
+            byId: { type: mongoose.Schema.Types.ObjectId, default: null },
+            note: { type: String, default: '' }
+        }],
         isShared: { type: Boolean, default: false },
         sharedPartnerId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodDeliveryPartner', default: null },
         dispatchingAt: { type: Date }

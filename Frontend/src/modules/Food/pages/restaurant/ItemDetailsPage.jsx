@@ -807,7 +807,6 @@ export default function ItemDetailsPage() {
       title={isNewItem ? "Add dish" : "Item details"}
       subtitle={isNewItem ? "Add a new dish to your menu" : "Update dish details, pricing, and variants"}
       backTo="/food/restaurant/inventory"
-      showBottomNav={false}
     >
       <style>{`
         [data-slot="switch"][data-state="checked"] {

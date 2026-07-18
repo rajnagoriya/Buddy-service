@@ -6,8 +6,6 @@ import {
 
   Package,
 
-  Compass,
-
   Info,
 
   Clock,
@@ -57,20 +55,6 @@ import {
 
 
 export const RESTAURANT_BASE = "/food/restaurant"
-
-
-
-export const BOTTOM_NAV_TABS = [
-
-  { id: "home", label: "Home", icon: LayoutDashboard, route: `${RESTAURANT_BASE}` },
-
-  { id: "orders", label: "Orders", icon: FileText, route: `${RESTAURANT_BASE}/orders/live` },
-
-  { id: "inventory", label: "Menu", icon: Package, route: `${RESTAURANT_BASE}/inventory` },
-
-  { id: "more", label: "More", icon: Compass, route: `${RESTAURANT_BASE}/explore` },
-
-]
 
 
 

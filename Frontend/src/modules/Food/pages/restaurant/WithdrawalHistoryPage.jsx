@@ -64,7 +64,6 @@ export default function WithdrawalHistoryPage() {
       title="Withdrawal history"
       subtitle="Track pending and completed payouts"
       backTo={`${RESTAURANT_BASE}/hub-finance`}
-      showBottomNav
     >
       <div className="mb-4 flex gap-2">
         <PanelPill

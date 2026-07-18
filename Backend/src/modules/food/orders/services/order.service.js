@@ -65,6 +65,7 @@ import {
   notifyOwnersSafely,
   notifyOwnerSafely,
   buildRestaurantScopedOrder,
+  toRestaurantOrderResponse,
   buildOrderIdentityFilter,
   toGeoPoint,
   pushStatusHistory,
@@ -1064,9 +1065,18 @@ export async function getOrderById(
       throw new ForbiddenError("Not your restaurant order");
     }
 
-    // Enforce: Restaurant cannot see the order until a rider has accepted it
-    const isAccepted = order.dispatch?.status === 'accepted';
-    if (!isAccepted) {
+    // Enforce: Restaurant cannot see the order until a rider has accepted it.
+    // Past/completed orders remain viewable (finance history, all-orders, etc.).
+    const dispatchStatus = String(order.dispatch?.status || '').toLowerCase();
+    const orderStatus = String(order.orderStatus || '').toLowerCase();
+    const riderAssigned = Boolean(order.dispatch?.deliveryPartnerId);
+    const isAccepted = dispatchStatus === 'accepted';
+    const isHistorical =
+      riderAssigned ||
+      ['delivered', 'ready', 'ready_for_pickup', 'picked_up', 'out_for_delivery', 'preparing', 'confirmed'].includes(orderStatus) ||
+      orderStatus.includes('cancel') ||
+      orderStatus.includes('reject');
+    if (!isAccepted && !isHistorical) {
       throw new ForbiddenError("Order is still being assigned to a delivery partner. You will see it once a rider is confirmed.");
     }
   }
@@ -1077,7 +1087,7 @@ export async function getOrderById(
   if (deliveryPartnerId || restaurantId) {
     if (restaurantId) {
       const scoped = buildRestaurantScopedOrder(order, restaurantId);
-      return sanitizeOrderForExternal(scoped);
+      return toRestaurantOrderResponse(scoped);
     }
     return sanitizeOrderForExternal(order);
   }
@@ -1523,31 +1533,57 @@ export async function updateOrderInstructions(orderId, userId, instructions) {
 
 // ----- Restaurant -----
 export async function listOrdersRestaurant(restaurantId, query) {
-  const { page, limit, skip } = buildPaginationOptions(query);
+  const { page, limit, skip } = buildPaginationOptions(query, {
+    defaultLimit: 10,
+    maxLimit: 50,
+  });
   const restaurantObjectId = new mongoose.Types.ObjectId(restaurantId);
   // Driver-first flow: restaurant only sees orders after a rider has accepted.
   // Use $and so restaurant ownership and payment filters do not overwrite each other.
-  const filter = {
-    $and: [
-      {
-        $or: [
-          { restaurantId: restaurantObjectId },
-          { 'pickups.restaurantId': restaurantObjectId },
-        ],
-      },
-      { 'dispatch.status': 'accepted' },
-      {
-        $or: [
-          { 'payment.method': { $in: ['cash', 'wallet'] } },
-          {
-            'payment.status': {
-              $in: ['paid', 'authorized', 'captured', 'settled', 'refunded', 'cod_pending'],
-            },
+  const andClauses = [
+    {
+      $or: [
+        { restaurantId: restaurantObjectId },
+        { 'pickups.restaurantId': restaurantObjectId },
+      ],
+    },
+    { 'dispatch.status': 'accepted' },
+    {
+      $or: [
+        { 'payment.method': { $in: ['cash', 'wallet'] } },
+        {
+          'payment.status': {
+            $in: ['paid', 'authorized', 'captured', 'settled', 'refunded', 'cod_pending'],
           },
-        ],
-      },
-    ],
-  };
+        },
+      ],
+    },
+  ];
+
+  const startDate = query.startDate ? new Date(query.startDate) : null;
+  const endDate = query.endDate ? new Date(query.endDate) : null;
+  const createdAt = {};
+  if (startDate && !Number.isNaN(startDate.getTime())) {
+    startDate.setHours(0, 0, 0, 0);
+    createdAt.$gte = startDate;
+  }
+  if (endDate && !Number.isNaN(endDate.getTime())) {
+    endDate.setHours(23, 59, 59, 999);
+    createdAt.$lte = endDate;
+  }
+  if (Object.keys(createdAt).length > 0) {
+    andClauses.push({ createdAt });
+  }
+
+  const search = String(query.search || query.q || '').trim();
+  if (search) {
+    const searchRegex = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    andClauses.push({
+      $or: [{ order_id: searchRegex }, { orderId: searchRegex }],
+    });
+  }
+
+  const filter = { $and: andClauses };
   const [docs, total] = await Promise.all([
     FoodOrder.find(filter)
       .populate("userId", "name phone email profileImage")
@@ -1558,7 +1594,12 @@ export async function listOrdersRestaurant(restaurantId, query) {
     FoodOrder.countDocuments(filter),
   ]);
   const scopedDocs = docs.map((doc) => buildRestaurantScopedOrder(doc, restaurantId));
-  return buildPaginatedResult({ docs: scopedDocs.map(d => normalizeOrderForClient(d)), total, page, limit });
+  return buildPaginatedResult({
+    docs: scopedDocs.map((d) => toRestaurantOrderResponse(d)),
+    total,
+    page,
+    limit,
+  });
 }
 
 function computeAggregateOrderStatus(orderDoc) {
@@ -1881,7 +1922,7 @@ export async function updateOrderStatusRestaurant(
     await order.save();
   }
 
-  return normalizeOrderForClient(order);
+  return toRestaurantOrderResponse(buildRestaurantScopedOrder(order, restaurantId));
 }
 
 /**
@@ -2014,6 +2055,10 @@ export async function listOrdersAdmin(query) {
     typeof query.restaurantId === "string" ? query.restaurantId.trim() : "";
   const userIdRaw =
     typeof query.userId === "string" ? query.userId.trim() : "";
+  const deliveryPartnerIdRaw =
+    typeof query.deliveryPartnerId === "string"
+      ? query.deliveryPartnerId.trim()
+      : "";
   const startDateRaw =
     typeof query.startDate === "string" ? query.startDate.trim() : "";
   const endDateRaw =
@@ -2021,6 +2066,23 @@ export async function listOrdersAdmin(query) {
 
   if (userIdRaw && mongoose.Types.ObjectId.isValid(userIdRaw)) {
     filter.userId = new mongoose.Types.ObjectId(userIdRaw);
+  }
+
+  if (
+    deliveryPartnerIdRaw &&
+    mongoose.Types.ObjectId.isValid(deliveryPartnerIdRaw)
+  ) {
+    const partnerId = new mongoose.Types.ObjectId(deliveryPartnerIdRaw);
+    // Include primary assignee (auto or admin) and shared partner trips
+    filter.$and = [
+      ...(filter.$and || []),
+      {
+        $or: [
+          { "dispatch.deliveryPartnerId": partnerId },
+          { "dispatch.sharedPartnerId": partnerId },
+        ],
+      },
+    ];
   }
 
   if (rawStatus && rawStatus !== "all") {
@@ -2066,6 +2128,22 @@ export async function listOrdersAdmin(query) {
       case "scheduled":
         filter.scheduledAt = { $ne: null };
         break;
+      case "live":
+      case "active":
+        // In-progress orders only (exclude delivered / rejected / cancelled)
+        filter.orderStatus = {
+          $in: [
+            "created",
+            "scheduled",
+            "confirmed",
+            "preparing",
+            "ready_for_pickup",
+            "reached_pickup",
+            "picked_up",
+            "reached_drop",
+          ],
+        };
+        break;
       default:
         break;
     }
@@ -2098,7 +2176,7 @@ export async function listOrdersAdmin(query) {
     }
   }
 
-  const [docs, total] = await Promise.all([
+  const [docs, total, statsRows] = await Promise.all([
     FoodOrder.find(filter)
       .select("+deliveryOtp")
       .populate("userId", "name phone email")
@@ -2109,9 +2187,68 @@ export async function listOrdersAdmin(query) {
       .limit(limit)
       .lean(),
     FoodOrder.countDocuments(filter),
+    FoodOrder.aggregate([
+      { $match: filter },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: 1 },
+          delivered: {
+            $sum: {
+              $cond: [{ $eq: ['$orderStatus', 'delivered'] }, 1, 0],
+            },
+          },
+          cancelled: {
+            $sum: {
+              $cond: [
+                {
+                  $in: [
+                    '$orderStatus',
+                    [
+                      'cancelled_by_user',
+                      'cancelled_by_restaurant',
+                      'cancelled_by_admin',
+                    ],
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+          totalSpent: {
+            $sum: {
+              $cond: [
+                { $eq: ['$orderStatus', 'delivered'] },
+                { $ifNull: ['$pricing.total', 0] },
+                0,
+              ],
+            },
+          },
+        },
+      },
+    ]),
   ]);
-  const paginated = buildPaginatedResult({ docs: docs.map(d => normalizeOrderForClient(d)), total, page, limit });
-  return { ...paginated, orders: paginated.data };
+
+  const statsRow = statsRows?.[0] || {};
+  const statsTotal = Number(statsRow.total || 0);
+  const statsDelivered = Number(statsRow.delivered || 0);
+  const statsCancelled = Number(statsRow.cancelled || 0);
+  const stats = {
+    total: statsTotal,
+    delivered: statsDelivered,
+    cancelled: statsCancelled,
+    inProgress: Math.max(0, statsTotal - statsDelivered - statsCancelled),
+    totalSpent: Number(statsRow.totalSpent || 0),
+  };
+
+  const paginated = buildPaginatedResult({
+    docs: docs.map((d) => normalizeOrderForClient(d)),
+    total,
+    page,
+    limit,
+  });
+  return { ...paginated, orders: paginated.data, stats };
 }
 
 export async function assignDeliveryPartnerAdmin(
@@ -2132,10 +2269,16 @@ export async function assignDeliveryPartnerAdmin(
     "delivered",
     "cancelled_by_user",
     "cancelled_by_restaurant",
+    "rejected_by_restaurant",
     "cancelled_by_admin",
   ];
   if (nonAssignableStatuses.includes(order.orderStatus)) {
-    throw new ValidationError("Cannot assign driver for this order");
+    throw new ValidationError(
+      order.orderStatus === "rejected_by_restaurant" ||
+        order.orderStatus === "cancelled_by_restaurant"
+        ? "Cannot reassign driver for an order rejected by the restaurant"
+        : "Cannot assign driver for this order",
+    );
   }
 
   const previousPartnerId =
@@ -2144,28 +2287,72 @@ export async function assignDeliveryPartnerAdmin(
     throw new ValidationError("This driver is already assigned to the order");
   }
 
-  const partner = await FoodDeliveryPartner.findById(deliveryPartnerId)
-    .select("status name")
+  const partnerIdsToLoad = [
+    deliveryPartnerId,
+    ...(previousPartnerId ? [previousPartnerId] : []),
+  ];
+  const partners = await FoodDeliveryPartner.find({
+    _id: { $in: partnerIdsToLoad },
+  })
+    .select("status name phone")
     .lean();
+  const partnerById = new Map(partners.map((p) => [String(p._id), p]));
+
+  const partner = partnerById.get(String(deliveryPartnerId));
   if (!partner || partner.status !== "approved") {
     throw new ValidationError("Delivery partner not available");
   }
 
+  const previousPartner = previousPartnerId
+    ? partnerById.get(String(previousPartnerId))
+    : null;
+  const isReassign = Boolean(previousPartnerId);
   const fromDispatchStatus = order.dispatch?.status || "unassigned";
+  const assignedAt = new Date();
+
+  const historyNote = isReassign
+    ? `Reassigned by admin from ${previousPartner?.name || previousPartnerId} to ${partner.name || deliveryPartnerId}`
+    : `Assigned by admin to ${partner.name || deliveryPartnerId}`;
+
   order.dispatch = order.dispatch || {};
+  if (!Array.isArray(order.dispatch.assignmentHistory)) {
+    order.dispatch.assignmentHistory = [];
+  }
+  order.dispatch.assignmentHistory.push({
+    at: assignedAt,
+    action: isReassign ? "reassigned" : "assigned",
+    fromPartnerId: previousPartnerId
+      ? new mongoose.Types.ObjectId(previousPartnerId)
+      : null,
+    fromPartnerName: previousPartner?.name || "",
+    fromPartnerPhone: previousPartner?.phone || "",
+    toPartnerId: new mongoose.Types.ObjectId(deliveryPartnerId),
+    toPartnerName: partner.name || "",
+    toPartnerPhone: partner.phone || "",
+    byRole: "ADMIN",
+    byId:
+      adminId && mongoose.Types.ObjectId.isValid(adminId)
+        ? new mongoose.Types.ObjectId(adminId)
+        : null,
+    note: historyNote,
+  });
+
   order.dispatch.status = "assigned";
   order.dispatch.deliveryPartnerId = new mongoose.Types.ObjectId(
     deliveryPartnerId,
   );
-  order.dispatch.assignedAt = new Date();
+  order.dispatch.assignedAt = assignedAt;
+  // New driver has not accepted yet
+  order.dispatch.acceptedAt = undefined;
+  order.dispatch.sharedPartnerId = null;
+  order.dispatch.isShared = false;
+
   pushStatusHistory(order, {
     byRole: "ADMIN",
     byId: adminId,
     from: fromDispatchStatus,
-    to: "assigned",
-    note: previousPartnerId
-      ? `Reassigned from driver ${previousPartnerId}`
-      : "Assigned by admin",
+    to: isReassign ? "reassigned" : "assigned",
+    note: historyNote,
   });
   await order.save();
 

@@ -27,7 +27,7 @@ export default function RestaurantPanelModal({
   footer,
   size = "md",
   mobileMaxHeight = "tall",
-  zIndex = 50,
+  zIndex = 70,
   className = "",
   bodyClassName = "",
   headerRight = null,
@@ -127,7 +127,12 @@ export default function RestaurantPanelModal({
 
             <div
               className={`flex-1 overflow-y-auto overscroll-contain ${
-                bodyClassName || "px-4 py-4 lg:px-5 lg:py-5"
+                bodyClassName ||
+                `px-4 py-4 lg:px-5 lg:py-5 ${
+                  footer
+                    ? ""
+                    : "pb-[calc(1.25rem+env(safe-area-inset-bottom))] lg:pb-5"
+                }`
               }`}
             >
               {children}
@@ -159,7 +164,7 @@ export function RestaurantConfirmModal({
   loading = false,
   icon = null,
   size = "sm",
-  zIndex = 50,
+  zIndex = 70,
   showCancel = true,
 }) {
   const confirmClass =

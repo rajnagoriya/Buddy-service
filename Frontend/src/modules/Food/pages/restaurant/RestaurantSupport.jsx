@@ -109,7 +109,6 @@ export default function RestaurantSupport() {
       title="Support"
       subtitle="Raise issues and track admin response"
       backTo={`${RESTAURANT_BASE}/explore`}
-      showBottomNav
     >
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">

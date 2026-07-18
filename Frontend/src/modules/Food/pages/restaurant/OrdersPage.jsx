@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import Lenis from "lenis"
-import BottomNavbar from "@food/components/restaurant/BottomNavbar"
 import MenuOverlay from "@food/components/restaurant/MenuOverlay"
 import NewOrderNotification from "@food/components/restaurant/NewOrderNotification"
 import { useRestaurantNotifications } from "@food/hooks/useRestaurantNotifications"
@@ -44,7 +43,12 @@ export default function OrdersPage() {
     ? {
         ...newOrder,
         orderMongoId: newOrder.orderMongoId || newOrder._id || newOrder.id,
-        total: newOrder.total ?? newOrder.pricing?.total ?? 0,
+        total:
+          newOrder.restaurantPayout ??
+          newOrder.restaurantEarnings?.payout ??
+          newOrder.total ??
+          newOrder.pricing?.total ??
+          0,
         customerAddress: newOrder.customerAddress || newOrder.deliveryAddress || newOrder.address,
       }
     : null
@@ -166,7 +170,11 @@ export default function OrdersPage() {
               items: order.items?.length || 0,
               timeAgo: timeAgo,
               deliveryType: 'Home Delivery',
-              amount: order.pricing?.total || 0,
+              amount:
+                order.restaurantPayout ??
+                order.restaurantEarnings?.payout ??
+                order.pricing?.total ??
+                0,
               status: order.status || 'pending',
               createdAt: order.createdAt,
               customerName: order.userId?.name || order.customerName || 'Customer',
@@ -236,7 +244,11 @@ export default function OrdersPage() {
                 items: order.items?.length || 0,
                 timeAgo: timeAgo,
                 deliveryType: 'Home Delivery',
-                amount: order.pricing?.total || 0,
+                amount:
+                order.restaurantPayout ??
+                order.restaurantEarnings?.payout ??
+                order.pricing?.total ??
+                0,
                 status: order.status || 'pending',
                 createdAt: order.createdAt,
                 customerName: order.userId?.name || order.customerName || 'Customer',
@@ -289,7 +301,11 @@ export default function OrdersPage() {
                 items: order.items?.length || 0,
                 timeAgo: timeAgo,
                 deliveryType: 'Home Delivery',
-                amount: order.pricing?.total || 0,
+                amount:
+                order.restaurantPayout ??
+                order.restaurantEarnings?.payout ??
+                order.pricing?.total ??
+                0,
                 status: order.status || 'pending',
                 createdAt: order.createdAt,
                 customerName: order.userId?.name || order.customerName || 'Customer',
@@ -387,7 +403,7 @@ export default function OrdersPage() {
   return (
     <div className="min-h-screen bg-[#f6e9dc] overflow-x-hidden">
       {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-4 py-6 pb-24 md:pb-6">
+      <div className="max-w-7xl mx-auto px-4 py-6 pb-8 md:pb-6">
         {/* Title */}
         <h1 className="text-2xl md:text-3xl font-bold text-gray-800 mb-6 text-center md:text-left">
           Orders
@@ -543,9 +559,6 @@ export default function OrdersPage() {
           )}
         </div>
       </div>
-
-      {/* Bottom Navigation Bar - Mobile Only */}
-      <BottomNavbar onMenuClick={() => setShowMenu(true)} />
       
       {/* Menu Overlay */}
       <MenuOverlay showMenu={showMenu} setShowMenu={setShowMenu} />

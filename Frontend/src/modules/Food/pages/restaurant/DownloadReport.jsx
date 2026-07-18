@@ -59,7 +59,6 @@ export default function DownloadReport() {
       title="Download report"
       subtitle="Generate and email finance reports"
       backTo={`${RESTAURANT_BASE}/hub-finance`}
-      showBottomNav
     >
       <PanelSurface className="mb-4 border-amber-200 bg-[#f8e7a0] p-3 text-sm text-gray-900">
         You are generating a report for <span className="font-semibold">All Outlets</span>

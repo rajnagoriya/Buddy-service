@@ -164,10 +164,6 @@ router.patch('/business-settings', upload.fields([
     { name: 'favicon', maxCount: 1 }
 ]), businessSettingsController.updateBusinessSettings);
 
-// ----- Delivery Cash Limit -----
-router.get('/delivery-cash-limit', adminController.getDeliveryCashLimit);
-router.patch('/delivery-cash-limit', adminController.updateDeliveryCashLimit);
-
 // ----- Delivery Emergency Help -----
 router.get('/delivery-emergency-help', adminController.getEmergencyHelp);
 router.put('/delivery-emergency-help', adminController.createOrUpdateEmergencyHelp);
@@ -177,7 +173,6 @@ router.get('/withdrawals', adminController.getWithdrawals);
 router.patch('/withdrawals/:id', adminController.updateWithdrawalStatus);
 router.get('/delivery/withdrawals', adminController.getDeliveryWithdrawals);
 router.patch('/delivery/withdrawals/:id', adminController.updateDeliveryWithdrawalStatus);
-router.get('/delivery/cash-limit-settlements', adminController.getCashLimitSettlements);
 
 // ----- Delivery partners & general -----
 router.get('/delivery/join-requests', adminController.getDeliveryJoinRequests);
