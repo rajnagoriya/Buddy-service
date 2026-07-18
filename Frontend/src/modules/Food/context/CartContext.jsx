@@ -5,7 +5,7 @@ import { API_BASE_URL } from "@food/api/config"
 import { buildRestaurantMetaFromCart } from "@food/hooks/useCartRestaurantValidation"
 
 import {
-  getLastRestaurantFromCart,
+  getFirstRestaurantFromCart,
   validateChainRestaurantRadius,
   CHAIN_RADIUS_VALIDATION_MESSAGE,
 } from "@food/utils/restaurantRadius"
@@ -508,17 +508,47 @@ export function CartProvider({ children }) {
       const isNewRestaurant = !restaurantMap.has(newItemRestaurantId)
 
       if (isNewRestaurant) {
-        const lastRestaurant = getLastRestaurantFromCart(safeCart)
-        const maxKm = Number(adminSettings?.multiOrderMaxDistance) > 0
-          ? Number(adminSettings.multiOrderMaxDistance)
+        // Re-fetch live settings so admin toggles apply without a full page reload
+        let liveSettings = adminSettings
+        try {
+          const res = await restaurantAPI.getPublicCheckoutSettings()
+          if (res.data?.success && res.data.data) {
+            liveSettings = res.data.data
+            setAdminSettings(liveSettings)
+          }
+        } catch (err) {
+          debugError('Failed to refresh checkout settings for multi-order:', err)
+        }
+
+        if (liveSettings?.multiOrderEnabled === false) {
+          return {
+            ok: false,
+            error: 'Multi-restaurant orders are currently disabled',
+            code: 'MULTI_ORDER_DISABLED',
+          }
+        }
+
+        if (restaurantMap.size >= 3) {
+          return {
+            ok: false,
+            error: 'You can order from a maximum of 3 restaurants at a time',
+            code: 'MAX_RESTAURANTS_EXCEEDED',
+          }
+        }
+
+        // Anchor = first restaurant in cart (A). B and C must both be near A.
+        const anchorRestaurant = getFirstRestaurantFromCart(safeCart)
+        const maxKm = Number(liveSettings?.multiOrderMaxDistance) > 0
+          ? Number(liveSettings.multiOrderMaxDistance)
           : undefined
 
         // Prefer backend road-distance validation (default 5 km)
         let backendValidated = false
-        if (lastRestaurant?.restaurantId && newItemRestaurantId) {
+        if (anchorRestaurant?.restaurantId && newItemRestaurantId) {
           try {
             await orderAPI.validateRestaurantChain({
-              lastRestaurantId: lastRestaurant.restaurantId,
+              anchorRestaurantId: anchorRestaurant.restaurantId,
+              lastRestaurantId: anchorRestaurant.restaurantId,
               newRestaurantId: newItemRestaurantId,
             })
             backendValidated = true
@@ -535,7 +565,8 @@ export function CartProvider({ children }) {
                 ok: false,
                 error: apiMessage || CHAIN_RADIUS_VALIDATION_MESSAGE,
                 code: 'RESTAURANT_CHAIN_RADIUS',
-                lastRestaurantId: lastRestaurant.restaurantId,
+                anchorRestaurantId: anchorRestaurant.restaurantId,
+                lastRestaurantId: anchorRestaurant.restaurantId,
                 newRestaurantId: newItemRestaurantId,
               }
             }
@@ -546,9 +577,9 @@ export function CartProvider({ children }) {
         if (!backendValidated) {
           const chainCheck = validateChainRestaurantRadius(
             {
-              latitude: lastRestaurant?.lat,
-              longitude: lastRestaurant?.lng,
-              restaurantId: lastRestaurant?.restaurantId,
+              latitude: anchorRestaurant?.lat,
+              longitude: anchorRestaurant?.lng,
+              restaurantId: anchorRestaurant?.restaurantId,
             },
             {
               latitude: item?.latitude,
@@ -564,7 +595,8 @@ export function CartProvider({ children }) {
               error: CHAIN_RADIUS_VALIDATION_MESSAGE,
               code: 'RESTAURANT_CHAIN_RADIUS',
               distanceKm: chainCheck.distanceKm,
-              lastRestaurantId: lastRestaurant?.restaurantId,
+              anchorRestaurantId: anchorRestaurant?.restaurantId,
+              lastRestaurantId: anchorRestaurant?.restaurantId,
               newRestaurantId: newItemRestaurantId,
             }
           }

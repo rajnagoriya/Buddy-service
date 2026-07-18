@@ -52,49 +52,14 @@ const DELIVERY_SPEED_ICON_MAP = {
   clock: Clock,
 }
 
-const FALLBACK_DELIVERY_OPTIONS = [
-  {
-    id: "eco",
-    name: "Eco Saver",
-    badge: "Save ₹15",
-    badgeColor: "bg-green-50 text-green-700 dark:bg-green-950/30 dark:text-green-400 border border-green-100 dark:border-green-900/30",
-    time: "45–55 mins",
-    estimatedTime: 50,
-    feeModifier: -15,
-    description: "Batch delivery. Lower carbon footprint.",
-    icon: Leaf,
-  },
-  {
-    id: "standard",
-    name: "Standard Delivery",
-    badge: "Popular",
-    badgeColor: "bg-orange-50 text-orange-700 dark:bg-orange-950/30 dark:text-orange-400 border border-orange-100 dark:border-orange-900/30",
-    time: "25–35 mins",
-    estimatedTime: 30,
-    feeModifier: 0,
-    description: "Direct to door. Reliable & prompt partner.",
-    icon: Bike,
-    isDefault: true,
-  },
-  {
-    id: "express",
-    name: "Express Delivery",
-    badge: "Zap Delivery",
-    badgeColor: "bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400 border border-amber-100 dark:border-amber-900/30",
-    time: "15–20 mins",
-    estimatedTime: 18,
-    feeModifier: 20,
-    description: "Direct dispatch. Priority mapping partner.",
-    icon: Zap,
-  },
-]
-
 function mapDeliverySpeedOptions(list = []) {
-  return list.map((option) => ({
-    ...option,
-    feeModifier: Number(option.feeModifier) || 0,
-    icon: DELIVERY_SPEED_ICON_MAP[option.icon] || Bike,
-  }))
+  return list
+    .filter((option) => option && option.isEnabled !== false)
+    .map((option) => ({
+      ...option,
+      feeModifier: Number(option.feeModifier) || 0,
+      icon: DELIVERY_SPEED_ICON_MAP[option.icon] || Bike,
+    }))
 }
 
 /** Module cache — avoid remount / StrictMode duplicate hits for static config. */
@@ -365,7 +330,6 @@ function Cart() {
   const [deliveryOption, setDeliveryOption] = useState("standard")
   const [configuredSpeedOptions, setConfiguredSpeedOptions] = useState([])
   const [loadingSpeedOptions, setLoadingSpeedOptions] = useState(true)
-  const [speedOptionsError, setSpeedOptionsError] = useState(false)
   const [isScheduled, setIsScheduled] = useState(() => {
     try {
       const stored = localStorage.getItem('scheduled_order_time')
@@ -470,14 +434,14 @@ function Cart() {
   const [loadingCoupons, setLoadingCoupons] = useState(false)
   const [userOrderCount, setUserOrderCount] = useState(0)
 
-  // Fallback fee defaults only — official amounts always come from calculateOrder / createOrder.
+  // Soft local defaults only while calculateOrder loads — no delivery fee fallback.
   const feeSettings = {
-    deliveryFee: 25,
+    deliveryFee: 0,
     deliveryFeeRanges: [],
-    freeDeliveryThreshold: 149,
-    platformFee: 5,
+    freeDeliveryThreshold: 0,
+    platformFee: 0,
     packagingFee: 0,
-    gstRate: 5,
+    gstRate: 0,
   }
 
   const subtotal = pricing?.subtotal || cart.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 1), 0)
@@ -1296,7 +1260,6 @@ function Cart() {
         const data = await loadDeliverySpeedOptionsOnce()
         if (cancelled) return
         setConfiguredSpeedOptions(data.options)
-        setSpeedOptionsError(false)
         if (data.defaultOptionId) {
           setDeliveryOption((prev) => (
             data.options.some((o) => o.id === prev) ? prev : data.defaultOptionId
@@ -1305,7 +1268,7 @@ function Cart() {
       } catch (error) {
         if (cancelled) return
         debugError("Error fetching delivery speed options:", error)
-        setSpeedOptionsError(true)
+        setConfiguredSpeedOptions([])
       } finally {
         if (!cancelled) setLoadingSpeedOptions(false)
       }
@@ -1315,55 +1278,18 @@ function Cart() {
     return () => { cancelled = true }
   }, [])
 
-  // Use backend pricing if available, otherwise fallback to database fee settings
-  const fallbackDeliveryFee = (() => {
-    if (appliedCoupon?.freeDelivery) {
-      return 0
-    }
-
-    const distanceKm = (() => {
-      const rCoords = restaurantData?.location?.coordinates
-      const dCoords = defaultAddress?.location?.coordinates
-      if (!Array.isArray(rCoords) || !Array.isArray(dCoords)) return null
-      if (rCoords.length !== 2 || dCoords.length !== 2) return null
-      const [rLng, rLat] = rCoords
-      const [dLng, dLat] = dCoords
-      return calculateDistance(rLat, rLng, dLat, dLng)
-    })()
-
-    const ranges = Array.isArray(feeSettings.deliveryFeeRanges) ? [...feeSettings.deliveryFeeRanges] : []
-    if (ranges.length > 0 && Number.isFinite(distanceKm)) {
-      const sortedRanges = ranges.sort((a, b) => Number(a.min) - Number(b.min))
-      for (let i = 0; i < sortedRanges.length; i += 1) {
-        const range = sortedRanges[i]
-        const min = Number(range.min)
-        const max = Number(range.max)
-        const fee = Number(range.fee)
-        const isLastRange = i === sortedRanges.length - 1
-        const inRange = isLastRange
-          ? distanceKm >= min && distanceKm <= max
-          : distanceKm >= min && distanceKm < max
-
-        if (inRange) return fee
-      }
-
-      return 0
-    }
-
-    if (subtotal >= feeSettings.freeDeliveryThreshold) {
-      return 0
-    }
-
-    return Number(feeSettings.deliveryFee || 0)
-  })()
+  // Use backend pricing if available; otherwise 0 (no flat delivery fee fallback).
+  const fallbackDeliveryFee = 0
 
   const deliveryOptions = configuredSpeedOptions.length > 0
     ? configuredSpeedOptions
-    : (speedOptionsError ? FALLBACK_DELIVERY_OPTIONS : [])
+    : []
 
   const selectedDeliveryOption = deliveryOptions.find(opt => opt.id === deliveryOption) || deliveryOptions.find(opt => opt.isDefault) || deliveryOptions[0]
 
-  const speedFeeModifier = Number(selectedDeliveryOption?.feeModifier) || 0
+  const speedFeeModifier = deliveryOptions.length > 0
+    ? (Number(selectedDeliveryOption?.feeModifier) || 0)
+    : 0
   const deliveryFeeBreakdown = pricing?.deliveryFeeBreakdown || null
   const backendSpeedModifier = Number(deliveryFeeBreakdown?.speedFeeModifier) || 0
   const deliveryFeeBeforeSpeed = pricing != null
@@ -1379,9 +1305,15 @@ function Cart() {
   const deliveryBaseBeforeMultiplier = deliveryFeeBreakdown?.baseFee != null
     ? Number(deliveryFeeBreakdown.baseFee)
     : deliveryFeeBeforeSpeed
-  const deliveryMultiplierSurcharge = deliveryFeeBreakdown?.multiplier > 1
-    ? Math.max(0, deliveryFeeBeforeSpeed - deliveryBaseBeforeMultiplier)
-    : 0
+  // Multi-restaurant uses additionalCharge (multiplier stays 1). Split/large orders use multiplier > 1.
+  const deliveryMultiplierSurcharge = (() => {
+    const additional = Number(deliveryFeeBreakdown?.additionalCharge) || 0
+    if (additional > 0) return additional
+    if (deliveryFeeBreakdown?.multiplier > 1) {
+      return Math.max(0, deliveryFeeBeforeSpeed - deliveryBaseBeforeMultiplier)
+    }
+    return 0
+  })()
   const hasDistanceDeliveryBreakdown =
     deliveryFeeBreakdown?.source === "distance" &&
     Number.isFinite(Number(deliveryFeeBreakdown?.distanceKm))
@@ -2310,7 +2242,7 @@ function Cart() {
                   <div className="px-4 py-2.5 md:px-5 md:py-3 border-b border-dashed border-gray-200 dark:border-gray-800 flex items-center gap-3 bg-[#f4fcf7] dark:bg-green-900/10">
                     <CheckCircle2 className="h-4.5 w-4.5 text-green-600 fill-green-600/20" />
                     <span className="text-xs md:text-sm font-bold text-gray-800 dark:text-gray-200">
-                      You saved {RUPEE_SYMBOL}{(deliveryDiscount || deliveryFee || feeSettings.deliveryFee || 25).toFixed(0)} on delivery
+                      You saved {RUPEE_SYMBOL}{(deliveryDiscount || deliveryFee || 0).toFixed(0)} on delivery
                     </span>
                   </div>
                 )}

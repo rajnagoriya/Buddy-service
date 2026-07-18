@@ -18,7 +18,7 @@ export async function validateRestaurantChainController(req, res, next) {
     try {
         const dto = validateRestaurantChainDto(req.body);
         const result = await validateNewRestaurantAgainstLast(
-            dto.lastRestaurantId,
+            dto.anchorRestaurantId,
             dto.newRestaurantId,
         );
         return sendResponse(res, 200, 'Restaurant chain validated', result);
@@ -387,14 +387,13 @@ export async function cancelOrderAdminController(req, res, next) {
     try {
         const adminId = req.user?.userId;
         const orderId = req.params.orderId;
-        const dto = validateCancelOrderDto(req.body);
-        const order = await orderService.cancelOrderByAdmin(
+        const dto = validateCancelOrderDto(req.body || {});
+        const order = await orderService.cancelOrderAdmin(
             orderId,
             adminId,
-            dto.reason,
-            dto.refundDestination,
+            dto.reason || '',
         );
-        return sendResponse(res, 200, 'Order cancelled by admin', { order });
+        return sendResponse(res, 200, 'Order cancelled by admin successfully', { order });
     } catch (err) {
         next(err);
     }
@@ -406,6 +405,15 @@ export async function deleteOrderAdminController(req, res, next) {
         const orderId = req.params.orderId;
         const result = await orderService.deleteOrderAdmin(orderId, adminId);
         return sendResponse(res, 200, 'Order deleted successfully', result);
+    } catch (err) {
+        next(err);
+    }
+}
+
+export async function getMultiOrderSettlementReportController(req, res, next) {
+    try {
+        const data = await orderService.getMultiOrderSettlementReport(req.query || {});
+        return sendResponse(res, 200, 'Multi-order settlement report fetched', data);
     } catch (err) {
         next(err);
     }
@@ -426,7 +434,8 @@ export async function resendOrderToRestaurantController(req, res, next) {
     try {
         const deliveryPartnerId = req.user?.userId;
         const orderId = req.params.orderId;
-        const order = await orderService.resendOrderToRestaurant(orderId, deliveryPartnerId);
+        const restaurantId = req.body?.restaurantId || req.query?.restaurantId || null;
+        const order = await orderService.resendOrderToRestaurant(orderId, deliveryPartnerId, restaurantId);
         return sendResponse(res, 200, 'Order resent to restaurant successfully', { order });
     } catch (err) {
         next(err);

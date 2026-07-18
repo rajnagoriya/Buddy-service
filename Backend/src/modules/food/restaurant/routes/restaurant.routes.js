@@ -136,7 +136,7 @@ router.get('/restaurants/:id/outlet-timings', cacheResponse(600, 'restaurant_tim
 router.get('/restaurants/:id/offers', cacheResponse(120, 'restaurant_offers'), listOffersForRestaurantPageController);
 router.get('/offers', cacheResponse(300, 'offers'), listPublicOffersController);
 router.get('/delivery-speed-options', cacheResponse(300, 'delivery_speed_options'), listDeliverySpeedOptionsController);
-router.get('/checkout-settings/public', cacheResponse(300, 'checkout_settings'), getPublicCheckoutSettingsController);
+router.get('/checkout-settings/public', cacheResponse(60, 'checkout_settings'), getPublicCheckoutSettingsController);
 router.get('/my-offers', authMiddleware, requireRestaurant, listRestaurantOffersController);
 router.get('/my-offers/:id/analytics', authMiddleware, requireRestaurant, getRestaurantOfferAnalyticsController);
 router.get('/my-offers/:id/history', authMiddleware, requireRestaurant, getRestaurantOfferUsageHistoryController);

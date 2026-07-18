@@ -102,6 +102,50 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
   const lastCoordRef = useRef(null);
   const rollingSpeedRef = useRef([]);
   const lastAutoArrivalRef = useRef({ PICKING_UP: false, PICKED_UP: false });
+  const activeOrderIdRef = useRef(null);
+  const clearLiveTripUiRef = useRef(null);
+  const extractCurrentTripRef = useRef(null);
+  const applyServerTripRef = useRef(null);
+  const hasMountedTripSyncRef = useRef(false);
+
+  useEffect(() => {
+    activeOrderIdRef.current = activeOrder
+      ? String(activeOrder._id || activeOrder.orderId || activeOrder.orderMongoId || '')
+      : null;
+  }, [activeOrder]);
+
+  const clearLiveTripUi = useCallback((toastMsg) => {
+    resetTrip();
+    setShowVerification(false);
+    setIsModalMinimized(false);
+    setIncomingOrder(null);
+    clearNewOrder?.();
+    clearSharedOrder?.();
+    if (toastMsg) toast.error(toastMsg);
+  }, [resetTrip, clearNewOrder, clearSharedOrder]);
+
+  const extractCurrentTrip = useCallback((response) => {
+    const data = response?.data?.data;
+    // Prefer explicit activeOrder key (null means no trip — do not fall back to wrapper object)
+    const candidate = data && Object.prototype.hasOwnProperty.call(data, 'activeOrder')
+      ? data.activeOrder
+      : data;
+    if (!candidate) return null;
+    if (!(candidate._id || candidate.orderId || candidate.order_id)) return null;
+    const status = String(
+      candidate.orderStatus || candidate.status || candidate.deliveryStatus || '',
+    ).toLowerCase();
+    if (status.startsWith('cancelled') || status === 'deleted') return null;
+    return candidate;
+  }, []);
+
+  useEffect(() => {
+    clearLiveTripUiRef.current = clearLiveTripUi;
+  }, [clearLiveTripUi]);
+
+  useEffect(() => {
+    extractCurrentTripRef.current = extractCurrentTrip;
+  }, [extractCurrentTrip]);
 
   const [zoom, setZoom] = useState(16);
   const [isSimMode, setIsSimMode] = useState(false);
@@ -340,80 +384,156 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
     setIsModalMinimized(false);
   }, [tripStatus, showVerification, incomingOrder]);
 
-  // 1. Initial Sync (Force sync with server to avoid 'stuck' persistent state)
+  // 1. Trip sync — mount once + slow watchdog via refs (avoids /orders/current render loops)
+  const applyServerTrip = useCallback((serverData) => {
+    if (!serverData) {
+      clearLiveTripUiRef.current?.();
+      return;
+    }
+
+    const getLoc = (ref, keysLat, keysLng) => {
+      if (!ref) return null;
+      if (ref.location) {
+        if (Array.isArray(ref.location.coordinates) && ref.location.coordinates.length >= 2) {
+          return {
+            lat: ref.location.coordinates[1],
+            lng: ref.location.coordinates[0]
+          };
+        }
+        return {
+          lat: ref.location.latitude || ref.location.lat,
+          lng: ref.location.longitude || ref.location.lng
+        };
+      }
+      for (const k of keysLat) { if (ref[k] != null) return { lat: ref[k], lng: ref[keysLng[keysLat.indexOf(k)]] }; }
+      return null;
+    };
+
+    const resLoc = (serverData.isMultiRestaurant && Array.isArray(serverData.pickups))
+      ? getLoc(serverData.pickups.find(p => !['picked_up', 'cancelled'].includes(p.status)), ['latitude', 'lat'], ['longitude', 'lng'])
+      : null;
+
+    const finalResLoc = resLoc ||
+      getLoc(serverData.restaurantId, ['latitude', 'lat'], ['longitude', 'lng']) ||
+      getLoc(serverData, ['restaurant_lat', 'restaurantLat', 'latitude'], ['restaurant_lng', 'restaurantLng', 'longitude']);
+
+    const cusLoc = getLoc(serverData.deliveryAddress, ['latitude', 'lat'], ['longitude', 'lng']) ||
+      getLoc(serverData, ['customer_lat', 'customerLat', 'latitude'], ['customer_lng', 'customerLng', 'longitude']);
+
+    const syncedOrder = {
+      ...serverData,
+      _id: serverData._id,
+      orderId: serverData.orderId || serverData.order_id || serverData._id,
+      restaurantLocation: finalResLoc,
+      customerLocation: cusLoc
+    };
+
+    setActiveOrder(syncedOrder);
+
+    const backendStatus = String(
+      serverData.deliveryStatus || serverData.orderState?.status || serverData.orderStatus || serverData.status || ''
+    ).toLowerCase();
+    const currentPhase = serverData.deliveryState?.currentPhase;
+    const { tripStatus: existingTripStatus } = useDeliveryStore.getState();
+
+    let nextTripStatus = null;
+    if (['delivered', 'completed'].includes(backendStatus)) {
+      nextTripStatus = 'COMPLETED';
+    } else if (currentPhase === 'at_drop' || ['reached_drop'].includes(backendStatus)) {
+      nextTripStatus = 'REACHED_DROP';
+    } else if (['picked_up', 'delivering'].includes(backendStatus)) {
+      nextTripStatus = 'PICKED_UP';
+    } else if (currentPhase === 'at_pickup' || ['reached_pickup'].includes(backendStatus)) {
+      nextTripStatus = 'REACHED_PICKUP';
+    } else if (['confirmed', 'preparing', 'ready_for_pickup', 'accepted', 'created'].includes(backendStatus)) {
+      nextTripStatus = 'PICKING_UP';
+    }
+
+    if (nextTripStatus && nextTripStatus !== existingTripStatus) {
+      updateTripStatus(nextTripStatus);
+    }
+  }, [setActiveOrder, updateTripStatus]);
+
   useEffect(() => {
+    applyServerTripRef.current = applyServerTrip;
+  }, [applyServerTrip]);
+
+  // Mount-only initial sync — empty deps prevent callback-identity loops
+  useEffect(() => {
+    if (hasMountedTripSyncRef.current) return undefined;
+    hasMountedTripSyncRef.current = true;
+    let cancelled = false;
     const syncWithServer = async () => {
       try {
         const response = await deliveryAPI.getCurrentDelivery();
-        const rawData = response?.data?.data?.activeOrder || response?.data?.data;
-        const serverData = (rawData && (rawData._id || rawData.orderId)) ? rawData : null;
-        
-        if (serverData) {
-          // Robust location mapping (Same as acceptOrder logic)
-          const getLoc = (ref, keysLat, keysLng) => {
-            if (!ref) return null;
-            if (ref.location) {
-              if (Array.isArray(ref.location.coordinates) && ref.location.coordinates.length >= 2) {
-                return {
-                  lat: ref.location.coordinates[1],
-                  lng: ref.location.coordinates[0]
-                };
-              }
-              return {
-                lat: ref.location.latitude || ref.location.lat,
-                lng: ref.location.longitude || ref.location.lng
-              };
-            }
-            for (const k of keysLat) { if (ref[k] != null) return { lat: ref[k], lng: ref[keysLng[keysLat.indexOf(k)]] }; }
-            return null;
-          };
-
-          const resLoc = (serverData.isMultiRestaurant && Array.isArray(serverData.pickups))
-            ? getLoc(serverData.pickups.find(p => !['picked_up', 'cancelled'].includes(p.status)), ['latitude', 'lat'], ['longitude', 'lng'])
-            : null;
-                         
-          const finalResLoc = resLoc || 
-                         getLoc(serverData.restaurantId, ['latitude', 'lat'], ['longitude', 'lng']) || 
-                         getLoc(serverData, ['restaurant_lat', 'restaurantLat', 'latitude'], ['restaurant_lng', 'restaurantLng', 'longitude']);
-                         
-          const cusLoc = getLoc(serverData.deliveryAddress, ['latitude', 'lat'], ['longitude', 'lng']) || 
-                         getLoc(serverData, ['customer_lat', 'customerLat', 'latitude'], ['customer_lng', 'customerLng', 'longitude']);
-
-          const syncedOrder = {
-            ...serverData,
-            _id: serverData._id,
-            orderId: serverData.orderId || serverData.order_id || serverData._id,
-            restaurantLocation: finalResLoc,
-            customerLocation: cusLoc
-          };
-
-          setActiveOrder(syncedOrder);
-          
-          const backendStatus = serverData.deliveryStatus || serverData.orderState?.status || serverData.orderStatus || serverData.status;
-          const currentPhase = serverData.deliveryState?.currentPhase;
-
-          if (['delivered', 'completed', 'DELIVERED'].includes(backendStatus)) {
-            updateTripStatus('COMPLETED');
-          } else if (currentPhase === 'at_drop' || ['reached_drop', 'REACHED_DROP'].includes(backendStatus)) {
-            updateTripStatus('REACHED_DROP');
-          } else if (['picked_up', 'PICKED_UP', 'delivering'].includes(backendStatus)) {
-            updateTripStatus('PICKED_UP');
-          } else if (currentPhase === 'at_pickup' || ['reached_pickup', 'REACHED_PICKUP'].includes(backendStatus)) {
-            updateTripStatus('REACHED_PICKUP');
-          } else if (['confirmed', 'preparing', 'ready_for_pickup'].includes(backendStatus)) {
-            updateTripStatus('PICKING_UP');
-          }
-        } else {
-          clearActiveOrder();
-        }
-      } catch (err) { 
-        console.error('Order Sync Failed:', err); 
-        clearActiveOrder();
+        if (cancelled) return;
+        const trip = extractCurrentTripRef.current?.(response) ?? null;
+        applyServerTripRef.current?.(trip);
+      } catch (err) {
+        console.error('Order Sync Failed:', err);
+        if (!cancelled) clearLiveTripUiRef.current?.();
       }
     };
     syncWithServer();
-  }, []); // Only on mount to stabilize state
-  
+    return () => { cancelled = true; };
+  }, []);
+
+  // Slow presence check while a trip is open (clear-only; does not re-apply trip state)
+  useEffect(() => {
+    const orderKey = activeOrder?._id || activeOrder?.orderId;
+    if (!orderKey) return undefined;
+
+    const localIds = new Set(
+      [activeOrder._id, activeOrder.orderId, activeOrder.orderMongoId, activeOrder.order_id]
+        .filter(Boolean)
+        .map((id) => String(id)),
+    );
+
+    let cancelled = false;
+    const verifyStillActive = async () => {
+      try {
+        const response = await deliveryAPI.getCurrentDelivery();
+        if (cancelled) return;
+        const serverData = extractCurrentTripRef.current?.(response) ?? null;
+        if (!serverData) {
+          clearLiveTripUiRef.current?.('This order is no longer active');
+          return;
+        }
+        const serverIds = [serverData._id, serverData.orderId, serverData.order_id, serverData.orderMongoId]
+          .filter(Boolean)
+          .map((id) => String(id));
+        const stillOurs = serverIds.some((id) => localIds.has(id));
+        if (!stillOurs) {
+          clearLiveTripUiRef.current?.('This order is no longer assigned to you');
+        }
+      } catch {
+        // Ignore transient network errors
+      }
+    };
+
+    const poller = window.setInterval(verifyStillActive, 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(poller);
+    };
+  }, [activeOrder?._id, activeOrder?.orderId]);
+
+  // Re-check only when the app tab becomes visible again
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (!activeOrderIdRef.current) return;
+      deliveryAPI.getCurrentDelivery()
+        .then((response) => {
+          const serverData = extractCurrentTripRef.current?.(response) ?? null;
+          if (!serverData) clearLiveTripUiRef.current?.('This order is no longer active');
+        })
+        .catch(() => {});
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, []);
+
   // 1.5 Professional Unified ETA Calculation Hook
   useEffect(() => {
     // If we have distance, calculate ETA. Fallback to 8m/s (28km/h) avg if GPS speed is unknown.
@@ -591,59 +711,16 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
     const hydrateAvailableOrder = async () => {
       try {
         const currentResponse = await deliveryAPI.getCurrentDelivery();
+        if (cancelled) return;
+
+        const data = currentResponse?.data?.data;
         const currentPayload =
-          currentResponse?.data?.data?.activeOrder ||
-          currentResponse?.data?.data ||
-          null;
-
-        if (!cancelled && currentPayload && (currentPayload._id || currentPayload.orderId)) {
-          // Robust location mapping
-          const getLoc = (ref, keysLat, keysLng) => {
-            if (!ref) return null;
-            if (ref.location) {
-              if (Array.isArray(ref.location.coordinates) && ref.location.coordinates.length >= 2) {
-                return { lat: ref.location.coordinates[1], lng: ref.location.coordinates[0] };
-              }
-              return { lat: ref.location.latitude || ref.location.lat, lng: ref.location.longitude || ref.location.lng };
-            }
-            for (const k of keysLat) { if (ref[k] != null) return { lat: ref[k], lng: ref[keysLng[keysLat.indexOf(k)]] }; }
-            return null;
-          };
-
-          const resLoc = (currentPayload.isMultiRestaurant && Array.isArray(currentPayload.pickups))
-            ? getLoc(currentPayload.pickups.find(p => !['picked_up', 'cancelled'].includes(p.status)), ['latitude', 'lat'], ['longitude', 'lng'])
+          data?.activeOrder && (data.activeOrder._id || data.activeOrder.orderId || data.activeOrder.order_id)
+            ? data.activeOrder
             : null;
 
-          const finalResLoc = resLoc || 
-                         getLoc(currentPayload.restaurantId, ['latitude', 'lat'], ['longitude', 'lng']) || 
-                         getLoc(currentPayload, ['restaurant_lat', 'restaurantLat', 'latitude'], ['restaurant_lng', 'restaurantLng', 'longitude']);
-          const cusLoc = getLoc(currentPayload.deliveryAddress, ['latitude', 'lat'], ['longitude', 'lng']) || 
-                         getLoc(currentPayload, ['customer_lat', 'customerLat', 'latitude'], ['customer_lng', 'customerLng', 'longitude']);
-
-          setActiveOrder({
-            ...currentPayload,
-            _id: currentPayload._id,
-            orderId: currentPayload.orderId || currentPayload.order_id || currentPayload._id,
-            restaurantLocation: finalResLoc,
-            customerLocation: cusLoc
-          });
-
-          // Sync status with server
-          const backendStatus = String(currentPayload.deliveryStatus || currentPayload.orderState?.status || currentPayload.orderStatus || currentPayload.status || "").toLowerCase();
-          const currentPhase = currentPayload.deliveryState?.currentPhase;
-
-          if (['delivered', 'completed'].includes(backendStatus)) {
-            updateTripStatus('COMPLETED');
-          } else if (currentPhase === 'at_drop' || backendStatus === 'reached_drop') {
-            updateTripStatus('REACHED_DROP');
-          } else if (['picked_up', 'delivering'].includes(backendStatus)) {
-            updateTripStatus('PICKED_UP');
-          } else if (currentPhase === 'at_pickup' || backendStatus === 'reached_pickup') {
-            updateTripStatus('REACHED_PICKUP');
-          } else if (['confirmed', 'preparing', 'ready_for_pickup'].includes(backendStatus)) {
-             // Only set to PICKING_UP if we aren't already further ahead
-             if (tripStatus === 'IDLE') updateTripStatus('PICKING_UP');
-          }
+        if (currentPayload) {
+          applyServerTripRef.current?.(currentPayload);
           return;
         }
 
@@ -694,7 +771,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
       if (!document.hidden) {
         void hydrateAvailableOrder();
       }
-    }, isSocketConnected ? 12000 : 5000);
+    }, isSocketConnected ? 12000 : 8000);
 
     if (socket) {
       socket.on('order_earnings_split', (data) => {
@@ -714,36 +791,107 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
       window.clearInterval(poller);
       if (socket) socket.off('order_earnings_split');
     };
-  }, [activeOrder, currentTab, isOnline, isSocketConnected, setActiveOrder, tripStatus, updateTripStatus, socket]);
+  }, [activeOrder?._id, activeOrder?.orderId, currentTab, isOnline, isSocketConnected, socket]);
 
   useEffect(() => {
     if (orderStatusUpdate) {
-      // 1. Update active order state for real-time sync (e.g. Partner joined, Status changed)
-      if (activeOrder && (activeOrder._id === orderStatusUpdate.orderId || activeOrder.orderId === orderStatusUpdate.orderId || activeOrder._id === orderStatusUpdate.orderMongoId)) {
+      const updateStatus = String(
+        orderStatusUpdate.orderStatus || orderStatusUpdate.status || '',
+      ).toLowerCase();
+      const updateIds = [
+        orderStatusUpdate.orderId,
+        orderStatusUpdate.orderMongoId,
+        orderStatusUpdate._id,
+        orderStatusUpdate.order_id,
+      ]
+        .filter(Boolean)
+        .map((id) => String(id));
+
+      const { activeOrder: currentActive } = useDeliveryStore.getState();
+      const matchesActiveOrder = Boolean(
+        currentActive &&
+          [
+            currentActive._id,
+            currentActive.orderId,
+            currentActive.orderMongoId,
+            currentActive.order_id,
+          ]
+            .filter(Boolean)
+            .map((id) => String(id))
+            .some((id) => updateIds.includes(id)),
+      );
+
+      const isCancelledUpdate =
+        updateStatus === 'cancelled' ||
+        updateStatus.startsWith('cancelled_') ||
+        updateStatus === 'deleted' ||
+        String(orderStatusUpdate.failureReason || '').toLowerCase().includes('cancel') ||
+        String(orderStatusUpdate.cancelledBy || '').toLowerCase() === 'admin';
+
+      if (isCancelledUpdate && currentActive && (matchesActiveOrder || updateIds.length === 0)) {
+        clearLiveTripUi(orderStatusUpdate.message || 'Order cancelled');
+        clearOrderStatusUpdate();
+        return;
+      }
+
+      if (orderStatusUpdate.orderStatus === 'rejected_by_restaurant' || orderStatusUpdate.status === 'rejected_by_restaurant') {
+        if (matchesActiveOrder && currentActive) {
           setActiveOrder({
-              ...activeOrder,
-              ...orderStatusUpdate
+            ...currentActive,
+            orderStatus: 'rejected_by_restaurant',
+            restaurantRejectionCount:
+              orderStatusUpdate.restaurantRejectionCount ||
+              (currentActive.restaurantRejectionCount || 0) + 1,
+            pickups: orderStatusUpdate.pickups || currentActive.pickups,
+          });
+          toast.warning('Restaurant rejected the order. You can try resending.');
+        }
+        clearOrderStatusUpdate();
+        return;
+      }
+
+      // Live status / pickup updates: refetch full trip so pickups + dispatch stay fresh
+      if (matchesActiveOrder) {
+        deliveryAPI.getCurrentDelivery()
+          .then((response) => {
+            const trip = extractCurrentTripRef.current?.(response) ?? null;
+            if (trip) {
+              applyServerTripRef.current?.(trip);
+              return;
+            }
+            // Fallback soft-merge if current endpoint briefly returns null
+            const latest = useDeliveryStore.getState().activeOrder;
+            if (!latest) return;
+            setActiveOrder({
+              ...latest,
+              orderStatus: orderStatusUpdate.orderStatus || latest.orderStatus,
+              status: orderStatusUpdate.status || latest.status,
+              dispatch: orderStatusUpdate.dispatch
+                ? { ...(latest.dispatch || {}), ...orderStatusUpdate.dispatch }
+                : latest.dispatch,
+              pickups: orderStatusUpdate.pickups || latest.pickups,
+              deliveryState: orderStatusUpdate.deliveryState || latest.deliveryState,
+              restaurantRejectionCount:
+                orderStatusUpdate.restaurantRejectionCount ?? latest.restaurantRejectionCount,
+            });
+          })
+          .catch(() => {
+            const latest = useDeliveryStore.getState().activeOrder;
+            if (!latest) return;
+            setActiveOrder({
+              ...latest,
+              orderStatus: orderStatusUpdate.orderStatus || latest.orderStatus,
+              pickups: orderStatusUpdate.pickups || latest.pickups,
+              dispatch: orderStatusUpdate.dispatch
+                ? { ...(latest.dispatch || {}), ...orderStatusUpdate.dispatch }
+                : latest.dispatch,
+            });
           });
       }
 
-      // 2. Handle specific terminal or critical statuses
-      if (orderStatusUpdate.status === 'cancelled' || orderStatusUpdate.orderStatus === 'cancelled') {
-        toast.error('Order cancelled');
-        resetTrip();
-      } else if (orderStatusUpdate.orderStatus === 'rejected_by_restaurant' || orderStatusUpdate.status === 'rejected_by_restaurant') {
-        // Update active order to reflect the rejection (and count)
-        if (activeOrder && (activeOrder._id === orderStatusUpdate.orderId || activeOrder.orderId === orderStatusUpdate.orderId)) {
-            setActiveOrder({
-                ...activeOrder,
-                orderStatus: 'rejected_by_restaurant',
-                restaurantRejectionCount: orderStatusUpdate.restaurantRejectionCount || (activeOrder.restaurantRejectionCount || 0) + 1
-            });
-            toast.warning('Restaurant rejected the order. You can try resending.');
-        }
-      }
       clearOrderStatusUpdate();
     }
-  }, [orderStatusUpdate, resetTrip, clearOrderStatusUpdate, activeOrder, setActiveOrder]);
+  }, [orderStatusUpdate, clearOrderStatusUpdate, setActiveOrder, clearLiveTripUi]);
 
   // Handle Real-time Admin Notifications
   useEffect(() => {
@@ -1159,7 +1307,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                     onMinimize={() => setIsModalMinimized(true)}
                   />
                 )}
-                {(tripStatus === 'PICKING_UP' || tripStatus === 'REACHED_PICKUP') && (
+                {activeOrder && (tripStatus === 'PICKING_UP' || tripStatus === 'REACHED_PICKUP') && (
                   <PickupActionModal 
                     order={activeOrder} 
                     status={tripStatus} 
@@ -1171,7 +1319,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                     onMinimize={() => setIsModalMinimized(true)}
                   />
                 )}
-                {(tripStatus === 'PICKED_UP' || tripStatus === 'REACHED_DROP') && (
+                {activeOrder && (tripStatus === 'PICKED_UP' || tripStatus === 'REACHED_DROP') && (
                   <div className="absolute inset-x-0 z-[120] px-4" style={{ bottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}>
                     {tripStatus === 'PICKED_UP' ? (
                       <div className="bg-white rounded-[2rem] p-6 shadow-[0_-20px_80px_rgba(0,0,0,0.4)] border border-gray-100 flex flex-col items-center">
@@ -1227,7 +1375,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                     )}
                   </div>
                 )}
-                {showVerification && tripStatus !== 'COMPLETED' && (
+                {showVerification && activeOrder && tripStatus !== 'COMPLETED' && (
                   <DeliveryVerificationModal 
                     order={activeOrder} 
                     onComplete={async (otp, paymentOverride) => {
@@ -1238,7 +1386,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                     onClose={() => setShowVerification(false)}
                   />
                 )}
-                {tripStatus === 'COMPLETED' && <OrderSummaryModal order={activeOrder} onDone={resetTrip} />}
+                {tripStatus === 'COMPLETED' && activeOrder && <OrderSummaryModal order={activeOrder} onDone={resetTrip} />}
                 {activeOrder?.orderStatus === 'rejected_by_restaurant' && (
                   <RejectedOrderModal 
                     order={activeOrder} 

@@ -14,13 +14,16 @@ import {
 import { ValidationError } from '../../../../core/auth/errors.js';
 import {
   calculateDistanceSlabFee,
-  calculateRangeDeliveryFee,
   resolveOrderDistanceKmAsync,
   applyDeliverySurcharges,
   resolveSpeedFeeModifier,
 } from './order.helpers.js';
 import { FoodDeliveryBoySettings } from '../../admin/models/deliveryBoySettings.model.js';
 import { validateRestaurantChainForItems } from './restaurant-chain-radius.service.js';
+import {
+  assertMaxRestaurants,
+  assertMultiOrderAllowed,
+} from './order-lifecycle.policy.js';
 
 /**
  * Re-load cart lines from catalog. Never trust client prices / availability.
@@ -186,6 +189,10 @@ export async function calculateOrderPricing(userId, dto) {
 
   if (restaurantIds.length === 0) throw new ValidationError('No restaurant specified');
 
+  assertMaxRestaurants(
+    restaurantIds.map((id) => ({ restaurantId: id })),
+  );
+
   const restaurantsRaw = await FoodRestaurant.find({ _id: { $in: restaurantIds } })
     .select(
       'status location name restaurantName packagingFee profileImage coverImages isAcceptingOrders profileReviewStatus',
@@ -217,12 +224,12 @@ export async function calculateOrderPricing(userId, dto) {
     .sort({ createdAt: -1 })
     .lean();
   const feeSettings = feeDoc || {
-    deliveryFee: 25,
+    deliveryFee: 0,
     deliveryFeeRanges: [],
-    freeDeliveryThreshold: 149,
-    platformFee: 5,
+    freeDeliveryThreshold: 0,
+    platformFee: 0,
     packagingFee: 0,
-    gstRate: 5,
+    gstRate: 0,
   };
 
   let deliveryBoySettings = await FoodDeliveryBoySettings.findOne({ isActive: true })
@@ -233,6 +240,7 @@ export async function calculateOrderPricing(userId, dto) {
       .sort({ createdAt: -1 })
       .lean();
   }
+  assertMultiOrderAllowed(deliveryBoySettings, restaurantIds.length);
 
   const defaultPackagingFee =
     feeSettings.packagingFee != null ? Number(feeSettings.packagingFee) : 0;
@@ -268,7 +276,7 @@ export async function calculateOrderPricing(userId, dto) {
   const isMultiRestaurant = restaurants.length > 1;
 
   let baseDeliveryFee = 0;
-  let deliveryFeeSource = 'flat';
+  let deliveryFeeSource = 'none';
 
   if (Number.isFinite(freeThreshold) && freeThreshold > 0 && subtotal >= freeThreshold) {
     baseDeliveryFee = 0;
@@ -279,14 +287,9 @@ export async function calculateOrderPricing(userId, dto) {
       baseDeliveryFee = calculateDistanceSlabFee(distanceKm, rules);
       deliveryFeeSource = 'distance';
     } else {
-      const rangeFee = calculateRangeDeliveryFee(distanceKm, feeSettings.deliveryFeeRanges);
-      if (rangeFee != null) {
-        baseDeliveryFee = rangeFee;
-        deliveryFeeSource = 'range';
-      } else {
-        baseDeliveryFee = Number(feeSettings.deliveryFee || 0);
-        deliveryFeeSource = 'flat';
-      }
+      // No active distance rules → delivery fee is 0 (no flat/range fallback)
+      baseDeliveryFee = 0;
+      deliveryFeeSource = 'none';
     }
   }
 
@@ -297,7 +300,7 @@ export async function calculateOrderPricing(userId, dto) {
   });
 
   const speedOptions = Array.isArray(deliveryBoySettings?.deliverySpeedOptions)
-    ? deliveryBoySettings.deliverySpeedOptions
+    ? deliveryBoySettings.deliverySpeedOptions.filter((o) => o && o.isEnabled !== false)
     : [];
   if (speedOptions.length > 0 && (dto.deliverySpeedOptionId || dto.deliveryOption)) {
     const speedId = String(dto.deliverySpeedOptionId || '').trim();
@@ -312,11 +315,13 @@ export async function calculateOrderPricing(userId, dto) {
     }
   }
 
-  const speedFeeModifier = resolveSpeedFeeModifier(
-    deliveryBoySettings,
-    dto.deliverySpeedOptionId,
-    dto.deliveryOption,
-  );
+  const speedFeeModifier = speedOptions.length > 0
+    ? resolveSpeedFeeModifier(
+      deliveryBoySettings,
+      dto.deliverySpeedOptionId,
+      dto.deliveryOption,
+    )
+    : 0;
 
   const deliveryFee = Math.max(0, surchargeResult.fee + speedFeeModifier);
   const deliveryFeeBreakdown = {

@@ -1870,8 +1870,11 @@ export async function getDeliveryCommissionRules() {
         name: r.name || '',
         minDistance: r.minDistance,
         maxDistance: r.maxDistance ?? null,
-        commissionPerKm: r.commissionPerKm,
-        basePayout: r.basePayout,
+        userCharge: r.userCharge != null ? r.userCharge : (r.basePayout ?? 0),
+        deliveryBoyFee: r.deliveryBoyFee != null ? r.deliveryBoyFee : (r.basePayout ?? 0),
+        // Legacy aliases for older admin clients
+        commissionPerKm: 0,
+        basePayout: r.userCharge != null ? r.userCharge : (r.basePayout ?? 0),
         status: r.status !== false
     }));
     return { commissions };
@@ -1930,8 +1933,8 @@ export async function createDeliveryCommissionRule(body) {
         {
             minDistance: body.minDistance,
             maxDistance: body.maxDistance ?? null,
-            commissionPerKm: body.commissionPerKm,
-            basePayout: body.basePayout,
+            userCharge: body.userCharge,
+            deliveryBoyFee: body.deliveryBoyFee,
             status: body.status ?? true
         }
     ];
@@ -1940,8 +1943,10 @@ export async function createDeliveryCommissionRule(body) {
         name: body.name || '',
         minDistance: body.minDistance,
         maxDistance: body.maxDistance ?? null,
-        commissionPerKm: body.commissionPerKm,
-        basePayout: body.basePayout,
+        userCharge: body.userCharge,
+        deliveryBoyFee: body.deliveryBoyFee,
+        commissionPerKm: 0,
+        basePayout: body.userCharge,
         status: body.status ?? true
     });
     return created.toObject();
@@ -1956,8 +1961,8 @@ export async function updateDeliveryCommissionRule(id, body) {
                   ...r,
                   minDistance: body.minDistance,
                   maxDistance: body.maxDistance ?? null,
-                  commissionPerKm: body.commissionPerKm,
-                  basePayout: body.basePayout,
+                  userCharge: body.userCharge,
+                  deliveryBoyFee: body.deliveryBoyFee,
                   status: r.status !== false
               }
             : r
@@ -1970,8 +1975,10 @@ export async function updateDeliveryCommissionRule(id, body) {
                 name: body.name || '',
                 minDistance: body.minDistance,
                 maxDistance: body.maxDistance ?? null,
-                commissionPerKm: body.commissionPerKm,
-                basePayout: body.basePayout
+                userCharge: body.userCharge,
+                deliveryBoyFee: body.deliveryBoyFee,
+                commissionPerKm: 0,
+                basePayout: body.userCharge
             }
         },
         { new: true }
@@ -2018,10 +2025,14 @@ export async function getPublicFeeSettings() {
 
 export async function getPublicCheckoutSettings() {
     const settings = await getDeliveryBoySettings();
+    const rawDistance = Number(settings.multiOrderMaxDistance);
+    const multiOrderMaxDistance = Number.isFinite(rawDistance) && rawDistance > 0
+        ? Math.min(5, Math.max(2, rawDistance))
+        : 5;
     return {
         // Default ON: multi-restaurant carts are allowed unless explicitly disabled
         multiOrderEnabled: settings.multiOrderEnabled !== false,
-        multiOrderMaxDistance: Number(settings.multiOrderMaxDistance) || 0,
+        multiOrderMaxDistance,
         multiOrderAdditionalCharge: Number(settings.multiOrderAdditionalCharge) || 0,
         splitOrderEnabled: settings.splitOrderEnabled !== false,
         splitOrderThreshold: Number(settings.splitOrderThreshold) || 20,
@@ -5805,8 +5816,9 @@ export const DEFAULT_DELIVERY_SPEED_OPTIONS = [
 const ALLOWED_SPEED_ICONS = new Set(['bike', 'leaf', 'zap', 'truck', 'clock']);
 
 export function sanitizeDeliverySpeedOptions(list) {
+    // Empty / missing = not configured (no hardcoded defaults reinjected)
     if (!Array.isArray(list) || list.length === 0) {
-        return DEFAULT_DELIVERY_SPEED_OPTIONS.map((o) => ({ ...o }));
+        return [];
     }
 
     const sanitized = list
@@ -5835,7 +5847,7 @@ export function sanitizeDeliverySpeedOptions(list) {
         .filter(Boolean);
 
     if (sanitized.length === 0) {
-        return DEFAULT_DELIVERY_SPEED_OPTIONS.map((o) => ({ ...o }));
+        return [];
     }
 
     let defaultSet = false;
@@ -5855,7 +5867,7 @@ export function sanitizeDeliverySpeedOptions(list) {
 }
 
 export function getEnabledDeliverySpeedOptions(list) {
-    return sanitizeDeliverySpeedOptions(list).filter((o) => o.isEnabled);
+    return sanitizeDeliverySpeedOptions(list).filter((o) => o.isEnabled !== false);
 }
 
 export async function getDeliveryBoySettings() {
@@ -5875,7 +5887,7 @@ export async function getDeliveryBoySettings() {
             multiOrderEnabled: true,
             multiOrderMaxDistance: 5,
             multiOrderAdditionalCharge: 0,
-            deliverySpeedOptions: DEFAULT_DELIVERY_SPEED_OPTIONS,
+            deliverySpeedOptions: [],
         };
     }
     return {
@@ -5890,7 +5902,11 @@ export async function upsertDeliveryBoySettings(data) {
     if (data.weeklySalarySlabs !== undefined) updatePayload.weeklySalarySlabs = data.weeklySalarySlabs;
     if (data.monthlySalarySlabs !== undefined) updatePayload.monthlySalarySlabs = data.monthlySalarySlabs;
     if (data.multiOrderEnabled !== undefined) updatePayload.multiOrderEnabled = Boolean(data.multiOrderEnabled);
-    if (data.multiOrderMaxDistance !== undefined) updatePayload.multiOrderMaxDistance = Number(data.multiOrderMaxDistance) || 0;
+    if (data.multiOrderMaxDistance !== undefined) {
+      const raw = Number(data.multiOrderMaxDistance);
+      const clamped = Number.isFinite(raw) ? Math.min(5, Math.max(2, raw)) : 5;
+      updatePayload.multiOrderMaxDistance = clamped;
+    }
     if (data.multiOrderAdditionalCharge !== undefined) updatePayload.multiOrderAdditionalCharge = Number(data.multiOrderAdditionalCharge) || 0;
     if (data.splitOrderEnabled !== undefined) updatePayload.splitOrderEnabled = Boolean(data.splitOrderEnabled);
     if (data.splitOrderThreshold !== undefined) updatePayload.splitOrderThreshold = Number(data.splitOrderThreshold) || 20;
@@ -5900,11 +5916,25 @@ export async function upsertDeliveryBoySettings(data) {
     if (data.isActive !== undefined) updatePayload.isActive = Boolean(data.isActive);
     if (updatePayload.isActive === undefined) updatePayload.isActive = true;
 
-    const settings = await FoodDeliveryBoySettings.findOneAndUpdate(
-        {},
-        { $set: updatePayload },
-        { new: true, upsert: true }
-    ).lean();
+    // Update the same document getDeliveryBoySettings() reads (active first),
+    // so partial toggles cannot land on a stale secondary doc.
+    let existing = await FoodDeliveryBoySettings.findOne({ isActive: true })
+        .sort({ createdAt: -1 });
+    if (!existing) {
+        existing = await FoodDeliveryBoySettings.findOne().sort({ createdAt: -1 });
+    }
+
+    let settings;
+    if (existing) {
+        settings = await FoodDeliveryBoySettings.findByIdAndUpdate(
+            existing._id,
+            { $set: updatePayload },
+            { new: true },
+        ).lean();
+    } else {
+        settings = await FoodDeliveryBoySettings.create(updatePayload);
+        settings = settings.toObject ? settings.toObject() : settings;
+    }
 
     return settings;
 }

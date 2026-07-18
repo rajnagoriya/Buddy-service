@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react"
-import { Search, Edit, Trash2, Settings, Check, Columns, MapPin, Loader2 } from "lucide-react"
+import { Search, Edit, Trash2, Settings, Check, MapPin, Loader2 } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
@@ -8,10 +8,38 @@ const columnsConfig = {
   si: "Serial Number",
   name: "Name",
   distanceSlab: "Distance Slab (km)",
-  commissionPerKm: "Commission/Km",
-  basePayout: "Base Payout",
+  userCharge: "User Charge",
+  deliveryBoyFee: "Delivery Boy Fee",
   status: "Status",
   actions: "Actions",
+}
+
+const emptyForm = {
+  name: "",
+  minDistance: "0",
+  maxDistance: "",
+  maxDistanceUnlimited: false,
+  userCharge: "",
+  deliveryBoyFee: "",
+}
+
+function resolveUserCharge(commission) {
+  if (commission?.userCharge != null) return Number(commission.userCharge)
+  if (commission?.basePayout != null) return Number(commission.basePayout)
+  return 0
+}
+
+function resolveDeliveryBoyFee(commission) {
+  if (commission?.deliveryBoyFee != null) return Number(commission.deliveryBoyFee)
+  if (commission?.basePayout != null) return Number(commission.basePayout)
+  return 0
+}
+
+function getDistanceSlabLabel(commission) {
+  const min = Number(commission.minDistance) || 0
+  const max = commission.maxDistance === null || commission.maxDistance === undefined ? null : Number(commission.maxDistance)
+  if (max === null) return `${min}+ km`
+  return `${min}-${max} km`
 }
 
 export default function DistanceRulesSection() {
@@ -24,21 +52,14 @@ export default function DistanceRulesSection() {
   const [isDeleteOpen, setIsDeleteOpen] = useState(false)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [selectedCommission, setSelectedCommission] = useState(null)
-  const [formData, setFormData] = useState({
-    name: "",
-    minDistance: "",
-    maxDistance: "",
-    maxDistanceUnlimited: false,
-    commissionPerKm: "",
-    basePayout: "",
-  })
+  const [formData, setFormData] = useState(emptyForm)
   const [formErrors, setFormErrors] = useState({})
   const [visibleColumns, setVisibleColumns] = useState({
     si: true,
     name: true,
     distanceSlab: true,
-    commissionPerKm: true,
-    basePayout: true,
+    userCharge: true,
+    deliveryBoyFee: true,
     status: true,
     actions: true,
   })
@@ -48,17 +69,9 @@ export default function DistanceRulesSection() {
     const query = searchQuery.toLowerCase().trim()
     return commissions.filter((commission) =>
       commission.name.toLowerCase().includes(query) ||
-      `0-${commission.minDistance} km`.toLowerCase().includes(query) ||
-      (commission.maxDistance !== null && `${commission.minDistance}-${commission.maxDistance} km`.toLowerCase().includes(query))
+      getDistanceSlabLabel(commission).toLowerCase().includes(query)
     )
   }, [commissions, searchQuery])
-
-  const getDistanceSlabLabel = (commission) => {
-    const min = Number(commission.minDistance) || 0
-    const max = commission.maxDistance === null || commission.maxDistance === undefined ? null : Number(commission.maxDistance)
-    if (max === null) return `${min}+ km`
-    return `${min}-${max} km`
-  }
 
   useEffect(() => {
     fetchCommissionRules()
@@ -102,7 +115,7 @@ export default function DistanceRulesSection() {
 
   const handleAdd = () => {
     setSelectedCommission(null)
-    setFormData({ name: "", minDistance: "0", maxDistance: "", maxDistanceUnlimited: false, commissionPerKm: "", basePayout: "" })
+    setFormData({ ...emptyForm })
     setFormErrors({})
     setIsAddEditOpen(true)
   }
@@ -115,8 +128,8 @@ export default function DistanceRulesSection() {
       minDistance: commission.minDistance?.toString?.() || "",
       maxDistance: isUnlimited ? "" : String(commission.maxDistance),
       maxDistanceUnlimited: isUnlimited,
-      commissionPerKm: commission.commissionPerKm.toString(),
-      basePayout: commission.basePayout.toString(),
+      userCharge: String(resolveUserCharge(commission)),
+      deliveryBoyFee: String(resolveDeliveryBoyFee(commission)),
     })
     setFormErrors({})
     setIsAddEditOpen(true)
@@ -151,11 +164,11 @@ export default function DistanceRulesSection() {
     if (!formData.maxDistanceUnlimited && formData.maxDistance !== "" && parseFloat(formData.maxDistance) < parseFloat(formData.minDistance || "0")) {
       errors.maxDistance = "Max distance must be greater than or equal to min distance"
     }
-    if (!formData.commissionPerKm.trim() || parseFloat(formData.commissionPerKm) < 0) {
-      errors.commissionPerKm = "Per km amount must be 0 or greater"
+    if (!formData.userCharge.trim() || parseFloat(formData.userCharge) < 0) {
+      errors.userCharge = "User charge must be 0 or greater"
     }
-    if (!formData.basePayout.trim() || parseFloat(formData.basePayout) < 0) {
-      errors.basePayout = "Base payout must be 0 or greater"
+    if (!formData.deliveryBoyFee.trim() || parseFloat(formData.deliveryBoyFee) < 0) {
+      errors.deliveryBoyFee = "Delivery boy fee must be 0 or greater"
     }
     setFormErrors(errors)
     return Object.keys(errors).length === 0
@@ -168,11 +181,11 @@ export default function DistanceRulesSection() {
       const minDistance = parseFloat(formData.minDistance)
       const maxDistance = formData.maxDistanceUnlimited || formData.maxDistance === "" ? null : parseFloat(formData.maxDistance)
       const commissionData = {
-        name: formData.name.trim() || `Base (0-${minDistance} km)`,
+        name: formData.name.trim() || `${minDistance}${maxDistance == null ? "+" : `-${maxDistance}`} km`,
         minDistance,
         maxDistance,
-        commissionPerKm: parseFloat(formData.commissionPerKm),
-        basePayout: parseFloat(formData.basePayout),
+        userCharge: parseFloat(formData.userCharge),
+        deliveryBoyFee: parseFloat(formData.deliveryBoyFee),
         status: selectedCommission ? selectedCommission.status : true,
       }
 
@@ -195,8 +208,9 @@ export default function DistanceRulesSection() {
         }
       }
       setIsAddEditOpen(false)
-      setFormData({ name: "", minDistance: "0", maxDistance: "", commissionPerKm: "", basePayout: "" })
+      setFormData({ ...emptyForm })
       setSelectedCommission(null)
+      await fetchCommissionRules()
     } catch (error) {
       toast.error(error.response?.data?.message || "Failed to save rule")
     } finally {
@@ -213,7 +227,7 @@ export default function DistanceRulesSection() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
         <div>
           <h2 className="text-xl font-bold text-slate-900">Distance Rules</h2>
-          <p className="text-sm text-slate-500 mt-0.5">Controls customer delivery fee and partner payout by distance</p>
+          <p className="text-sm text-slate-500 mt-0.5">Fixed delivery fee slabs for customers and partners</p>
         </div>
         <div className="flex items-center gap-2">
           <button type="button" onClick={handleAdd} className="px-4 py-2.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold shadow-sm">
@@ -229,10 +243,11 @@ export default function DistanceRulesSection() {
         <div className="flex items-start gap-3">
           <MapPin className="w-5 h-5 text-green-600 mt-0.5 shrink-0" />
           <div className="text-sm text-slate-700">
-            <p className="font-semibold text-green-900 mb-1">Single distance rule set</p>
+            <p className="font-semibold text-green-900 mb-1">Fixed amount per distance slab</p>
             <p className="text-slate-600">
-              These rules calculate delivery fee as <strong>base payout + extra per km</strong> and also determine partner earnings.
-              Example: base ₹45 + ₹7/km after 3 km → 10 km = ₹45 + (7 × ₹7) = ₹94.
+              Each slab has a fixed <strong>user charge</strong> and <strong>delivery boy fee</strong> (no per-km rate).
+              Example: 0–2 km → user ₹30 / driver ₹25; 2–4 km → user ₹40 / driver ₹35.
+              Multi-restaurant distance = user → A → B → C. Multi-order extra charge (if set) is added on top.
             </p>
           </div>
         </div>
@@ -256,8 +271,8 @@ export default function DistanceRulesSection() {
               {visibleColumns.si && <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase">SI</th>}
               {visibleColumns.name && <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase">Name</th>}
               {visibleColumns.distanceSlab && <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase">Distance Slab</th>}
-              {visibleColumns.commissionPerKm && <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase">Per/Km (₹)</th>}
-              {visibleColumns.basePayout && <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase">Base Payout (₹)</th>}
+              {visibleColumns.userCharge && <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase">User Charge (₹)</th>}
+              {visibleColumns.deliveryBoyFee && <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase">Delivery Boy Fee (₹)</th>}
               {visibleColumns.status && <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase">Status</th>}
               {visibleColumns.actions && <th className="px-6 py-4 text-center text-[10px] font-bold text-slate-700 uppercase">Action</th>}
             </tr>
@@ -286,8 +301,12 @@ export default function DistanceRulesSection() {
                       <span className="text-sm font-medium text-slate-900">{getDistanceSlabLabel(commission)}</span>
                     </td>
                   )}
-                  {visibleColumns.commissionPerKm && <td className="px-6 py-4 text-sm font-semibold text-green-700">₹{commission.commissionPerKm}</td>}
-                  {visibleColumns.basePayout && <td className="px-6 py-4 text-sm font-semibold text-slate-800">₹{commission.basePayout}</td>}
+                  {visibleColumns.userCharge && (
+                    <td className="px-6 py-4 text-sm font-semibold text-green-700">₹{resolveUserCharge(commission)}</td>
+                  )}
+                  {visibleColumns.deliveryBoyFee && (
+                    <td className="px-6 py-4 text-sm font-semibold text-slate-800">₹{resolveDeliveryBoyFee(commission)}</td>
+                  )}
                   {visibleColumns.status && (
                     <td className="px-6 py-4">
                       <button type="button" onClick={() => handleToggleStatus(commission)} className={`relative inline-flex h-6 w-11 items-center rounded-full ${commission.status ? "bg-green-600" : "bg-slate-300"}`}>
@@ -318,7 +337,7 @@ export default function DistanceRulesSection() {
           <div className="px-6 pb-6 space-y-4">
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-2">Rule Name</label>
-              <input type="text" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-green-500 outline-none" placeholder={`e.g., Base (0-${formulaMinDistance} km)`} />
+              <input type="text" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-green-500 outline-none" placeholder={`e.g., ${formulaMinDistance}-3 km`} />
             </div>
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-2">Minimum Distance (km) *</label>
@@ -335,14 +354,14 @@ export default function DistanceRulesSection() {
               {formErrors.maxDistance && <p className="text-xs text-red-500 mt-1">{formErrors.maxDistance}</p>}
             </div>
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">Extra Per Km after {formulaMinDistance} km (₹) *</label>
-              <input type="number" step="0.01" min="0" value={formData.commissionPerKm} onChange={(e) => setFormData({ ...formData, commissionPerKm: e.target.value })} className={`w-full px-4 py-2.5 border rounded-lg text-sm focus:ring-2 focus:ring-green-500 outline-none ${formErrors.commissionPerKm ? "border-red-500" : "border-slate-200"}`} />
-              {formErrors.commissionPerKm && <p className="text-xs text-red-500 mt-1">{formErrors.commissionPerKm}</p>}
+              <label className="block text-sm font-semibold text-slate-700 mb-2">User Charge (₹) *</label>
+              <input type="number" step="0.01" min="0" value={formData.userCharge} onChange={(e) => setFormData({ ...formData, userCharge: e.target.value })} className={`w-full px-4 py-2.5 border rounded-lg text-sm focus:ring-2 focus:ring-green-500 outline-none ${formErrors.userCharge ? "border-red-500" : "border-slate-200"}`} placeholder="Fixed amount charged to customer" />
+              {formErrors.userCharge && <p className="text-xs text-red-500 mt-1">{formErrors.userCharge}</p>}
             </div>
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">Base Payout for 0-{formulaMinDistance} km (₹) *</label>
-              <input type="number" step="0.01" min="0" value={formData.basePayout} onChange={(e) => setFormData({ ...formData, basePayout: e.target.value })} className={`w-full px-4 py-2.5 border rounded-lg text-sm focus:ring-2 focus:ring-green-500 outline-none ${formErrors.basePayout ? "border-red-500" : "border-slate-200"}`} />
-              {formErrors.basePayout && <p className="text-xs text-red-500 mt-1">{formErrors.basePayout}</p>}
+              <label className="block text-sm font-semibold text-slate-700 mb-2">Delivery Boy Fee (₹) *</label>
+              <input type="number" step="0.01" min="0" value={formData.deliveryBoyFee} onChange={(e) => setFormData({ ...formData, deliveryBoyFee: e.target.value })} className={`w-full px-4 py-2.5 border rounded-lg text-sm focus:ring-2 focus:ring-green-500 outline-none ${formErrors.deliveryBoyFee ? "border-red-500" : "border-slate-200"}`} placeholder="Fixed amount paid to delivery partner" />
+              {formErrors.deliveryBoyFee && <p className="text-xs text-red-500 mt-1">{formErrors.deliveryBoyFee}</p>}
             </div>
           </div>
           <DialogFooter className="px-6 pb-6">

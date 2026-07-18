@@ -186,7 +186,11 @@ const meInFlight = new Map(); // module -> Promise
 
 function hasAccessToken(module) {
   try {
-    return Boolean(localStorage.getItem(`${module}_accessToken`));
+    if (localStorage.getItem(`${module}_accessToken`)) return true;
+    // DRIVER identity login may only have one of these slots populated
+    if (module === "delivery" && localStorage.getItem("driver_accessToken")) return true;
+    if (module === "driver" && localStorage.getItem("delivery_accessToken")) return true;
+    return false;
   } catch {
     return false;
   }

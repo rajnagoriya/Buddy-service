@@ -632,8 +632,24 @@ export const adminAPI = {
     apiClient.get(`/food/admin/orders/${String(orderId)}`, {
       contextModule: "admin",
     }),
-  cancelOrder: (orderId, body = {}) =>
-    apiClient.patch(`/food/admin/orders/${String(orderId)}/cancel`, body, {
+  cancelOrder: (orderId, bodyOrReason = {}) => {
+    const body =
+      typeof bodyOrReason === "string"
+        ? { reason: bodyOrReason }
+        : bodyOrReason ?? {};
+    return apiClient.patch(
+      `/food/admin/orders/${String(orderId)}/cancel`,
+      body,
+      { contextModule: "admin" },
+    );
+  },
+  getMultiOrderSettlementReport: (params = {}) =>
+    apiClient.get("/food/admin/orders/settlement-report", {
+      params,
+      contextModule: "admin",
+    }),
+  deleteOrder: (orderId) =>
+    apiClient.delete(`/food/admin/orders/${String(orderId)}`, {
       contextModule: "admin",
     }),
   assignDeliveryPartner: (orderId, deliveryPartnerId) =>
@@ -2128,10 +2144,10 @@ export const deliveryAPI = {
         contextModule: "delivery",
       },
     ),
-  resendOrderToRestaurant: (orderId) =>
+  resendOrderToRestaurant: (orderId, restaurantId) =>
     apiClient.post(
       `/food/delivery/orders/${String(orderId)}/resend-to-restaurant`,
-      {},
+      restaurantId ? { restaurantId: String(restaurantId) } : {},
       {
         contextModule: "delivery",
       },

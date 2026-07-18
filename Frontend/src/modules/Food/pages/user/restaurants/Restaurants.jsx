@@ -23,7 +23,7 @@ import {
 } from "@food/utils/restaurantDisplay";
 import { resolveUserListCity } from "@food/utils/restaurantListParams";
 import {
-  getLastRestaurantFromCart,
+  getFirstRestaurantFromCart,
   getChainDistanceBadge,
 } from "@food/utils/restaurantRadius";
 
@@ -73,7 +73,7 @@ export default function Restaurants() {
   const showRestaurantsSkeleton = useDelayedLoading(loading);
 
   const lastCartRestaurant = useMemo(
-    () => getLastRestaurantFromCart(cart),
+    () => getFirstRestaurantFromCart(cart),
     [cart],
   );
 

@@ -749,6 +749,7 @@ export default function OrderTracking() {
   // Kept separately so UI still renders even if the event arrives
   // before the order API poll populates `order` state.
   const [socketDropOtpCode, setSocketDropOtpCode] = useState(null)
+  const [partialDropPopup, setPartialDropPopup] = useState(null)
 
 
   // OTP received via socket event (deliveryDropOtp)
@@ -1251,6 +1252,17 @@ export default function OrderTracking() {
 
       const nextStatusRaw = payload.orderStatus || status
       const isCancelled = String(nextStatusRaw || '').toLowerCase().includes('cancel')
+      const isPartialDrop = payload.failureReason === 'restaurant_partially_dropped'
+
+      if (isPartialDrop) {
+        setPartialDropPopup({
+          message:
+            message ||
+            `One restaurant rejected your order. ₹${Number(payload.refundAmount || 0).toFixed(0)} has been refunded to your wallet.`,
+          refundAmount: Number(payload.refundAmount) || 0,
+          restaurantName: payload.restaurantName || 'A restaurant',
+        })
+      }
 
       setOrder((prev) => {
         const apiPatch = {
@@ -1262,6 +1274,8 @@ export default function OrderTracking() {
           deliveryState: payload.deliveryState ?? prev?.deliveryState,
           dispatch: payload.dispatch ?? prev?.dispatch,
           payment: payload.payment ?? prev?.payment,
+          pricing: payload.pricing ?? prev?.pricing,
+          pickups: payload.pickups ?? prev?.pickups,
         }
         const transformed = transformOrderForTracking(apiPatch, prev)
         const ui = mapOrderToTrackingUiStatus(transformed)
@@ -1270,7 +1284,7 @@ export default function OrderTracking() {
       })
 
       if (message) {
-        const toastKey = `${String(evtOrderId || orderMongoId || orderId)}:${String(nextStatusRaw || '')}`
+        const toastKey = `${String(evtOrderId || orderMongoId || orderId)}:${String(nextStatusRaw || '')}:${String(payload.failureReason || '')}`
         const now = Date.now()
         const isDuplicateToast =
           toastKey &&
@@ -1280,10 +1294,15 @@ export default function OrderTracking() {
         if (!isDuplicateToast) {
           lastStatusToastRef.current = { key: toastKey, at: now }
           toast.dismiss(ORDER_STATUS_TOAST_ID)
-          const toastFn = isCancelled || payload.failureReason === 'driver_not_found' ? toast.error : toast.success
+          const toastFn =
+            isCancelled || payload.failureReason === 'driver_not_found'
+              ? toast.error
+              : isPartialDrop
+                ? toast.message
+                : toast.success
           toastFn(message, {
             id: ORDER_STATUS_TOAST_ID,
-            duration: 6000,
+            duration: isPartialDrop ? 10000 : 6000,
             position: 'top-center',
             description: estimatedDeliveryTime
               ? `Estimated delivery in ${Math.round(estimatedDeliveryTime / 60)} minutes`
@@ -1294,31 +1313,52 @@ export default function OrderTracking() {
       }
     };
 
+    const handlePartialDrop = (event) => {
+      const payload = event?.detail || {}
+      const evtKeys = [payload.orderId, payload.orderMongoId].filter(Boolean).map(String)
+      const idMatches =
+        evtKeys.length === 0 ||
+        evtKeys.some((k) => String(k) === String(orderId)) ||
+        evtKeys.some((k) => trackingOrderIdsRef.current.has(k))
+      if (!idMatches) return
+      setPartialDropPopup({
+        message: payload.message,
+        refundAmount: Number(payload.refundAmount) || 0,
+        restaurantName: payload.restaurantName || 'A restaurant',
+      })
+    }
+
     window.addEventListener('orderStatusNotification', handleOrderStatusNotification);
-    return () => window.removeEventListener('orderStatusNotification', handleOrderStatusNotification);
+    window.addEventListener('orderPartialRestaurantDropped', handlePartialDrop);
+    return () => {
+      window.removeEventListener('orderStatusNotification', handleOrderStatusNotification);
+      window.removeEventListener('orderPartialRestaurantDropped', handlePartialDrop);
+    }
   }, [orderId])
 
   const handleCancelOrder = () => {
-    // Check if order can be cancelled (only Razorpay orders that aren't delivered/cancelled)
     if (!order) return;
 
-    if (isAdminAccepted && !isEditWindowOpen) {
-      toast.error('Cancellation window ended. You can no longer cancel this order.');
+    const rawStatus = String(order?.orderStatus || order?.status || '').toLowerCase()
+    const canCancel =
+      rawStatus === 'created' ||
+      rawStatus === 'scheduled' ||
+      (!isAdminAccepted && ['pending', 'placed'].includes(rawStatus))
+
+    if (!canCancel) {
+      toast.error('Order cannot be cancelled after the restaurant has accepted it. Contact support if needed.');
       return;
     }
 
-    if (order.status === 'cancelled') {
+    if (String(order.status || '').includes('cancel') || rawStatus.includes('cancel')) {
       toast.error('Order is already cancelled');
       return;
     }
 
-    if (order.status === 'delivered') {
+    if (rawStatus === 'delivered') {
       toast.error('Cannot cancel a delivered order');
       return;
     }
-
-    // Allow cancellation for all payment methods (Razorpay, COD, Wallet)
-    // Only restrict if order is already cancelled or delivered (checked above)
 
     const method = String(order?.payment?.method || order?.paymentMethod || "").toLowerCase()
     const status = String(order?.payment?.status || "").toLowerCase()
@@ -2251,7 +2291,14 @@ export default function OrderTracking() {
           </motion.div>
         )}
 
-        {!isAdminAccepted && orderStatus !== 'cancelled' && orderStatus !== 'delivered' && (
+        {(() => {
+          const rawStatus = String(order?.orderStatus || order?.status || '').toLowerCase()
+          const canUserCancel =
+            (rawStatus === 'created' || rawStatus === 'scheduled') &&
+            !rawStatus.includes('cancel') &&
+            rawStatus !== 'delivered'
+          if (!canUserCancel) return null
+          return (
           <motion.div
             className="flex flex-col gap-3"
             initial={{ opacity: 0, y: 20 }}
@@ -2266,10 +2313,11 @@ export default function OrderTracking() {
               Cancel Order
             </Button>
             <p className="text-[10px] text-gray-400 text-center px-4">
-              You can cancel your order until the restaurant accepts it.
+              You can cancel only while the order is created or scheduled (before restaurant acceptance).
             </p>
           </motion.div>
-        )}
+          )
+        })()}
 
       </div>
 
@@ -2633,6 +2681,31 @@ export default function OrderTracking() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {partialDropPopup && (
+        <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-2xl">
+            <h3 className="text-lg font-black text-gray-900 dark:text-white uppercase tracking-tight">
+              Restaurant removed
+            </h3>
+            <p className="mt-3 text-sm text-gray-600 dark:text-gray-300 leading-relaxed">
+              {partialDropPopup.message ||
+                `${partialDropPopup.restaurantName} rejected your order. ₹${Number(partialDropPopup.refundAmount || 0).toFixed(0)} has been refunded to your wallet. Your order continues with the remaining restaurant(s).`}
+            </p>
+            {Number(partialDropPopup.refundAmount) > 0 && (
+              <p className="mt-3 text-sm font-bold text-[#16A34A]">
+                ₹{Number(partialDropPopup.refundAmount).toFixed(0)} credited to wallet
+              </p>
+            )}
+            <Button
+              className="w-full mt-6 bg-[#16A34A] hover:bg-[#15803D] text-white font-bold h-12 rounded-2xl"
+              onClick={() => setPartialDropPopup(null)}
+            >
+              Got it
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -33,7 +33,7 @@ const deliveryBoySettingsSchema = new mongoose.Schema(
         monthlySalarySlabs: { type: [salarySlabSchema], default: [] },
         // Multi-Restaurant Order Settings
         multiOrderEnabled: { type: Boolean, default: true },
-        multiOrderMaxDistance: { type: Number, default: 5, min: 0 }, // max road km between R1 and R2
+        multiOrderMaxDistance: { type: Number, default: 5, min: 2, max: 5 }, // max road km between R1 and R2 (2–5)
         multiOrderAdditionalCharge: { type: Number, default: 0, min: 0 }, // extra fee for 2nd pickup
         // Order Sharing Settings
         splitOrderEnabled: { type: Boolean, default: true },

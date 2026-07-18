@@ -19,6 +19,7 @@ import {
     invalidateAfterOfferMutation,
     invalidateAfterZoneMutation,
     invalidateAfterDiningAdminMutation,
+    invalidateAfterDeliveryBoySettingsMutation,
 } from '../../utils/foodCacheInvalidation.js';
 
 const router = express.Router();
@@ -30,6 +31,7 @@ const invAddon = withFoodCacheInvalidation(invalidateAfterAdminAddonMutation);
 const invOffer = withFoodCacheInvalidation(invalidateAfterOfferMutation);
 const invZone = withFoodCacheInvalidation(invalidateAfterZoneMutation);
 const invDining = withFoodCacheInvalidation(invalidateAfterDiningAdminMutation);
+const invDeliveryBoySettings = withFoodCacheInvalidation(invalidateAfterDeliveryBoySettingsMutation);
 
 // ----- Public Business Settings (No Admin Required) -----
 router.get('/business-settings/public', businessSettingsController.getBusinessSettings);
@@ -150,7 +152,7 @@ router.put('/fee-settings', adminController.createOrUpdateFeeSettings);
 
 // ----- Delivery Boy Settings -----
 router.get('/delivery-boy-settings', adminController.getDeliveryBoySettings);
-router.put('/delivery-boy-settings', adminController.upsertDeliveryBoySettings);
+router.put('/delivery-boy-settings', invDeliveryBoySettings, adminController.upsertDeliveryBoySettings);
 
 // ----- Referral Settings -----
 router.get('/referral-settings', adminController.getReferralSettings);
@@ -226,9 +228,11 @@ router.patch('/dining/requests/:id/reject', invDining, diningAdminController.rej
 
 // ----- Orders -----
 router.get('/orders', orderController.listOrdersAdminController);
+router.get('/orders/settlement-report', orderController.getMultiOrderSettlementReportController);
 router.get('/orders/:orderId', orderController.getOrderByIdAdminController);
 router.patch('/orders/:orderId/cancel', orderController.cancelOrderAdminController);
 router.patch('/orders/:orderId/assign-delivery', orderController.assignDeliveryPartnerController);
+router.delete('/orders/:orderId', orderController.deleteOrderAdminController);
 
 // ----- CMS Pages (About + legal) -----
 router.get('/pages-social-media/:key', getAdminPageController);

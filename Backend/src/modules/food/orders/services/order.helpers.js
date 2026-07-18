@@ -22,32 +22,66 @@ export function enqueueOrderEvent(action, payload = {}) {
 import { haversineKm } from '../../../../core/location/haversine.util.js';
 export { haversineKm };
 
-export function calculateDistanceSlabFee(distanceKm, rules = []) {
+export function resolveSlabAmounts(rule) {
+  if (!rule) return { userCharge: 0, deliveryBoyFee: 0 };
+  const legacyBase = Number(rule.basePayout);
+  const userCharge = Number(
+    rule.userCharge != null ? rule.userCharge : (Number.isFinite(legacyBase) ? legacyBase : 0),
+  );
+  const deliveryBoyFee = Number(
+    rule.deliveryBoyFee != null ? rule.deliveryBoyFee : (Number.isFinite(legacyBase) ? legacyBase : 0),
+  );
+  return {
+    userCharge: Number.isFinite(userCharge) && userCharge >= 0 ? userCharge : 0,
+    deliveryBoyFee: Number.isFinite(deliveryBoyFee) && deliveryBoyFee >= 0 ? deliveryBoyFee : 0,
+  };
+}
+
+/**
+ * Match a fixed distance slab.
+ * Inclusive min/max; if multiple slabs match a boundary (e.g. 2 km on 0–2 and 2–4),
+ * the lower (first) slab wins.
+ */
+export function findMatchingDistanceSlab(distanceKm, rules = []) {
   const d = Math.max(0, Number(distanceKm) || 0);
   const list = Array.isArray(rules) ? rules.filter((r) => r && r.status !== false) : [];
-  if (!list.length) return 0;
+  if (!list.length) return null;
 
   const sorted = [...list].sort(
     (a, b) => (Number(a.minDistance) || 0) - (Number(b.minDistance) || 0),
   );
-  const baseRule = sorted.find((r) => Number(r.minDistance || 0) === 0) || sorted[0];
-  if (!baseRule) return 0;
-
-  let fee = Number(baseRule.basePayout || 0);
 
   for (const rule of sorted) {
-    const perKm = Number(rule.commissionPerKm || 0);
-    if (!Number.isFinite(perKm) || perKm <= 0) continue;
     const min = Number(rule.minDistance || 0);
     const max = rule.maxDistance == null ? null : Number(rule.maxDistance);
-    if (d <= min) continue;
-    const upper = max == null ? d : Math.min(d, max);
-    const kmInSlab = Math.max(0, upper - min);
-    if (kmInSlab > 0) fee += kmInSlab * perKm;
+    if (d < min) continue;
+    if (max != null && Number.isFinite(max) && d > max) continue;
+    return rule;
   }
 
-  if (!Number.isFinite(fee) || fee < 0) return 0;
-  return Math.round(fee);
+  // Beyond last closed slab → use last open-ended or last rule
+  const last = sorted[sorted.length - 1];
+  if (last && (last.maxDistance == null || last.maxDistance === undefined)) return last;
+  return null;
+}
+
+/**
+ * Fixed slab fee for the customer (userCharge of matching slab).
+ * No per-km accumulation.
+ */
+export function calculateDistanceSlabFee(distanceKm, rules = []) {
+  const matched = findMatchingDistanceSlab(distanceKm, rules);
+  if (!matched) return 0;
+  const { userCharge } = resolveSlabAmounts(matched);
+  return Math.round(userCharge);
+}
+
+/** Fixed slab fee for the delivery partner (deliveryBoyFee of matching slab). */
+export function calculateDistanceSlabRiderFee(distanceKm, rules = []) {
+  const matched = findMatchingDistanceSlab(distanceKm, rules);
+  if (!matched) return 0;
+  const { deliveryBoyFee } = resolveSlabAmounts(matched);
+  return Math.round(deliveryBoyFee);
 }
 
 export function calculateRangeDeliveryFee(distanceKm, ranges = []) {
@@ -82,21 +116,19 @@ function getRestaurantLatLng(restaurant) {
 }
 
 /**
- * Chain distance: R1 → R2 → … → Rn → user (cart order).
- * Single restaurant: R1 → user.
+ * Fee distance path: user → R1 → R2 → … → Rn (cart order).
+ * Single restaurant: user → R1.
  */
 function resolveOrderDistanceKmStraight(restaurants = [], userLoc) {
   if (!Array.isArray(restaurants) || restaurants.length === 0) return 0;
   if (!Array.isArray(userLoc) || userLoc.length < 2) return 0;
 
-  const points = [];
+  const points = [{ lat: userLoc[1], lng: userLoc[0] }];
   for (const restaurant of restaurants) {
     const point = getRestaurantLatLng(restaurant);
     if (point) points.push(point);
   }
-  if (points.length === 0) return 0;
-
-  points.push({ lat: userLoc[1], lng: userLoc[0] });
+  if (points.length < 2) return 0;
 
   let total = 0;
   for (let i = 0; i < points.length - 1; i += 1) {
@@ -116,9 +148,8 @@ export function resolveOrderDistanceKm(restaurants = [], userLoc) {
 }
 
 /**
- * Order delivery distance in km.
- * Road (driving) when Google Maps is available; otherwise straight-line.
- * Multi-resto: R1→R2→…→Rn→user. Single: restaurant → user.
+ * Order delivery distance in km (road preferred).
+ * Path: user → R1 → R2 → … → Rn.
  */
 export async function resolveOrderDistanceKmAsync(restaurants = [], userLoc) {
   const straight = resolveOrderDistanceKmStraight(restaurants, userLoc);
@@ -129,13 +160,12 @@ export async function resolveOrderDistanceKmAsync(restaurants = [], userLoc) {
     const { fetchRoadDistancesKm } = await import('../utils/googleMaps.js');
     const user = { lat: userLoc[1], lng: userLoc[0] };
 
-    const points = [];
+    const points = [user];
     for (const restaurant of restaurants) {
       const point = getRestaurantLatLng(restaurant);
       if (point) points.push(point);
     }
-    if (points.length === 0) return 0;
-    points.push(user);
+    if (points.length < 2) return 0;
 
     let total = 0;
     for (let i = 0; i < points.length - 1; i += 1) {
@@ -176,7 +206,7 @@ export function applyDeliverySurcharges(baseFee, { isMultiRestaurant, isSplitOrd
 
 export function resolveSpeedFeeModifier(deliveryBoySettings, deliverySpeedOptionId, deliveryOptionName) {
   const options = Array.isArray(deliveryBoySettings?.deliverySpeedOptions)
-    ? deliveryBoySettings.deliverySpeedOptions
+    ? deliveryBoySettings.deliverySpeedOptions.filter((o) => o && o.isEnabled !== false)
     : [];
   if (!options.length) return 0;
 

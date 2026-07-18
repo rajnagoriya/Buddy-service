@@ -272,7 +272,30 @@ const pickupSchema = new mongoose.Schema(
             type: buildLocationSchema(),
             default: undefined
         },
-        items: [String] // Array of item names or IDs belonging to this pickup
+        items: [String], // Array of item names or IDs belonging to this pickup
+        /** Times this pickup was rejected while awaiting DP resend (max 3) */
+        rejectionAttempts: { type: Number, default: 0, min: 0 },
+        /** After 3 failed attempts — restaurant dropped; order continues without it */
+        permanentlyDropped: { type: Boolean, default: false },
+        pickedAt: { type: Date, default: null },
+        droppedAt: { type: Date, default: null },
+        billImageUrl: { type: String, default: null },
+    },
+    { _id: false }
+);
+
+const partialRefundSchema = new mongoose.Schema(
+    {
+        restaurantId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodRestaurant' },
+        restaurantName: { type: String, default: '' },
+        amount: { type: Number, default: 0, min: 0 },
+        foodAmount: { type: Number, default: 0, min: 0 },
+        packagingFee: { type: Number, default: 0, min: 0 },
+        taxShare: { type: Number, default: 0, min: 0 },
+        destination: { type: String, enum: ['wallet', 'source'], default: 'wallet' },
+        status: { type: String, enum: ['processed', 'failed'], default: 'processed' },
+        at: { type: Date, default: Date.now },
+        note: { type: String, default: '' },
     },
     { _id: false }
 );
@@ -411,6 +434,40 @@ const orderSchema = new mongoose.Schema(
         },
         /** Track how many times the restaurant has rejected this order while a rider is assigned */
         restaurantRejectionCount: { type: Number, default: 0 },
+        /** Partial wallet refunds when a multi-restaurant pickup is permanently dropped */
+        partialRefunds: {
+            type: [partialRefundSchema],
+            default: [],
+        },
+        /**
+         * Immutable settlement snapshots for audits:
+         * create / share / partial_drop / complete
+         */
+        settlementSnapshots: {
+            type: [
+                {
+                    at: { type: Date, default: Date.now },
+                    event: {
+                        type: String,
+                        enum: ['create', 'accept', 'share', 'partial_drop', 'complete', 'admin_cancel'],
+                        required: true,
+                    },
+                    pricing: { type: mongoose.Schema.Types.Mixed },
+                    riderEarning: { type: Number, default: 0 },
+                    sharedRiderEarning: { type: Number, default: 0 },
+                    platformProfit: { type: Number, default: 0 },
+                    driverSettlement: { type: mongoose.Schema.Types.Mixed },
+                    platformRevenue: { type: mongoose.Schema.Types.Mixed },
+                    deliveryFeeBreakdown: { type: mongoose.Schema.Types.Mixed },
+                    isMultiRestaurant: { type: Boolean, default: false },
+                    isSplitOrder: { type: Boolean, default: false },
+                    activePickupCount: { type: Number, default: 0 },
+                    partialRefundAmount: { type: Number, default: 0 },
+                    note: { type: String, default: '' },
+                },
+            ],
+            default: [],
+        },
         /** Flag to track if the 30-minute pre-alert has been sent to the restaurant */
         restaurantNotifiedForSchedule: { type: Boolean, default: false },
         /** ✅ NEW: Contextual delay information for the end-user */
