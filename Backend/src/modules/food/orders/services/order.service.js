@@ -2012,10 +2012,16 @@ export async function listOrdersAdmin(query) {
       : "";
   const restaurantIdRaw =
     typeof query.restaurantId === "string" ? query.restaurantId.trim() : "";
+  const userIdRaw =
+    typeof query.userId === "string" ? query.userId.trim() : "";
   const startDateRaw =
     typeof query.startDate === "string" ? query.startDate.trim() : "";
   const endDateRaw =
     typeof query.endDate === "string" ? query.endDate.trim() : "";
+
+  if (userIdRaw && mongoose.Types.ObjectId.isValid(userIdRaw)) {
+    filter.userId = new mongoose.Types.ObjectId(userIdRaw);
+  }
 
   if (rawStatus && rawStatus !== "all") {
     switch (rawStatus) {

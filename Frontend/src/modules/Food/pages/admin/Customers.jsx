@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react"
-import { useSearchParams } from "react-router-dom"
-import { Search, Download, ChevronDown, Eye, FileDown, FileSpreadsheet, FileText, X, Mail, Phone, MapPin, Package, IndianRupee, Calendar as CalendarIcon, User, CheckCircle, XCircle } from "lucide-react"
+import { useSearchParams, useNavigate } from "react-router-dom"
+import { Search, Download, ChevronDown, Eye, FileDown, FileSpreadsheet, FileText, X, Mail, Phone, MapPin, Package, IndianRupee, Calendar as CalendarIcon, User, CheckCircle, XCircle, MoreVertical, History } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { exportCustomersToCSV, exportCustomersToExcel, exportCustomersToPDF } from "@food/components/admin/customers/customersExportUtils"
 import { adminAPI } from "@food/api"
@@ -12,6 +12,7 @@ const debugError = (...args) => {}
 
 
 export default function Customers() {
+  const navigate = useNavigate()
   const [searchQuery, setSearchQuery] = useState("")
   const [customers, setCustomers] = useState([])
   const [loading, setLoading] = useState(true)
@@ -216,6 +217,14 @@ export default function Customers() {
     } finally {
       setLoadingDetails(false)
     }
+  }
+
+  const handleViewOrderHistory = (customerId) => {
+    if (!customerId) {
+      toast.error("Customer ID not found")
+      return
+    }
+    navigate(`/admin/food/orders/all?userId=${customerId}`)
   }
 
   const handleSelectAll = (e) => {
@@ -572,12 +581,29 @@ export default function Customers() {
                         </button>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-center">
-                        <button
-                          onClick={() => handleViewDetails(customer._id || customer.id || customer.sl)}
-                          className="p-1.5 rounded text-blue-600 hover:bg-blue-50 transition-colors"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button className="p-1.5 rounded text-slate-600 hover:bg-slate-100 transition-colors">
+                              <MoreVertical className="w-4 h-4" />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-52 bg-white border border-slate-200 rounded-lg shadow-lg z-50">
+                            <DropdownMenuItem
+                              onClick={() => handleViewDetails(customer._id || customer.id || customer.sl)}
+                              className="cursor-pointer flex items-center gap-2 text-blue-600"
+                            >
+                              <Eye className="w-4 h-4" />
+                              <span>View Details</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => handleViewOrderHistory(customer._id || customer.id)}
+                              className="cursor-pointer flex items-center gap-2 text-emerald-600"
+                            >
+                              <History className="w-4 h-4" />
+                              <span>View Order History</span>
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </td>
                     </tr>
                   ))

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react"
-import { useSearchParams } from "react-router-dom"
+import { useSearchParams, useNavigate } from "react-router-dom"
 import io from "socket.io-client"
-import { FileText, Calendar, Package } from "lucide-react"
+import { FileText, Calendar, Package, ArrowLeft } from "lucide-react"
 import { adminAPI } from "@food/api"
 import { API_BASE_URL } from "@food/api/config"
 import { toast } from "sonner"
@@ -43,6 +43,10 @@ const ORDERS_PAGE_LIMIT = 20
 
 export default function OrdersPage({ statusKey = "all" }) {
   const config = statusConfig[statusKey] || statusConfig["all"]
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const userIdFromUrl = searchParams.get("userId")
+  const orderIdFromUrl = searchParams.get("orderId")
   const [orders, setOrders] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [currentPage, setCurrentPage] = useState(1)
@@ -342,6 +346,7 @@ export default function OrdersPage({ statusKey = "all" }) {
               ? "cancelled"
               : statusKey,
         cancelledBy: statusKey === "restaurant-cancelled" ? "restaurant" : undefined,
+        ...(userIdFromUrl ? { userId: userIdFromUrl } : {}),
       }
 
       const response = await adminAPI.getOrders(params)
@@ -404,7 +409,7 @@ export default function OrdersPage({ statusKey = "all" }) {
     } finally {
       if (!silent) setIsLoading(false)
     }
-  }, [statusKey])
+  }, [statusKey, userIdFromUrl])
 
   const normalizedOrders = useMemo(() => {
     const safeOrders = Array.isArray(orders) ? orders : []
@@ -692,9 +697,6 @@ export default function OrdersPage({ statusKey = "all" }) {
     }
   }, [playDefaultRing, showBrowserNotification])
 
-  const [searchParams] = useSearchParams()
-  const orderIdFromUrl = searchParams.get("orderId")
-
   useEffect(() => {
     if (orderIdFromUrl && normalizedOrders.length > 0) {
       const order = normalizedOrders.find(o => o.id === orderIdFromUrl || o._id === orderIdFromUrl || o.orderId === orderIdFromUrl)
@@ -924,8 +926,23 @@ export default function OrdersPage({ statusKey = "all" }) {
 
   return (
     <div className="p-4 lg:p-6 bg-slate-50 min-h-screen w-full max-w-full overflow-x-hidden">
+      {userIdFromUrl && (
+        <div className="mb-4 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => navigate("/admin/food/customers")}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back to Customers
+          </button>
+          <p className="text-sm text-slate-500">
+            Showing order history for this customer. Open an order to view payment method, coupon, and full details.
+          </p>
+        </div>
+      )}
       <OrdersTopbar 
-        title={config.title} 
+        title={userIdFromUrl ? "Customer Order History" : config.title} 
         count={paginationMeta.total || count} 
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
