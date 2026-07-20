@@ -6,7 +6,6 @@ import { clearModuleAuth } from "@food/utils/auth"
 import {
   fetchApprovedRestaurantsCached,
   fetchRestaurantDetailCached,
-  getCachedRestaurantDetail,
   getZonesCached,
   hasFullRestaurantDetails,
   invalidateApprovedRestaurantsCache,
@@ -18,6 +17,10 @@ import { isRestaurantBanned } from "@food/utils/restaurantBan"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { exportRestaurantsToPDF } from "@food/components/admin/restaurants/restaurantsExportUtils"
 import { getGoogleMapsApiKey } from "@food/utils/googleMapsApiKey"
+import OutletTimingsEditor from "@food/components/admin/OutletTimingsEditor"
+import { DAY_NAMES, getDefaultDays } from "@food/utils/outletTimingsUtils"
+import { fetchOutletTimingsCached, clearOutletTimingsCache } from "@food/utils/outletTimingsCache"
+import { clearRestaurantListCache } from "@food/utils/restaurantListCache"
 
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
@@ -189,6 +192,7 @@ export default function RestaurantsList() {
   const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" })
   const [refreshKey, setRefreshKey] = useState(0)
   const isInitialFetchRef = useRef(true)
+  const detailsRequestIdRef = useRef(0)
   const [isEditingDetails, setIsEditingDetails] = useState(false)
   const [savingDetails, setSavingDetails] = useState(false)
   const [detailsForm, setDetailsForm] = useState({
@@ -200,8 +204,7 @@ export default function RestaurantsList() {
     primaryContactNumber: "",
     email: "",
     estimatedDeliveryTime: "",
-    openingTime: "",
-    closingTime: "",
+    outletTimings: getDefaultDays(),
     isActive: true,
   })
   const [profileImageFile, setProfileImageFile] = useState(null)
@@ -601,8 +604,47 @@ export default function RestaurantsList() {
     })
   }
 
-  // Handle view restaurant details
+  const normalizeRestaurantTimings = (restaurant) => {
+    if (!restaurant || typeof restaurant !== "object") return restaurant
+    const outletTimings =
+      restaurant.outletTimings && typeof restaurant.outletTimings === "object"
+        ? { ...getDefaultDays(), ...restaurant.outletTimings }
+        : getDefaultDays()
+    return { ...restaurant, outletTimings }
+  }
+
+  // Prefer outletTimings from admin API (fresh DB read). Public timings endpoint can be HTTP-cached.
+  const mergeOutletTimings = async (restaurant) => {
+    if (!restaurant || typeof restaurant !== "object") return restaurant
+    if (restaurant.outletTimings && typeof restaurant.outletTimings === "object") {
+      return normalizeRestaurantTimings(restaurant)
+    }
+
+    const restaurantId = restaurant._id || restaurant.id
+    if (!restaurantId) return normalizeRestaurantTimings(restaurant)
+
+    try {
+      const outletTimings = await fetchOutletTimingsCached(restaurantId, { force: true })
+      return normalizeRestaurantTimings({
+        ...restaurant,
+        outletTimings: outletTimings && typeof outletTimings === "object" ? outletTimings : null,
+      })
+    } catch {
+      return normalizeRestaurantTimings(restaurant)
+    }
+  }
+
+  const applyRestaurantDetails = (merged) => {
+    if (!merged) return null
+    setRestaurantDetails(merged)
+    setDetailsForm(buildDetailsFormFromRestaurant(merged))
+    setProfileImagePreview(getPrimaryRestaurantImage(merged))
+    return merged
+  }
+
   const handleViewDetails = async (restaurant) => {
+    const requestId = ++detailsRequestIdRef.current
+
     setIsEditingDetails(false)
     setProfileImageFile(null)
     setProfileImagePreview("")
@@ -616,28 +658,28 @@ export default function RestaurantsList() {
 
     try {
       if (!restaurantId) {
-        setRestaurantDetails(fromList)
-        return
+        const merged = await mergeOutletTimings(fromList)
+        if (requestId !== detailsRequestIdRef.current) return null
+        return applyRestaurantDetails(merged)
       }
 
-      if (hasFullRestaurantDetails(fromList)) {
-        setRestaurantDetails(fromList)
-        return
-      }
+      invalidateRestaurantDetailCache(restaurantId)
+      const data = await fetchRestaurantDetailCached(restaurantId, { force: true })
+      if (requestId !== detailsRequestIdRef.current) return null
 
-      const cached = getCachedRestaurantDetail(restaurantId)
-      if (cached) {
-        setRestaurantDetails(cached)
-        return
-      }
-
-      const data = await fetchRestaurantDetailCached(restaurantId)
-      setRestaurantDetails(data || fromList)
+      const merged = await mergeOutletTimings(data || fromList)
+      if (requestId !== detailsRequestIdRef.current) return null
+      return applyRestaurantDetails(merged)
     } catch (err) {
       debugError("Error fetching restaurant details:", err)
-      setRestaurantDetails(fromList)
+      if (requestId !== detailsRequestIdRef.current) return null
+      const merged = await mergeOutletTimings(fromList)
+      if (requestId !== detailsRequestIdRef.current) return null
+      return applyRestaurantDetails(merged)
     } finally {
-      setLoadingDetails(false)
+      if (requestId === detailsRequestIdRef.current) {
+        setLoadingDetails(false)
+      }
     }
   }
 
@@ -768,22 +810,11 @@ export default function RestaurantsList() {
         primaryContactNumber: "",
         email: "",
         estimatedDeliveryTime: "",
-        openingTime: "",
-        closingTime: "",
+        outletTimings: getDefaultDays(),
         isActive: true,
       }
     }
 
-    const openingTimeValue =
-      restaurant.openingTime ||
-      restaurant.deliveryTimings?.openingTime ||
-      restaurant.onboarding?.step2?.deliveryTimings?.openingTime ||
-      ""
-    const closingTimeValue =
-      restaurant.closingTime ||
-      restaurant.deliveryTimings?.closingTime ||
-      restaurant.onboarding?.step2?.deliveryTimings?.closingTime ||
-      ""
     const estimatedDeliveryTimeValue =
       restaurant.estimatedDeliveryTime ||
       restaurant.onboarding?.step4?.estimatedDeliveryTime ||
@@ -801,14 +832,15 @@ export default function RestaurantsList() {
       primaryContactNumber: restaurant.primaryContactNumber || restaurant.ownerPhone || "",
       email: restaurant.email || restaurant.ownerEmail || "",
       estimatedDeliveryTime: estimatedDeliveryTimeValue,
-      openingTime: openingTimeValue,
-      closingTime: closingTimeValue,
+      outletTimings: restaurant.outletTimings && typeof restaurant.outletTimings === "object"
+        ? { ...getDefaultDays(), ...restaurant.outletTimings }
+        : getDefaultDays(),
       isActive: restaurant.isActive !== false,
     }
   }
 
-  const handleStartEditDetails = () => {
-    const source = getDetailsEditSource()
+  const handleStartEditDetails = async () => {
+    const source = await mergeOutletTimings(getDetailsEditSource())
     setDetailsForm(buildDetailsFormFromRestaurant(source))
     setProfileImageFile(null)
     setProfileImagePreview(getPrimaryRestaurantImage(source))
@@ -816,15 +848,11 @@ export default function RestaurantsList() {
   }
 
   // Opens the detail modal for a restaurant and immediately enters edit mode
-  const handleEditDetailsFromTable = (restaurant) => {
-    // First open the modal (same as view details)
-    handleViewDetails(restaurant)
-    // Immediately switch to edit mode using the row data we already have
-    const source = restaurant.originalData || restaurant
-    setDetailsForm(buildDetailsFormFromRestaurant(source))
-    setProfileImageFile(null)
-    setProfileImagePreview(getPrimaryRestaurantImage(source))
-    setIsEditingDetails(true)
+  const handleEditDetailsFromTable = async (restaurant) => {
+    const source = await handleViewDetails(restaurant)
+    if (source) {
+      setIsEditingDetails(true)
+    }
   }
 
   const handleCancelEditDetails = () => {
@@ -891,21 +919,6 @@ export default function RestaurantsList() {
         }
       }
 
-      const normalizedOpeningTime = normalizeTimeValue(detailsForm.openingTime.trim())
-      const normalizedClosingTime = normalizeTimeValue(detailsForm.closingTime.trim())
-      const openingMinutes = timeToMinutes(normalizedOpeningTime)
-      const closingMinutes = timeToMinutes(normalizedClosingTime)
-      if (openingMinutes !== null && closingMinutes !== null) {
-        if (openingMinutes === closingMinutes) {
-          alert("Opening time and closing time cannot be same")
-          return
-        }
-        if (closingMinutes < openingMinutes) {
-          alert("Closing time cannot be less than opening time")
-          return
-        }
-      }
-
       const payload = {
         name: detailsForm.name.trim(),
         pureVegRestaurant: detailsForm.pureVegRestaurant === true,
@@ -915,8 +928,7 @@ export default function RestaurantsList() {
         primaryContactNumber: detailsForm.primaryContactNumber.trim(),
         email: detailsForm.email.trim(),
         estimatedDeliveryTime: detailsForm.estimatedDeliveryTime.trim(),
-        openingTime: normalizedOpeningTime,
-        closingTime: normalizedClosingTime,
+        outletTimings: detailsForm.outletTimings,
         isActive: detailsForm.isActive,
       }
 
@@ -925,10 +937,14 @@ export default function RestaurantsList() {
       }
 
       const response = await adminAPI.updateRestaurant(restaurantId, payload)
-      const updatedRestaurant = response?.data?.data?.restaurant
+      const updatedRestaurant =
+        response?.data?.data?.restaurant ||
+        response?.data?.data ||
+        null
 
       if (updatedRestaurant) {
-        setRestaurantDetails(updatedRestaurant)
+        const merged = await mergeOutletTimings(updatedRestaurant)
+        applyRestaurantDetails(merged)
         setRestaurants((prev) =>
           prev.map((item) =>
             (item._id === restaurantId || item.id === restaurantId)
@@ -955,6 +971,8 @@ export default function RestaurantsList() {
       setProfileImageFile(null)
       invalidateApprovedRestaurantsCache()
       invalidateRestaurantDetailCache(restaurantId)
+      clearOutletTimingsCache()
+      clearRestaurantListCache()
       alert("Restaurant details updated successfully")
     } catch (err) {
       debugError("Error updating restaurant details:", err)
@@ -1792,7 +1810,10 @@ export default function RestaurantsList() {
             </div>
 
             {/* Modal Content - Scrollable area */}
-            <div className="p-5 md:p-6 overflow-y-auto">
+            <div
+              key={selectedRestaurant?._id || selectedRestaurant?.id || "details"}
+              className="p-5 md:p-6 overflow-y-auto"
+            >
               {loadingDetails && (
                 <div className="flex flex-col items-center justify-center py-24">
                   <div className="relative">
@@ -1884,13 +1905,12 @@ export default function RestaurantsList() {
                       <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Primary Contact Number</label>
                       <input type="text" value={detailsForm.primaryContactNumber} onChange={(e) => setDetailsForm((prev) => ({ ...prev, primaryContactNumber: e.target.value }))} className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all" />
                     </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Opening Time</label>
-                      <input type="text" value={detailsForm.openingTime} onChange={(e) => setDetailsForm((prev) => ({ ...prev, openingTime: e.target.value }))} className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all" />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Closing Time</label>
-                      <input type="text" value={detailsForm.closingTime} onChange={(e) => setDetailsForm((prev) => ({ ...prev, closingTime: e.target.value }))} className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all" />
+                    <div className="md:col-span-2">
+                      <OutletTimingsEditor
+                        value={detailsForm.outletTimings}
+                        onChange={(outletTimings) => setDetailsForm((prev) => ({ ...prev, outletTimings }))}
+                        compact
+                      />
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Estimated Delivery Time (mins)</label>
@@ -1925,12 +1945,9 @@ export default function RestaurantsList() {
                   (Array.isArray(r?.cuisines) && r.cuisines.length ? r.cuisines : null) ||
                   (Array.isArray(r?.onboarding?.step2?.cuisines) && r.onboarding.step2.cuisines.length ? r.onboarding.step2.cuisines : null) ||
                   null
-                const openingTimeVal = r?.openingTime || r?.deliveryTimings?.openingTime || r?.onboarding?.step2?.deliveryTimings?.openingTime || ""
-                const closingTimeVal = r?.closingTime || r?.deliveryTimings?.closingTime || r?.onboarding?.step2?.deliveryTimings?.closingTime || ""
-                const openDaysVal =
-                  (Array.isArray(r?.openDays) && r.openDays.length ? r.openDays : null) ||
-                  (Array.isArray(r?.onboarding?.step2?.openDays) && r.onboarding.step2.openDays.length ? r.onboarding.step2.openDays : null) ||
-                  null
+                const outletTimingsVal = r?.outletTimings && typeof r.outletTimings === "object"
+                  ? r.outletTimings
+                  : null
                 const offerVal = r?.offer || r?.onboarding?.step4?.offer || ""
                 const estimatedDeliveryTimeVal = r?.estimatedDeliveryTime || r?.onboarding?.step4?.estimatedDeliveryTime || ""
                 const featuredDishVal = r?.featuredDish || r?.onboarding?.step4?.featuredDish || ""
@@ -2146,12 +2163,23 @@ export default function RestaurantsList() {
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="space-y-2.5">
-                        {(openingTimeVal || closingTimeVal) && (
+                        {outletTimingsVal && (
                           <div className="p-2.5 rounded-xl bg-slate-50/50 border border-slate-100">
-                            <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-0.5">Opening / Closing Hours</p>
-                            <p className="text-sm font-semibold text-slate-800">
-                              {formatTime12Hour(openingTimeVal)} – {formatTime12Hour(closingTimeVal)}
-                            </p>
+                            <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-1.5">Weekly Timings</p>
+                            <div className="space-y-1">
+                              {DAY_NAMES.map((day) => {
+                                const slot = outletTimingsVal[day]
+                                if (!slot) return null
+                                const label = slot.isOpen === false
+                                  ? "Closed"
+                                  : `${formatTime12Hour(slot.openingTime)} – ${formatTime12Hour(slot.closingTime)}`
+                                return (
+                                  <p key={day} className="text-[11px] font-medium text-slate-700">
+                                    <span className="text-slate-500">{day}:</span> {label}
+                                  </p>
+                                )
+                              })}
+                            </div>
                           </div>
                         )}
                         {estimatedDeliveryTimeVal && (
@@ -2174,16 +2202,6 @@ export default function RestaurantsList() {
                             <div className="flex flex-wrap gap-1">
                               {cuisinesList.map((c, i) => (
                                 <span key={i} className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-[10px] font-semibold">{c}</span>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                        {openDaysVal && openDaysVal.length > 0 && (
-                          <div className="p-2.5 rounded-xl bg-slate-50/50 border border-slate-100">
-                            <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-1.5">Open Days</p>
-                            <div className="flex flex-wrap gap-1">
-                              {openDaysVal.map((day, idx) => (
-                                <span key={idx} className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-[10px] font-semibold">{day}</span>
                               ))}
                             </div>
                           </div>
@@ -2600,27 +2618,22 @@ export default function RestaurantsList() {
                             </div>
                           </div>
                         )}
-                        {r.onboarding.step2.deliveryTimings && (
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-                            <div>
-                              <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-0.5">Opening Time (at registration)</p>
-                              <p className="font-semibold text-slate-800">{formatTime12Hour(r.onboarding.step2.deliveryTimings.openingTime)}</p>
-                            </div>
-                            <div>
-                              <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-0.5">Closing Time (at registration)</p>
-                              <p className="font-semibold text-slate-800">{formatTime12Hour(r.onboarding.step2.deliveryTimings.closingTime)}</p>
-                            </div>
-                          </div>
-                        )}
-                        {r.onboarding.step2.openDays && Array.isArray(r.onboarding.step2.openDays) && r.onboarding.step2.openDays.length > 0 && (
+                        {(r.onboarding.step2.outletTimings || r.outletTimings) && (
                           <div>
-                            <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-1">Open Days (at registration)</p>
-                            <div className="flex flex-wrap gap-1">
-                              {r.onboarding.step2.openDays.map((day, idx) => (
-                                <span key={idx} className="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full text-[10px] font-semibold capitalize">
-                                  {day}
-                                </span>
-                              ))}
+                            <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-1">Weekly Timings (at registration)</p>
+                            <div className="space-y-1">
+                              {DAY_NAMES.map((day) => {
+                                const slot = (r.onboarding.step2.outletTimings || r.outletTimings)?.[day]
+                                if (!slot) return null
+                                const label = slot.isOpen === false
+                                  ? "Closed"
+                                  : `${formatTime12Hour(slot.openingTime)} – ${formatTime12Hour(slot.closingTime)}`
+                                return (
+                                  <p key={day} className="text-[11px] font-medium text-slate-700">
+                                    <span className="text-slate-500">{day}:</span> {label}
+                                  </p>
+                                )
+                              })}
                             </div>
                           </div>
                         )}

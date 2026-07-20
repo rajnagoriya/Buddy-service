@@ -14,7 +14,7 @@ export default function AddToCartButton({ item, className = "" }) {
   const navigate = useNavigate()
   const location = useLocation()
 
-  const handleAddToCart = (e) => {
+  const handleAddToCart = async (e) => {
     e.preventDefault()
     e.stopPropagation()
 
@@ -24,7 +24,7 @@ export default function AddToCartButton({ item, className = "" }) {
       return
     }
 
-    const result = addToCart(item)
+    const result = await addToCart(item)
     handleAddToCartFeedback(result, "Cannot add this item to cart.", item.restaurant || "")
   }
 

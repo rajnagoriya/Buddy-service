@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Link, useNavigate } from "react-router-dom"
+import { Link, useLocation, useNavigate } from "react-router-dom"
 import {
   ArrowRight,
   Loader2,
@@ -39,7 +39,9 @@ export default function UnifiedOTPFastLogin() {
   const [isUpdatingName, setIsUpdatingName] = useState(false)
   const [tempAuth, setTempAuth] = useState(null)
   const [pendingVerify, setPendingVerify] = useState(null)
+  const [deactivatedError, setDeactivatedError] = useState(false)
   const navigate = useNavigate()
+  const loginLocation = useLocation()
   const submitting = useRef(false)
 
   const normalizedPhone = () => {
@@ -64,12 +66,18 @@ export default function UnifiedOTPFastLogin() {
       setResendTimer(RESEND_COOLDOWN_SECONDS)
       toast.success("OTP sent successfully!")
     } catch (err) {
-      const msg =
+      const status = err?.response?.status
+      let msg =
         err?.response?.data?.error ||
         err?.response?.data?.message ||
         err?.message ||
         "Failed to send OTP."
-      toast.error(msg)
+      
+      if (status === 401 && /deactivat(ed|e)/i.test(String(msg))) {
+        setDeactivatedError(true)
+      } else {
+        toast.error(msg)
+      }
     } finally {
       setLoading(false)
       submitting.current = false
@@ -191,7 +199,8 @@ export default function UnifiedOTPFastLogin() {
       }
       if (status === 401) {
         if (/deactivat(ed|e)/i.test(String(msg))) {
-          msg = "Your account is deactivated. Please contact support."
+          setDeactivatedError(true)
+          return
         } else {
           msg = "Invalid or expired code, or account not active."
         }
@@ -294,7 +303,7 @@ export default function UnifiedOTPFastLogin() {
     <div className="min-h-screen min-h-dvh bg-gray-50 flex flex-col font-[family-name:var(--font-poppins)] sm:justify-center sm:items-center sm:p-4 md:p-6">
       <div className="w-full h-full min-h-screen min-h-dvh sm:min-h-0 sm:h-auto sm:max-w-[420px] md:max-w-[440px] sm:bg-white sm:rounded-[2.5rem] sm:shadow-2xl sm:overflow-hidden sm:relative flex flex-col max-w-full">
         {/* Hero banner */}
-        <div className="relative w-full overflow-hidden bg-gradient-to-br from-primary via-[#15803d] to-[#166534] pt-4 pb-14 sm:pb-16 flex-shrink-0 min-h-[320px] sm:min-h-[340px]">
+        <div className="relative w-full overflow-hidden bg-gradient-to-br from-primary via-[#15803d] to-[#166534] pt-4 pb-28 sm:pb-32 flex-shrink-0 min-h-[300px] sm:min-h-[340px]">
           <div className="absolute top-[-30%] left-[-20%] w-[140%] h-[120%] bg-gradient-to-br from-white/25 via-white/10 to-transparent rounded-br-[50%] z-0" />
 
           <div className="px-5 sm:px-6 pt-4 pb-2 relative z-10 flex flex-col justify-between h-full">
@@ -547,11 +556,19 @@ export default function UnifiedOTPFastLogin() {
 
             <p className="text-center text-[10px] text-gray-500 font-medium max-w-[280px]">
               By continuing, you agree to our{" "}
-              <Link to="/terms" className="text-primary font-semibold hover:underline">
+              <Link
+                to="/terms"
+                state={{ from: `${loginLocation.pathname}${loginLocation.search}` }}
+                className="text-primary font-semibold hover:underline"
+              >
                 Terms & Conditions
               </Link>{" "}
               and{" "}
-              <Link to="/privacy" className="text-primary font-semibold hover:underline">
+              <Link
+                to="/privacy"
+                state={{ from: `${loginLocation.pathname}${loginLocation.search}` }}
+                className="text-primary font-semibold hover:underline"
+              >
                 Privacy Policy
               </Link>
               .
@@ -563,7 +580,7 @@ export default function UnifiedOTPFastLogin() {
       {/* Name modal */}
       <Dialog open={showNameModal} onOpenChange={setShowNameModal}>
         <DialogContent
-          className="sm:max-w-[425px] rounded-3xl border-none p-0 overflow-hidden bg-white mx-4"
+          className="w-[calc(100%-2rem)] sm:w-full sm:max-w-[425px] mx-auto rounded-3xl border-none p-0 overflow-hidden bg-white"
           showCloseButton={false}
         >
           <div className="bg-primary p-6 sm:p-8 text-center relative">
@@ -624,6 +641,31 @@ export default function UnifiedOTPFastLogin() {
               )}
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+      {/* Deactivated Account Modal */}
+      <Dialog open={deactivatedError} onOpenChange={setDeactivatedError}>
+        <DialogContent className="sm:max-w-[400px] w-[calc(100%-2rem)] mx-auto p-0 overflow-hidden border-0 bg-white rounded-[24px] sm:rounded-[2rem]">
+          <div className="bg-red-50 p-6 flex flex-col items-center justify-center border-b border-red-100">
+            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
+              <ShieldCheck className="w-8 h-8 text-red-600" />
+            </div>
+            <DialogTitle className="text-xl sm:text-2xl font-bold text-gray-900 text-center m-0">
+              Account Deactivated
+            </DialogTitle>
+          </div>
+          <div className="p-6">
+            <DialogDescription className="text-center text-[15px] sm:text-base text-gray-600 mb-6">
+              Your account has been temporarily deactivated by the admin. You won't be able to log in at this time.
+            </DialogDescription>
+            <button
+              type="button"
+              onClick={() => setDeactivatedError(false)}
+              className="w-full h-12 sm:h-14 bg-red-600 hover:bg-red-700 text-white rounded-xl sm:rounded-2xl font-bold text-[15px] sm:text-base transition-all active:scale-[0.98] shadow-sm"
+            >
+              Close
+            </button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

@@ -4,7 +4,7 @@ import { ArrowLeft, ChevronDown, MapPin, ShoppingCart } from "lucide-react"
 import { Button } from "@food/components/ui/button"
 import { useCart } from "@food/context/CartContext"
 import { useProfile } from "@food/context/ProfileContext"
-import { useLocation as useFoodLocation } from "@food/hooks/useLocation"
+import useEffectiveDeliveryLocation from "@food/hooks/useEffectiveDeliveryLocation"
 import { useLocationSelector } from "./UserLayout"
 import UnifiedHeader from "@/shared/components/UnifiedHeader"
 import VegModePopups from "./VegModePopups"
@@ -81,7 +81,12 @@ export default function FoodUserHeader({ variant, className = "" }) {
   const { getCartCount } = useCart()
   const cartCount = getCartCount()
   const { openLocationSelector } = useLocationSelector()
-  const { location, loading } = useFoodLocation()
+  const {
+    loading: locationLoading,
+    effectiveLocation,
+    getAreaLabel,
+    getCityLabel,
+  } = useEffectiveDeliveryLocation()
   const { vegMode, setVegMode } = useProfile()
   const [showVegModePopup, setShowVegModePopup] = useState(false)
   const [showSwitchOffPopup, setShowSwitchOffPopup] = useState(false)
@@ -91,8 +96,8 @@ export default function FoodUserHeader({ variant, className = "" }) {
   const themeKey = variant || resolveThemeKey(route)
   const theme = ROUTE_THEMES[themeKey] || ROUTE_THEMES.profile
 
-  const areaLabel = location?.area || location?.city || "Set location"
-  const cityLabel = location?.city && location.city !== "Current Location" ? location.city : ""
+  const areaLabel = getAreaLabel()
+  const cityLabel = getCityLabel()
 
   const locationCardClass =
     themeKey === "home"
@@ -102,7 +107,7 @@ export default function FoodUserHeader({ variant, className = "" }) {
   const locationCard = (
     <button
       type="button"
-      disabled={loading}
+      disabled={locationLoading}
       onClick={openLocationSelector}
       className={locationCardClass}
     >
@@ -112,7 +117,7 @@ export default function FoodUserHeader({ variant, className = "" }) {
       <div className="min-w-0 flex-1">
         <p className={theme.label}>{theme.titleText}</p>
         <div className="flex min-w-0 items-center gap-1">
-          <span className={`truncate ${theme.title}`}>{loading ? "Loading..." : areaLabel}</span>
+          <span className={`truncate ${theme.title}`}>{locationLoading ? "Loading..." : areaLabel}</span>
           <ChevronDown className={`h-3.5 w-3.5 shrink-0 ${theme.chevron}`} />
         </div>
         {cityLabel ? <p className={`truncate ${theme.sub}`}>{cityLabel}</p> : null}
@@ -159,7 +164,7 @@ export default function FoodUserHeader({ variant, className = "" }) {
       <UnifiedHeader
         activeTab="food"
         setActiveTab={() => {}}
-        location={location}
+        location={effectiveLocation}
         savedAddressText=""
         handleLocationClick={() => {}}
         handleSearchFocus={() => {}}

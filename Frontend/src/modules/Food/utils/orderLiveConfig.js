@@ -1,4 +1,5 @@
 export const ORDER_FILTER_TABS = [
+  { id: "new", label: "New Orders" },
   { id: "all", label: "All" },
   { id: "preparing", label: "Preparing" },
   { id: "ready", label: "Ready" },
@@ -10,11 +11,14 @@ export const ORDER_FILTER_TABS = [
 ]
 
 export const ALL_ORDERS_STATUS_PRIORITY = {
+  created: 0,
   pending: 0,
   confirmed: 1,
   preparing: 2,
   ready: 3,
+  ready_for_pickup: 3,
   out_for_delivery: 4,
+  picked_up: 4,
   scheduled: 5,
   delivered: 6,
   completed: 6,

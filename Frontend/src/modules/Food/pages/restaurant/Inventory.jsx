@@ -920,6 +920,8 @@ export default function Inventory() {
                 variants: Array.isArray(item.variants) ? item.variants : (Array.isArray(item.variations) ? item.variations : []),
                 category: section.name || "",
                 categoryId: section.categoryId || section.id || "",
+                categoryDisabled: item.categoryDisabled === true,
+                categoryDisabledByAdmin: item.categoryDisabledByAdmin === true,
                 inStock: item.isAvailable !== undefined ? item.isAvailable : true,
                 isAvailable: item.isAvailable !== undefined ? item.isAvailable : true,
                 isVeg: item.foodType === "Veg",
@@ -950,6 +952,8 @@ export default function Inventory() {
                     variants: Array.isArray(item.variants) ? item.variants : (Array.isArray(item.variations) ? item.variations : []),
                     category: section.name || subsection.name || "",
                     categoryId: section.categoryId || section.id || "",
+                    categoryDisabled: item.categoryDisabled === true || section.categoryDisabled === true,
+                    categoryDisabledByAdmin: item.categoryDisabledByAdmin === true || section.categoryDisabledByAdmin === true,
                     inStock: item.isAvailable !== undefined ? item.isAvailable : true,
                     isAvailable: item.isAvailable !== undefined ? item.isAvailable : true,
                     isVeg: item.foodType === "Veg",
@@ -976,6 +980,9 @@ export default function Inventory() {
             description: section.description || "",
             itemCount: itemCount,
             inStock: categoryInStock,
+            categoryDisabled: section.categoryDisabled === true,
+            categoryDisabledByAdmin: section.categoryDisabledByAdmin === true,
+            categoryIsActive: section.categoryIsActive !== false,
             items: allItems,
             order: section.order !== undefined ? section.order : sectionIndex,
           }
@@ -1922,7 +1929,6 @@ export default function Inventory() {
     <RestaurantSubPageShell
       title="Menu inventory"
       subtitle="Manage dishes, stock, and add-ons"
-      showBottomNav
       contentClassName="space-y-4 pb-28 lg:pb-8"
     >
       <InventoryStatsRow activeTab={activeTab} stats={inventoryStats} />
@@ -2345,6 +2351,11 @@ export default function Inventory() {
                                     <span className={`rounded px-1.5 py-0.5 text-[8px] sm:text-[9px] font-bold uppercase tracking-wider border shadow-sm ${approvalMeta.className.replace('text-', 'text-').replace('bg-', 'bg-white border-')}`}>
                                       {approvalMeta.label}
                                     </span>
+                                    {item.categoryDisabled ? (
+                                      <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[8px] sm:text-[9px] font-bold uppercase tracking-wider text-amber-700">
+                                        {item.categoryDisabledByAdmin ? "Category disabled by admin" : "Category disabled"}
+                                      </span>
+                                    ) : null}
                                   </div>
 
                                   {item.description && (

@@ -114,6 +114,18 @@ export const adminSidebarMenu = [
   },
   {
     type: "section",
+    label: "GLOBAL SUPPORT MANAGEMENT",
+    items: [
+      {
+        type: "link",
+        label: "Global Support Tickets",
+        path: "/admin/support/tickets",
+        icon: "ShieldCheck",
+      },
+    ],
+  },
+  {
+    type: "section",
     label: "CUSTOMER MANAGEMENT",
     items: [
       {
@@ -134,12 +146,8 @@ export const adminSidebarMenu = [
     type: "section",
     label: "DELIVERYMAN MANAGEMENT",
     items: [
-      { type: "link", label: "Delivery Cash Limit", path: "/admin/food/delivery-cash-limit", icon: "IndianRupee" },
       { type: "link", label: "Delivery & Platform Fee", path: "/admin/food/fee-settings", icon: "DollarSign" },
-      { type: "link", label: "Cash limit settlement", path: "/admin/food/cash-limit-settlement", icon: "Receipt" },
-      { type: "link", label: "Delivery Withdrawal", path: "/admin/food/delivery-withdrawal", icon: "Wallet" },
       { type: "link", label: "Delivery boy Wallet", path: "/admin/food/delivery-boy-wallet", icon: "PiggyBank" },
-      { type: "link", label: "Delivery Boy Commission", path: "/admin/food/delivery-boy-commission", icon: "DollarSign" },
       { type: "link", label: "Delivery Emergency Help", path: "/admin/food/delivery-emergency-help", icon: "Phone" },
       { type: "link", label: "Delivery Support Tickets", path: "/admin/food/delivery-support-tickets", icon: "MessageSquare" },
       {
@@ -149,6 +157,7 @@ export const adminSidebarMenu = [
         subItems: [
           { label: "New Join Request", path: "/admin/food/delivery-partners/join-request" },
           { label: "Deliveryman List", path: "/admin/food/delivery-partners" },
+          { label: "Live Drivers Map", path: "/admin/food/zone-setup/delivery-boy-view" },
           { label: "Deliveryman Reviews", path: "/admin/food/delivery-partners/reviews" },
           { label: "Bonus", path: "/admin/food/delivery-partners/bonus" },
           { label: "Earning Addon", path: "/admin/food/delivery-partners/earning-addon" },
@@ -189,9 +198,10 @@ export const adminSidebarMenu = [
   },
   {
     type: "section",
-    label: "TRANSACTION MANAGEMENT",
+    label: "WITHDRAWAL MANAGEMENT",
     items: [
       { type: "link", label: "Restaurant Withdraws", path: "/admin/food/restaurant-withdraws", icon: "CreditCard" },
+      { type: "link", label: "Delivery Withdrawal", path: "/admin/food/delivery-withdrawal", icon: "Wallet" },
     ],
   },
   {

@@ -46,6 +46,108 @@ const firstText = (...values) => {
 const formatMoney = (value) => `₹${Number(value || 0).toFixed(2)}`
 const formatDiscount = (value) => `-₹${Math.abs(Number(value || 0)).toFixed(2)}`
 
+const formatTimelineTimestamp = (value) => {
+  if (!value) return ""
+  const date = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    // Already-formatted string from API
+    if (typeof value === "string" && value.trim()) return value.trim()
+    return ""
+  }
+  return date.toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  })
+}
+
+const buildTimelineFromOrder = (order) => {
+  if (Array.isArray(order?.timeline) && order.timeline.length > 0) {
+    return order.timeline.map((event) => ({
+      event: event.event || event.label || "Update",
+      timestamp:
+        formatTimelineTimestamp(event.at) ||
+        formatTimelineTimestamp(event.timestamp) ||
+        event.timestamp ||
+        "",
+      status: event.status || "completed",
+      reason: event.reason || "",
+    }))
+  }
+
+  const statusLower = String(order.status || order.orderStatus || "").toLowerCase()
+  const reached = {
+    confirmed:
+      order.tracking?.confirmed?.status ||
+      ["confirmed", "preparing", "ready", "ready_for_pickup", "picked_up", "out_for_delivery", "delivered"].includes(statusLower),
+    preparing:
+      order.tracking?.preparing?.status ||
+      ["preparing", "ready", "ready_for_pickup", "picked_up", "out_for_delivery", "delivered"].includes(statusLower),
+    ready:
+      order.tracking?.ready?.status ||
+      ["ready", "ready_for_pickup", "picked_up", "out_for_delivery", "delivered"].includes(statusLower),
+    outForDelivery:
+      order.tracking?.outForDelivery?.status ||
+      ["picked_up", "out_for_delivery", "delivered"].includes(statusLower),
+    delivered: order.tracking?.delivered?.status || statusLower === "delivered",
+  }
+
+  return [
+    {
+      event: "Order placed",
+      timestamp: formatTimelineTimestamp(order.createdAt),
+      status: "completed",
+    },
+    ...(reached.confirmed
+      ? [{
+          event: "Order confirmed",
+          timestamp: formatTimelineTimestamp(
+            order.tracking?.confirmed?.timestamp || order.dispatch?.acceptedAt,
+          ),
+          status: "completed",
+        }]
+      : []),
+    ...(reached.preparing
+      ? [{
+          event: "Preparing",
+          timestamp: formatTimelineTimestamp(order.tracking?.preparing?.timestamp),
+          status: "completed",
+        }]
+      : []),
+    ...(reached.ready
+      ? [{
+          event: "Ready for pickup",
+          timestamp: formatTimelineTimestamp(order.tracking?.ready?.timestamp),
+          status: "completed",
+        }]
+      : []),
+    ...(reached.outForDelivery
+      ? [{
+          event: "Out for delivery",
+          timestamp: formatTimelineTimestamp(order.tracking?.outForDelivery?.timestamp),
+          status: "completed",
+        }]
+      : []),
+    ...(reached.delivered
+      ? [{
+          event: "Delivered",
+          timestamp: formatTimelineTimestamp(order.tracking?.delivered?.timestamp),
+          status: "completed",
+        }]
+      : []),
+    ...(statusLower.includes("cancel") || statusLower.includes("reject")
+      ? [{
+          event: statusLower.includes("reject") ? "Rejected" : "Cancelled",
+          timestamp: formatTimelineTimestamp(order.cancelledAt),
+          status: "rejected",
+          reason: order.cancellationReason,
+        }]
+      : []),
+  ]
+}
 
 export default function OrderDetails() {
   const navigate = useNavigate()
@@ -88,6 +190,7 @@ export default function OrderDetails() {
           if (!order) throw new Error('Order data is missing')
           const orderStatusRaw = String(order.status || order.orderStatus || "").toLowerCase()
           const pricing = order.pricing || {}
+          const earnings = order.restaurantEarnings || {}
           const computedSubtotal = Array.isArray(order.items)
             ? order.items.reduce((sum, item) => {
                 const price = Number(item?.price || 0)
@@ -96,8 +199,10 @@ export default function OrderDetails() {
               }, 0)
             : 0
 
+          // Restaurant sees only what they earn (not customer bill).
           const itemSubtotal =
             firstNumber(
+              earnings.foodAmount,
               pricing.subtotal,
               pricing.itemsTotal,
               pricing.itemSubtotal,
@@ -105,39 +210,24 @@ export default function OrderDetails() {
               order.subtotal
             ) ?? computedSubtotal
 
-          const taxes =
+          const packagingFee =
+            firstNumber(earnings.packagingFee, pricing.packagingFee, order.packagingFee) ?? 0
+          const commission =
             firstNumber(
-              pricing.tax,
-              pricing.gst,
-              order.tax,
-              order.gst
+              earnings.commission,
+              pricing.restaurantCommission,
+              order.restaurantCommission
             ) ?? 0
-
-          const packagingFee = firstNumber(pricing.packagingFee, order.packagingFee) ?? 0
-          const deliveryFee = firstNumber(pricing.deliveryFee, order.deliveryFee) ?? 0
-          const platformFee = firstNumber(pricing.platformFee, order.platformFee) ?? 0
-          const discount = firstNumber(pricing.discount, order.discount) ?? 0
-          const couponDiscount = firstNumber(pricing.couponDiscount, order.couponDiscount) ?? 0
-          const referralDiscount = firstNumber(pricing.referralDiscount, order.referralDiscount) ?? 0
+          const discount =
+            firstNumber(earnings.discount, pricing.discount, order.discount) ?? 0
 
           const total =
             firstNumber(
-              pricing.total,
-              order.payment?.amountDue,
-              order.totalAmount,
-              order.total,
-              order.amount
+              earnings.payout,
+              order.restaurantPayout,
+              pricing.total
             ) ??
-            Math.max(
-              0,
-              itemSubtotal +
-                taxes +
-                packagingFee +
-                deliveryFee +
-                platformFee -
-                discount
-            )
-          const paidAmount = firstNumber(order.payment?.amountDue, order.payment?.amount, total) ?? total
+            Math.max(0, itemSubtotal + packagingFee - commission - discount)
 
           const addressParts = [
             order.address?.street,
@@ -197,13 +287,7 @@ export default function OrderDetails() {
           }
           
           const statusLower = orderStatusRaw
-          const reached = {
-            confirmed: order.tracking?.confirmed?.status || ["confirmed", "preparing", "ready", "ready_for_pickup", "picked_up", "out_for_delivery", "delivered"].includes(statusLower),
-            preparing: order.tracking?.preparing?.status || ["preparing", "ready", "ready_for_pickup", "picked_up", "out_for_delivery", "delivered"].includes(statusLower),
-            ready: order.tracking?.ready?.status || ["ready", "ready_for_pickup", "picked_up", "out_for_delivery", "delivered"].includes(statusLower),
-            outForDelivery: order.tracking?.outForDelivery?.status || ["picked_up", "out_for_delivery", "delivered"].includes(statusLower),
-            delivered: order.tracking?.delivered?.status || statusLower === "delivered"
-          }
+          const timeline = buildTimelineFromOrder(order)
 
           // Transform API order data to match component structure
           const transformedOrder = {
@@ -228,30 +312,17 @@ export default function OrderDetails() {
             })) || [],
             billing: {
               itemSubtotal,
-              taxes,
               packagingFee,
-              deliveryFee,
-              platformFee,
+              commission,
               discount,
-              couponDiscount,
-              referralDiscount,
               total,
-              paidAmount,
               paymentStatus
             },
             deliveryPartnerId: order.deliveryPartnerId || order.dispatch?.deliveryPartnerId || null,
             dispatchStatus: order.dispatch?.status || null,
             reason: order.cancellationReason || '',
             restaurantNote: order.restaurantNote || '',
-            timeline: [
-              { event: 'Order placed', timestamp: new Date(order.createdAt).toLocaleString('en-GB'), status: 'completed' },
-              ...(reached.confirmed ? [{ event: 'Order confirmed', timestamp: order.tracking?.confirmed?.timestamp ? new Date(order.tracking.confirmed.timestamp).toLocaleString('en-GB') : '', status: 'completed' }] : []),
-              ...(reached.preparing ? [{ event: 'Preparing', timestamp: order.tracking?.preparing?.timestamp ? new Date(order.tracking.preparing.timestamp).toLocaleString('en-GB') : '', status: 'completed' }] : []),
-              ...(reached.ready ? [{ event: 'Ready for pickup', timestamp: order.tracking?.ready?.timestamp ? new Date(order.tracking.ready.timestamp).toLocaleString('en-GB') : '', status: 'completed' }] : []),
-              ...(reached.outForDelivery ? [{ event: 'Out for delivery', timestamp: order.tracking?.outForDelivery?.timestamp ? new Date(order.tracking.outForDelivery.timestamp).toLocaleString('en-GB') : '', status: 'completed' }] : []),
-              ...(reached.delivered ? [{ event: 'Delivered', timestamp: order.tracking?.delivered?.timestamp ? new Date(order.tracking.delivered.timestamp).toLocaleString('en-GB') : '', status: 'completed' }] : []),
-              ...(statusLower === 'cancelled' ? [{ event: 'Cancelled', timestamp: order.cancelledAt ? new Date(order.cancelledAt).toLocaleString('en-GB') : '', status: 'rejected', reason: order.cancellationReason }] : [])
-            ]
+            timeline,
           }
           
           setOrderData(transformedOrder)
@@ -463,25 +534,15 @@ export default function OrderDetails() {
     doc.setFont("helvetica", "normal")
     const billRows = [
       ["Item Subtotal:", formatMoney(orderData.billing.itemSubtotal)],
-      ["Taxes:", formatMoney(orderData.billing.taxes)],
     ]
     if (Number(orderData.billing.packagingFee) > 0) {
       billRows.push(["Packaging Fee:", formatMoney(orderData.billing.packagingFee)])
     }
-    if (Number(orderData.billing.deliveryFee) > 0) {
-      billRows.push(["Delivery Fee:", formatMoney(orderData.billing.deliveryFee)])
-    }
-    if (Number(orderData.billing.platformFee) > 0) {
-      billRows.push(["Platform Fee:", formatMoney(orderData.billing.platformFee)])
+    if (Number(orderData.billing.commission) > 0) {
+      billRows.push(["Commission:", formatDiscount(orderData.billing.commission)])
     }
     if (Number(orderData.billing.discount) > 0) {
       billRows.push(["Discount:", formatDiscount(orderData.billing.discount)])
-    }
-    if (Number(orderData.billing.couponDiscount) > 0) {
-      billRows.push(["Coupon Discount:", formatDiscount(orderData.billing.couponDiscount)])
-    }
-    if (Number(orderData.billing.referralDiscount) > 0) {
-      billRows.push(["Referral Discount:", formatDiscount(orderData.billing.referralDiscount)])
     }
     billRows.forEach(([label, value]) => {
       doc.text(label, 15, yPosition)
@@ -497,16 +558,9 @@ export default function OrderDetails() {
 
     doc.setFont("helvetica", "bold")
     doc.setFontSize(11)
-    doc.text("Total Bill:", leftMargin, yPosition)
+    doc.text("You Get:", leftMargin, yPosition)
     doc.text(formatMoney(orderData.billing.total), pageWidth - rightMargin, yPosition, { align: "right" })
     yPosition += 6
-    if (Number(orderData.billing.paidAmount) > 0) {
-      doc.setFont("helvetica", "normal")
-      doc.setFontSize(10)
-      doc.text("Amount Paid:", leftMargin, yPosition)
-      doc.text(formatMoney(orderData.billing.paidAmount), pageWidth - rightMargin, yPosition, { align: "right" })
-      yPosition += 6
-    }
 
     doc.setFontSize(9)
     doc.setFont("helvetica", "normal")
@@ -891,26 +945,16 @@ export default function OrderDetails() {
               <span className="text-sm text-gray-600">Item subtotal</span>
               <span className="text-sm text-gray-900">{formatMoney(orderData.billing.itemSubtotal)}</span>
             </div>
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-sm text-gray-600">Taxes</span>
-              <span className="text-sm text-gray-900">{formatMoney(orderData.billing.taxes)}</span>
-            </div>
             {Number(orderData.billing.packagingFee) > 0 && (
               <div className="flex items-center justify-between mb-3">
                 <span className="text-sm text-gray-600">Packaging fee</span>
                 <span className="text-sm text-gray-900">{formatMoney(orderData.billing.packagingFee)}</span>
               </div>
             )}
-            {Number(orderData.billing.deliveryFee) > 0 && (
+            {Number(orderData.billing.commission) > 0 && (
               <div className="flex items-center justify-between mb-3">
-                <span className="text-sm text-gray-600">Delivery fee</span>
-                <span className="text-sm text-gray-900">{formatMoney(orderData.billing.deliveryFee)}</span>
-              </div>
-            )}
-            {Number(orderData.billing.platformFee) > 0 && (
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-sm text-gray-600">Platform fee</span>
-                <span className="text-sm text-gray-900">{formatMoney(orderData.billing.platformFee)}</span>
+                <span className="text-sm text-gray-600">Commission</span>
+                <span className="text-sm text-gray-900">{formatDiscount(orderData.billing.commission)}</span>
               </div>
             )}
             {Number(orderData.billing.discount) > 0 && (
@@ -919,34 +963,16 @@ export default function OrderDetails() {
                 <span className="text-sm text-green-700">{formatDiscount(orderData.billing.discount)}</span>
               </div>
             )}
-            {Number(orderData.billing.couponDiscount) > 0 && (
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-sm text-green-700">Coupon discount</span>
-                <span className="text-sm text-green-700">{formatDiscount(orderData.billing.couponDiscount)}</span>
-              </div>
-            )}
-            {Number(orderData.billing.referralDiscount) > 0 && (
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-sm text-green-700">Referral discount</span>
-                <span className="text-sm text-green-700">{formatDiscount(orderData.billing.referralDiscount)}</span>
-              </div>
-            )}
             <div className="my-3"></div>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-semibold text-gray-900">Total bill</span>
+                <span className="text-sm font-semibold text-gray-900">You get</span>
                 <span className="px-2 py-0.5 bg-gray-200 text-gray-700 text-xs font-medium rounded">
                   {orderData.billing.paymentStatus}
                 </span>
               </div>
               <span className="text-sm font-semibold text-gray-900">{formatMoney(orderData.billing.total)}</span>
             </div>
-            {Number(orderData.billing.paidAmount) > 0 && (
-              <div className="flex items-center justify-between mt-2">
-                <span className="text-sm text-gray-600">Amount paid</span>
-                <span className="text-sm font-medium text-gray-900">{formatMoney(orderData.billing.paidAmount)}</span>
-              </div>
-            )}
           </div>
         </div>
 
@@ -981,7 +1007,12 @@ export default function OrderDetails() {
                     {/* Event Details */}
                     <div className="flex-1 pt-1">
                       <p className="text-sm text-gray-900">{event.event}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">{event.timestamp}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {event.timestamp || "Time unavailable"}
+                      </p>
+                      {event.reason ? (
+                        <p className="text-xs text-red-600 mt-0.5">{event.reason}</p>
+                      ) : null}
                     </div>
                   </div>
                 ))}

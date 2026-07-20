@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { buildLocationSchema } from '../../../../core/location/location.schema.js';
 
 const orderItemSchema = new mongoose.Schema(
     {
@@ -29,8 +30,8 @@ const deliveryAddressSchema = new mongoose.Schema(
         zipCode: { type: String, default: '', trim: true },
         phone: { type: String, default: '', trim: true },
         location: {
-            type: { type: String, enum: ['Point'], default: 'Point' },
-            coordinates: { type: [Number], default: undefined }
+            type: buildLocationSchema(),
+            default: undefined
         }
     },
     { _id: false }
@@ -39,15 +40,56 @@ const deliveryAddressSchema = new mongoose.Schema(
 const pricingSchema = new mongoose.Schema(
     {
         subtotal: { type: Number, required: true, min: 0 },
+        foodSubtotal: { type: Number, default: 0, min: 0 },
         tax: { type: Number, default: 0, min: 0 },
         packagingFee: { type: Number, default: 0, min: 0 },
+        restaurantPackagingTotal: { type: Number, default: 0, min: 0 },
         deliveryFee: { type: Number, default: 0, min: 0 },
         platformFee: { type: Number, default: 0, min: 0 },
         restaurantCommission: { type: Number, default: 0, min: 0 },
         discount: { type: Number, default: 0, min: 0 },
+        couponCode: { type: String },
+        couponCreatedBy: { type: String, enum: ['admin', 'restaurant'] },
+        couponCategory: { type: String, enum: ['normal', 'free_delivery'] },
+        offerId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodOffer' },
+        platformSubsidy: { type: Number, default: 0, min: 0 },
+        deliveryDiscount: { type: Number, default: 0, min: 0 },
         total: { type: Number, required: true, min: 0 },
         currency: { type: String, default: 'INR' },
-        deliveryFeeBreakdown: { type: mongoose.Schema.Types.Mixed }
+        deliveryFeeBreakdown: { type: mongoose.Schema.Types.Mixed },
+        restaurantGroups: { type: mongoose.Schema.Types.Mixed },
+    },
+    { _id: false }
+);
+
+const restaurantSettlementSchema = new mongoose.Schema(
+    {
+        restaurantId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodRestaurant' },
+        restaurantName: { type: String, default: '' },
+        foodAmount: { type: Number, default: 0, min: 0 },
+        packagingFee: { type: Number, default: 0, min: 0 },
+        commission: { type: Number, default: 0, min: 0 },
+        commissionGST: { type: Number, default: 0, min: 0 },
+        restaurantPayout: { type: Number, default: 0, min: 0 },
+    },
+    { _id: false }
+);
+
+const driverSettlementSchema = new mongoose.Schema(
+    {
+        deliveryFee: { type: Number, default: 0, min: 0 },
+        tip: { type: Number, default: 0, min: 0 },
+        incentive: { type: Number, default: 0, min: 0 },
+        driverPayout: { type: Number, default: 0, min: 0 },
+    },
+    { _id: false }
+);
+
+const platformRevenueSchema = new mongoose.Schema(
+    {
+        platformFee: { type: Number, default: 0, min: 0 },
+        commission: { type: Number, default: 0, min: 0 },
+        deliveryMargin: { type: Number, default: 0, min: 0 },
     },
     { _id: false }
 );
@@ -111,7 +153,7 @@ const dispatchSchema = new mongoose.Schema(
         modeAtCreation: { type: String, enum: ['auto'], default: 'auto' },
         status: {
             type: String,
-            enum: ['unassigned', 'assigned', 'accepted', 'rejected', 'cancelled'],
+            enum: ['unassigned', 'offered', 'assigned', 'accepted', 'rejected', 'cancelled', 'timed_out'],
             default: 'unassigned'
         },
         deliveryPartnerId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodDeliveryPartner', default: null },
@@ -121,9 +163,31 @@ const dispatchSchema = new mongoose.Schema(
         offeredTo: [{
             partnerId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodDeliveryPartner' },
             at: { type: Date, default: Date.now },
-            action: { type: String, enum: ['offered', 'rejected', 'timeout'], default: 'offered' },
+            action: { type: String, enum: ['offered', 'accepted', 'rejected', 'timeout'], default: 'offered' },
             allowOverLimit: { type: Boolean, default: false },
             requiredCashForOrder: { type: Number, default: 0 }
+        }],
+        /** Admin (and system) driver assign/reassign audit trail */
+        assignmentHistory: [{
+            at: { type: Date, default: Date.now },
+            action: {
+                type: String,
+                enum: ['assigned', 'reassigned'],
+                default: 'assigned'
+            },
+            fromPartnerId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodDeliveryPartner', default: null },
+            fromPartnerName: { type: String, default: '' },
+            fromPartnerPhone: { type: String, default: '' },
+            toPartnerId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodDeliveryPartner', default: null },
+            toPartnerName: { type: String, default: '' },
+            toPartnerPhone: { type: String, default: '' },
+            byRole: {
+                type: String,
+                enum: ['USER', 'RESTAURANT', 'DELIVERY_PARTNER', 'ADMIN', 'SYSTEM'],
+                default: 'ADMIN'
+            },
+            byId: { type: mongoose.Schema.Types.ObjectId, default: null },
+            note: { type: String, default: '' }
         }],
         isShared: { type: Boolean, default: false },
         sharedPartnerId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodDeliveryPartner', default: null },
@@ -205,10 +269,33 @@ const pickupSchema = new mongoose.Schema(
             default: 'pending' 
         },
         location: {
-            type: { type: String, enum: ['Point'], default: 'Point' },
-            coordinates: { type: [Number] }
+            type: buildLocationSchema(),
+            default: undefined
         },
-        items: [String] // Array of item names or IDs belonging to this pickup
+        items: [String], // Array of item names or IDs belonging to this pickup
+        /** Times this pickup was rejected while awaiting DP resend (max 3) */
+        rejectionAttempts: { type: Number, default: 0, min: 0 },
+        /** After 3 failed attempts — restaurant dropped; order continues without it */
+        permanentlyDropped: { type: Boolean, default: false },
+        pickedAt: { type: Date, default: null },
+        droppedAt: { type: Date, default: null },
+        billImageUrl: { type: String, default: null },
+    },
+    { _id: false }
+);
+
+const partialRefundSchema = new mongoose.Schema(
+    {
+        restaurantId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodRestaurant' },
+        restaurantName: { type: String, default: '' },
+        amount: { type: Number, default: 0, min: 0 },
+        foodAmount: { type: Number, default: 0, min: 0 },
+        packagingFee: { type: Number, default: 0, min: 0 },
+        taxShare: { type: Number, default: 0, min: 0 },
+        destination: { type: String, enum: ['wallet', 'source'], default: 'wallet' },
+        status: { type: String, enum: ['processed', 'failed'], default: 'processed' },
+        at: { type: Date, default: Date.now },
+        note: { type: String, default: '' },
     },
     { _id: false }
 );
@@ -267,6 +354,18 @@ const orderSchema = new mongoose.Schema(
         pricing: {
             type: pricingSchema,
             required: false
+        },
+        restaurantSettlement: {
+            type: [restaurantSettlementSchema],
+            default: [],
+        },
+        driverSettlement: {
+            type: driverSettlementSchema,
+            default: undefined,
+        },
+        platformRevenue: {
+            type: platformRevenueSchema,
+            default: undefined,
         },
         /**
          * Denormalized payment snapshot for fast reads & legacy clients.
@@ -335,6 +434,40 @@ const orderSchema = new mongoose.Schema(
         },
         /** Track how many times the restaurant has rejected this order while a rider is assigned */
         restaurantRejectionCount: { type: Number, default: 0 },
+        /** Partial wallet refunds when a multi-restaurant pickup is permanently dropped */
+        partialRefunds: {
+            type: [partialRefundSchema],
+            default: [],
+        },
+        /**
+         * Immutable settlement snapshots for audits:
+         * create / share / partial_drop / complete
+         */
+        settlementSnapshots: {
+            type: [
+                {
+                    at: { type: Date, default: Date.now },
+                    event: {
+                        type: String,
+                        enum: ['create', 'accept', 'share', 'partial_drop', 'complete', 'admin_cancel'],
+                        required: true,
+                    },
+                    pricing: { type: mongoose.Schema.Types.Mixed },
+                    riderEarning: { type: Number, default: 0 },
+                    sharedRiderEarning: { type: Number, default: 0 },
+                    platformProfit: { type: Number, default: 0 },
+                    driverSettlement: { type: mongoose.Schema.Types.Mixed },
+                    platformRevenue: { type: mongoose.Schema.Types.Mixed },
+                    deliveryFeeBreakdown: { type: mongoose.Schema.Types.Mixed },
+                    isMultiRestaurant: { type: Boolean, default: false },
+                    isSplitOrder: { type: Boolean, default: false },
+                    activePickupCount: { type: Number, default: 0 },
+                    partialRefundAmount: { type: Number, default: 0 },
+                    note: { type: String, default: '' },
+                },
+            ],
+            default: [],
+        },
         /** Flag to track if the 30-minute pre-alert has been sent to the restaurant */
         restaurantNotifiedForSchedule: { type: Boolean, default: false },
         /** ✅ NEW: Contextual delay information for the end-user */

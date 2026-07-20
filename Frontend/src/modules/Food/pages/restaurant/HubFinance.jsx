@@ -1,8 +1,7 @@
-import { useState, useMemo, useRef, useEffect } from "react"
+import { useState, useMemo, useRef, useEffect, useCallback } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { motion, AnimatePresence } from "framer-motion"
-import { Bell, Menu, ChevronDown, Calendar, Download, ArrowRight, FileText, Wallet } from "lucide-react"
-import BottomNavOrders from "@food/components/restaurant/BottomNavOrders"
+import { Bell, Menu, ChevronDown, Calendar, Download, ArrowRight, FileText, Wallet, ChevronLeft, ChevronRight, Loader2 } from "lucide-react"
 import RestaurantPanelHeader from "@food/components/restaurant/panel/RestaurantPanelHeader"
 import RestaurantPanelModal from "@food/components/restaurant/panel/RestaurantPanelModal"
 import { PanelPill, PanelSurface } from "@food/components/restaurant/panel/panelUi"
@@ -11,6 +10,63 @@ import { restaurantAPI } from "@food/api"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
+
+const PAST_CYCLES_PAGE_SIZE = 10
+
+const formatMoney = (value) =>
+  `₹${Number(value || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
+const formatDiscount = (value) =>
+  `-₹${Math.abs(Number(value || 0)).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
+const firstNumber = (...values) => {
+  for (const value of values) {
+    const num = Number(value)
+    if (Number.isFinite(num)) return num
+  }
+  return null
+}
+
+const buildRestaurantOrderDetail = (order) => {
+  const pricing = order?.pricing || {}
+  const earnings = order?.restaurantEarnings || {}
+  const items = Array.isArray(order?.items) ? order.items : []
+  const computedSubtotal = items.reduce((sum, item) => {
+    const price = Number(item?.price || 0)
+    const qty = Number(item?.quantity || 1)
+    return sum + (Number.isFinite(price) ? price : 0) * (Number.isFinite(qty) ? qty : 1)
+  }, 0)
+
+  const itemSubtotal =
+    firstNumber(earnings.foodAmount, pricing.subtotal, order?.itemSubtotal) ?? computedSubtotal
+  const packagingFee =
+    firstNumber(earnings.packagingFee, pricing.packagingFee, order?.packagingFee) ?? 0
+  const commission =
+    firstNumber(earnings.commission, pricing.restaurantCommission, order?.commission) ?? 0
+  const discount = firstNumber(earnings.discount, pricing.discount, order?.discount) ?? 0
+  const youGet =
+    firstNumber(earnings.payout, order?.restaurantPayout, order?.payout, pricing.total) ??
+    Math.max(0, itemSubtotal + packagingFee - commission - discount)
+
+  return {
+    orderId: order?.orderId || order?.order_id || order?._id || "N/A",
+    status: order?.orderStatus || order?.status || "N/A",
+    createdAt: order?.createdAt,
+    items: items.map((item) => ({
+      name: item?.name || "Item",
+      quantity: Number(item?.quantity || 1),
+      price: Number(item?.price || 0),
+      isVeg: item?.isVeg ?? item?.foodType === "Veg",
+    })),
+    billing: {
+      itemSubtotal,
+      packagingFee,
+      commission,
+      discount,
+      youGet,
+    },
+  }
+}
 
 
 export default function HubFinance() {
@@ -29,6 +85,17 @@ export default function HubFinance() {
   const [loading, setLoading] = useState(true)
   const [pastCyclesData, setPastCyclesData] = useState(null)
   const [loadingPastCycles, setLoadingPastCycles] = useState(false)
+  const [pastCyclesPage, setPastCyclesPage] = useState(1)
+  const [pastCyclesRange, setPastCyclesRange] = useState(() => {
+    const end = new Date()
+    const start = new Date()
+    start.setDate(end.getDate() - 30)
+    return { startDate: start, endDate: end }
+  })
+  const [selectedOrderSummary, setSelectedOrderSummary] = useState(null)
+  const [orderDetail, setOrderDetail] = useState(null)
+  const [loadingOrderDetail, setLoadingOrderDetail] = useState(false)
+  const [orderDetailError, setOrderDetailError] = useState(null)
   const [restaurantData, setRestaurantData] = useState(null)
   const [loadingRestaurant, setLoadingRestaurant] = useState(true)
   const [showWithdrawalModal, setShowWithdrawalModal] = useState(false)
@@ -36,6 +103,17 @@ export default function HubFinance() {
   const [submittingWithdrawal, setSubmittingWithdrawal] = useState(false)
   const [withdrawalRequests, setWithdrawalRequests] = useState([])
   const [loadingWithdrawals, setLoadingWithdrawals] = useState(false)
+
+  const walletAvailableBalance = useMemo(() => {
+    return Number(
+      financeData?.wallet?.availableBalance ??
+        financeData?.availableBalance ??
+        financeData?.currentCycle?.estimatedPayout ??
+        0,
+    )
+  }, [financeData])
+
+  const unsettledOrderCount = Number(financeData?.currentCycle?.totalOrders ?? 0)
 
   // Fetch finance data on mount
   useEffect(() => {
@@ -186,6 +264,70 @@ export default function HubFinance() {
     navigate(`${RESTAURANT_BASE}/finance-details`, { state: { financeData, restaurantData } })
   }
 
+  const closeOrderPopup = () => {
+    setSelectedOrderSummary(null)
+    setOrderDetail(null)
+    setOrderDetailError(null)
+    setLoadingOrderDetail(false)
+  }
+
+  const openRestaurantOrder = async (order) => {
+    const orderId = order?.orderId || order?.mongoId
+    if (!orderId) return
+
+    setSelectedOrderSummary(order)
+    setOrderDetail(null)
+    setOrderDetailError(null)
+    setLoadingOrderDetail(true)
+
+    try {
+      let response
+      try {
+        response = await restaurantAPI.getOrderById(orderId)
+        if (!response.data?.success) throw new Error("Readable ID fetch failed")
+      } catch (err) {
+        if (order?.mongoId && order.mongoId !== orderId) {
+          response = await restaurantAPI.getOrderById(order.mongoId)
+        } else {
+          throw err
+        }
+      }
+
+      const rawOrder = response?.data?.data?.order || response?.data?.data
+      if (!rawOrder) throw new Error("Order data is missing")
+      setOrderDetail(buildRestaurantOrderDetail(rawOrder))
+    } catch (error) {
+      debugError("Error fetching order detail:", error)
+      // Fallback to list summary so popup still shows restaurant payout info
+      setOrderDetail(
+        buildRestaurantOrderDetail({
+          orderId: order.orderId,
+          orderStatus: order.orderStatus,
+          createdAt: order.createdAt,
+          items: order.items || [],
+          restaurantPayout: order.payout,
+          restaurantEarnings: {
+            foodAmount: order.orderTotal,
+            packagingFee: 0,
+            commission: order.commission || 0,
+            discount: 0,
+            payout: order.payout || 0,
+          },
+          pricing: {
+            subtotal: order.orderTotal,
+            restaurantCommission: order.commission || 0,
+            total: order.payout || 0,
+          },
+        }),
+      )
+      setOrderDetailError(
+        error?.response?.data?.message || "Showing summary details for this order.",
+      )
+    } finally {
+      setLoadingOrderDetail(false)
+    }
+  }
+
   const getWithdrawalStatusClass = (statusRaw) => {
     const status = String(statusRaw || '').trim().toLowerCase()
     if (status === 'approved') return 'bg-green-100 text-green-700'
@@ -213,76 +355,8 @@ export default function HubFinance() {
     })
   }
 
-  // Parse date range string to extract start and end dates
-  const parseDateRange = (dateRangeStr) => {
-    try {
-      if (!dateRangeStr || typeof dateRangeStr !== 'string') return null;
-
-      // Handle relative ranges
-      const today = new Date();
-      if (dateRangeStr === "Last 7 days") {
-        const start = new Date();
-        start.setDate(today.getDate() - 7);
-        return { startDate: start.toISOString(), endDate: today.toISOString() };
-      }
-      if (dateRangeStr === "Last 30 days" || dateRangeStr === "Last 1 month") {
-        const start = new Date();
-        start.setDate(today.getDate() - 30);
-        return { startDate: start.toISOString(), endDate: today.toISOString() };
-      }
-      if (dateRangeStr === "This week") {
-        const start = new Date();
-        const day = today.getDay();
-        start.setDate(today.getDate() - day);
-        return { startDate: start.toISOString(), endDate: today.toISOString() };
-      }
-      if (dateRangeStr === "This month") {
-        const start = new Date(today.getFullYear(), today.getMonth(), 1);
-        return { startDate: start.toISOString(), endDate: today.toISOString() };
-      }
-
-      const parts = dateRangeStr.split(' - ')
-      if (parts.length !== 2) return null
-      
-      const startStr = parts[0].trim() // "14 Nov"
-      const endStr = parts[1].trim().replace("'", " ") // "14 Dec 25"
-      
-      const currentYear = new Date().getFullYear()
-      const startParts = startStr.split(' ')
-      const endParts = endStr.split(' ')
-      
-      if (startParts.length < 2 || endParts.length < 2) return null
-      
-      const monthMap = {
-        'Jan': 0, 'Feb': 1, 'Mar': 2, 'Apr': 3, 'May': 4, 'Jun': 5,
-        'Jul': 6, 'Aug': 7, 'Sep': 8, 'Oct': 9, 'Nov': 10, 'Dec': 11
-      }
-      
-      const startDay = parseInt(startParts[0])
-      const startMonth = monthMap[startParts[1]]
-      const endDay = parseInt(endParts[0])
-      const endMonth = monthMap[endParts[1]]
-      const year = endParts.length > 2 ? parseInt('20' + endParts[2]) : currentYear
-      
-      if (startMonth === undefined || endMonth === undefined || isNaN(startDay) || isNaN(endDay)) {
-        return null
-      }
-      
-      const start = new Date(year, startMonth, startDay)
-      const end = new Date(year, endMonth, endDay)
-
-      return {
-        startDate: start.toISOString(),
-        endDate: end.toISOString()
-      }
-    } catch (error) {
-      debugError('Error parsing date range:', error)
-      return null
-    }
-  }
-
-  // Fetch past cycles data when date range changes
-  const fetchPastCyclesData = async (startDate, endDate) => {
+  // Fetch past cycles data when date range / page changes
+  const fetchPastCyclesData = useCallback(async (startDate, endDate, page = 1) => {
     if (!startDate || !endDate) {
       setPastCyclesData(null)
       return
@@ -290,54 +364,57 @@ export default function HubFinance() {
 
     try {
       setLoadingPastCycles(true)
-      // Validate dates and format as ISO strings
       const startDateObj = startDate instanceof Date ? startDate : new Date(startDate)
       const endDateObj = endDate instanceof Date ? endDate : new Date(endDate)
-      
-      // Check if dates are valid
+
       if (isNaN(startDateObj.getTime()) || isNaN(endDateObj.getTime())) {
         debugError('Invalid date values:', { startDate, endDate })
         setPastCyclesData(null)
         return
       }
-      
+
       const startDateISO = startDateObj.toISOString().split('T')[0]
       const endDateISO = endDateObj.toISOString().split('T')[0]
-      
+
       const response = await restaurantAPI.getFinance({
         startDate: startDateISO,
-        endDate: endDateISO
+        endDate: endDateISO,
+        page,
+        limit: PAST_CYCLES_PAGE_SIZE,
       })
       if (response.data?.success && response.data?.data?.pastCycles) {
         setPastCyclesData(response.data.data.pastCycles)
-        debugLog('? Past cycles data fetched:', response.data.data.pastCycles)
-        debugLog('?? Orders array:', response.data.data.pastCycles?.orders)
-        debugLog('?? Total orders:', response.data.data.pastCycles?.totalOrders)
+        debugLog('Past cycles data fetched:', response.data.data.pastCycles)
       } else {
         setPastCyclesData(null)
       }
     } catch (error) {
-      // Suppress 401 errors as they're handled by axios interceptor (token refresh/redirect)
       if (error.response?.status !== 401) {
-        debugError('? Error fetching past cycles data:', error)
+        debugError('Error fetching past cycles data:', error)
       }
       setPastCyclesData(null)
     } finally {
       setLoadingPastCycles(false)
     }
-  }
+  }, [])
 
-  // Fetch past cycles data on mount and when date range changes
+  // Fetch past cycles data on mount and when date range / page changes
   useEffect(() => {
-    const dateRange = parseDateRange(selectedDateRange)
-    if (dateRange && dateRange.startDate && dateRange.endDate) {
-      fetchPastCyclesData(dateRange.startDate, dateRange.endDate)
+    if (pastCyclesRange?.startDate && pastCyclesRange?.endDate) {
+      fetchPastCyclesData(pastCyclesRange.startDate, pastCyclesRange.endDate, pastCyclesPage)
     } else {
-      // If date range is invalid, don't fetch
       setPastCyclesData(null)
     }
-  }, [selectedDateRange])
+  }, [pastCyclesRange, pastCyclesPage, fetchPastCyclesData])
 
+  const pastCyclesPagination = pastCyclesData?.pagination || {
+    page: pastCyclesPage,
+    limit: PAST_CYCLES_PAGE_SIZE,
+    total: pastCyclesData?.totalOrders || 0,
+    totalPages: 0,
+    hasNextPage: false,
+    hasPreviousPage: false,
+  }
 
   // Prepare report data from real finance data
   const getReportData = () => {
@@ -703,7 +780,7 @@ export default function HubFinance() {
   }, [showDownloadMenu])
 
   return (
-    <div className="rt-panel-bg flex min-h-screen flex-col pb-24 lg:pb-8">
+    <div className="rt-panel-bg flex min-h-screen flex-col pb-8">
       <div className="hidden lg:block">
         <RestaurantPanelHeader
           title="Accounting"
@@ -762,25 +839,25 @@ export default function HubFinance() {
       <div className="mx-auto w-full max-w-6xl flex-1 overflow-y-auto px-4 pb-8 pt-2 lg:px-6">
         {activeTab === "payouts" && (
           <div className="space-y-6">
-            {/* Current cycle */}
+            {/* Wallet balance */}
             <div>
-              <h2 className="mb-3 text-base font-bold text-gray-900">Current cycle</h2>
+              <h2 className="mb-3 text-base font-bold text-gray-900">Wallet balance</h2>
               <PanelSurface className="p-4">
                 {loading ? (
                   <div className="py-8 text-center text-gray-500">Loading...</div>
                 ) : (
                   <>
                     <p className="text-4xl font-bold text-gray-900 mb-2">
-                      ₹{(financeData?.currentCycle?.estimatedPayout || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      ₹{walletAvailableBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </p>
                     <p className="text-sm text-gray-600 mb-4">
-                      {financeData?.currentCycle?.totalOrders || 0} {financeData?.currentCycle?.totalOrders === 1 ? 'order' : 'orders'}
+                      {unsettledOrderCount} unsettled {unsettledOrderCount === 1 ? 'order' : 'orders'}
                     </p>
                     <button
                       onClick={() => setShowWithdrawalModal(true)}
-                      disabled={!(financeData?.currentCycle?.estimatedPayout > 0)}
+                      disabled={!(walletAvailableBalance > 0)}
                       className={`mt-4 flex w-full items-center justify-center gap-2 rounded-2xl py-3 px-4 font-semibold transition-colors ${
-                        financeData?.currentCycle?.estimatedPayout > 0
+                        walletAvailableBalance > 0
                           ? "rt-btn-primary"
                           : "cursor-not-allowed bg-gray-200 text-gray-500"
                       }`}
@@ -984,8 +1061,11 @@ export default function HubFinance() {
                                     onClick={() => {
                                       setSelectedDateRange(option.range)
                                       setShowDateRangePicker(false)
-                                      // Fetch data for selected range
-                                      fetchPastCyclesData(option.startDate, option.endDate)
+                                      setPastCyclesPage(1)
+                                      setPastCyclesRange({
+                                        startDate: option.startDate,
+                                        endDate: option.endDate,
+                                      })
                                     }}
                                     className="w-full text-left px-3 py-2 rounded-md hover:bg-gray-100 transition-colors text-sm"
                                   >
@@ -1042,27 +1122,61 @@ export default function HubFinance() {
                     {pastCyclesData && pastCyclesData.orders && pastCyclesData.orders.length > 0 ? (
                       <PanelSurface className="space-y-3 p-4">
                         {pastCyclesData.orders.map((order, index) => (
-                          <div key={order.orderId || index} className="border-b border-gray-200 pb-3 last:border-b-0 last:pb-0">
+                          <button
+                            type="button"
+                            key={order.mongoId || order.orderId || index}
+                            onClick={() => openRestaurantOrder(order)}
+                            className="w-full border-b border-gray-200 pb-3 last:border-b-0 last:pb-0 text-left hover:bg-gray-50 rounded-md transition-colors -mx-1 px-1"
+                          >
                             <div className="flex justify-between items-start">
-                              <div className="flex-1">
+                              <div className="flex-1 min-w-0">
                                 <p className="text-sm font-semibold text-gray-900 mb-1">
                                   Order ID: {order.orderId || 'N/A'}
                                 </p>
-                                <p className="text-xs text-gray-600">
+                                <p className="text-xs text-gray-600 truncate">
                                   {order.foodNames || (order.items && order.items.map(item => item.name).join(', ')) || 'N/A'}
                                 </p>
                               </div>
-                              <div className="text-right ml-4">
+                              <div className="text-right ml-4 flex-shrink-0">
                                 <p className="text-sm font-bold text-gray-900">
                                   ₹{(order.payout || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </p>
                                 <p className="text-xs text-gray-500">
-                                  Earning
+                                  You get
                                 </p>
                               </div>
                             </div>
-                          </div>
+                          </button>
                         ))}
+
+                        {(pastCyclesPagination.totalPages > 1 || pastCyclesPagination.total > PAST_CYCLES_PAGE_SIZE) && (
+                          <div className="flex items-center justify-between pt-2 gap-3">
+                            <p className="text-xs text-gray-500">
+                              Page {pastCyclesPagination.page || pastCyclesPage} of{" "}
+                              {pastCyclesPagination.totalPages || 1} · {pastCyclesPagination.total || 0} orders
+                            </p>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                disabled={!pastCyclesPagination.hasPreviousPage || loadingPastCycles}
+                                onClick={() => setPastCyclesPage((p) => Math.max(1, p - 1))}
+                                className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-40 hover:bg-gray-50"
+                              >
+                                <ChevronLeft className="w-3.5 h-3.5" />
+                                Prev
+                              </button>
+                              <button
+                                type="button"
+                                disabled={!pastCyclesPagination.hasNextPage || loadingPastCycles}
+                                onClick={() => setPastCyclesPage((p) => p + 1)}
+                                className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-40 hover:bg-gray-50"
+                              >
+                                Next
+                                <ChevronRight className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </PanelSurface>
                     ) : (pastCyclesData && pastCyclesData.orders && pastCyclesData.orders.length === 0) ? (
                       <PanelSurface className="border-dashed p-8 text-center">
@@ -1073,26 +1187,31 @@ export default function HubFinance() {
                     {(!pastCyclesData || !pastCyclesData.orders) && !loadingPastCycles && financeData?.currentCycle?.orders && financeData.currentCycle.orders.length > 0 && (
                       <PanelSurface className="space-y-3 p-4">
                         {financeData.currentCycle.orders.map((order, index) => (
-                          <div key={order.orderId || index} className="border-b border-gray-200 pb-3 last:border-b-0 last:pb-0">
+                          <button
+                            type="button"
+                            key={order.mongoId || order.orderId || index}
+                            onClick={() => openRestaurantOrder(order)}
+                            className="w-full border-b border-gray-200 pb-3 last:border-b-0 last:pb-0 text-left hover:bg-gray-50 rounded-md transition-colors -mx-1 px-1"
+                          >
                             <div className="flex justify-between items-start">
-                              <div className="flex-1">
+                              <div className="flex-1 min-w-0">
                                 <p className="text-sm font-semibold text-gray-900 mb-1">
                                   Order ID: {order.orderId || 'N/A'}
                                 </p>
-                                <p className="text-xs text-gray-600">
+                                <p className="text-xs text-gray-600 truncate">
                                   {order.foodNames || (order.items && order.items.map(item => item.name).join(', ')) || 'N/A'}
                                 </p>
                               </div>
-                              <div className="text-right ml-4">
+                              <div className="text-right ml-4 flex-shrink-0">
                                 <p className="text-sm font-bold text-gray-900">
                                   ₹{(order.payout || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </p>
                                 <p className="text-xs text-gray-500">
-                                  Earning
+                                  You get
                                 </p>
                               </div>
                             </div>
-                          </div>
+                          </button>
                         ))}
                       </PanelSurface>
                     )}
@@ -1145,22 +1264,27 @@ export default function HubFinance() {
               ) : (
                 <div className="space-y-2">
                   {invoiceOrders.map((order, index) => (
-                    <div key={`${order.orderId || index}-invoice`} className="border border-gray-100 rounded-md p-3">
+                    <button
+                      type="button"
+                      key={`${order.mongoId || order.orderId || index}-invoice`}
+                      onClick={() => openRestaurantOrder(order)}
+                      className="w-full border border-gray-100 rounded-md p-3 text-left hover:bg-gray-50 transition-colors"
+                    >
                       <div className="flex items-start justify-between gap-3">
-                        <div>
+                        <div className="min-w-0">
                           <p className="text-sm font-medium text-gray-900">Order: {order.orderId || "N/A"}</p>
                           <p className="text-xs text-gray-600 mt-0.5">
                             {order.paymentMethod || "N/A"} | {order.orderStatus || "N/A"}
                           </p>
                         </div>
-                        <div className="text-right">
+                        <div className="text-right flex-shrink-0">
                           <p className="text-sm font-semibold text-gray-900">
-                            ₹{(order.totalAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            ₹{(order.payout || order.restaurantEarning || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </p>
-                          <p className="text-xs text-gray-500">Total</p>
+                          <p className="text-xs text-gray-500">You get</p>
                         </div>
                       </div>
-                    </div>
+                    </button>
                   ))}
                 </div>
               )}
@@ -1198,7 +1322,7 @@ export default function HubFinance() {
                   alert('Please enter a valid amount')
                   return
                 }
-                if (amount > (financeData?.currentCycle?.estimatedPayout || 0)) {
+                if (amount > walletAvailableBalance) {
                   alert('Amount cannot exceed available balance')
                   return
                 }
@@ -1232,7 +1356,7 @@ export default function HubFinance() {
                   setSubmittingWithdrawal(false)
                 }
               }}
-              disabled={submittingWithdrawal || !withdrawalAmount || parseFloat(withdrawalAmount) <= 0 || parseFloat(withdrawalAmount) > (financeData?.currentCycle?.estimatedPayout || 0)}
+              disabled={submittingWithdrawal || !withdrawalAmount || parseFloat(withdrawalAmount) <= 0 || parseFloat(withdrawalAmount) > walletAvailableBalance}
               className="flex-1 rounded-lg bg-black px-4 py-3 font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-300"
             >
               {submittingWithdrawal ? 'Submitting...' : 'Submit Request'}
@@ -1243,7 +1367,7 @@ export default function HubFinance() {
         <p className="mb-4 text-sm text-gray-600">
           Available Balance:{' '}
           <span className="font-semibold text-gray-900">
-            ₹{(financeData?.currentCycle?.estimatedPayout || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            ₹{walletAvailableBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </span>
         </p>
         <label className="mb-2 block text-sm font-medium text-gray-700">
@@ -1252,19 +1376,125 @@ export default function HubFinance() {
         <input
           type="number"
           min="0.01"
-          max={financeData?.currentCycle?.estimatedPayout || 0}
+          max={walletAvailableBalance}
           step="0.01"
           value={withdrawalAmount}
           onChange={(e) => setWithdrawalAmount(e.target.value)}
           placeholder="0.00"
           className="w-full rounded-lg border border-gray-300 px-4 py-3 outline-none focus:border-transparent focus:ring-2 focus:ring-black"
         />
-        {withdrawalAmount && parseFloat(withdrawalAmount) > (financeData?.currentCycle?.estimatedPayout || 0) && (
+        {withdrawalAmount && parseFloat(withdrawalAmount) > walletAvailableBalance && (
           <p className="mt-1 text-sm text-red-600">Amount cannot exceed available balance</p>
         )}
       </RestaurantPanelModal>
 
-      <BottomNavOrders />
+      <RestaurantPanelModal
+        open={Boolean(selectedOrderSummary)}
+        onClose={closeOrderPopup}
+        title={orderDetail ? `Order ${orderDetail.orderId}` : "Order details"}
+        size="md"
+        mobileMaxHeight="tall"
+        zIndex={80}
+      >
+        {loadingOrderDetail ? (
+          <div className="flex items-center justify-center gap-2 py-10 text-sm text-gray-600">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Loading order...
+          </div>
+        ) : orderDetail ? (
+          <div className="space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs text-gray-500">Status</p>
+                <p className="text-sm font-semibold text-gray-900 capitalize">
+                  {String(orderDetail.status || "N/A").replace(/_/g, " ")}
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs text-gray-500">Date</p>
+                <p className="text-sm font-medium text-gray-900">
+                  {orderDetail.createdAt
+                    ? new Date(orderDetail.createdAt).toLocaleString("en-IN", {
+                        day: "2-digit",
+                        month: "short",
+                        year: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })
+                    : "N/A"}
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Items</p>
+              <div className="space-y-2 rounded-lg bg-gray-50 p-3">
+                {orderDetail.items.length > 0 ? (
+                  orderDetail.items.map((item, index) => (
+                    <div key={`${item.name}-${index}`} className="flex items-center justify-between gap-3 text-sm">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className={`h-2 w-2 rounded-full flex-shrink-0 ${
+                            item.isVeg ? "bg-green-500" : "bg-red-500"
+                          }`}
+                        />
+                        <span className="truncate text-gray-800">
+                          {item.quantity} x {item.name}
+                        </span>
+                      </div>
+                      <span className="flex-shrink-0 font-medium text-gray-900">
+                        {formatMoney(item.price * item.quantity)}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-gray-500">No items available</p>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Your earnings
+              </p>
+              <div className="space-y-2 rounded-lg border border-gray-100 p-3">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Item subtotal</span>
+                  <span className="text-gray-900">{formatMoney(orderDetail.billing.itemSubtotal)}</span>
+                </div>
+                {Number(orderDetail.billing.packagingFee) > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">Packaging fee</span>
+                    <span className="text-gray-900">{formatMoney(orderDetail.billing.packagingFee)}</span>
+                  </div>
+                )}
+                {Number(orderDetail.billing.commission) > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">Commission</span>
+                    <span className="text-gray-900">{formatDiscount(orderDetail.billing.commission)}</span>
+                  </div>
+                )}
+                {Number(orderDetail.billing.discount) > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-green-700">Discount</span>
+                    <span className="text-green-700">{formatDiscount(orderDetail.billing.discount)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between border-t border-gray-100 pt-2 text-sm font-semibold">
+                  <span className="text-gray-900">You get</span>
+                  <span className="text-gray-900">{formatMoney(orderDetail.billing.youGet)}</span>
+                </div>
+              </div>
+            </div>
+
+            {orderDetailError ? (
+              <p className="text-xs text-amber-600">{orderDetailError}</p>
+            ) : null}
+          </div>
+        ) : (
+          <p className="py-8 text-center text-sm text-gray-500">Unable to load order details.</p>
+        )}
+      </RestaurantPanelModal>
     </div>
   )
 }

@@ -46,7 +46,7 @@ export default function AddressSelectorView({
   }, [addresses, searchQuery]);
 
   return (
-    <AnimatedPage className="flex min-h-dvh flex-col bg-[#f6f7f4] dark:bg-[#0a0a0a] pt-[env(safe-area-inset-top)] [-webkit-tap-highlight-color:transparent]">
+    <AnimatedPage className="flex h-[100dvh] w-full flex-col overflow-hidden bg-[#f6f7f4] dark:bg-[#0a0a0a] pt-[env(safe-area-inset-top)] [-webkit-tap-highlight-color:transparent]">
       {/* Header */}
       <header className="flex shrink-0 items-center gap-3 border-b border-[#eef0eb] bg-white px-4 py-3 dark:border-[#262626] dark:bg-[#141414]">
         <button

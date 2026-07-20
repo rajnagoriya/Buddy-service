@@ -26,6 +26,7 @@ const ROLES = {
   USER: "USER",
   RESTAURANT: "RESTAURANT",
   DELIVERY_PARTNER: "DELIVERY_PARTNER",
+  DRIVER: "DRIVER",
   ADMIN: "ADMIN",
 };
 
@@ -101,6 +102,11 @@ const sanitizeDeliveryForAuthResponse = (deliveryDoc = {}) => {
 export const requestUserOtp = async (phone) => {
   if (!phone) {
     throw new ValidationError("Phone is required");
+  }
+
+  const user = await FoodUser.findOne({ phone });
+  if (user && user.isActive === false) {
+    throw new AuthError("Your account has been deactivated. Please contact support.");
   }
 
   const otp = await createOrUpdateOtp(phone);
@@ -704,7 +710,10 @@ export const getProfile = async (userId, role) => {
         };
       }
       break;
-    case ROLES.DELIVERY_PARTNER: {
+    case ROLES.DELIVERY_PARTNER:
+    case ROLES.DRIVER: {
+      // Unified BuddyIdentity issues role=DRIVER; legacy food OTP used DELIVERY_PARTNER.
+      // Both resolve against FoodDeliveryPartner (JWT userId is partner._id when onboarded).
       const partner = await FoodDeliveryPartner.findById(id).populate('zone').lean();
       if (!partner) break;
       const deliveryId = partner._id

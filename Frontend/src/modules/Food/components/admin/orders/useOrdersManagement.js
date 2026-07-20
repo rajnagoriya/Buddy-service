@@ -2,6 +2,7 @@ import { useState, useMemo } from "react"
 import { exportToCSV, exportToExcel, exportToPDF, exportToJSON } from "./ordersExportUtils"
 import quickSpicyLogo from "@food/assets/quicky-spicy-logo.png"
 import { getCachedSettings, loadBusinessSettings } from "@food/utils/businessSettings"
+import { adminAPI } from "@food/api"
 const debugError = () => {}
 
 
@@ -104,17 +105,17 @@ export function useOrdersManagement(orders, statusKey, title) {
     restaurant: "",
   })
   const [visibleColumns, setVisibleColumns] = useState({
-    si: true,
+    si: false,
     orderId: true,
-    orderDate: true,
-    orderOtp: true,
+    orderDate: false,
+    orderOtp: false,
     customer: true,
-    restaurant: true,
-    foodItems: true,
-    itemPrice: true,
-    deliveryCharge: true,
+    restaurant: false,
+    foodItems: false,
+    itemPrice: false,
+    deliveryCharge: false,
     totalAmount: true,
-    paymentType: true,
+    paymentType: false,
     paymentCollectionStatus: true,
     paymentMethodDetail: true,
     orderStatus: true,
@@ -279,9 +280,24 @@ export function useOrdersManagement(orders, statusKey, title) {
     }
   }
 
-  const handleViewOrder = (order) => {
+  const handleViewOrder = async (order) => {
     setSelectedOrder(order)
     setIsViewOrderOpen(true)
+    const orderIdToUse = order?.id || order?._id || order?.orderId || order?.orderMongoId
+    if (!orderIdToUse) return
+    try {
+      const res = await adminAPI.getOrderById(orderIdToUse)
+      const full =
+        res?.data?.data?.order ||
+        res?.data?.order ||
+        res?.data?.data ||
+        null
+      if (full) {
+        setSelectedOrder({ ...order, ...full })
+      }
+    } catch (_) {
+      // Keep list payload if detail fetch fails
+    }
   }
 
   const handlePrintOrder = async (order) => {
@@ -594,17 +610,17 @@ export function useOrdersManagement(orders, statusKey, title) {
 
   const resetColumns = () => {
     setVisibleColumns({
-      si: true,
+      si: false,
       orderId: true,
-      orderDate: true,
-      orderOtp: true,
+      orderDate: false,
+      orderOtp: false,
       customer: true,
-      restaurant: true,
-      foodItems: true,
-      itemPrice: true,
-      deliveryCharge: true,
+      restaurant: false,
+      foodItems: false,
+      itemPrice: false,
+      deliveryCharge: false,
       totalAmount: true,
-      paymentType: true,
+      paymentType: false,
       paymentCollectionStatus: true,
       paymentMethodDetail: true,
       orderStatus: true,

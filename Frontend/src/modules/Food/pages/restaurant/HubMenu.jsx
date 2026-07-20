@@ -19,7 +19,6 @@ import {
   RefreshCw,
   Loader2
 } from "lucide-react"
-import BottomNavOrders from "@food/components/restaurant/BottomNavOrders"
 import RestaurantPanelModal from "@food/components/restaurant/panel/RestaurantPanelModal"
 // Removed foodManagement - now using backend API directly
 import { useNavigate } from "react-router-dom"
@@ -1187,7 +1186,7 @@ export default function HubMenu() {
           </button>
         </div>
       {/* Content */}
-      <div className="flex-1 space-y-4 pt-8 pb-24 overflow-y-auto">
+      <div className="flex-1 space-y-4 pt-8 pb-8 overflow-y-auto">
         {activeTab === "add-ons" ? (
           <div className="px-4">
             {/* Add Add-on Button */}
@@ -2186,8 +2185,6 @@ export default function HubMenu() {
                 </div>
         </div>
       </RestaurantPanelModal>
-
-      <BottomNavOrders />
     </div>
   )
 }

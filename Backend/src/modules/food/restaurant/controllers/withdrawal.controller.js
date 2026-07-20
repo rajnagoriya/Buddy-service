@@ -13,7 +13,8 @@ export const createWithdrawalRequestController = async (req, res, next) => {
 
         // Check if restaurant has enough balance
         const finance = await getRestaurantFinance(restaurantId);
-        const availableBalance = finance?.currentCycle?.estimatedPayout || 0;
+        const availableBalance =
+            Number(finance?.wallet?.availableBalance ?? finance?.availableBalance ?? finance?.currentCycle?.estimatedPayout) || 0;
 
         if (amount > availableBalance) {
             return sendError(res, 400, `Insufficient balance. Available: ₹${availableBalance}`);

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   ChefHat, MapPin, Phone, 
@@ -25,7 +25,7 @@ export const PickupActionModal = ({
   eta,
   onReachedPickup, 
   onPickedUp,
-  onMinimize
+  onMinimize,
 }) => {
   const [showItems, setShowItems] = useState(false);
   const [isUploadingBill, setIsUploadingBill] = useState(false);
@@ -42,6 +42,25 @@ export const PickupActionModal = ({
     { label: "Vehicle Issue", icon: "🛵", value: "Vehicle Issue 🛵" },
     { label: "Rain/Weather", icon: "🌧️", value: "Rain/Weather 🌧️" }
   ];
+
+  // Current multi-restaurant stop — bill must be captured again at each restaurant
+  const currentPickupKey = useMemo(() => {
+    if (order?.isMultiRestaurant && Array.isArray(order.pickups) && order.pickups.length > 0) {
+      const next = order.pickups.find(
+        (p) => !p.permanentlyDropped && !['picked_up', 'ready_for_handover', 'cancelled'].includes(String(p.status || '')),
+      );
+      if (next) {
+        return String(next.restaurantId || next._id || next.restaurantName || '');
+      }
+    }
+    return String(order?._id || order?.orderId || 'single');
+  }, [order?._id, order?.orderId, order?.isMultiRestaurant, order?.pickups]);
+
+  useEffect(() => {
+    setBillImageUploaded(false);
+    setBillImageUrl(null);
+    setIsUploadingBill(false);
+  }, [currentPickupKey]);
 
   const handleReportDelay = async (reason) => {
     try {
@@ -170,12 +189,17 @@ export const PickupActionModal = ({
   };
 
   const isAtPickup = status === 'REACHED_PICKUP';
-  // Check if current partner has reached
   const hasReachedPickup = order.deliveryState?.status === 'reached_pickup' || order.deliveryState?.currentPhase === 'at_pickup';
-
-  // Order is pending restaurant acceptance if status is still 'created'
   const isPending = order.orderStatus === 'created';
-  
+
+  const activePickups = useMemo(
+    () =>
+      (Array.isArray(order.pickups) ? order.pickups : []).filter(
+        (p) => !p.permanentlyDropped && String(p.status || '') !== 'cancelled',
+      ),
+    [order.pickups],
+  );
+
   const totalQuantity = React.useMemo(() => {
     let count = 0;
     if (Array.isArray(order.items)) {
@@ -218,13 +242,13 @@ export const PickupActionModal = ({
 
         {/* Restaurant Header */}
         {!order.isMultiRestaurant ? (
-          <div className="flex items-start justify-between mb-5 sm:mb-8 pb-3 sm:pb-4 border-b border-gray-50">
-            <div className="flex gap-3 sm:gap-4">
-              <div className="w-14 h-14 bg-white rounded-2xl flex items-center justify-center shadow-lg shadow-black/5 overflow-hidden border border-gray-100">
+          <div className="flex items-start justify-between mb-5 sm:mb-8 pb-3 sm:pb-4 border-b border-gray-50 gap-2">
+            <div className="flex gap-3 sm:gap-4 min-w-0 flex-1">
+              <div className="w-14 h-14 shrink-0 bg-white rounded-2xl flex items-center justify-center shadow-lg shadow-black/5 overflow-hidden border border-gray-100">
                 <img src={restaurantLogo} alt="Logo" className="w-full h-full object-cover" />
               </div>
-              <div>
-                <h3 className="text-gray-950 text-lg sm:text-xl font-bold">{restaurantName}</h3>
+              <div className="min-w-0">
+                <h3 className="text-gray-950 text-lg sm:text-xl font-bold break-words">{restaurantName}</h3>
                 <p className="text-gray-500 text-[10px] font-bold uppercase tracking-widest flex items-center gap-1 mt-1.5">
                   {hasReachedPickup ? (
                     <span className="text-green-600">Reached Store √</span>
@@ -237,7 +261,7 @@ export const PickupActionModal = ({
               </div>
             </div>
 
-            <div className="flex gap-2">
+            <div className="flex gap-2 shrink-0">
               <button
                 onClick={() => setShowDelayPicker(true)}
                 className="w-10 h-10 rounded-full bg-orange-50 flex items-center justify-center text-orange-600 border border-orange-100"
@@ -274,26 +298,37 @@ export const PickupActionModal = ({
                    <Clock className="w-4 h-4" />
                  </button>
                  <p className="text-[10px] font-bold text-orange-500 uppercase tracking-widest">
-                    {order.pickups?.filter(p => ['picked_up', 'ready_for_handover'].includes(p.status)).length} / {order.pickups?.length} Picked
+                    {activePickups.filter(p => ['picked_up', 'ready_for_handover'].includes(p.status)).length} / {activePickups.length} Picked
                  </p>
                </div>
             </div>
-            {order.pickups?.map((p, idx) => {
+            {activePickups.map((p, idx) => {
                const isDone = ['picked_up', 'ready_for_handover'].includes(p.status);
-               const isCurrent = !isDone && order.pickups.findIndex(px => !['picked_up', 'ready_for_handover'].includes(px.status)) === idx;
+               const isCurrent = !isDone && activePickups.findIndex(px => !['picked_up', 'ready_for_handover'].includes(px.status)) === idx;
                
                return (
-                 <div key={idx} className={`p-4 rounded-2xl border-2 transition-all ${isCurrent ? 'bg-orange-50/50 border-orange-200' : isDone ? 'bg-green-50/30 border-green-100 opacity-60' : 'bg-gray-50/50 border-gray-100'}`}>
-                    <div className="flex items-start justify-between">
-                       <div className="flex gap-3">
-                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center shadow-sm ${isCurrent ? 'bg-orange-500 text-white' : 'bg-white text-gray-400'}`}>
+                 <div
+                   key={String(p.restaurantId || idx)}
+                   className={`p-4 rounded-2xl border-2 transition-all min-w-0 ${
+                     isCurrent
+                       ? 'bg-orange-50/50 border-orange-200'
+                       : isDone
+                         ? 'bg-green-50/30 border-green-100 opacity-60'
+                         : 'bg-gray-50/50 border-gray-100'
+                   }`}
+                 >
+                    <div className="flex items-start justify-between gap-2 min-w-0">
+                       <div className="flex gap-3 min-w-0 flex-1">
+                          <div className={`w-10 h-10 shrink-0 rounded-xl flex items-center justify-center shadow-sm ${isCurrent ? 'bg-orange-500 text-white' : 'bg-white text-gray-400'}`}>
                              <ChefHat className="w-5 h-5" />
                           </div>
-                           <div>
-                              <h4 className="text-sm font-bold text-gray-950">{p.restaurantName}</h4>
-                              <div className="flex items-center gap-1.5">
-                                <p className="text-[10px] text-gray-500 line-clamp-1">{p.location?.address || 'Pickup location'}</p>
-                                <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-bold uppercase ${
+                           <div className="min-w-0 flex-1">
+                              <h4 className="text-sm font-bold text-gray-950 break-words [overflow-wrap:anywhere]">{p.restaurantName}</h4>
+                              <div className="flex flex-wrap items-start gap-1.5 mt-0.5">
+                                <p className="text-[10px] text-gray-500 break-words [overflow-wrap:anywhere] min-w-0 flex-1">
+                                  {p.location?.address || p.restaurantAddress || 'Pickup location'}
+                                </p>
+                                <span className={`shrink-0 text-[8px] px-1.5 py-0.5 rounded-full font-bold uppercase ${
                                   p.status === 'pending' ? 'bg-gray-100 text-gray-500' : 
                                   p.status === 'accepted' || p.status === 'preparing' ? 'bg-blue-100 text-blue-600' :
                                   'bg-green-100 text-green-600'
@@ -303,14 +338,14 @@ export const PickupActionModal = ({
                               </div>
                            </div>
                        </div>
-                       <div className="flex gap-2">
+                       <div className="flex gap-2 shrink-0">
                           {p.phone && (
                             <button onClick={() => window.location.href = `tel:${p.phone}`} className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-green-600 border border-gray-100">
                                <Phone className="w-4 h-4" />
                             </button>
                           )}
                           <button 
-                            onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(p.location?.address || p.restaurantName)}`, '_blank')}
+                            onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(p.location?.address || p.restaurantAddress || p.restaurantName)}`, '_blank')}
                             className="w-8 h-8 rounded-full bg-gray-900 flex items-center justify-center text-white"
                           >
                              <Navigation className="w-4 h-4" />
@@ -415,20 +450,26 @@ export const PickupActionModal = ({
                  />
               </div>
 
-              {/* Share Order Option for Large Orders */}
-              {totalQuantity >= splitThreshold && !order.dispatch?.isShared && !order.dispatch?.sharedPartnerId && (
+              {/* Share Order Option for Large Orders (required before complete) */}
+              {totalQuantity >= splitThreshold && !order.dispatch?.sharedPartnerId && (
                 <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 flex flex-col gap-3 mt-2">
                   <div className="flex gap-3 items-start">
                     <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 shrink-0">
                       <Users className="w-5 h-5" />
                     </div>
                     <div className="flex-1">
-                      <p className="text-[10px] font-bold text-blue-700 uppercase tracking-widest mb-1">Large Order detected</p>
+                      <p className="text-[10px] font-bold text-blue-700 uppercase tracking-widest mb-1">
+                        Second partner required
+                      </p>
                       <p className="text-xs font-medium text-blue-900 leading-tight">
-                        This order has {totalQuantity} items. You can share this with another delivery partner to split the load and earnings.
+                        This bulk order has {totalQuantity} items. A second delivery partner must join before you can complete delivery.
+                        {order.dispatch?.isShared
+                          ? ' Waiting for a partner to accept the share…'
+                          : ' Share now to open the order for another rider.'}
                       </p>
                     </div>
                   </div>
+                  {!order.dispatch?.isShared && (
                   <button
                     onClick={handleShareOrder}
                     disabled={isSharing}
@@ -437,6 +478,7 @@ export const PickupActionModal = ({
                     {isSharing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Share2 className="w-4 h-4" />}
                     <span>Share with Partner</span>
                   </button>
+                  )}
                 </div>
               )}
 

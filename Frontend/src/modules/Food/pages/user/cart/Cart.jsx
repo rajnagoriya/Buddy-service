@@ -1,20 +1,27 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from "react"
 import { createPortal } from "react-dom"
 import { Link, useNavigate } from "react-router-dom"
-import { Plus, Minus, ArrowLeft, ChevronRight, Clock, MapPin, Phone, FileText, Utensils, Tag, Percent, Share2, ChevronUp, ChevronDown, X, Check, Settings, CreditCard, Wallet, Building2, Sparkles, Banknote, Zap, CheckCircle2, MessageCircle, Send, Mail, Copy, AlertCircle, Leaf, Bike } from "lucide-react"
+import { Plus, Minus, ArrowLeft, ChevronRight, Clock, MapPin, Phone, FileText, Utensils, Tag, Percent, Share2, ChevronUp, ChevronDown, X, Check, Settings, CreditCard, Wallet, Building2, Sparkles, Zap, CheckCircle2, MessageCircle, Send, Mail, Copy, AlertCircle, Leaf, Bike, Truck } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 import confetti from "canvas-confetti"
 
 import AnimatedPage from "@food/components/user/AnimatedPage"
 import { Button } from "@food/components/ui/button"
 import { Badge } from "@food/components/ui/badge"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@food/components/ui/select"
 import { useCart } from "@food/context/CartContext"
 import { useProfile } from "@food/context/ProfileContext"
 import { useOrders } from "@food/context/OrdersContext"
 import { useLocation as useUserLocation } from "@food/hooks/useLocation"
 import { useZone } from "@food/hooks/useZone"
 import { useLocationSelector } from "@food/components/user/UserLayout"
-import { orderAPI, restaurantAPI, adminAPI, userAPI, API_ENDPOINTS } from "@food/api"
+import { orderAPI, restaurantAPI, userAPI } from "@food/api"
 import { API_BASE_URL } from "@food/api/config"
 import { initRazorpayPayment } from "@food/utils/razorpay"
 import { toast } from "sonner"
@@ -28,11 +35,59 @@ import CartPageHeader, { CartSavingsBanner } from "@food/components/user/cart/Ca
 import CartItemsCard from "@food/components/user/cart/CartItemsCard"
 import CartCheckoutBar from "@food/components/user/cart/CartCheckoutBar"
 import RestaurantUnavailableModal from "@food/components/user/cart/RestaurantUnavailableModal"
+import AddMoneyModal from "@food/components/user/AddMoneyModal"
 import { useCartRestaurantValidation } from "@food/hooks/useCartRestaurantValidation"
 const zoopSound = "/zomato_sms.mp3"
 const debugLog = (...args) => { }
 const debugWarn = (...args) => { }
 const debugError = (...args) => { }
+
+const PRICING_CALC_DEBOUNCE_MS = 500
+
+const DELIVERY_SPEED_ICON_MAP = {
+  bike: Bike,
+  leaf: Leaf,
+  zap: Zap,
+  truck: Truck,
+  clock: Clock,
+}
+
+function mapDeliverySpeedOptions(list = []) {
+  return list
+    .filter((option) => option && option.isEnabled !== false)
+    .map((option) => ({
+      ...option,
+      feeModifier: Number(option.feeModifier) || 0,
+      icon: DELIVERY_SPEED_ICON_MAP[option.icon] || Bike,
+    }))
+}
+
+/** Module cache — avoid remount / StrictMode duplicate hits for static config. */
+let deliverySpeedOptionsCache = null
+let deliverySpeedOptionsInFlight = null
+
+async function loadDeliverySpeedOptionsOnce() {
+  if (deliverySpeedOptionsCache) return deliverySpeedOptionsCache
+  if (deliverySpeedOptionsInFlight) return deliverySpeedOptionsInFlight
+  deliverySpeedOptionsInFlight = restaurantAPI
+    .getDeliverySpeedOptions()
+    .then((response) => {
+      const options = mapDeliverySpeedOptions(response?.data?.data?.options || [])
+      deliverySpeedOptionsCache = {
+        options,
+        defaultOptionId:
+          response?.data?.data?.defaultOptionId ||
+          options.find((o) => o.isDefault)?.id ||
+          options[0]?.id ||
+          null,
+      }
+      return deliverySpeedOptionsCache
+    })
+    .finally(() => {
+      deliverySpeedOptionsInFlight = null
+    })
+  return deliverySpeedOptionsInFlight
+}
 
 
 
@@ -87,40 +142,72 @@ const RUPEE_SYMBOL = "\u20B9"
 const CART_RECIPIENT_DETAILS_STORAGE_KEY = "food-cart-recipient-details-v1"
 const CART_ORDER_NOTE_STORAGE_KEY = "food-cart-order-note-v1"
 
-const DUMMY_COUPONS = [
-  {
-    code: "BUDDY50",
-    discountType: "percentage",
-    discountPercentage: 50,
-    maxDiscount: 150,
-    minOrder: 200,
-    discountDisplay: "50% OFF",
-    description: "50% OFF up to ₹150 on orders above ₹200",
-    customerGroup: "all",
-    isGlobalCoupon: true
-  },
-  {
-    code: "SUPERBUDDY",
-    discountType: "flat",
-    discount: 100,
-    minOrder: 400,
-    discountDisplay: "₹100 OFF",
-    description: "Flat ₹100 OFF on orders above ₹400",
-    customerGroup: "all",
-    isGlobalCoupon: true
-  },
-  {
-    code: "NEWUSER",
-    discountType: "percentage",
-    discountPercentage: 30,
-    maxDiscount: 100,
-    minOrder: 150,
-    discountDisplay: "30% OFF",
-    description: "30% OFF up to ₹100 for your first order",
-    customerGroup: "new",
-    isGlobalCoupon: true
+function isFreeDeliveryCoupon(coupon) {
+  return Boolean(
+    coupon?.freeDelivery
+    || coupon?.isFreeDelivery
+    || coupon?.couponCategory === "free_delivery"
+    || coupon?.discountType === "free_delivery",
+  )
+}
+
+function mapOfferToCartCoupon(o) {
+  const code = o.couponCode || o.code
+  if (isFreeDeliveryCoupon(o)) {
+    return {
+      code,
+      couponCode: code,
+      discountType: "free_delivery",
+      discountPercentage: 0,
+      discount: 0,
+      minOrder: Number(o.minOrderValue ?? o.minOrder ?? 0),
+      minOrderValue: Number(o.minOrderValue ?? o.minOrder ?? 0),
+      maxDiscount: null,
+      customerGroup: o.customerScope === "first-time" || o.customerGroup === "new" ? "new" : "all",
+      isGlobalCoupon: o.restaurantScope !== "selected",
+      createdBy: o.createdBy || "admin",
+      restaurantScope: o.restaurantScope || "all",
+      restaurantId: o.restaurantId || null,
+      couponCategory: "free_delivery",
+      isFreeDelivery: true,
+      freeDelivery: true,
+      discountDisplay: "FREE DELIVERY",
+      description: "Delivery charge waived — paid by platform",
+      showInCart: o.showInCart !== false,
+      sourceLabel: o.createdBy === "restaurant" ? "Restaurant" : "Platform",
+    }
   }
-]
+
+  const isPct = o.discountType === "percentage"
+  const discountValue = Number(o.discountValue || o.discount || 0)
+  const discountDisplay = isPct
+    ? `${discountValue}% OFF`
+    : `${RUPEE_SYMBOL}${discountValue} OFF`
+  return {
+    code,
+    couponCode: code,
+    discountType: isPct ? "percentage" : "flat",
+    discountPercentage: isPct ? discountValue : 0,
+    discount: isPct ? 0 : discountValue,
+    minOrder: Number(o.minOrderValue ?? o.minOrder ?? 0),
+    minOrderValue: Number(o.minOrderValue ?? o.minOrder ?? 0),
+    maxDiscount: o.maxDiscount != null ? Number(o.maxDiscount) : null,
+    customerGroup: o.customerScope === "first-time" || o.customerGroup === "new" ? "new" : "all",
+    isGlobalCoupon: o.restaurantScope !== "selected",
+    createdBy: o.createdBy || "admin",
+    restaurantScope: o.restaurantScope || "all",
+    restaurantId: o.restaurantId || null,
+    couponCategory: o.couponCategory || "normal",
+    isFreeDelivery: false,
+    freeDelivery: false,
+    discountDisplay,
+    description: isPct
+      ? `${discountValue}% OFF up to ${RUPEE_SYMBOL}${o.maxDiscount || 0}`
+      : `Flat ${RUPEE_SYMBOL}${discountValue} OFF`,
+    showInCart: o.showInCart !== false,
+    sourceLabel: o.createdBy === "restaurant" ? "Restaurant" : "Platform",
+  }
+}
 
 function Cart() {
   const companyName = useCompanyName()
@@ -130,6 +217,7 @@ function Cart() {
   const hasRestoredRecipientRef = useRef(false)
   const hasRestoredNoteRef = useRef(false)
   const hasManuallyRemovedCouponRef = useRef(false)
+  const pricingRequestIdRef = useRef(0)
 
   // Defensive check: Ensure CartProvider is available
   let cartContext;
@@ -166,7 +254,6 @@ function Cart() {
     restaurantMeta,
     setRestaurantMeta,
     removeItemsByRestaurantIds,
-    flushCartSave,
   } = cartContext;
 
   const {
@@ -197,14 +284,14 @@ function Cart() {
   const { openLocationSelector } = useLocationSelector()
   const { location: currentLocation, loading: currentLocationLoading } = useUserLocation() // Get live location address
 
-  const [showCoupons, setShowCoupons] = useState(false)
   const [appliedCoupon, setAppliedCoupon] = useState(null)
   const [couponCode, setCouponCode] = useState("")
-  const [manualCouponCode, setManualCouponCode] = useState("")
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState("cash")
+  const [couponErrorPopup, setCouponErrorPopup] = useState({ open: false, message: "" })
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState("razorpay")
   const [showPaymentSheet, setShowPaymentSheet] = useState(false)
   const [walletBalance, setWalletBalance] = useState(0)
   const [isLoadingWallet, setIsLoadingWallet] = useState(false)
+  const [showAddMoneyModal, setShowAddMoneyModal] = useState(false)
   const [restaurantNote, setRestaurantNote] = useState(() => {
     try {
       if (typeof window === "undefined") return ""
@@ -240,8 +327,9 @@ function Cart() {
   const [isPlacingOrder, setIsPlacingOrder] = useState(false)
   const placeOrderInFlightRef = useRef(false)
   const [showBillDetails, setShowBillDetails] = useState(true)
-  const [showPlacingOrder, setShowPlacingOrder] = useState(false)
   const [deliveryOption, setDeliveryOption] = useState("standard")
+  const [configuredSpeedOptions, setConfiguredSpeedOptions] = useState([])
+  const [loadingSpeedOptions, setLoadingSpeedOptions] = useState(true)
   const [isScheduled, setIsScheduled] = useState(() => {
     try {
       const stored = localStorage.getItem('scheduled_order_time')
@@ -272,7 +360,6 @@ function Cart() {
     } catch { }
     return ""
   })
-  const [orderProgress, setOrderProgress] = useState(0)
   const [showSavingsCongrats, setShowSavingsCongrats] = useState(false)
   const [congratsSavingsAmount, setCongratssSavingsAmount] = useState(0)
   const [congratsSavingsPercentage, setCongratssSavingsPercentage] = useState(0)
@@ -347,16 +434,15 @@ function Cart() {
   const [loadingCoupons, setLoadingCoupons] = useState(false)
   const [userOrderCount, setUserOrderCount] = useState(0)
 
-  // Fee settings from database (used for platform fee and GST fallback only)
-  const [feeSettings, setFeeSettings] = useState({
-    deliveryFee: 25,
+  // Soft local defaults only while calculateOrder loads — no delivery fee fallback.
+  const feeSettings = {
+    deliveryFee: 0,
     deliveryFeeRanges: [],
-    freeDeliveryUpTo: 0,
-    freeDeliveryThreshold: 149,
-    platformFee: 5,
+    freeDeliveryThreshold: 0,
+    platformFee: 0,
     packagingFee: 0,
-    gstRate: 5,
-  })
+    gstRate: 0,
+  }
 
   const subtotal = pricing?.subtotal || cart.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 1), 0)
 
@@ -633,7 +719,7 @@ function Cart() {
 
   // Lock body scroll and scroll to top when any full-screen modal opens
   useEffect(() => {
-    if (showPlacingOrder || showOrderSuccess || showSavingsCongrats) {
+    if (showOrderSuccess || showSavingsCongrats) {
       // Lock body scroll
       document.body.style.overflow = 'hidden'
       document.body.style.position = 'fixed'
@@ -661,7 +747,7 @@ function Cart() {
       document.body.style.width = ''
       document.body.style.top = ''
     }
-  }, [showPlacingOrder, showOrderSuccess, showSavingsCongrats])
+  }, [showOrderSuccess, showSavingsCongrats])
 
   // Fetch restaurant data when cart has items
   useEffect(() => {
@@ -916,98 +1002,130 @@ function Cart() {
     fetchAddons()
   }, [restaurantData, cart.length, loadingRestaurant])
 
-  // Set dummy coupons locally instead of fetching from backend
+  // Fetch available coupons from backend (admin + restaurant)
   useEffect(() => {
-    const fetchCouponsForCartItems = () => {
+    const fetchCouponsForCartItems = async () => {
       if (cart.length === 0 || !restaurantId) {
         setAvailableCoupons([])
         return
       }
 
-      debugLog(`[CART-COUPONS] Loading dummy offers for cart`)
-      setLoadingCoupons(true)
-      setAvailableCoupons(DUMMY_COUPONS)
-      setLoadingCoupons(false)
+      const cartRestaurantIds = [...new Set(
+        cart.map((item) => String(item.restaurantId || item.restaurant || "")).filter(Boolean)
+      )]
+      const multiRestaurant = cartRestaurantIds.length > 1
+
+      try {
+        setLoadingCoupons(true)
+        debugLog(`[CART-COUPONS] Loading offers for cart`)
+        const response = await restaurantAPI.getCouponsByItemIdPublic(cartRestaurantIds)
+        const list = response?.data?.data?.coupons || []
+        const coupons = list
+          .filter((o) => o.showInCart !== false)
+          .filter((o) => {
+            if (multiRestaurant) {
+              return o.createdBy === "admin" && o.restaurantScope === "all"
+            }
+            if (String(o.restaurantScope) === "selected") {
+              return cartRestaurantIds.includes(String(o.restaurantId || ""))
+            }
+            return true
+          })
+          .map(mapOfferToCartCoupon)
+        setAvailableCoupons(coupons)
+      } catch (error) {
+        debugError("[CART-COUPONS] Failed to load offers:", error)
+        setAvailableCoupons([])
+      } finally {
+        setLoadingCoupons(false)
+      }
     }
 
     fetchCouponsForCartItems()
   }, [cart, restaurantId])
 
-  // Reset manually removed flag if cart items change
-  const prevCartLengthRef = useRef(cart.length)
-  const prevCartTotalItemsRef = useRef(cart.reduce((sum, item) => sum + (item.quantity || 1), 0))
-
   useEffect(() => {
-    const currentTotalItems = cart.reduce((sum, item) => sum + (item.quantity || 1), 0)
-    if (cart.length !== prevCartLengthRef.current || currentTotalItems !== prevCartTotalItemsRef.current) {
-      hasManuallyRemovedCouponRef.current = false
-      prevCartLengthRef.current = cart.length
-      prevCartTotalItemsRef.current = currentTotalItems
+    if (!appliedCoupon || loadingCoupons) return
+    const stillListed = availableCoupons.some((c) => c.code === appliedCoupon.code)
+    const minOk = isFreeDeliveryCoupon(appliedCoupon)
+      || subtotal >= (Number(appliedCoupon.minOrder) || 0)
+    // Platform first-time: block on any prior platform order.
+    // Restaurant first-time: backend validates per-restaurant — don't strip here using global count.
+    const isRestaurantCoupon = appliedCoupon.createdBy === "restaurant"
+    const newOk = appliedCoupon.customerGroup !== "new"
+      || isRestaurantCoupon
+      || userOrderCount === 0
+    if (!stillListed || !minOk || !newOk) {
+      setAppliedCoupon(null)
+      setCouponCode("")
     }
-  }, [cart])
+  }, [appliedCoupon, availableCoupons, subtotal, userOrderCount, loadingCoupons])
 
-  // Auto-apply best eligible coupon
-  useEffect(() => {
-    if (loadingCoupons || availableCoupons.length === 0 || hasManuallyRemovedCouponRef.current) {
-      return
-    }
-
-    // Find all eligible coupons
-    const eligibleCoupons = availableCoupons.filter(coupon => {
-      const minOrderOk = subtotal >= (Number(coupon.minOrder) || 0)
-      const newOk = coupon.customerGroup !== "new" || userOrderCount === 0
-      return minOrderOk && newOk
+  // Calculate pricing only when cart/address/coupon/speed meaningfully change (stable fingerprint).
+  const pricingRequestKey = useMemo(() => {
+    if (cart.length === 0 || !hasSavedAddress) return ""
+    const coords = defaultAddress?.location?.coordinates
+    return JSON.stringify({
+      items: cart.map((item) => ({
+        itemId: String(item.itemId || item.id || ""),
+        variantId: String(item.variantId || ""),
+        quantity: Number(item.quantity) || 1,
+        price: Number(item.price) || 0,
+        restaurantId: String(item.restaurantId || item.restaurant?._id || item.restaurant || ""),
+      })),
+      restaurantId: String(restaurantData?.restaurantId || restaurantData?._id || restaurantId || ""),
+      couponCode: String(couponCode || appliedCoupon?.code || "").trim().toUpperCase(),
+      deliveryOption: String(deliveryOption || ""),
+      addressId: String(defaultAddress?._id || defaultAddress?.id || ""),
+      coords: Array.isArray(coords) ? coords : null,
     })
+  }, [
+    cart,
+    hasSavedAddress,
+    defaultAddress,
+    appliedCoupon?.code,
+    couponCode,
+    restaurantId,
+    restaurantData?.restaurantId,
+    restaurantData?._id,
+    deliveryOption,
+  ])
 
-    if (eligibleCoupons.length === 0) {
-      // If subtotal fell below eligibility, remove applied coupon
-      if (appliedCoupon) {
-        setAppliedCoupon(null)
-        setCouponCode("")
-      }
-      return
-    }
+  const lastPricingKeyRef = useRef("")
 
-    // Calculate maximum discount for each eligible coupon
-    let bestCoupon = null
-    let maxDiscount = 0
-    eligibleCoupons.forEach(coupon => {
-      const amt = coupon.discountType === "percentage"
-        ? Math.min(subtotal * (coupon.discountPercentage / 100), coupon.maxDiscount || Infinity)
-        : (coupon.discount || 0)
-      if (amt > maxDiscount) {
-        maxDiscount = amt
-        bestCoupon = coupon
-      }
-    })
-
-    if (bestCoupon && (!appliedCoupon || appliedCoupon.code !== bestCoupon.code)) {
-      setAppliedCoupon(bestCoupon)
-      setCouponCode(bestCoupon.code)
-      setManualCouponCode(bestCoupon.code)
-      toast.success(`Coupon ${bestCoupon.code} auto-applied!`)
-    }
-  }, [availableCoupons, subtotal, userOrderCount, loadingCoupons, appliedCoupon])
-
-  // Calculate pricing from backend whenever cart, address, or coupon changes
   useEffect(() => {
-    const calculatePricing = async () => {
-      if (cart.length === 0 || !hasSavedAddress) {
-        setPricing(null)
-        return
-      }
+    if (!pricingRequestKey) {
+      setPricing(null)
+      lastPricingKeyRef.current = ""
+      return undefined
+    }
 
+    if (placeOrderInFlightRef.current || isPlacingOrder) {
+      return undefined
+    }
+
+    // Same inputs as last successful/in-flight request — skip duplicate calculate
+    if (pricingRequestKey === lastPricingKeyRef.current && pricing != null) {
+      return undefined
+    }
+
+    let cancelled = false
+    const requestId = ++pricingRequestIdRef.current
+    const keyForRequest = pricingRequestKey
+
+    const timer = setTimeout(async () => {
+      if (placeOrderInFlightRef.current) return
       try {
         setLoadingPricing(true)
         const items = cart.map(item => ({
           itemId: item.itemId || item.id,
           name: item.name,
-          price: item.price, // Price should already be in INR
+          price: item.price,
           variantId: item.variantId || undefined,
           variantName: item.variantName || undefined,
           variantPrice: item.variantPrice || item.price,
           quantity: item.quantity || 1,
-          image: item.image,
+          image: item.image || item.imageUrl,
           description: item.description,
           isVeg: item.isVeg !== false,
           restaurantId: item.restaurantId || item.restaurant?._id || item.restaurant
@@ -1015,57 +1133,105 @@ function Cart() {
 
         const resolvedRestaurantId = restaurantData?.restaurantId || restaurantData?._id || restaurantId || undefined
 
+        const selectedSpeed = configuredSpeedOptions.find((opt) => opt.id === deliveryOption)
+          || configuredSpeedOptions.find((opt) => opt.isDefault)
+          || configuredSpeedOptions[0]
+
         const response = await orderAPI.calculateOrder({
           items,
           restaurantId: resolvedRestaurantId,
-          deliveryAddress: defaultAddress
-          // Removed couponCode so backend doesn't try to look it up in database
+          deliveryAddress: defaultAddress,
+          couponCode: couponCode || appliedCoupon?.code || undefined,
+          deliverySpeedOptionId: deliveryOption || undefined,
+          deliveryOption: selectedSpeed?.name || undefined,
         })
 
-        if (response?.data?.success && response?.data?.data?.pricing) {
-          setPricing(response.data.data.pricing)
+        if (cancelled || requestId !== pricingRequestIdRef.current || placeOrderInFlightRef.current) return
 
-          // Update applied coupon if backend returns one
-          if (response.data.data.pricing.appliedCoupon && !appliedCoupon) {
-            const coupon = availableCoupons.find(c => c.code === response.data.data.pricing.appliedCoupon.code)
+        if (response?.data?.success && response?.data?.data?.pricing) {
+          lastPricingKeyRef.current = keyForRequest
+          const pricingData = response.data.data.pricing
+          const couponErr =
+            response.data.data.couponError ||
+            pricingData.couponError ||
+            null
+          setPricing(pricingData)
+
+          if (couponErr?.message) {
+            setAppliedCoupon(null)
+            setCouponCode("")
+            setCouponErrorPopup({
+              open: true,
+              message: couponErr.message,
+            })
+          } else if (pricingData.appliedCoupon && !appliedCoupon) {
+            const coupon = availableCoupons.find(c => c.code === pricingData.appliedCoupon.code)
             if (coupon) {
               setAppliedCoupon(coupon)
             }
           }
         }
       } catch (error) {
-        // Network errors or 404 errors - silently handle, fallback to frontend calculation
+        if (cancelled || requestId !== pricingRequestIdRef.current) return
         if (error.code !== 'ERR_NETWORK' && error.response?.status !== 404) {
           debugError("Error calculating pricing:", error)
         }
-        // Fallback to frontend calculation if backend fails
         setPricing(null)
       } finally {
-        setLoadingPricing(false)
+        if (!cancelled && requestId === pricingRequestIdRef.current) {
+          setLoadingPricing(false)
+        }
       }
+    }, PRICING_CALC_DEBOUNCE_MS)
+
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
     }
+  }, [pricingRequestKey, isPlacingOrder])
 
-    calculatePricing()
-  }, [cart, defaultAddress, appliedCoupon, couponCode, restaurantId])
+  const refreshWalletBalance = async () => {
+    try {
+      setIsLoadingWallet(true)
+      const response = await userAPI.getWallet()
+      if (response?.data?.success && response?.data?.data?.wallet) {
+        const balance = response.data.data.wallet.balance || 0
+        setWalletBalance(balance)
+        return balance
+      }
+      return walletBalance
+    } catch (error) {
+      debugError("Error fetching wallet balance:", error)
+      return walletBalance
+    } finally {
+      setIsLoadingWallet(false)
+    }
+  }
 
-  // Fetch wallet balance
+  // Fetch wallet when user selects Wallet, or when opening the payment sheet (to show balance / low-balance CTA)
   useEffect(() => {
+    if (selectedPaymentMethod !== "wallet" && !showPaymentSheet) return undefined
+
+    let cancelled = false
     const fetchWalletBalance = async () => {
       try {
         setIsLoadingWallet(true)
         const response = await userAPI.getWallet()
+        if (cancelled) return
         if (response?.data?.success && response?.data?.data?.wallet) {
           setWalletBalance(response.data.data.wallet.balance || 0)
         }
       } catch (error) {
+        if (cancelled) return
         debugError("Error fetching wallet balance:", error)
         setWalletBalance(0)
       } finally {
-        setIsLoadingWallet(false)
+        if (!cancelled) setIsLoadingWallet(false)
       }
     }
     fetchWalletBalance()
-  }, [])
+    return () => { cancelled = true }
+  }, [selectedPaymentMethod, showPaymentSheet])
 
   // Fetch user order count (used for first-time coupon eligibility)
   useEffect(() => {
@@ -1085,129 +1251,69 @@ function Cart() {
     fetchOrderCount()
   }, [])
 
-  // Fetch fee settings on mount
+  // Delivery speed options once (cached). Do NOT refetch on focus — that fired during Razorpay checkout.
   useEffect(() => {
-    const fetchFeeSettings = async () => {
+    let cancelled = false
+    const fetchDeliverySpeedOptions = async () => {
       try {
-        const response = await adminAPI.getPublicFeeSettings()
-        if (response.data.success && response.data.data.feeSettings) {
-          setFeeSettings({
-            deliveryFee: response.data.data.feeSettings.deliveryFee ?? 25,
-            deliveryFeeRanges: response.data.data.feeSettings.deliveryFeeRanges ?? [],
-            freeDeliveryUpTo: response.data.data.feeSettings.freeDeliveryUpTo ?? 0,
-            freeDeliveryThreshold: response.data.data.feeSettings.freeDeliveryThreshold ?? 149,
-            platformFee: response.data.data.feeSettings.platformFee ?? 5,
-            packagingFee: response.data.data.feeSettings.packagingFee ?? 0,
-            gstRate: response.data.data.feeSettings.gstRate ?? 5,
-          })
+        setLoadingSpeedOptions(true)
+        const data = await loadDeliverySpeedOptionsOnce()
+        if (cancelled) return
+        setConfiguredSpeedOptions(data.options)
+        if (data.defaultOptionId) {
+          setDeliveryOption((prev) => (
+            data.options.some((o) => o.id === prev) ? prev : data.defaultOptionId
+          ))
         }
       } catch (error) {
-        debugError('Error fetching fee settings:', error)
-        // Keep default values on error
+        if (cancelled) return
+        debugError("Error fetching delivery speed options:", error)
+        setConfiguredSpeedOptions([])
+      } finally {
+        if (!cancelled) setLoadingSpeedOptions(false)
       }
     }
 
-    const handleFocus = () => {
-      fetchFeeSettings()
-    }
-
-    fetchFeeSettings()
-    window.addEventListener("focus", handleFocus)
-    const intervalId = setInterval(fetchFeeSettings, 30000)
-
-    return () => {
-      window.removeEventListener("focus", handleFocus)
-      clearInterval(intervalId)
-    }
+    fetchDeliverySpeedOptions()
+    return () => { cancelled = true }
   }, [])
 
-  // Use backend pricing if available, otherwise fallback to database fee settings
-  const fallbackDeliveryFee = (() => {
-    if (appliedCoupon?.freeDelivery) {
-      return 0
-    }
+  // Use backend pricing if available; otherwise 0 (no flat delivery fee fallback).
+  const fallbackDeliveryFee = 0
 
-    const freeUpTo = Number(feeSettings.freeDeliveryUpTo || 0)
-    if (Number.isFinite(freeUpTo) && freeUpTo > 0 && subtotal >= freeUpTo) {
-      return 0
-    }
+  const deliveryOptions = configuredSpeedOptions.length > 0
+    ? configuredSpeedOptions
+    : []
 
-    const distanceKm = (() => {
-      const rCoords = restaurantData?.location?.coordinates
-      const dCoords = defaultAddress?.location?.coordinates
-      if (!Array.isArray(rCoords) || !Array.isArray(dCoords)) return null
-      if (rCoords.length !== 2 || dCoords.length !== 2) return null
-      const [rLng, rLat] = rCoords
-      const [dLng, dLat] = dCoords
-      return calculateDistance(rLat, rLng, dLat, dLng)
-    })()
+  const selectedDeliveryOption = deliveryOptions.find(opt => opt.id === deliveryOption) || deliveryOptions.find(opt => opt.isDefault) || deliveryOptions[0]
 
-    const ranges = Array.isArray(feeSettings.deliveryFeeRanges) ? [...feeSettings.deliveryFeeRanges] : []
-    if (ranges.length > 0 && Number.isFinite(distanceKm)) {
-      const sortedRanges = ranges.sort((a, b) => Number(a.min) - Number(b.min))
-      for (let i = 0; i < sortedRanges.length; i += 1) {
-        const range = sortedRanges[i]
-        const min = Number(range.min)
-        const max = Number(range.max)
-        const fee = Number(range.fee)
-        const isLastRange = i === sortedRanges.length - 1
-        const inRange = isLastRange
-          ? distanceKm >= min && distanceKm <= max
-          : distanceKm >= min && distanceKm < max
-
-        if (inRange) return fee
-      }
-
-      return 0
-    }
-
-    if (subtotal >= feeSettings.freeDeliveryThreshold) {
-      return 0
-    }
-
-    return Number(feeSettings.deliveryFee || 0)
-  })()
-  const deliveryOptions = [
-    {
-      id: "eco",
-      name: "Eco Saver",
-      badge: "Save ₹15",
-      badgeColor: "bg-green-50 text-green-700 dark:bg-green-950/30 dark:text-green-400 border border-green-100 dark:border-green-900/30",
-      time: "45–55 mins",
-      estimatedTime: 50,
-      feeModifier: -15, // Discount ₹15 from the calculated delivery fee
-      description: "Batch delivery. Lower carbon footprint.",
-      icon: Leaf
-    },
-    {
-      id: "standard",
-      name: "Standard Delivery",
-      badge: "Popular",
-      badgeColor: "bg-orange-50 text-orange-700 dark:bg-orange-950/30 dark:text-orange-400 border border-orange-100 dark:border-orange-900/30",
-      time: "25–35 mins",
-      estimatedTime: 30,
-      feeModifier: 0, // Standard fee
-      description: "Direct to door. Reliable & prompt partner.",
-      icon: Bike
-    },
-    {
-      id: "express",
-      name: "Express Delivery",
-      badge: "Zap Delivery",
-      badgeColor: "bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400 border border-amber-100 dark:border-amber-900/30",
-      time: "15–20 mins",
-      estimatedTime: 18,
-      feeModifier: 20, // Add ₹20 to the calculated delivery fee
-      description: "Direct dispatch. Priority mapping partner.",
-      icon: Zap
-    }
-  ]
-
-  const selectedDeliveryOption = deliveryOptions.find(opt => opt.id === deliveryOption) || deliveryOptions[1]
-
-  const baseDeliveryFee = pricing != null ? (pricing.deliveryFee ?? 0) : fallbackDeliveryFee
-  const deliveryFee = Math.max(0, baseDeliveryFee + selectedDeliveryOption.feeModifier)
+  const speedFeeModifier = deliveryOptions.length > 0
+    ? (Number(selectedDeliveryOption?.feeModifier) || 0)
+    : 0
   const deliveryFeeBreakdown = pricing?.deliveryFeeBreakdown || null
+  const backendSpeedModifier = Number(deliveryFeeBreakdown?.speedFeeModifier) || 0
+  const deliveryFeeBeforeSpeed = pricing != null
+    ? Math.max(0, (Number(pricing.deliveryFee) || 0) - backendSpeedModifier)
+    : fallbackDeliveryFee
+  const deliveryFee = pricing != null
+    ? (Number(pricing.deliveryFee) || 0)
+    : Math.max(0, fallbackDeliveryFee + speedFeeModifier)
+  const deliveryDiscount = pricing != null
+    ? (Number(pricing.deliveryDiscount) || 0)
+    : (isFreeDeliveryCoupon(appliedCoupon) ? deliveryFee : 0)
+  const customerDeliveryFee = Math.max(0, deliveryFee - deliveryDiscount)
+  const deliveryBaseBeforeMultiplier = deliveryFeeBreakdown?.baseFee != null
+    ? Number(deliveryFeeBreakdown.baseFee)
+    : deliveryFeeBeforeSpeed
+  // Multi-restaurant uses additionalCharge (multiplier stays 1). Split/large orders use multiplier > 1.
+  const deliveryMultiplierSurcharge = (() => {
+    const additional = Number(deliveryFeeBreakdown?.additionalCharge) || 0
+    if (additional > 0) return additional
+    if (deliveryFeeBreakdown?.multiplier > 1) {
+      return Math.max(0, deliveryFeeBeforeSpeed - deliveryBaseBeforeMultiplier)
+    }
+    return 0
+  })()
   const hasDistanceDeliveryBreakdown =
     deliveryFeeBreakdown?.source === "distance" &&
     Number.isFinite(Number(deliveryFeeBreakdown?.distanceKm))
@@ -1222,13 +1328,23 @@ function Cart() {
     .map(id => String(id).trim())
   )]
   const isMultiRestaurantOrder = uniqueRestaurantIds.length > 1
-  const multiRestaurantExtraCharge = isMultiRestaurantOrder ? 150 : 0
+
+  useEffect(() => {
+    if (!isMultiRestaurantOrder || !appliedCoupon) return
+    if (appliedCoupon.createdBy === "restaurant" || appliedCoupon.restaurantScope === "selected") {
+      setAppliedCoupon(null)
+      setCouponCode("")
+      toast.info("Restaurant coupons cannot be used with items from multiple restaurants")
+    }
+  }, [isMultiRestaurantOrder, appliedCoupon])
 
   const platformFee = pricing != null ? (pricing.platformFee ?? 0) : (feeSettings.platformFee ?? 0)
-  const packagingFee = pricing != null ? (pricing.packagingFee ?? 0) : (feeSettings.packagingFee ?? 0)
+  const packagingFee = pricing != null
+    ? (pricing.packagingFee ?? 0)
+    : (feeSettings.packagingFee ?? 0) * Math.max(1, uniqueRestaurantIds.length)
   const gstCharges = pricing != null ? (pricing.tax ?? 0) : Math.round(subtotal * ((feeSettings.gstRate ?? 0) / 100))
   
-  // Calculate discount based on dummy coupon locally
+  // Calculate discount from backend pricing or applied coupon
   const discount = (() => {
     if (pricing?.discount) {
       return pricing.discount
@@ -1245,10 +1361,16 @@ function Cart() {
     return 0
   })()
 
-  const totalBeforeDiscount = subtotal + deliveryFee + platformFee + packagingFee + gstCharges
+  const billDiscount = pricing != null ? (Number(pricing.discount) || 0) : discount
+  const billSubtotal = pricing != null ? (Number(pricing.subtotal) || subtotal) : subtotal
+  const billPlatformFee = pricing != null ? (Number(pricing.platformFee) ?? platformFee) : platformFee
+  const billPackagingFee = pricing != null ? (Number(pricing.packagingFee) ?? packagingFee) : packagingFee
+  const billTax = pricing != null ? (Number(pricing.tax) ?? gstCharges) : gstCharges
+  const totalCouponSavings = billDiscount + deliveryDiscount
+  const totalBeforeDiscount = billSubtotal + deliveryFee + billPlatformFee + billPackagingFee + billTax
   const total = pricing != null
-    ? Math.max(0, pricing.total - baseDeliveryFee + deliveryFee - (pricing.discount ? 0 : discount))
-    : (totalBeforeDiscount - discount)
+    ? Math.max(0, Number(pricing.total) || 0)
+    : Math.max(0, totalBeforeDiscount - billDiscount - deliveryDiscount)
   const savings = Math.max(0, totalBeforeDiscount - total)
 
   // Calculate platform pricing comparison savings
@@ -1309,9 +1431,7 @@ function Cart() {
   const selectedPaymentLabel =
     selectedPaymentMethod === "wallet"
       ? "Wallet"
-      : selectedPaymentMethod === "razorpay"
-        ? "Online Payment"
-        : "Cash on Delivery"
+      : "Online Payment"
 
   // Restaurant name from data or cart
   const restaurantName = isMultiRestaurantOrder
@@ -1514,73 +1634,63 @@ function Cart() {
     }
   }
 
+  const showCouponError = (message) => {
+    setCouponErrorPopup({
+      open: true,
+      message: message || "This coupon is not valid",
+    })
+  }
+
   const handleApplyCoupon = (coupon) => {
-    if (coupon?.customerGroup === "new" && userOrderCount > 0) {
-      toast.error("This coupon is only for first-time users")
+    // Quick UX guard for platform first-time only (restaurant first-time is validated server-side).
+    if (
+      coupon?.customerGroup === "new" &&
+      coupon?.createdBy !== "restaurant" &&
+      userOrderCount > 0
+    ) {
+      showCouponError("This coupon is only for first-time users on the platform")
       return
     }
 
-    if (subtotal < (Number(coupon.minOrder) || 0)) {
-      toast.error(`Min order ${RUPEE_SYMBOL}${Number(coupon.minOrder || 0)}`)
+    if (!isFreeDeliveryCoupon(coupon) && subtotal < (Number(coupon.minOrder) || 0)) {
+      showCouponError(`Minimum order amount of ${RUPEE_SYMBOL}${Number(coupon.minOrder || 0)} required for this coupon`)
       return
     }
 
+    const isReplacing = Boolean(appliedCoupon?.code && appliedCoupon.code !== coupon.code)
     setAppliedCoupon(coupon)
     setCouponCode(coupon.code)
-    setManualCouponCode(coupon.code)
-    setShowCoupons(false)
-    toast.success("Coupon applied")
+    hasManuallyRemovedCouponRef.current = false
+    toast.success(isReplacing ? "Coupon changed" : "Coupon applied")
   }
-
-  const handleApplyCouponCode = () => {
-    const inputCode = manualCouponCode.trim().toUpperCase()
-    if (!inputCode) {
-      toast.error("Enter coupon code")
-      return
-    }
-
-    if (cart.length === 0 || !hasSavedAddress) {
-      toast.error("Add items and delivery address first")
-      return
-    }
-
-    const matchedCoupon = availableCoupons.find(
-      (coupon) => String(coupon.code || "").toUpperCase() === inputCode,
-    )
-
-    if (!matchedCoupon) {
-      toast.error("Invalid coupon code")
-      return
-    }
-
-    if (matchedCoupon.customerGroup === "new" && userOrderCount > 0) {
-      toast.error("This coupon is only for first-time users")
-      return
-    }
-
-    if (subtotal < (Number(matchedCoupon.minOrder) || 0)) {
-      toast.error(`Min order ${RUPEE_SYMBOL}${Number(matchedCoupon.minOrder || 0)}`)
-      return
-    }
-
-    setAppliedCoupon(matchedCoupon)
-    setCouponCode(inputCode)
-    setShowCoupons(false)
-    toast.success("Coupon applied")
-  }
-
-  const handleRemoveCoupon = () => {
-    setAppliedCoupon(null)
-    setCouponCode("")
-    setManualCouponCode("")
-    hasManuallyRemovedCouponRef.current = true
-    toast.success("Coupon removed")
-  }
-
 
   const releasePlaceOrderLock = () => {
     placeOrderInFlightRef.current = false
     setIsPlacingOrder(false)
+  }
+
+  const finalizeSuccessfulOrder = (order) => {
+    setPlacedOrderId(order?._id || order?.orderId || order?.id || null)
+    setOrderSuccessSavingsAmount(platformPricingSavings.totalSavings > 0 ? platformPricingSavings.totalSavings : 0)
+    if (platformPricingSavings.totalSavings > 0) {
+      setCongratssSavingsAmount(platformPricingSavings.totalSavings)
+      setCongratssSavingsPercentage(platformPricingSavings.savingsPercentage)
+      setCongratssSavingsItems(platformPricingSavings.items)
+      setShowSavingsCongrats(true)
+    } else {
+      setShowOrderSuccess(true)
+    }
+    window.dispatchEvent(new CustomEvent("order-placed", { detail: { order } }))
+    // Skip client→server cart sync; server already cleared cart on successful order.
+    clearCart({ skipServerSync: true })
+    setRestaurantNote("")
+    setShowRestaurantNoteInput(false)
+    try {
+      window.localStorage.removeItem(CART_ORDER_NOTE_STORAGE_KEY)
+      window.localStorage.removeItem("scheduled_order_time")
+    } catch {
+      // ignore
+    }
   }
 
   const handlePlaceOrder = async () => {
@@ -1599,13 +1709,6 @@ function Cart() {
       return
     }
 
-    const validation = await validateRestaurants({ force: true })
-    if (validation?.hasClosed) {
-      return
-    }
-
-    await flushCartSave()
-
     if (isScheduled) {
       if (!scheduledDate || !scheduledTime) {
         toast.error("Please select both date and time to schedule your order")
@@ -1619,34 +1722,36 @@ function Cart() {
       }
     }
 
+    const finalRestaurantId =
+      restaurantData?.restaurantId ||
+      restaurantData?._id ||
+      cart[0]?.restaurantId ||
+      restaurantId ||
+      null
+    const finalRestaurantName = restaurantData?.name || cart[0]?.restaurant || null
+
+    if (!finalRestaurantId) {
+      toast.error("Restaurant information is missing. Please refresh and try again.")
+      return
+    }
+
+    const invalidItems = cart.filter((item) => !item.restaurantId && !item.restaurant)
+    if (invalidItems.length > 0) {
+      toast.error("Some items are missing restaurant information. Please refresh and try again.")
+      return
+    }
+
     placeOrderInFlightRef.current = true
     setIsPlacingOrder(true)
 
     try {
-      debugLog("?? Starting order placement process...")
-      debugLog("?? Cart items:", cart.map(item => ({ id: item.id, name: item.name, quantity: item.quantity, price: item.price })))
-      debugLog("?? Applied coupon:", appliedCoupon?.code || "None")
-      debugLog("?? Delivery address:", defaultAddress?.label || defaultAddress?.city)
-
-      // Ensure couponCode and dynamic deliveryFee are included in pricing
       const orderPricing = {
-        subtotal: pricing?.subtotal || subtotal,
-        deliveryFee: deliveryFee,
-        tax: pricing?.tax || gstCharges,
-        platformFee: pricing?.platformFee || platformFee,
-        discount: pricing?.discount || discount,
-        total: total,
-        couponCode: pricing?.couponCode || appliedCoupon?.code || null
-      };
-
-      // Add couponCode if not present but coupon is applied
-      if (!orderPricing.couponCode && appliedCoupon?.code) {
-        orderPricing.couponCode = appliedCoupon.code;
+        couponCode: appliedCoupon?.code || pricing?.couponCode || null,
+        couponCreatedBy: appliedCoupon?.createdBy || pricing?.couponCreatedBy || null,
+        offerId: pricing?.offerId || null,
       }
 
-      // Include all cart items (main items + addons)
-      // Note: Addons are added as separate cart items when user clicks the + button
-      const orderItems = cart.map(item => ({
+      const orderItems = cart.map((item) => ({
         itemId: item.itemId || item.id,
         name: item.name,
         price: item.price,
@@ -1656,105 +1761,10 @@ function Cart() {
         quantity: item.quantity || 1,
         image: item.image || "",
         description: item.description || "",
-        isVeg: item.isVeg === true || item.foodType === 'Veg',
+        isVeg: item.isVeg === true || item.foodType === "Veg",
         preparationTime: item.preparationTime,
-        restaurantId: item.restaurantId || item.restaurant?._id || item.restaurant
+        restaurantId: item.restaurantId || item.restaurant?._id || item.restaurant,
       }))
-
-      debugLog("?? Order items to send:", orderItems)
-      debugLog("?? Order pricing:", orderPricing)
-
-      // Check API base URL before making request (for debugging)
-      const fullUrl = `${API_BASE_URL}${API_ENDPOINTS.ORDER.CREATE}`;
-      debugLog("?? Making request to:", fullUrl)
-      debugLog("?? Authentication token present:", !!localStorage.getItem('accessToken') || !!localStorage.getItem('user_accessToken'))
-
-      // CRITICAL: Validate restaurant ID before placing order
-      // Ensure we're using the correct restaurant from restaurantData (most reliable)
-      const finalRestaurantId = restaurantData?.restaurantId || restaurantData?._id || null;
-      const finalRestaurantName = restaurantData?.name || null;
-
-      if (!finalRestaurantId) {
-        debugError('? CRITICAL: Cannot place order - Restaurant ID is missing!');
-        debugError('?? Debug info:', {
-          restaurantData: restaurantData ? {
-            _id: restaurantData._id,
-            restaurantId: restaurantData.restaurantId,
-            name: restaurantData.name
-          } : 'Not loaded',
-          cartRestaurantId: restaurantId,
-          cartRestaurantName: cart[0]?.restaurant,
-          cartItems: cart.map(item => ({
-            id: item.id,
-            name: item.name,
-            restaurant: item.restaurant,
-            restaurantId: item.restaurantId
-          }))
-        });
-        alert('Error: Restaurant information is missing. Please refresh the page and try again.');
-        releasePlaceOrderLock();
-        return;
-      }
-
-      // Validate cart restaurant items - support both single and multi-restaurant orders
-      const cartRestaurantIds = cart
-        .map(item => item.restaurantId)
-        .filter(Boolean)
-        .map(id => String(id).trim()); // Normalize to string and trim
-
-      const cartRestaurantNames = cart
-        .map(item => item.restaurant)
-        .filter(Boolean)
-        .map(name => name.trim().toLowerCase()); // Normalize names
-
-      // Get unique values (after normalization)
-      const uniqueRestaurantIds = [...new Set(cartRestaurantIds)];
-      const uniqueRestaurantNames = [...new Set(cartRestaurantNames)];
-
-      // Allow both single and multi-restaurant orders if admin has enabled it
-      // CartContext already validates distance, capacity (max 2), etc. during addToCart
-      // So if cart has multiple restaurants, they've already passed validation
-      debugLog('?? Order validation - Restaurant count:', {
-        uniqueRestaurantNames: uniqueRestaurantNames.length,
-        isMultiRestaurant: uniqueRestaurantNames.length > 1,
-        restaurants: uniqueRestaurantNames
-      });
-
-      if (cartRestaurantIds.length > 0) {
-        // For multi-restaurant orders, just validate all items have valid restaurant info
-        // Backend will handle the multi-restaurant logic
-        const invalidItems = cart.filter(item => !item.restaurantId && !item.restaurant);
-        if (invalidItems.length > 0) {
-          debugError('? Invalid cart items found - missing restaurant info!', invalidItems);
-          alert('Error: Some items are missing restaurant information. Please refresh and try again.');
-          releasePlaceOrderLock();
-          return;
-        }
-      }
-
-      // Validate restaurant name matches (for single-restaurant orders or when checking first restaurant)
-      if (cartRestaurantNames.length > 0 && finalRestaurantName && uniqueRestaurantNames.length === 1) {
-        const cartRestaurantName = cartRestaurantNames[0];
-        // For single restaurant orders, validate name matches
-        if (cartRestaurantName.toLowerCase().trim() !== finalRestaurantName.toLowerCase().trim()) {
-          debugError('? Restaurant name mismatch in single-restaurant order!', {
-            cartRestaurantName: cartRestaurantName,
-            finalRestaurantName: finalRestaurantName
-          });
-          alert(`Error: Cart items belong to "${cartRestaurantName}" but restaurant data shows "${finalRestaurantName}". Please refresh the page and try again.`);
-          releasePlaceOrderLock();
-          return;
-        }
-      }
-
-      // Log order details for debugging
-      debugLog('? Order validation passed - Placing order with:', {
-        restaurantId: finalRestaurantId,
-        restaurantName: finalRestaurantName,
-        cartRestaurantCount: uniqueRestaurantNames.length,
-        restaurants: uniqueRestaurantNames,
-        cartItemCount: cart.length
-      });
 
       const orderPayload = {
         items: orderItems,
@@ -1777,85 +1787,46 @@ function Cart() {
         // `useZone()` can return `null`. Zod expects string/undefined, not null.
         zoneId: zoneId || undefined,
         scheduledAt: isScheduled ? new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString() : undefined,
-        deliveryOption: selectedDeliveryOption.name,
-        deliveryTime: selectedDeliveryOption.time,
-        estimatedTime: selectedDeliveryOption.estimatedTime,
+        deliveryOption: selectedDeliveryOption?.name || "Standard Delivery",
+        deliverySpeedOptionId: selectedDeliveryOption?.id || deliveryOption || undefined,
+        deliveryTime: selectedDeliveryOption?.time || "",
+        estimatedTime: selectedDeliveryOption?.estimatedTime || 30,
       };
       // Log final order details (including paymentMethod for COD debugging)
       debugLog('?? FINAL: Sending order to backend with:', {
         restaurantId: finalRestaurantId,
         restaurantName: finalRestaurantName,
         itemCount: orderItems.length,
-        totalAmount: orderPricing.total,
-        paymentMethod: orderPayload.paymentMethod
+        paymentMethod: orderPayload.paymentMethod,
+        deliverySpeedOptionId: orderPayload.deliverySpeedOptionId,
+        couponCode: orderPricing.couponCode,
       });
 
-      // Check wallet balance if wallet payment selected
+      // Check wallet balance if wallet payment selected (UI guard; server re-validates)
       if (selectedPaymentMethod === "wallet" && walletBalance < total) {
         toast.error(`Insufficient wallet balance. Required: ${RUPEE_SYMBOL}${total.toFixed(0)}, Available: ${RUPEE_SYMBOL}${walletBalance.toFixed(0)}`)
         releasePlaceOrderLock()
         return
       }
 
-      // Create order in backend
+      // Single create-order call — server validates, prices, and places wallet/prepaid order
       const orderResponse = await orderAPI.createOrder(orderPayload)
 
-      debugLog("? Order created successfully:", orderResponse.data)
+      debugLog("? Order/checkout response:", orderResponse.data)
 
-      const { order, razorpay } = orderResponse.data.data
-
-      // Cash flow: order placed without online payment
-      if (selectedPaymentMethod === "cash") {
-        toast.success("Order placed with Cash on Delivery")
-        setPlacedOrderId(order?._id || order?.orderId || order?.id || null)
-        setOrderSuccessSavingsAmount(platformPricingSavings.totalSavings > 0 ? platformPricingSavings.totalSavings : 0)
-        if (platformPricingSavings.totalSavings > 0) {
-          setCongratssSavingsAmount(platformPricingSavings.totalSavings)
-          setCongratssSavingsPercentage(platformPricingSavings.savingsPercentage)
-          setCongratssSavingsItems(platformPricingSavings.items)
-          setShowSavingsCongrats(true)
-        } else {
-          setShowOrderSuccess(true)
-        }
-        window.dispatchEvent(new CustomEvent('order-placed', { detail: { order } }))
-        clearCart()
-        setRestaurantNote("")
-        setShowRestaurantNoteInput(false)
-        try {
-          window.localStorage.removeItem(CART_ORDER_NOTE_STORAGE_KEY)
-          window.localStorage.removeItem('scheduled_order_time')
-        } catch {
-          // ignore
-        }
-        releasePlaceOrderLock()
-        return
-      }
+      const {
+        order,
+        razorpay,
+        checkoutId,
+        requiresPayment,
+        paymentType,
+      } = orderResponse.data.data || {}
 
       // Wallet flow: order placed with wallet payment (already processed in backend)
-      if (selectedPaymentMethod === "wallet") {
+      if (selectedPaymentMethod === "wallet" || paymentType === "WALLET") {
         toast.success("Order placed with Wallet payment")
-        setPlacedOrderId(order?._id || order?.orderId || order?.id || null)
-        setOrderSuccessSavingsAmount(platformPricingSavings.totalSavings > 0 ? platformPricingSavings.totalSavings : 0)
-        if (platformPricingSavings.totalSavings > 0) {
-          setCongratssSavingsAmount(platformPricingSavings.totalSavings)
-          setCongratssSavingsPercentage(platformPricingSavings.savingsPercentage)
-          setCongratssSavingsItems(platformPricingSavings.items)
-          setShowSavingsCongrats(true)
-        } else {
-          setShowOrderSuccess(true)
-        }
-        window.dispatchEvent(new CustomEvent('order-placed', { detail: { order } }))
-        clearCart()
-        setRestaurantNote("")
-        setShowRestaurantNoteInput(false)
-        try {
-          window.localStorage.removeItem(CART_ORDER_NOTE_STORAGE_KEY)
-          window.localStorage.removeItem('scheduled_order_time')
-        } catch {
-          // ignore
-        }
+        finalizeSuccessfulOrder(order)
         releasePlaceOrderLock()
-        // Refresh wallet balance
         try {
           const walletResponse = await userAPI.getWallet()
           if (walletResponse?.data?.success && walletResponse?.data?.data?.wallet) {
@@ -1867,12 +1838,14 @@ function Cart() {
         return
       }
 
-      if (!razorpay || !razorpay.orderId || !razorpay.key) {
-        debugError("? Razorpay initialization failed:", { razorpay, order })
+      // Prepaid: pay first, then backend creates FoodOrder on verify
+      if (!razorpay || !razorpay.orderId || !razorpay.key || !checkoutId) {
+        debugError("? Razorpay checkout initialization failed:", { razorpay, checkoutId, order, requiresPayment })
         throw new Error(razorpay ? "Razorpay payment gateway is not configured. Please contact support." : "Failed to initialize payment")
       }
 
-      debugLog("?? Razorpay order created:", {
+      debugLog("?? Razorpay checkout created:", {
+        checkoutId,
         orderId: razorpay.orderId,
         amount: razorpay.amount,
         currency: razorpay.currency,
@@ -1900,6 +1873,15 @@ function Cart() {
       // Flag to prevent double-cancellation (Razorpay can fire both onError + onClose)
       let paymentHandled = false
 
+      const cancelAbandonedCheckout = async (reason) => {
+        try {
+          await orderAPI.cancelCheckout(checkoutId)
+          debugLog("Checkout cancelled:", reason)
+        } catch (cancelErr) {
+          debugError("Failed to cancel checkout:", cancelErr)
+        }
+      }
+
       // Initialize Razorpay payment
       await initRazorpayPayment({
         key: razorpay.key,
@@ -1907,14 +1889,14 @@ function Cart() {
         currency: razorpay.currency || 'INR',
         order_id: razorpay.orderId,
         name: companyName,
-        description: `Order ${order._id || order.orderId} - ${RUPEE_SYMBOL}${(razorpay.amount / 100).toFixed(2)}`,
+        description: `Checkout ${checkoutId} - ${RUPEE_SYMBOL}${(razorpay.amount / 100).toFixed(2)}`,
         prefill: {
           name: userName,
           email: userEmail,
           contact: formattedPhone
         },
         notes: {
-          orderId: order._id || order.orderId,
+          checkoutId,
           userId: userInfo.id || "",
           restaurantId: restaurantId || "unknown"
         },
@@ -1923,16 +1905,12 @@ function Cart() {
           try {
             debugLog("? Payment successful, verifying...", {
               razorpay_order_id: response.razorpay_order_id,
-              razorpay_payment_id: response.razorpay_payment_id
+              razorpay_payment_id: response.razorpay_payment_id,
+              checkoutId,
             })
 
-            // Verify payment with backend
-            const verifyOrderId = order?._id || order?.id || order?.orderMongoId
-            if (!verifyOrderId) {
-              throw new Error("Unable to verify payment: missing order id from create-order response")
-            }
             const verifyResponse = await orderAPI.verifyPayment({
-              orderId: verifyOrderId,
+              checkoutId,
               razorpayOrderId: response.razorpay_order_id,
               razorpayPaymentId: response.razorpay_payment_id,
               razorpaySignature: response.razorpay_signature
@@ -1941,26 +1919,8 @@ function Cart() {
             debugLog("? Payment verification response:", verifyResponse.data)
 
             if (verifyResponse.data.success) {
-              // Payment successful
-              debugLog("?? Order placed successfully:", {
-                orderId: order._id || order.orderId,
-                paymentId: verifyResponse.data.data?.payment?.paymentId
-              })
-              setPlacedOrderId(order._id || order.orderId)
-              setOrderSuccessSavingsAmount(platformPricingSavings.totalSavings > 0 ? platformPricingSavings.totalSavings : 0)
-              if (platformPricingSavings.totalSavings > 0) {
-                setCongratssSavingsAmount(platformPricingSavings.totalSavings)
-                setCongratssSavingsPercentage(platformPricingSavings.savingsPercentage)
-                setCongratssSavingsItems(platformPricingSavings.items)
-                setShowSavingsCongrats(true)
-              } else {
-                setShowOrderSuccess(true)
-              }
-              window.dispatchEvent(new CustomEvent('order-placed', { detail: { order } }))
-              clearCart()
-              try {
-                window.localStorage.removeItem('scheduled_order_time')
-              } catch { }
+              const placedOrder = verifyResponse.data.data?.order
+              finalizeSuccessfulOrder(placedOrder)
               releasePlaceOrderLock()
             } else {
               throw new Error(verifyResponse.data.message || "Payment verification failed")
@@ -1981,18 +1941,7 @@ function Cart() {
           if (paymentHandled) return
           paymentHandled = true
           debugError("? Razorpay payment error:", error)
-          // Auto-cancel the unpaid order in backend
-          const cancelOrderId = order?._id || order?.id || order?.orderMongoId
-          if (cancelOrderId) {
-            try {
-              await orderAPI.cancelOrder(cancelOrderId, {
-                reason: "Payment failed or was not completed"
-              })
-            } catch (cancelErr) {
-              debugError("Failed to cancel unpaid order:", cancelErr)
-            }
-          }
-          // Don't show alert for user cancellation
+          await cancelAbandonedCheckout("Payment failed or was not completed")
           if (error?.code !== 'PAYMENT_CANCELLED' && error?.message !== 'PAYMENT_CANCELLED') {
             const errorMessage = error?.description || error?.message || "Payment failed. Please try again."
             alert(errorMessage)
@@ -2005,19 +1954,8 @@ function Cart() {
           if (paymentHandled) return
           paymentHandled = true
           debugLog("?? Payment modal closed by user")
-          // Auto-cancel the unpaid order since user left without paying
-          const cancelOrderId = order?._id || order?.id || order?.orderMongoId
-          if (cancelOrderId) {
-            try {
-              await orderAPI.cancelOrder(cancelOrderId, {
-                reason: "User closed payment gateway without paying"
-              })
-              toast.info("Payment was not completed. No order has been placed.")
-            } catch (cancelErr) {
-              debugError("Failed to cancel unpaid order:", cancelErr)
-              toast.warning("Payment was not completed. If you see a pending order, please cancel it manually.")
-            }
-          }
+          await cancelAbandonedCheckout("User closed payment gateway without paying")
+          toast.info("Payment was not completed. No order has been placed.")
           releasePlaceOrderLock()
         }
       })
@@ -2060,14 +1998,25 @@ function Cart() {
       // Handle other axios errors
       else if (error.response) {
         // Server responded with error status
-        errorMessage = error.response.data?.message || `Server error: ${error.response.status}`
+        errorMessage =
+          error.response.data?.message ||
+          error.response.data?.error?.message ||
+          error.response.data?.errors?.[0]?.message ||
+          `Server error: ${error.response.status}`
       }
       // Handle other errors
       else if (error.message) {
         errorMessage = error.message
       }
 
-      alert(errorMessage)
+      const looksLikeCouponError = /coupon/i.test(String(errorMessage || ""))
+      if (looksLikeCouponError) {
+        setAppliedCoupon(null)
+        setCouponCode("")
+        showCouponError(errorMessage)
+      } else {
+        showCouponError(errorMessage)
+      }
       releasePlaceOrderLock()
     }
   }
@@ -2083,7 +2032,7 @@ function Cart() {
   }
 
   // Empty cart state - but don't show if order success or placing order modal is active
-  if (cart.length === 0 && !showOrderSuccess && !showPlacingOrder && !showSavingsCongrats) {
+  if (cart.length === 0 && !showOrderSuccess && !showSavingsCongrats) {
     return <CartEmptyState onBack={handleBack} />
   }
 
@@ -2093,6 +2042,38 @@ function Cart() {
 
   return (
     <AnimatedPage className="relative min-h-screen bg-[#FAFAFA] dark:bg-[#0a0a0a]">
+      {couponErrorPopup.open && typeof document !== "undefined" && createPortal(
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setCouponErrorPopup({ open: false, message: "" })}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-white dark:bg-[#1a1a1a] shadow-2xl border border-gray-100 dark:border-gray-800 p-5 text-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-red-50 dark:bg-red-950/40">
+              <AlertCircle className="h-6 w-6 text-red-500" />
+            </div>
+            <h3 className="text-base font-bold text-gray-900 dark:text-white mb-2">
+              Coupon not applied
+            </h3>
+            <p className="text-sm text-gray-600 dark:text-gray-300 mb-5 leading-relaxed">
+              {couponErrorPopup.message}
+            </p>
+            <button
+              type="button"
+              className="w-full rounded-xl bg-[#16A34A] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#15803D]"
+              onClick={() => setCouponErrorPopup({ open: false, message: "" })}
+            >
+              OK
+            </button>
+          </div>
+        </div>,
+        document.body,
+      )}
+
       <CartPageHeader
         restaurantName={restaurantName}
         deliveryTime={restaurantData?.estimatedDeliveryTime || "25-35 mins"}
@@ -2114,6 +2095,7 @@ function Cart() {
                 rupeeSymbol={RUPEE_SYMBOL}
                 onUpdateQuantity={updateQuantity}
                 onAddMore={handleBack}
+                restaurantGroups={pricing?.restaurantGroups || []}
               />
 
               {/* Note & Cutlery */}
@@ -2246,115 +2228,87 @@ function Cart() {
             <div className="lg:col-span-5 space-y-3">
               {/* Coupon Section */}
               <div className="rounded-2xl border border-gray-100 bg-white shadow-xs dark:border-gray-800 dark:bg-[#141414] flex flex-col">
-                {deliveryFee === 0 && (
+                {customerDeliveryFee === 0 && (deliveryFee > 0 || deliveryDiscount > 0) && (
                   <div className="px-4 py-2.5 md:px-5 md:py-3 border-b border-dashed border-gray-200 dark:border-gray-800 flex items-center gap-3 bg-[#f4fcf7] dark:bg-green-900/10">
                     <CheckCircle2 className="h-4.5 w-4.5 text-green-600 fill-green-600/20" />
-                    <span className="text-xs md:text-sm font-bold text-gray-800 dark:text-gray-200">You saved {RUPEE_SYMBOL}{feeSettings.deliveryFee || 25} on delivery</span>
+                    <span className="text-xs md:text-sm font-bold text-gray-800 dark:text-gray-200">
+                      You saved {RUPEE_SYMBOL}{(deliveryDiscount || deliveryFee || 0).toFixed(0)} on delivery
+                    </span>
                   </div>
                 )}
 
-                {/* Applied Coupon View */}
-                {appliedCoupon ? (
-                  <div className="px-4 py-2.5 md:px-5 md:py-3 flex items-center justify-between">
-                    <div className="flex items-start gap-3">
-                      <Percent className="h-4.5 w-4.5 text-[#16A34A] mt-0.5" />
-                      <div>
-                        <p className="text-xs md:text-sm font-bold text-gray-850 dark:text-gray-200">'{appliedCoupon.code}' applied</p>
-                        <p className="text-xs text-[#16A34A] font-medium mt-0.5">You saved {RUPEE_SYMBOL}{discount}</p>
-                      </div>
-                    </div>
-                    <button onClick={handleRemoveCoupon} className="text-[#16A34A] text-xs font-bold px-2 hover:underline">REMOVE</button>
-                  </div>
-                ) : (
-                  /* Available / Input View */
-                  <div className="px-4 py-2.5 md:px-5 md:py-3 flex flex-col gap-3">
-                    {loadingCoupons ? (
-                      <p className="text-sm text-gray-500">Loading offers...</p>
-                    ) : availableCoupons.length > 0 ? (
-                      <div className="flex items-start justify-between w-full">
-                        <div className="flex items-start gap-3 flex-1">
-                          <Percent className="h-5 w-5 text-gray-700 dark:text-gray-300 mt-0.5" />
-                          <div className="flex-1">
-                            <p className="text-sm font-semibold text-gray-800 dark:text-gray-200 leading-tight mb-0.5">
-                              {availableCoupons[0].discountDisplay || `Save ${RUPEE_SYMBOL}${availableCoupons[0].discount}`} with '{availableCoupons[0].code}'
-                            </p>
-                            {availableCoupons[0].customerGroup === "new" ? (
-                              <p className="text-[11px] text-[#16A34A] mb-1">First-time users only</p>
-                            ) : subtotal < availableCoupons[0].minOrder ? (
-                              <p className="text-xs text-blue-600 font-medium mb-1">Add items worth {RUPEE_SYMBOL}{(availableCoupons[0].minOrder - subtotal).toFixed(0)} more to unlock</p>
-                            ) : null}
-
-                            {availableCoupons.length > 1 && (
-                              <button onClick={() => setShowCoupons(!showCoupons)} className="text-[11px] text-[#16A34A] hover:underline flex items-center mt-1">
-                                View all coupons <ChevronRight className="h-3 w-3 ml-0.5" />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                        <button
-                          className="border border-[#16A34A] text-[#16A34A] dark:hover:bg-[#16A34A10] rounded px-3 py-1.5 text-xs font-semibold uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed ml-2 shadow-sm"
-                          onClick={() => handleApplyCoupon(availableCoupons[0])}
-                          disabled={subtotal < availableCoupons[0].minOrder || (availableCoupons[0].customerGroup === "new" && userOrderCount > 0)}
-                        >
-                          APPLY
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-3">
-                        <Percent className="h-5 w-5 text-gray-400" />
-                        <p className="text-sm text-gray-500">No offers available</p>
-                      </div>
-                    )}
-
-                    {/* Show All Coupons List */}
-                    {showCoupons && !appliedCoupon && availableCoupons.length > 0 && (
-                      <div className="mt-3 pt-3 border-t border-dashed border-gray-200 dark:border-gray-800 space-y-4">
-                        {/* Input for manual code */}
-                        <div className="flex flex-col sm:flex-row gap-2 mb-4">
-                          <input
-                            type="text"
-                            value={manualCouponCode}
-                            onChange={(e) => setManualCouponCode(e.target.value.toUpperCase())}
-                            placeholder="Enter coupon code"
-                            className="flex-1 h-9 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#0a0a0a] px-3 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:border-[#16A34A]"
-                          />
-                          <button
-                            className="bg-white dark:bg-[#1a1a1a] border border-[#16A34A] text-[#16A34A] rounded px-4 h-9 text-xs font-semibold uppercase hover:bg-[#16A34A05] dark:hover:bg-[#16A34A10]"
-                            onClick={handleApplyCouponCode}
+                <div className="px-4 py-2.5 md:px-5 md:py-3 flex flex-col gap-2">
+                  <div className="flex items-start gap-3">
+                    <Percent className="h-5 w-5 text-gray-700 dark:text-gray-300 mt-2 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5">
+                        {loadingCoupons
+                          ? "Loading coupons..."
+                          : isMultiRestaurantOrder
+                            ? "Platform coupons only (multi-restaurant cart)"
+                            : "Select a coupon (one per order)"}
+                      </p>
+                      {loadingCoupons ? (
+                        <div className="h-9 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#0a0a0a] animate-pulse" />
+                      ) : availableCoupons.length > 0 ? (
+                        <>
+                          <Select
+                            value={appliedCoupon?.code || "__none__"}
+                            onValueChange={(value) => {
+                              if (value === "__none__") {
+                                if (appliedCoupon) {
+                                  setAppliedCoupon(null)
+                                  setCouponCode("")
+                                  hasManuallyRemovedCouponRef.current = true
+                                }
+                                return
+                              }
+                              const coupon = availableCoupons.find((c) => c.code === value)
+                              if (coupon) handleApplyCoupon(coupon)
+                            }}
                           >
-                            APPLY
-                          </button>
-                        </div>
-                        {availableCoupons.slice(1).map((coupon) => (
-                          <div key={coupon.code} className="flex items-start justify-between">
-                            <div className="flex items-start gap-3 flex-1">
-                              <Percent className="h-5 w-5 text-gray-700 dark:text-gray-300 mt-0.5 opacity-50" />
-                              <div className="flex-1">
-                                <p className="text-sm font-semibold text-gray-800 dark:text-gray-200 leading-tight mb-0.5">
-                                  {coupon.discountDisplay || `Save ${RUPEE_SYMBOL}${coupon.discount}`} with '{coupon.code}'
-                                </p>
-                                {coupon.customerGroup === "new" ? (
-                                  <p className="text-[11px] text-[#16A34A] mb-1">First-time users only</p>
-                                ) : subtotal < coupon.minOrder ? (
-                                  <p className="text-xs text-blue-600 font-medium mb-1 line-clamp-1">Add items worth {RUPEE_SYMBOL}{(coupon.minOrder - subtotal).toFixed(0)} more to unlock</p>
-                                ) : (
-                                  <p className="text-xs text-gray-500 mb-1 line-clamp-1">{coupon.description}</p>
-                                )}
-                              </div>
-                            </div>
-                            <button
-                              className="border border-gray-300 text-gray-600 dark:border-gray-600 dark:text-gray-400 rounded px-3 py-1.5 text-xs font-semibold uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed ml-2"
-                              onClick={() => handleApplyCoupon(coupon)}
-                              disabled={subtotal < coupon.minOrder || (coupon.customerGroup === "new" && userOrderCount > 0)}
-                            >
-                              APPLY
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                            <SelectTrigger className="w-full h-10 text-sm">
+                              <SelectValue placeholder="Choose a coupon" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none__">No coupon</SelectItem>
+                              {availableCoupons.map((coupon) => {
+                                const isPlatformFirstTimeBlocked =
+                                  coupon.customerGroup === "new" &&
+                                  coupon.createdBy !== "restaurant" &&
+                                  userOrderCount > 0
+                                const isEligible = (isFreeDeliveryCoupon(coupon) || subtotal >= (Number(coupon.minOrder) || 0))
+                                  && !isPlatformFirstTimeBlocked
+                                const source = coupon.sourceLabel || (coupon.createdBy === "restaurant" ? "Restaurant" : "Platform")
+                                return (
+                                    <SelectItem
+                                    key={coupon.code}
+                                    value={coupon.code}
+                                    disabled={!isEligible}
+                                    >
+                                    {coupon.code} — {coupon.discountDisplay || `Save ${RUPEE_SYMBOL}${coupon.discount}`} ({source})
+                                    </SelectItem>
+                                )
+                              })}
+                            </SelectContent>
+                          </Select>
+                          {appliedCoupon && (
+                            <p className="text-xs text-[#16A34A] font-medium mt-1.5">
+                              '{appliedCoupon.code}' applied
+                              {totalCouponSavings > 0
+                                ? ` · You saved ${RUPEE_SYMBOL}${totalCouponSavings.toFixed(0)}`
+                                : isFreeDeliveryCoupon(appliedCoupon)
+                                  ? " · Free delivery applied"
+                                  : ""}
+                            </p>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-sm text-gray-500">No offers available</p>
+                      )}
+                    </div>
                   </div>
-                )}
+                </div>
               </div>
 
               {/* Delivery Speed Options */}
@@ -2366,12 +2320,18 @@ function Cart() {
                   <span className="text-sm font-extrabold text-gray-800 dark:text-gray-200 tracking-tight">Delivery Speed Options</span>
                 </div>
 
-                {!isScheduled ? (
+                {loadingSpeedOptions ? (
+                  <div className="space-y-2">
+                    {[1, 2, 3].map((i) => (
+                      <div key={i} className="h-[58px] rounded-xl bg-gray-100 dark:bg-gray-800 animate-pulse" />
+                    ))}
+                  </div>
+                ) : !isScheduled && deliveryOptions.length > 0 ? (
                   <div className="space-y-2">
                     {deliveryOptions.map((option) => {
                       const isSelected = deliveryOption === option.id
                       const IconComponent = option.icon
-                      const feeAmount = Math.max(0, baseDeliveryFee + option.feeModifier)
+                      const feeAmount = Math.max(0, deliveryFeeBeforeSpeed + (Number(option.feeModifier) || 0))
 
                       return (
                         <div
@@ -2411,7 +2371,7 @@ function Cart() {
                                 {option.time}
                               </p>
                               <p className="text-[10px] font-semibold text-gray-400 mt-0.5 leading-none">
-                                {feeAmount === 0 ? "FREE" : `${RUPEE_SYMBOL}${feeAmount.toFixed(0)}`}
+                                {feeAmount === 0 ? "FREE" : `${RUPEE_SYMBOL}${feeAmount.toFixed(2)}`}
                               </p>
                             </div>
                             <div className={`h-3.5 w-3.5 rounded-full border flex items-center justify-center shrink-0 ${isSelected ? "border-[#16A34A] bg-[#16A34A]" : "border-gray-300 dark:border-gray-600"
@@ -2423,11 +2383,13 @@ function Cart() {
                       )
                     })}
                   </div>
-                ) : (
+                ) : isScheduled ? (
                   <div className="bg-slate-50 dark:bg-slate-900/40 p-2.5 rounded-xl mb-2 text-center border border-slate-100 dark:border-slate-800">
                     <p className="text-xs font-bold text-slate-850 dark:text-slate-200">Scheduled Order Mode</p>
                     <p className="text-[10px] text-slate-500 mt-0.5">Delivery will arrive at the scheduled time chosen below</p>
                   </div>
+                ) : (
+                  <p className="text-xs text-gray-500 text-center py-2">No delivery speed options available</p>
                 )}
 
                 <div className="mt-3 pt-2.5 border-t border-gray-100 dark:border-gray-800/80">
@@ -2668,7 +2630,7 @@ function Cart() {
                       />
                     </div>
                     <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                      Agar aap kisi aur ke liye order kar rahe ho, to yahan uska naam aur phone save kar do.
+                      Ordering for someone else? Save their name and phone number here.
                     </p>
                   </div>
                 )}
@@ -2739,22 +2701,79 @@ function Cart() {
                 {showBillDetails && (
                   <div className="mt-3 pt-3 border-t border-dashed border-gray-200 dark:border-gray-800 space-y-2">
                     <div className="flex justify-between items-center text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">Item Total</span>
-                      <span className="text-gray-800 dark:text-gray-200 font-medium">{RUPEE_SYMBOL}{subtotal.toFixed(2)}</span>
+                      <span className="text-gray-600 dark:text-gray-400">Food Total</span>
+                      <span className="text-gray-800 dark:text-gray-200 font-medium">{RUPEE_SYMBOL}{billSubtotal.toFixed(2)}</span>
                     </div>
 
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">Delivery Fee</span>
-                      <span className={deliveryFee === 0 ? "text-[#16A34A] font-medium" : "text-gray-800 dark:text-gray-200 font-medium"}>
-                        {deliveryFee === 0 ? "FREE" : `${RUPEE_SYMBOL}${deliveryFee.toFixed(2)}`}
-                      </span>
-                    </div>
+                    {(deliveryFeeBreakdown != null || speedFeeModifier !== 0 || deliveryMultiplierSurcharge > 0) ? (
+                      <>
+                        {deliveryBaseBeforeMultiplier > 0 && (
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-600 dark:text-gray-400">Base Delivery Fee</span>
+                            <span className="text-gray-800 dark:text-gray-200 font-medium">
+                              {RUPEE_SYMBOL}{deliveryBaseBeforeMultiplier.toFixed(2)}
+                            </span>
+                          </div>
+                        )}
+                        {deliveryMultiplierSurcharge > 0 && (
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-600 dark:text-gray-400">
+                              {deliveryFeeBreakdown?.isMultiRestaurant
+                                ? "Multi-restaurant delivery surcharge"
+                                : "Large order delivery surcharge"}
+                            </span>
+                            <span className="text-gray-800 dark:text-gray-200 font-medium">
+                              {RUPEE_SYMBOL}{deliveryMultiplierSurcharge.toFixed(2)}
+                            </span>
+                          </div>
+                        )}
+                        {speedFeeModifier !== 0 && selectedDeliveryOption && (
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-600 dark:text-gray-400">
+                              {speedFeeModifier > 0
+                                ? `${selectedDeliveryOption.name} surcharge`
+                                : `${selectedDeliveryOption.name} discount`}
+                            </span>
+                            <span className={speedFeeModifier < 0 ? "text-[#16A34A] font-medium" : "text-gray-800 dark:text-gray-200 font-medium"}>
+                              {speedFeeModifier < 0 ? "-" : ""}{RUPEE_SYMBOL}{Math.abs(speedFeeModifier).toFixed(2)}
+                            </span>
+                          </div>
+                        )}
+                        <div className="flex justify-between text-sm font-semibold">
+                          <span className="text-gray-700 dark:text-gray-300">Total Delivery Fee</span>
+                          <span className="flex items-center gap-2">
+                            {deliveryDiscount > 0 && deliveryFee > 0 && (
+                              <span className="text-gray-400 line-through text-xs font-normal">
+                                {RUPEE_SYMBOL}{deliveryFee.toFixed(2)}
+                              </span>
+                            )}
+                            <span className={customerDeliveryFee === 0 ? "text-[#16A34A]" : "text-gray-900 dark:text-white"}>
+                              {customerDeliveryFee === 0 ? "FREE" : `${RUPEE_SYMBOL}${customerDeliveryFee.toFixed(2)}`}
+                            </span>
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-600 dark:text-gray-400">Delivery Fee</span>
+                        <span className="flex items-center gap-2">
+                          {deliveryDiscount > 0 && deliveryFee > 0 && (
+                            <span className="text-gray-400 line-through text-xs font-normal">
+                              {RUPEE_SYMBOL}{deliveryFee.toFixed(2)}
+                            </span>
+                          )}
+                          <span className={customerDeliveryFee === 0 ? "text-[#16A34A] font-medium" : "text-gray-800 dark:text-gray-200 font-medium"}>
+                            {customerDeliveryFee === 0 ? "FREE" : `${RUPEE_SYMBOL}${customerDeliveryFee.toFixed(2)}`}
+                          </span>
+                        </span>
+                      </div>
+                    )}
                     {deliveryFeeBreakdownText && (
                       <div className="text-[11px] text-gray-500 dark:text-gray-400 -mt-1.5 ml-1 border-l-2 border-gray-100 pl-2">
                         {deliveryFeeBreakdownText}
                       </div>
                     )}
-                    {isMultiRestaurantOrder && multiRestaurantExtraCharge > 0 && (
+                    {isMultiRestaurantOrder && (
                       <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/40 rounded-lg p-2.5 -mx-1 mt-1">
                         <div className="flex items-start gap-2">
                           <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
@@ -2763,7 +2782,7 @@ function Cart() {
                               Multiple restaurants selected
                             </p>
                             <p className="text-[10px] text-amber-800 dark:text-amber-200 mt-0.5">
-                              Extra {RUPEE_SYMBOL}{multiRestaurantExtraCharge} charge applies for multi-restaurant orders
+                              Delivery fee includes a surcharge for orders from multiple restaurants
                             </p>
                           </div>
                         </div>
@@ -2771,22 +2790,32 @@ function Cart() {
                     )}
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-600 dark:text-gray-400">Platform Fee</span>
-                      <span className="text-gray-800 dark:text-gray-200 font-medium">{RUPEE_SYMBOL}{platformFee.toFixed(2)}</span>
+                      <span className="text-gray-800 dark:text-gray-200 font-medium">{RUPEE_SYMBOL}{billPlatformFee.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">Packaging Charges</span>
-                      <span className="text-gray-800 dark:text-gray-200 font-medium">{RUPEE_SYMBOL}{packagingFee.toFixed(2)}</span>
+                      <span className="text-gray-600 dark:text-gray-400">Packaging Total</span>
+                      <span className="text-gray-800 dark:text-gray-200 font-medium">{RUPEE_SYMBOL}{billPackagingFee.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-600 dark:text-gray-400">GST</span>
-                      <span className="text-gray-800 dark:text-gray-200 font-medium">{RUPEE_SYMBOL}{gstCharges.toFixed(2)}</span>
+                      <span className="text-gray-800 dark:text-gray-200 font-medium">{RUPEE_SYMBOL}{billTax.toFixed(2)}</span>
                     </div>
-                    {discount > 0 && (
+                    {billDiscount > 0 && (
                       <div className="flex justify-between text-sm text-[#16A34A] font-medium">
                         <span>Coupon Discount</span>
-                        <span>-{RUPEE_SYMBOL}{discount.toFixed(2)}</span>
+                        <span>-{RUPEE_SYMBOL}{billDiscount.toFixed(2)}</span>
                       </div>
                     )}
+                    {deliveryDiscount > 0 && (
+                      <div className="flex justify-between text-sm text-[#16A34A] font-medium">
+                        <span>Free Delivery (Coupon)</span>
+                        <span>-{RUPEE_SYMBOL}{deliveryDiscount.toFixed(2)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between items-center text-sm font-bold border-t border-gray-200 dark:border-gray-700 pt-2 mt-1">
+                      <span className="text-gray-900 dark:text-white">Grand Total</span>
+                      <span className="text-gray-900 dark:text-white">{RUPEE_SYMBOL}{total.toFixed(2)}</span>
+                    </div>
 
                     {/* Platform Pricing Comparison - Bottom */}
                     {platformPricingSavings.hasPlatformPricing && (
@@ -2860,94 +2889,18 @@ function Cart() {
         onContinueReviewing={handleContinueReviewingCart}
       />
 
-      {/* Placing Order Modal */}
-      {showPlacingOrder && (
-        <div className="fixed inset-0 z-[60] h-screen w-screen overflow-hidden">
-          {/* Backdrop */}
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-
-          {/* Modal Sheet */}
-          <div
-            className="absolute bottom-0 left-0 right-0 bg-white rounded-t-3xl shadow-2xl overflow-hidden"
-            style={{ animation: 'slideUpModal 0.4s cubic-bezier(0.16, 1, 0.3, 1)' }}
-          >
-            <div className="px-6 py-8">
-              {/* Title */}
-              <h2 className="text-2xl font-bold text-gray-900 mb-6">Placing your order</h2>
-
-              {/* Payment Info */}
-              <div className="flex items-center gap-4 mb-5">
-                <div className="w-14 h-14 rounded-xl border border-gray-200 flex items-center justify-center bg-white shadow-sm">
-                  <CreditCard className="w-6 h-6 text-gray-600" />
-                </div>
-                <div>
-                  <p className="text-lg font-semibold text-gray-900">
-                    {selectedPaymentMethod === "razorpay"
-                      ? `Pay ${RUPEE_SYMBOL}${total.toFixed(2)} online (Razorpay)`
-                      : selectedPaymentMethod === "wallet"
-                        ? `Pay ${RUPEE_SYMBOL}${total.toFixed(2)} from Wallet`
-                        : `Pay on delivery (COD)`}
-                  </p>
-                </div>
-              </div>
-
-              {/* Delivery Address */}
-              <div className="flex items-center gap-4 mb-8">
-                <div className="w-14 h-14 rounded-xl border border-gray-200 flex items-center justify-center bg-gray-50">
-                  <svg className="w-7 h-7 text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                    <path d="M9 22V12h6v10" />
-                  </svg>
-                </div>
-                <div>
-                  <p className="text-lg font-semibold text-gray-900">Delivering to Location</p>
-                  <p className="text-sm text-gray-600 mt-1">
-                    {defaultAddress ? (formatFullAddress(defaultAddress) || defaultAddress?.formattedAddress || defaultAddress?.address || "Address") : "Add address"}
-                  </p>
-                  <p className="text-sm text-gray-500">
-                    {defaultAddress ? (formatFullAddress(defaultAddress) || "Address") : "Address"}
-                  </p>
-                </div>
-              </div>
-
-              {/* Progress Bar */}
-              <div className="relative mb-6">
-                <div className="h-2.5 bg-gray-200 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-gradient-to-r from-[#16A34A] to-[#15803D] rounded-full transition-all duration-100 ease-linear"
-                    style={{
-                      width: `${orderProgress}%`,
-                      boxShadow: '0 0 10px rgba(126, 56, 102, 0.5)'
-                    }}
-                  />
-                </div>
-                {/* Animated shimmer effect */}
-                <div
-                  className="absolute inset-0 h-2.5 rounded-full overflow-hidden pointer-events-none"
-                  style={{
-                    background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent)',
-                    animation: 'shimmer 1.5s infinite',
-                    width: `${orderProgress}%`
-                  }}
-                />
-              </div>
-
-              {/* Cancel Button */}
-              <button
-                onClick={() => {
-                  setShowPlacingOrder(false)
-                  releasePlaceOrderLock()
-                }}
-                className="w-full text-right"
-              >
-                <span className="text-[#16A34A] font-semibold text-base hover:text-[#15803D] transition-colors">
-                  CANCEL
-                </span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <AddMoneyModal
+        open={showAddMoneyModal}
+        onOpenChange={setShowAddMoneyModal}
+        initialAmount={Math.max(1, Math.ceil(Math.max(0, total - walletBalance)))}
+        onSuccess={async () => {
+          const balance = await refreshWalletBalance()
+          if (balance >= total) {
+            setSelectedPaymentMethod("wallet")
+            setShowPaymentSheet(false)
+          }
+        }}
+      />
 
       {/* Savings Congratulations Page */}
       {showSavingsCongrats && (
@@ -3213,22 +3166,23 @@ function Cart() {
                       icon: <Wallet className="w-5 h-5" />,
                       color: 'bg-blue-50 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400',
                       selectedColor: 'bg-blue-500 text-white',
-                      subInfo: `Bal: ${RUPEE_SYMBOL}${walletBalance.toFixed(0)}`,
-                      disabled: walletBalance < total,
-                      disabledText: 'Low Balance'
+                      subInfo: isLoadingWallet
+                        ? 'Loading…'
+                        : `Bal: ${RUPEE_SYMBOL}${walletBalance.toFixed(0)}`,
+                      disabled: !isLoadingWallet && walletBalance < total,
+                      disabledText: 'Low Balance',
+                      allowAddMoney: !isLoadingWallet && walletBalance < total,
                     },
-                    {
-                      id: 'cash',
-                      name: 'Cash on Delivery',
-                      description: 'Pay when order arrives',
-                      icon: <Banknote className="w-5 h-5" />,
-                      color: 'bg-orange-50 text-#15803D dark:bg-orange-900/40 dark:text-orange-400',
-                      selectedColor: 'bg-[#16A34A] text-white'
-                    }
                   ].map((option) => (
                     <button
                       key={option.id}
+                      type="button"
                       onClick={() => {
+                        if (option.allowAddMoney) {
+                          setShowPaymentSheet(false)
+                          setShowAddMoneyModal(true)
+                          return
+                        }
                         if (!option.disabled) {
                           setSelectedPaymentMethod(option.id)
                           setShowPaymentSheet(false)
@@ -3236,8 +3190,10 @@ function Cart() {
                       }}
                       className={`w-full flex items-center justify-between p-4 rounded-2xl border-2 transition-all duration-300 group ${selectedPaymentMethod === option.id
                         ? 'border-[#16A34A] bg-[#16A34A] shadow-lg shadow-[#16A34A]/30'
-                        : 'border-gray-100 dark:border-gray-800/80 bg-white dark:bg-[#222222] hover:border-[#16A34A]/30 dark:hover:border-[#16A34A]/30 shadow-sm'
-                        } ${option.disabled ? 'opacity-40 grayscale-[0.8] cursor-not-allowed' : 'cursor-pointer active:scale-[0.98]'}`}
+                        : option.allowAddMoney
+                          ? 'border-amber-200 dark:border-amber-800/60 bg-amber-50/50 dark:bg-amber-950/20 hover:border-amber-400 dark:hover:border-amber-600 shadow-sm cursor-pointer active:scale-[0.98]'
+                          : 'border-gray-100 dark:border-gray-800/80 bg-white dark:bg-[#222222] hover:border-[#16A34A]/30 dark:hover:border-[#16A34A]/30 shadow-sm'
+                        } ${option.disabled && !option.allowAddMoney ? 'opacity-40 grayscale-[0.8] cursor-not-allowed' : option.allowAddMoney ? '' : 'cursor-pointer active:scale-[0.98]'}`}
                     >
                       <div className="flex items-center gap-4">
                         <div className={`w-11 h-11 rounded-xl flex items-center justify-center transition-all duration-300 ${selectedPaymentMethod === option.id
@@ -3266,18 +3222,27 @@ function Cart() {
                               }`}>
                               {option.description}
                             </p>
-                            {option.subInfo && !option.disabled && (
+                            {option.subInfo && (
                               <>
                                 <span className={`w-1 h-1 rounded-full ${selectedPaymentMethod === option.id ? 'bg-white/40' : 'bg-orange-300 dark:bg-orange-700'
                                   }`} />
-                                <p className={`text-[10px] font-black uppercase tracking-tighter transition-colors ${selectedPaymentMethod === option.id ? 'text-white' : 'text-green-600 dark:text-green-500'
+                                <p className={`text-[10px] font-black uppercase tracking-tighter transition-colors ${selectedPaymentMethod === option.id
+                                  ? 'text-white'
+                                  : option.allowAddMoney
+                                    ? 'text-amber-600 dark:text-amber-400'
+                                    : 'text-green-600 dark:text-green-500'
                                   }`}>
                                   {option.subInfo}
                                 </p>
                               </>
                             )}
                           </div>
-                          {option.disabled && (
+                          {option.allowAddMoney && (
+                            <p className="text-[10px] font-bold text-amber-600 dark:text-amber-400 mt-1.5">
+                              {option.disabledText} · Tap to add money
+                            </p>
+                          )}
+                          {option.disabled && !option.allowAddMoney && (
                             <p className="text-[9px] font-black text-red-500 mt-1 uppercase tracking-wide">
                               {option.disabledText}
                             </p>
@@ -3285,12 +3250,19 @@ function Cart() {
                         </div>
                       </div>
 
-                      <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all duration-300 ${selectedPaymentMethod === option.id
-                        ? 'bg-white border-white'
-                        : 'border-gray-200 dark:border-gray-700'
-                        }`}>
-                        {selectedPaymentMethod === option.id && <Check className="w-3.5 h-3.5 text-[#16A34A]" strokeWidth={4} />}
-                      </div>
+                      {option.allowAddMoney ? (
+                        <span className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-[#16A34A] text-white text-[11px] font-bold shadow-sm shrink-0">
+                          <Plus className="w-3.5 h-3.5" />
+                          Add
+                        </span>
+                      ) : (
+                        <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all duration-300 ${selectedPaymentMethod === option.id
+                          ? 'bg-white border-white'
+                          : 'border-gray-200 dark:border-gray-700'
+                          }`}>
+                          {selectedPaymentMethod === option.id && <Check className="w-3.5 h-3.5 text-[#16A34A]" strokeWidth={4} />}
+                        </div>
+                      )}
                     </button>
                   ))}
                 </div>

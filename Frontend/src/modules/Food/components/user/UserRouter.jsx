@@ -98,6 +98,15 @@ export default function UserRouter() {
   return (
     <Suspense fallback={<Loader />}>
       <Routes>
+        {/* Public legal pages (login + shared links) */}
+        <Route path="terms" element={<Terms />} />
+        <Route path="privacy" element={<Privacy />} />
+        <Route path="refund" element={<Refund />} />
+        <Route path="shipping" element={<Shipping />} />
+        <Route path="cancellation" element={<Cancellation />} />
+        <Route path="about" element={<About />} />
+
+
         <Route element={<UserLayout />}>
           {/* Home & Discovery */}
           <Route path="" element={<Home />} />

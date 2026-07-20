@@ -12,7 +12,6 @@ export default function FssaiDetails() {
       title="FSSAI details"
       subtitle="No live restaurant license data available"
       backTo={`${RESTAURANT_BASE}/explore`}
-      showBottomNav
     >
       <PanelSurface className="mb-4 flex items-start gap-3 border-amber-200 bg-[#ffe9b3] p-4">
         <div className="mt-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/80 text-xs font-semibold text-white">

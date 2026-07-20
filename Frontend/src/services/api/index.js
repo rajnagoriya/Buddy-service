@@ -396,18 +396,18 @@ export const adminAPI = {
     deliveryBoySettingsCache.clear("settings");
     return apiClient.put('/food/admin/delivery-boy-settings', body ?? {}, { contextModule: "admin" });
   },
-  approveDeliveryPartner: (id) =>
+  approveDeliveryPartner: (id, service = 'food') =>
     apiClient.patch(
       `/food/admin/delivery/${String(id)}/approve`,
-      {},
+      { service },
       {
         contextModule: "admin",
       },
     ),
-  rejectDeliveryPartner: (id, reason) =>
+  rejectDeliveryPartner: (id, reason, service = 'food') =>
     apiClient.patch(
       `/food/admin/delivery/${String(id)}/reject`,
-      { reason: String(reason || "").trim() },
+      { reason: String(reason || "").trim(), service },
       {
         contextModule: "admin",
       },
@@ -625,17 +625,39 @@ export const adminAPI = {
   /** Orders (admin) – list, get by id, assign delivery partner */
   getOrders: (params = {}) =>
     apiClient.get("/food/admin/orders", {
-      params: { limit: 50, page: 1, ...params },
+      params: { limit: 30, page: 1, ...params },
       contextModule: "admin",
     }),
   getOrderById: (orderId) =>
     apiClient.get(`/food/admin/orders/${String(orderId)}`, {
       contextModule: "admin",
     }),
+  cancelOrder: (orderId, bodyOrReason = {}) => {
+    const body =
+      typeof bodyOrReason === "string"
+        ? { reason: bodyOrReason }
+        : bodyOrReason ?? {};
+    return apiClient.patch(
+      `/food/admin/orders/${String(orderId)}/cancel`,
+      body,
+      { contextModule: "admin" },
+    );
+  },
+  getMultiOrderSettlementReport: (params = {}) =>
+    apiClient.get("/food/admin/orders/settlement-report", {
+      params,
+      contextModule: "admin",
+    }),
   deleteOrder: (orderId) =>
     apiClient.delete(`/food/admin/orders/${String(orderId)}`, {
       contextModule: "admin",
     }),
+  assignDeliveryPartner: (orderId, deliveryPartnerId) =>
+    apiClient.patch(
+      `/food/admin/orders/${String(orderId)}/assign-delivery`,
+      { deliveryPartnerId: String(deliveryPartnerId) },
+      { contextModule: "admin" },
+    ),
   /** Dispatch settings – auto vs manual assign (global) */
   /** Create restaurant (admin). Single API: POST /food/admin/restaurants. Body: JSON with image URLs. */
   createRestaurant: (body) =>
@@ -722,6 +744,10 @@ export const adminAPI = {
     apiClient.post("/food/admin/offers", body ?? {}, {
       contextModule: "admin",
     }),
+  updateAdminOffer: (offerId, body) =>
+    apiClient.patch(`/food/admin/offers/${String(offerId)}`, body ?? {}, {
+      contextModule: "admin",
+    }),
   updateAdminOfferCartVisibility: (offerId, itemId, showInCart) =>
     apiClient.patch(
       `/food/admin/offers/${String(offerId)}/cart-visibility`,
@@ -730,6 +756,23 @@ export const adminAPI = {
     ),
   deleteAdminOffer: (offerId) =>
     apiClient.delete(`/food/admin/offers/${String(offerId)}`, {
+      contextModule: "admin",
+    }),
+  approveAdminOffer: (offerId) =>
+    apiClient.patch(`/food/admin/offers/${String(offerId)}/approve`, {}, {
+      contextModule: "admin",
+    }),
+  rejectAdminOffer: (offerId, reason) =>
+    apiClient.patch(`/food/admin/offers/${String(offerId)}/reject`, { reason }, {
+      contextModule: "admin",
+    }),
+  getAdminOfferAnalytics: (offerId) =>
+    apiClient.get(`/food/admin/offers/${String(offerId)}/analytics`, {
+      contextModule: "admin",
+    }),
+  getAdminOfferUsageHistory: (offerId, params = {}) =>
+    apiClient.get(`/food/admin/offers/${String(offerId)}/history`, {
+      params,
       contextModule: "admin",
     }),
 
@@ -821,11 +864,6 @@ export const adminAPI = {
     apiClient.patch(`/food/admin/delivery/withdrawals/${String(id)}`, body, {
       contextModule: "admin",
     }),
-  getCashLimitSettlements: (params = {}) =>
-    apiClient.get("/food/admin/delivery/cash-limit-settlements", {
-      params,
-      contextModule: "admin",
-    }),
 
   /** Restaurant Commission (admin) */
   getRestaurantCommissionBootstrap: () =>
@@ -897,6 +935,8 @@ export const adminAPI = {
   /** Fee Settings (admin) */
   getFeeSettings: () =>
     apiClient.get("/food/admin/fee-settings", { contextModule: "admin" }),
+  getPublicFeeSettings: (config = {}) =>
+    apiClient.get("/food/admin/fee-settings/public", config),
   createOrUpdateFeeSettings: (body) =>
     apiClient.put("/food/admin/fee-settings", body ?? {}, {
       contextModule: "admin",
@@ -930,16 +970,6 @@ export const adminAPI = {
     ),
   deleteSafetyEmergencyReport: (id) =>
     apiClient.delete(`/food/admin/safety-emergency-reports/${String(id)}`, {
-      contextModule: "admin",
-    }),
-
-  /** Delivery Cash Limit (admin) */
-  getDeliveryCashLimit: () =>
-    apiClient.get("/food/admin/delivery-cash-limit", {
-      contextModule: "admin",
-    }),
-  updateDeliveryCashLimit: (body) =>
-    apiClient.patch("/food/admin/delivery-cash-limit", body ?? {}, {
       contextModule: "admin",
     }),
 
@@ -1138,39 +1168,115 @@ export const restaurantAPI = {
   },
   /** Public Offers for users (global/selected restaurant) */
   getPublicOffers: () => apiClient.get("/food/restaurant/offers"),
+  getRestaurantPageOffers: (restaurantId) =>
+    apiClient.get(`/food/restaurant/restaurants/${String(restaurantId)}/offers`),
+  getDeliverySpeedOptions: (config = {}) =>
+    apiClient.get("/food/restaurant/delivery-speed-options", config),
+  getPublicCheckoutSettings: (config = {}) =>
+    apiClient.get("/food/restaurant/checkout-settings/public", config),
   /** Backward-compat helper used by Cart: returns coupons array for an item by adapting public offers */
-  getCouponsByItemIdPublic: (restaurantId, _itemId) =>
+  getCouponsByItemIdPublic: (restaurantIds, _itemId) =>
     apiClient.get("/food/restaurant/offers").then((res) => {
       const list = res?.data?.data?.allOffers || res?.data?.allOffers || [];
+      const idList = Array.isArray(restaurantIds)
+        ? restaurantIds.map((id) => String(id || "")).filter(Boolean)
+        : [String(restaurantIds || "")].filter(Boolean);
       const now = Date.now();
       const coupons = list
+        .filter((o) => o.showInCart !== false)
         .filter((o) => {
-          // Guard: respect selected restaurant scope
           if (String(o?.restaurantScope) === "selected") {
-            if (!restaurantId) return false;
-            return String(o.restaurantId || "") === String(restaurantId || "");
+            if (!idList.length) return false;
+            return idList.includes(String(o.restaurantId || ""));
           }
           return true;
         })
         .map((o) => {
+          const isFreeDel = o.couponCategory === "free_delivery" || o.isFreeDelivery
+          if (isFreeDel) {
+            return {
+              couponCode: o.couponCode,
+              code: o.couponCode,
+              discountType: "free_delivery",
+              discountPercentage: 0,
+              discount: 0,
+              discountValue: 0,
+              originalPrice: 0,
+              discountedPrice: 0,
+              minOrderValue: Number(o.minOrderValue || 0),
+              minOrder: Number(o.minOrderValue || 0),
+              maxDiscount: null,
+              customerGroup: o.customerScope === "first-time" ? "new" : "all",
+              customerScope: o.customerScope || "all",
+              isGlobalCoupon: o.restaurantScope !== "selected",
+              restaurantScope: o.restaurantScope || "all",
+              restaurantId: o.restaurantId || null,
+              createdBy: o.createdBy || "admin",
+              couponCategory: "free_delivery",
+              isFreeDelivery: true,
+              freeDelivery: true,
+              discountDisplay: "FREE DELIVERY",
+              sourceLabel: o.createdBy === "restaurant" ? "Restaurant" : "Platform",
+              endDate: o.endDate || null,
+              showInCart: o.showInCart !== false,
+              _ts: now,
+            };
+          }
           const isPct = o.discountType === "percentage";
           return {
             couponCode: o.couponCode,
+            code: o.couponCode,
             discountType: o.discountType,
             discountPercentage: isPct ? Number(o.discountValue) || 0 : 0,
+            discount: isPct ? 0 : Number(o.discountValue) || 0,
+            discountValue: Number(o.discountValue) || 0,
             originalPrice: 0,
             discountedPrice: 0,
             minOrderValue: Number(o.minOrderValue || 0),
             minOrder: Number(o.minOrderValue || 0),
             maxDiscount: o.maxDiscount != null ? Number(o.maxDiscount) : null,
-            customerGroup: o.customerScope || "all",
-            isGlobalCoupon: true,
+            customerGroup: o.customerScope === "first-time" ? "new" : "all",
+            customerScope: o.customerScope || "all",
+            isGlobalCoupon: o.restaurantScope !== "selected",
+            restaurantScope: o.restaurantScope || "all",
+            restaurantId: o.restaurantId || null,
+            createdBy: o.createdBy || "admin",
+            couponCategory: o.couponCategory || "normal",
+            isFreeDelivery: o.couponCategory === "free_delivery",
+            sourceLabel: o.createdBy === "restaurant" ? "Restaurant" : "Platform",
             endDate: o.endDate || null,
             showInCart: o.showInCart !== false,
             _ts: now,
           };
         });
       return { data: { success: true, data: { coupons } } };
+    }),
+  getMyOffers: () =>
+    apiClient.get("/food/restaurant/my-offers", { contextModule: "restaurant" }),
+  createMyOffer: (body) =>
+    apiClient.post("/food/restaurant/my-offers", body ?? {}, {
+      contextModule: "restaurant",
+    }),
+  updateMyOffer: (offerId, body) =>
+    apiClient.patch(`/food/restaurant/my-offers/${String(offerId)}`, body ?? {}, {
+      contextModule: "restaurant",
+    }),
+  reapplyMyOffer: (offerId) =>
+    apiClient.patch(`/food/restaurant/my-offers/${String(offerId)}/reapply`, {}, {
+      contextModule: "restaurant",
+    }),
+  deleteMyOffer: (offerId) =>
+    apiClient.delete(`/food/restaurant/my-offers/${String(offerId)}`, {
+      contextModule: "restaurant",
+    }),
+  getMyOfferAnalytics: (offerId) =>
+    apiClient.get(`/food/restaurant/my-offers/${String(offerId)}/analytics`, {
+      contextModule: "restaurant",
+    }),
+  getMyOfferUsageHistory: (offerId, params = {}) =>
+    apiClient.get(`/food/restaurant/my-offers/${String(offerId)}/history`, {
+      params,
+      contextModule: "restaurant",
     }),
   /** Categories (restaurant dashboard) */
   getCategories: (params = {}) =>
@@ -1261,6 +1367,10 @@ export const restaurantAPI = {
     apiClient.patch(`/food/restaurant/foods/${String(id)}`, body ?? {}, {
       contextModule: "restaurant",
     }),
+  deleteFood: (id) =>
+    apiClient.delete(`/food/restaurant/foods/${String(id)}`, {
+      contextModule: "restaurant",
+    }),
   /** Orders (restaurant dashboard) */
   getOrders: (() => {
     // Single-flight de-dupe to avoid duplicate GETs in React StrictMode / double-mount.
@@ -1297,7 +1407,20 @@ export const restaurantAPI = {
 
           // Normalize backend order fields to match existing restaurant UI expectations.
           // UI historically uses: order.status, order.address, order.total, order.paymentMethod
-          const normalizeStatus = (s) => {
+          const normalizeStatus = (s, order) => {
+            // Prefer this restaurant's own pickup status when present (multi-restaurant)
+            const pickupStatus = String(
+              order?.myPickupStatus
+              || order?.pickups?.[0]?.status
+              || "",
+            ).toLowerCase();
+            if (pickupStatus === "pending") return "confirmed"; // awaiting restaurant accept
+            if (pickupStatus === "accepted") return "confirmed";
+            if (pickupStatus === "preparing") return "preparing";
+            if (pickupStatus === "ready" || pickupStatus === "ready_for_handover") return "ready";
+            if (pickupStatus === "picked_up") return "out_for_delivery";
+            if (pickupStatus === "cancelled") return "cancelled";
+
             const v = String(s || "").toLowerCase();
             // Backend: created -> treat as confirmed/new in UI
             if (v === "created") return "confirmed";
@@ -1310,18 +1433,18 @@ export const restaurantAPI = {
           };
 
           const rows = rowsRaw.map((o) => {
-            const status = normalizeStatus(o.orderStatus || o.status);
+            const status = normalizeStatus(o.orderStatus || o.status, o);
             const address = o.deliveryAddress || o.address;
             const total = o.pricing?.total ?? o.total ?? 0;
             const paymentMethod = o.payment?.method || o.paymentMethod || null;
             return { ...o, status, address, total, paymentMethod };
           });
-          const meta = payload.meta || {};
+          const meta = payload.meta || payload.pagination || {};
           const normalized = {
             ...res,
             data: {
               ...res.data,
-              data: { orders: rows, meta },
+              data: { orders: rows, meta, pagination: meta },
             },
           };
 
@@ -1539,7 +1662,7 @@ export const invalidateUserCartCache = () => {
 
 const getPublicRestaurantDetailOnce = (id, config = {}) => {
   const safeId = String(id || "").trim();
-  const { noCache, ...axiosConfig } = config || {};
+  const { noCache, params, ...axiosConfig } = config || {};
   if (!safeId) {
     return Promise.resolve({
       data: { success: false, data: null },
@@ -1549,14 +1672,24 @@ const getPublicRestaurantDetailOnce = (id, config = {}) => {
       config: {},
     });
   }
+  // Round to ~111m so nearby GPS jitter still hits the in-flight cache.
+  const keyParams = { ...params };
+  if (keyParams.lat != null && Number.isFinite(Number(keyParams.lat))) {
+    keyParams.lat = Math.round(Number(keyParams.lat) * 1000) / 1000;
+  }
+  if (keyParams.lng != null && Number.isFinite(Number(keyParams.lng))) {
+    keyParams.lng = Math.round(Number(keyParams.lng) * 1000) / 1000;
+  }
   if (noCache) {
     return apiClient.get(`/food/restaurant/restaurants/${safeId}`, {
+      params: keyParams,
       ...axiosConfig,
     });
   }
-  const key = `detail:${safeId}`;
+  const key = `detail:${safeId}:${stableStringify(keyParams)}`;
   return publicRestaurantDetailCache.getOrCreate(key, () =>
     apiClient.get(`/food/restaurant/restaurants/${safeId}`, {
+      params: keyParams,
       ...axiosConfig,
     }),
   );
@@ -1690,6 +1823,11 @@ export const landingAPI = {
     publicGetOnce("/food/explore-icons/public", config),
   getLandingSettingsPublic: (config = {}) =>
     publicGetOnce("/food/landing/settings/public", config),
+};
+
+export const pageAPI = {
+  getPublic: (key, config = {}) =>
+    publicGetOnce(`/food/pages/${String(key || "").trim().toLowerCase()}`, config),
 };
 
 const publicZonesCache = createInFlightCache({ ttlMs: 5 * 60 * 1000 });
@@ -2019,10 +2157,10 @@ export const deliveryAPI = {
         contextModule: "delivery",
       },
     ),
-  resendOrderToRestaurant: (orderId) =>
+  resendOrderToRestaurant: (orderId, restaurantId) =>
     apiClient.post(
       `/food/delivery/orders/${String(orderId)}/resend-to-restaurant`,
-      {},
+      restaurantId ? { restaurantId: String(restaurantId) } : {},
       {
         contextModule: "delivery",
       },
@@ -2373,14 +2511,11 @@ export const userAPI = {
       contextModule: "user",
     }),
   /**
-   * Legacy UI compatibility: update "current user location".
-   * We already persist the user's selected location in localStorage in the UI.
-   * Keep this as a no-op success so existing flows don't break.
+   * POST /food/user/location (Bearer USER) - persists the raw "current
+   * location" GPS ping (independent of any saved address) to the backend.
    */
-  updateLocation: (_payload) =>
-    Promise.resolve({
-      data: { success: true, message: "Location saved (client)", data: null },
-    }),
+  updateLocation: (payload) =>
+    apiClient.post("/food/user/location", payload, { contextModule: "user" }),
   saveFcmToken: (token, options = {}) => {
     if (!token) return Promise.reject(new Error("FCM token is required"));
     const platform = options?.platform === "mobile" ? "mobile" : "web";
@@ -2411,7 +2546,16 @@ export const userAPI = {
   deleteAccount: () =>
     apiClient.delete("/food/user/account", { contextModule: "user" }),
 };
-export const locationAPI = createStubAPI();
+export const locationAPI = {
+  /**
+   * GET /location/reverse-geocode?lat=&lng= - shared endpoint (any
+   * authenticated actor). Backend does the Google Geocode API call + caching
+   * server-side so the API key is never exposed to the browser.
+   * Response shape: { lat, lng, formattedAddress, addressLine1, area, city, state, pincode, country, placeId }
+   */
+  reverseGeocode: (lat, lng) =>
+    apiClient.get("/location/reverse-geocode", { params: { lat, lng } }),
+};
 export const zoneAPI = {
   /** Public: detect active service zone for a lat/lng point. */
   detectZone: (lat, lng, config = {}) => {
@@ -2497,6 +2641,10 @@ export const orderAPI = {
     apiClient.post("/food/orders", payload ?? {}, { contextModule: "user" }),
   verifyPayment: (body) =>
     apiClient.post("/food/orders/verify-payment", body ?? {}, {
+      contextModule: "user",
+    }),
+  cancelCheckout: (checkoutId) =>
+    apiClient.post(`/food/orders/checkout/${String(checkoutId)}/cancel`, {}, {
       contextModule: "user",
     }),
   getOrders: (() => {

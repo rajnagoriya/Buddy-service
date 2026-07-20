@@ -6,8 +6,6 @@ import {
 
   Package,
 
-  Compass,
-
   Info,
 
   Clock,
@@ -50,25 +48,13 @@ import {
 
   Grid3x3,
 
+  Tag,
+
 } from "lucide-react"
 
 
 
 export const RESTAURANT_BASE = "/food/restaurant"
-
-
-
-export const BOTTOM_NAV_TABS = [
-
-  { id: "home", label: "Home", icon: LayoutDashboard, route: `${RESTAURANT_BASE}` },
-
-  { id: "orders", label: "Orders", icon: FileText, route: `${RESTAURANT_BASE}/orders/live` },
-
-  { id: "inventory", label: "Menu", icon: Package, route: `${RESTAURANT_BASE}/inventory` },
-
-  { id: "more", label: "More", icon: Compass, route: `${RESTAURANT_BASE}/explore` },
-
-]
 
 
 
@@ -139,6 +125,8 @@ export const SIDEBAR_SECTIONS = [
       { id: "inventory", label: "Menu inventory", icon: Package, route: `${RESTAURANT_BASE}/inventory` },
 
       { id: "menu-categories", label: "Categories", icon: Grid3x3, route: `${RESTAURANT_BASE}/menu-categories` },
+
+      { id: "coupons", label: "Coupons & offers", icon: Tag, route: `${RESTAURANT_BASE}/coupons` },
 
     ],
 
@@ -239,6 +227,8 @@ export const EXPLORE_SECTIONS = [
       { id: "menu-categories", label: "Categories", icon: Grid3x3, route: `${RESTAURANT_BASE}/menu-categories` },
 
       { id: "rush-hour", label: "Rush hour", icon: Clock, route: `${RESTAURANT_BASE}/rush-hour` },
+
+      { id: "coupons", label: "Coupons & offers", icon: Tag, route: `${RESTAURANT_BASE}/coupons` },
 
     ],
 

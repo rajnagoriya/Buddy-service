@@ -19,6 +19,7 @@ import {
     invalidateAfterOfferMutation,
     invalidateAfterZoneMutation,
     invalidateAfterDiningAdminMutation,
+    invalidateAfterDeliveryBoySettingsMutation,
 } from '../../utils/foodCacheInvalidation.js';
 
 const router = express.Router();
@@ -30,9 +31,11 @@ const invAddon = withFoodCacheInvalidation(invalidateAfterAdminAddonMutation);
 const invOffer = withFoodCacheInvalidation(invalidateAfterOfferMutation);
 const invZone = withFoodCacheInvalidation(invalidateAfterZoneMutation);
 const invDining = withFoodCacheInvalidation(invalidateAfterDiningAdminMutation);
+const invDeliveryBoySettings = withFoodCacheInvalidation(invalidateAfterDeliveryBoySettingsMutation);
 
 // ----- Public Business Settings (No Admin Required) -----
 router.get('/business-settings/public', businessSettingsController.getBusinessSettings);
+router.get('/fee-settings/public', adminController.getPublicFeeSettings);
 
 const requireAdmin = (req, _res, next) => {
     const user = req.user;
@@ -131,8 +134,13 @@ router.patch('/foods/:id/reject', invFood, foodApprovalController.rejectFoodItem
 // ----- Offers & Coupons -----
 router.get('/offers', adminController.getAllOffers);
 router.post('/offers', invOffer, adminController.createAdminOffer);
+router.patch('/offers/:id', invOffer, adminController.updateAdminOffer);
+router.patch('/offers/:id/approve', invOffer, adminController.approveAdminOffer);
+router.patch('/offers/:id/reject', invOffer, adminController.rejectAdminOffer);
 router.patch('/offers/:id/cart-visibility', invOffer, adminController.updateAdminOfferCartVisibility);
 router.delete('/offers/:id', invOffer, adminController.deleteAdminOffer);
+router.get('/offers/:id/analytics', invOffer, adminController.getAdminOfferAnalytics);
+router.get('/offers/:id/history', invOffer, adminController.getAdminOfferUsageHistory);
 
 // ----- Feedback Experience (Admin) -----
 router.get('/feedback-experiences', feedbackExperienceController.getFeedbackExperiences);
@@ -144,7 +152,7 @@ router.put('/fee-settings', adminController.createOrUpdateFeeSettings);
 
 // ----- Delivery Boy Settings -----
 router.get('/delivery-boy-settings', adminController.getDeliveryBoySettings);
-router.put('/delivery-boy-settings', adminController.upsertDeliveryBoySettings);
+router.put('/delivery-boy-settings', invDeliveryBoySettings, adminController.upsertDeliveryBoySettings);
 
 // ----- Referral Settings -----
 router.get('/referral-settings', adminController.getReferralSettings);
@@ -158,10 +166,6 @@ router.patch('/business-settings', upload.fields([
     { name: 'favicon', maxCount: 1 }
 ]), businessSettingsController.updateBusinessSettings);
 
-// ----- Delivery Cash Limit -----
-router.get('/delivery-cash-limit', adminController.getDeliveryCashLimit);
-router.patch('/delivery-cash-limit', adminController.updateDeliveryCashLimit);
-
 // ----- Delivery Emergency Help -----
 router.get('/delivery-emergency-help', adminController.getEmergencyHelp);
 router.put('/delivery-emergency-help', adminController.createOrUpdateEmergencyHelp);
@@ -171,10 +175,10 @@ router.get('/withdrawals', adminController.getWithdrawals);
 router.patch('/withdrawals/:id', adminController.updateWithdrawalStatus);
 router.get('/delivery/withdrawals', adminController.getDeliveryWithdrawals);
 router.patch('/delivery/withdrawals/:id', adminController.updateDeliveryWithdrawalStatus);
-router.get('/delivery/cash-limit-settlements', adminController.getCashLimitSettlements);
 
 // ----- Delivery partners & general -----
 router.get('/delivery/join-requests', adminController.getDeliveryJoinRequests);
+router.get('/delivery/join-requests/:identityId', adminController.getDeliveryJoinRequestDetail);
 router.get('/delivery/wallets', adminController.getDeliveryWallets);
 router.get('/delivery/bonus-transactions', adminController.getDeliveryPartnerBonusTransactions);
 router.get('/delivery/earnings', adminController.getDeliveryEarnings);
@@ -224,7 +228,10 @@ router.patch('/dining/requests/:id/reject', invDining, diningAdminController.rej
 
 // ----- Orders -----
 router.get('/orders', orderController.listOrdersAdminController);
+router.get('/orders/settlement-report', orderController.getMultiOrderSettlementReportController);
 router.get('/orders/:orderId', orderController.getOrderByIdAdminController);
+router.patch('/orders/:orderId/cancel', orderController.cancelOrderAdminController);
+router.patch('/orders/:orderId/assign-delivery', orderController.assignDeliveryPartnerController);
 router.delete('/orders/:orderId', orderController.deleteOrderAdminController);
 
 // ----- CMS Pages (About + legal) -----

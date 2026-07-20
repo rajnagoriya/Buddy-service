@@ -55,6 +55,7 @@ const resolveDeliveryBackPath = ({ pathname, state }) => {
     normalizedPath === "/pocket/deductions" ||
     normalizedPath === "/pocket/limit-settlement" ||
     normalizedPath === "/pocket/balance" ||
+    normalizedPath === "/pocket/withdraw" ||
     normalizedPath === "/pocket/cash-limit" ||
     normalizedPath === "/pocket/details"
   ) {

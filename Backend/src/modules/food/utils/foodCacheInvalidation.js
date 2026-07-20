@@ -44,6 +44,14 @@ export async function invalidateFoodDiningCaches() {
     await invalidateCache('food_dining:*');
 }
 
+/** Multi-order / delivery-speed settings shown on user cart checkout. */
+export async function invalidateAfterDeliveryBoySettingsMutation() {
+    await invalidatePatterns([
+        'checkout_settings:*',
+        'delivery_speed_options:*',
+    ]);
+}
+
 /** Restaurant profile / images / availability changes. */
 export async function invalidateAfterRestaurantProfileUpdate() {
     await invalidateFoodRestaurantListCaches();
@@ -71,6 +79,8 @@ export async function invalidateAfterAdminRestaurantMutation() {
 }
 
 export async function invalidateAfterAdminCategoryMutation() {
+    await invalidateFoodRestaurantMenuCaches();
+    await invalidateFoodRestaurantListCaches();
     await invalidateFoodSearchCaches();
 }
 
@@ -114,12 +124,16 @@ export async function invalidateAfterDiningAdminMutation() {
  * @param {() => Promise<void>} invalidatorFn
  */
 export function withFoodCacheInvalidation(invalidatorFn) {
-    return async (req, res, next) => {
-        try {
-            await invalidatorFn();
-        } catch (err) {
-            logger.warn(`Food cache invalidation skipped: ${err?.message || err}`);
-        }
+    return (req, res, next) => {
+        res.on('finish', async () => {
+            if (res.statusCode < 400) {
+                try {
+                    await invalidatorFn();
+                } catch (err) {
+                    logger.warn(`Food cache invalidation skipped: ${err?.message || err}`);
+                }
+            }
+        });
         next();
     };
 }

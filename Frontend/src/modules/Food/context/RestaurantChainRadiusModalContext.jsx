@@ -64,7 +64,7 @@ export function RestaurantChainRadiusModalProvider({ children }) {
                 Outside delivery radius
               </DialogTitle>
               <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed">
-                This restaurant is outside the allowed 5 KM radius required for a combined order.
+                This restaurant is outside the allowed road distance of the first restaurant in your cart. Both additional restaurants must be near that first restaurant.
               </p>
             </DialogHeader>
           </div>
@@ -72,7 +72,7 @@ export function RestaurantChainRadiusModalProvider({ children }) {
           <div className="px-5 py-4 space-y-3">
             <div className="rounded-xl border border-gray-100 bg-gray-50 p-3 dark:border-gray-800 dark:bg-[#1a1a1a]">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-                Restaurant in cart
+                First restaurant in cart
               </p>
               <p className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">
                 {details.lastRestaurantName || "—"}

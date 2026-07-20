@@ -8,17 +8,17 @@ export const FEST_SLIDES = [
     heading: "Flat ₹150 OFF",
     sub: "on Premium Dining restaurants",
     cta: "Explore now",
-    section: "bg-gradient-to-b from-[#dce7ff] to-[#d3ddff]",
+    section: "bg-gradient-to-b from-[#1a1a1a] to-[#0a0a0a]",
     theme: {
-      card: "from-[#dbe6ff] via-[#d5e1ff] to-[#cddaff]",
-      text: "text-[#1c2c5a]",
-      button: "bg-[#1e3a8a] text-white",
-      badge: "bg-white text-[#1e3a8a]",
-      accent: "text-[#5167bf]",
-      icon: "text-[#90a4ff]",
-      iconBorder: "border-[#b9c6ff]",
-      dotActive: "bg-[#2b3f83]",
-      dotInactive: "bg-[#2b3f83]/25",
+      card: "from-[#262626] via-[#1a1a1a] to-[#0a0a0a]",
+      text: "text-[#facc15]",
+      button: "bg-[#facc15] text-[#1a1a1a] font-bold",
+      badge: "bg-[#facc15] text-[#1a1a1a]",
+      accent: "text-white/90",
+      icon: "text-[#fef08a]",
+      iconBorder: "border-[#ca8a04]/60",
+      dotActive: "bg-[#facc15]",
+      dotInactive: "bg-white/20",
     },
     right: "sparkle",
   },
@@ -108,11 +108,11 @@ export default function FestBanner({ activeIndex, onChange, embedded = false }) 
 
   const shellClassName = embedded
     ? "relative pt-1 pb-2 overflow-hidden min-h-[150px] sm:min-h-[180px] w-full"
-    : "relative pt-2 pb-4 overflow-hidden min-h-[160px] sm:min-h-[190px] w-full -mx-4 px-4";
+    : "relative pt-2 pb-4 overflow-hidden min-h-[160px] sm:min-h-[190px] w-full";
 
   return (
     <motion.div initial={false} className={shellClassName}>
-      <div className="relative z-10">
+      <div className="relative z-10 mx-4 sm:mx-0">
         <AnimatePresence mode="wait" initial={false}>
           {FEST_SLIDES.map((slide, index) =>
             index === resolvedIndex ? (
@@ -132,12 +132,12 @@ export default function FestBanner({ activeIndex, onChange, embedded = false }) 
                   {renderRightVisual(slide)}
                 </div>
 
-                <div className={`space-y-2 ${slide.theme.text}`}>
+                <div className={`space-y-2 relative z-10 max-w-[65%] sm:max-w-[70%] ${slide.theme.text}`}>
                   {slide.id === "pink" ? (
                     <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-lg sm:text-xl font-black tracking-tight">{slide.heading}</span>
-                        <span className={`text-[12px] font-black rounded-full px-2 py-0.5 ${slide.theme.badge}`}>
+                      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                        <span className="text-lg sm:text-xl font-black tracking-tight leading-tight">{slide.heading}</span>
+                        <span className={`text-[10px] sm:text-[12px] font-black rounded-full px-2 py-0.5 ${slide.theme.badge}`}>
                           50% OFF
                         </span>
                       </div>
@@ -149,7 +149,7 @@ export default function FestBanner({ activeIndex, onChange, embedded = false }) 
                         {slide.heading}
                       </span>
                       {slide.id === "blue" && (
-                        <span className="text-[12px] font-bold rounded-full px-2 py-0.5 bg-white/90 text-[#1d2d5c]">
+                        <span className={`text-[12px] font-bold rounded-full px-2 py-0.5 ${slide.theme.badge}`}>
                           Premium
                         </span>
                       )}

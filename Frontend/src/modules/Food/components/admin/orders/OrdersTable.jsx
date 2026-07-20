@@ -1,5 +1,33 @@
 import { useState, useEffect, useMemo } from "react"
-import { Eye, Printer, ArrowUpDown, Loader2, Check, X, Trash2 } from "lucide-react"
+import { Eye, Printer, ArrowUpDown, Loader2, X, Bike, MoreVertical } from "lucide-react"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
+
+const TERMINAL_ORDER_STATUSES = new Set([
+  "Delivered",
+  "Canceled",
+  "Cancelled",
+  "Cancelled by Restaurant",
+  "Rejected by Restaurant",
+  "Cancelled by User",
+  "Cancelled by Admin",
+  "Refunded",
+  "Payment Failed",
+])
+
+const RESTAURANT_REJECTED_STATUSES = new Set([
+  "Cancelled by Restaurant",
+  "Rejected by Restaurant",
+  "cancelled_by_restaurant",
+  "rejected_by_restaurant",
+])
+
+const isActiveOrder = (order) => !TERMINAL_ORDER_STATUSES.has(order.orderStatus)
+
+const canReassignDriver = (order) => {
+  if (!isActiveOrder(order)) return false
+  const status = String(order?.orderStatus || order?.status || "").trim()
+  return !RESTAURANT_REJECTED_STATUSES.has(status)
+}
 
 const getStatusColor = (orderStatus) => {
   const colors = {
@@ -11,7 +39,9 @@ const getStatusColor = (orderStatus) => {
     "Food On The Way": "bg-yellow-100 text-yellow-700",
     "Canceled": "bg-rose-100 text-rose-700",
     "Cancelled by Restaurant": "bg-red-100 text-red-700",
+    "Rejected by Restaurant": "bg-red-100 text-red-700",
     "Cancelled by User": "bg-orange-100 text-orange-700",
+    "Cancelled by Admin": "bg-red-100 text-red-700",
     "Payment Failed": "bg-red-100 text-red-700",
     "Refunded": "bg-sky-100 text-sky-700",
     "Dine In": "bg-indigo-100 text-indigo-700",
@@ -33,26 +63,53 @@ export default function OrdersTable({
   onViewOrder,
   onPrintOrder,
   onRefund,
-  onDeleteOrder,
-  onAcceptOrder,
-  onRejectOrder,
+  onCancelOrder,
+  onReassignDriver,
   actionLoadingOrderId,
-  deletingOrderId,
+  currentPage: controlledPage,
+  totalPages: controlledTotalPages,
+  totalItems: controlledTotalItems,
+  pageSize = 20,
+  onPageChange,
 }) {
-  const [currentPage, setCurrentPage] = useState(1)
-  const itemsPerPage = 10
-  const totalPages = Math.ceil(orders.length / itemsPerPage)
-  
-  // Reset to page 1 when orders change
+  const isServerPaginated = typeof onPageChange === "function"
+  const [clientPage, setClientPage] = useState(1)
+  const itemsPerPage = pageSize || 20
+
+  const currentPage = isServerPaginated
+    ? Math.max(1, Number(controlledPage) || 1)
+    : clientPage
+
+  const totalItems = isServerPaginated
+    ? Math.max(0, Number(controlledTotalItems) || 0)
+    : orders.length
+
+  const totalPages = isServerPaginated
+    ? Math.max(0, Number(controlledTotalPages) || 0)
+    : Math.ceil(orders.length / itemsPerPage)
+
+  // Reset client page when orders change (local pagination only)
   useEffect(() => {
-    setCurrentPage(1)
-  }, [orders.length])
-  
+    if (!isServerPaginated) {
+      setClientPage(1)
+    }
+  }, [orders.length, isServerPaginated])
+
   const paginatedOrders = useMemo(() => {
+    if (isServerPaginated) return orders
     const start = (currentPage - 1) * itemsPerPage
     const end = start + itemsPerPage
     return orders.slice(start, end)
-  }, [orders, currentPage])
+  }, [orders, currentPage, itemsPerPage, isServerPaginated])
+
+  const handlePageChange = (page) => {
+    const nextPage = Math.max(1, Math.min(page, Math.max(totalPages, 1)))
+    if (isServerPaginated) {
+      onPageChange(nextPage)
+    } else {
+      setClientPage(nextPage)
+    }
+  }
 
   const formatRestaurantName = (name) => {
     if (name === "Cafe Monarch") return "Café Monarch"
@@ -74,6 +131,9 @@ export default function OrdersTable({
       </div>
     )
   }
+
+  const rangeStart = totalItems === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1
+  const rangeEnd = Math.min(currentPage * itemsPerPage, totalItems)
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden w-full max-w-full">
@@ -116,7 +176,7 @@ export default function OrdersTable({
               {visibleColumns.customer && (
                 <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
                   <div className="flex items-center gap-2">
-                    <span>Customer Information</span>
+                    <span>Customer Name</span>
                     <ArrowUpDown className="w-3 h-3 text-slate-400 cursor-pointer hover:text-slate-600" />
                   </div>
                 </th>
@@ -156,12 +216,12 @@ export default function OrdersTable({
               {visibleColumns.totalAmount && (
                 <th className="px-6 py-4 text-right text-[10px] font-bold text-slate-700 uppercase tracking-wider">
                   <div className="flex items-center justify-end gap-2">
-                    <span>Total Amount</span>
+                    <span>Price</span>
                     <ArrowUpDown className="w-3 h-3 text-slate-400 cursor-pointer hover:text-slate-600" />
                   </div>
                 </th>
               )}
-              {(visibleColumns.paymentType !== false) && (
+              {visibleColumns.paymentType && (
                 <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
                   <div className="flex items-center gap-2">
                     <span>Payment Type</span>
@@ -169,7 +229,7 @@ export default function OrdersTable({
                   </div>
                 </th>
               )}
-              {(visibleColumns.paymentCollectionStatus !== false) && (
+              {visibleColumns.paymentCollectionStatus && (
                 <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
                   <div className="flex items-center gap-2">
                     <span>Payment Status</span>
@@ -180,7 +240,7 @@ export default function OrdersTable({
               {visibleColumns.paymentMethodDetail && (
                 <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
                   <div className="flex items-center gap-2">
-                    <span>Method</span>
+                    <span>Payment Method</span>
                     <ArrowUpDown className="w-3 h-3 text-slate-400 cursor-pointer hover:text-slate-600" />
                   </div>
                 </th>
@@ -229,11 +289,8 @@ export default function OrdersTable({
                   </td>
                 )}
                 {visibleColumns.customer && (
-                  <td className="px-6 py-4">
-                    <div className="flex flex-col">
-                      <span className="text-sm font-medium text-slate-700">{order.customerName}</span>
-                      <span className="text-xs text-slate-500 mt-0.5">{order.customerPhone}</span>
-                    </div>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <span className="text-sm font-medium text-slate-700">{order.customerName || "N/A"}</span>
                   </td>
                 )}
                 {visibleColumns.restaurant && (
@@ -297,7 +354,7 @@ export default function OrdersTable({
                 )}
                 {visibleColumns.totalAmount && (
                   <td className="px-6 py-4 whitespace-nowrap text-right">
-                    <div className="text-sm font-medium text-slate-900">
+                    <span className="text-sm font-semibold text-slate-900">
                       {(() => {
                         const rawAmount =
                           order.totalAmount ??
@@ -312,16 +369,12 @@ export default function OrdersTable({
                           maximumFractionDigits: 2
                         })}`;
                       })()}
-                    </div>
-                    <div className={`text-xs mt-0.5 ${getPaymentStatusColor(order.paymentStatus)}`}>
-                      {order.paymentStatus}
-                    </div>
+                    </span>
                   </td>
                 )}
-                {(visibleColumns.paymentType !== false) && (
+                {visibleColumns.paymentType && (
                   <td className="px-6 py-4 whitespace-nowrap">
                     {(() => {
-                      // Determine payment type display
                       let paymentTypeDisplay = order.paymentType;
                       const paymentMethod = order.payment?.method || order.paymentMethod || order.payment?.paymentMethod;
                       
@@ -337,7 +390,6 @@ export default function OrdersTable({
                         }
                       }
                       
-                      // Override if payment method is wallet but paymentType is not set correctly
                       if (paymentMethod === 'wallet' && paymentTypeDisplay !== 'Wallet') {
                         paymentTypeDisplay = 'Wallet';
                       }
@@ -357,168 +409,126 @@ export default function OrdersTable({
                     })()}
                   </td>
                 )}
-                {(visibleColumns.paymentCollectionStatus !== false) && (
+                {visibleColumns.paymentCollectionStatus && (
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex flex-col">
-                      <span className={`text-sm font-medium ${getPaymentStatusColor(order.paymentStatus)}`}>
-                        {order.paymentStatus || "Pending"}
-                      </span>
-                      {order.paymentCollectionStatus && (
-                        <span className="text-xs text-slate-500 mt-0.5">
-                          {order.paymentCollectionStatus}
-                        </span>
-                      )}
-                    </div>
+                    <span className={`text-sm font-medium ${getPaymentStatusColor(order.paymentStatus)}`}>
+                      {order.paymentStatus || "Pending"}
+                    </span>
                   </td>
                 )}
                 {visibleColumns.paymentMethodDetail && (
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${
+                    <span className={`inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-full ${
                       (order.paymentMethodDetail === "QR" || order.paymentMethodDetail === "COD/QR")
-                        ? "bg-emerald-50 text-emerald-600 border border-emerald-100" 
-                        : "bg-slate-50 text-slate-600 border border-slate-100"
+                        ? "bg-emerald-50 text-emerald-700 border border-emerald-100" 
+                        : order.paymentMethodDetail === "Wallet"
+                        ? "bg-violet-50 text-violet-700 border border-violet-100"
+                        : order.paymentMethodDetail === "Online"
+                        ? "bg-sky-50 text-sky-700 border border-sky-100"
+                        : "bg-amber-50 text-amber-700 border border-amber-100"
                     }`}>
-                      {order.paymentMethodDetail}
+                      {order.paymentMethodDetail || order.paymentType || "N/A"}
                     </span>
                   </td>
                 )}
                 {visibleColumns.orderStatus && (
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex flex-col gap-1">
-                      <div className="flex items-center gap-2">
-                        <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(order.orderStatus)}`}>
-                          {order.orderStatus}
-                        </span>
-                        <span className="text-xs text-slate-500">{order.deliveryType}</span>
-                      </div>
-                      {order.cancellationReason && (
-                        <div className="text-xs text-red-600 mt-1">
-                          <span className="font-medium">
-                            {order.cancelledBy === 'user' ? 'Cancelled by User - ' : 
-                             order.cancelledBy === 'restaurant' ? 'Cancelled by Restaurant - ' : 
-                             'Reason: '}
-                          </span>
-                          {order.cancellationReason}
-                        </div>
-                      )}
-                    </div>
+                    <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(order.orderStatus)}`}>
+                      {order.orderStatus}
+                    </span>
                   </td>
                 )}
                 {visibleColumns.actions && (
                   <td className="px-6 py-4 whitespace-nowrap text-center">
-                    <div className="flex items-center justify-center gap-2">
-                      {order.orderStatus === "Pending" && onAcceptOrder && (
-                        <button
-                          onClick={() => onAcceptOrder(order)}
-                          disabled={actionLoadingOrderId === (order.id || order.orderId)}
-                          className="px-2.5 py-1.5 rounded text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
-                          title="Accept Order"
-                        >
-                          {actionLoadingOrderId === (order.id || order.orderId) ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          ) : (
-                            <Check className="w-3.5 h-3.5" />
-                          )}
-                          <span>Accept</span>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button className="p-1.5 rounded text-slate-600 hover:bg-slate-100 transition-colors">
+                          <MoreVertical className="w-4 h-4" />
                         </button>
-                      )}
-                      {order.orderStatus === "Pending" && onRejectOrder && (
-                        <button
-                          onClick={() => onRejectOrder(order)}
-                          disabled={actionLoadingOrderId === (order.id || order.orderId)}
-                          className="px-2.5 py-1.5 rounded text-xs font-medium text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
-                          title="Reject Order"
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-48 bg-white border border-slate-200 rounded-lg shadow-lg z-50">
+                        {isActiveOrder(order) && onCancelOrder && (
+                          <DropdownMenuItem
+                            onClick={() => onCancelOrder(order)}
+                            disabled={actionLoadingOrderId === (order.id || order.orderId)}
+                            className="cursor-pointer flex items-center gap-2 text-rose-600 focus:text-rose-700"
+                          >
+                            {actionLoadingOrderId === (order.id || order.orderId) ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <X className="w-4 h-4" />
+                            )}
+                            <span>Cancel Order</span>
+                          </DropdownMenuItem>
+                        )}
+                        {canReassignDriver(order) && onReassignDriver && (
+                          <DropdownMenuItem
+                            onClick={() => onReassignDriver(order)}
+                            disabled={actionLoadingOrderId === (order.id || order.orderId)}
+                            className="cursor-pointer flex items-center gap-2 text-emerald-600 focus:text-emerald-700"
+                          >
+                            <Bike className="w-4 h-4" />
+                            <span>Reassign Driver</span>
+                          </DropdownMenuItem>
+                        )}
+                        {((isActiveOrder(order) && onCancelOrder) ||
+                          (canReassignDriver(order) && onReassignDriver)) && (
+                          <DropdownMenuSeparator />
+                        )}
+                        <DropdownMenuItem
+                          onClick={() => onViewOrder(order)}
+                          className="cursor-pointer flex items-center gap-2 text-orange-600"
                         >
-                          {actionLoadingOrderId === (order.id || order.orderId) ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          ) : (
-                            <X className="w-3.5 h-3.5" />
-                          )}
-                          <span>Reject</span>
-                        </button>
-                      )}
-                      <button 
-                        onClick={() => onViewOrder(order)}
-                        className="p-1.5 rounded text-orange-600 hover:bg-orange-50 transition-colors"
-                        title="View Details"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </button>
-                      <button 
-                        onClick={() => onPrintOrder(order)}
-                        className="p-1.5 rounded text-blue-600 hover:bg-blue-50 transition-colors"
-                        title="Print Order"
-                      >
-                        <Printer className="w-4 h-4" />
-                      </button>
-                      {onDeleteOrder && (
-                        <button
-                          onClick={() => onDeleteOrder(order)}
-                          disabled={deletingOrderId === (order.id || order.orderId)}
-                          className="p-1.5 rounded text-rose-600 hover:bg-rose-50 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
-                          title="Delete Order"
+                          <Eye className="w-4 h-4" />
+                          <span>View Details</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => onPrintOrder(order)}
+                          className="cursor-pointer flex items-center gap-2 text-blue-600"
                         >
-                          {deletingOrderId === (order.id || order.orderId) ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <Trash2 className="w-4 h-4" />
-                          )}
-                        </button>
-                      )}
-                      {/* Show Refund button or Refunded status for cancelled orders with Online/Wallet payment (restaurant or user cancelled) */}
-                      {(() => {
-                        // Check if order is cancelled by restaurant or user
-                        const isCancelled = order.orderStatus === "Cancelled by Restaurant" || 
-                                          order.orderStatus === "Cancelled" || 
-                                          order.orderStatus === "Cancelled by User" ||
-                                          (order.status === "cancelled" && (order.cancelledBy === "user" || order.cancelledBy === "restaurant"));
-                        
-                        // Check if payment type is Online or Wallet (not Cash on Delivery)
-                        const paymentMethod = order.payment?.method || order.paymentMethod;
-                        const isOnlinePayment = order.paymentType === "Online" ||
-                                              (order.paymentType !== "Cash on Delivery" && 
-                                               order.payment?.method !== "cash" && 
-                                               order.payment?.method !== "cod" &&
-                                               (order.paymentMethod === "razorpay" || 
-                                                order.paymentMethod === "online" || 
-                                                order.payment?.paymentMethod === "razorpay" || 
-                                                order.payment?.method === "razorpay" ||
-                                                order.payment?.method === "online"));
-                        
-                        const isWalletPayment = order.paymentType === "Wallet" || paymentMethod === "wallet";
-                        
-                        return isCancelled && (isOnlinePayment || isWalletPayment);
-                      })() && (
-                        <>
-                          {order.refundStatus === 'processed' || order.refundStatus === 'initiated' ? (
-                            <span className={`px-3 py-1.5 rounded-md text-xs font-medium ${
-                              order.paymentType === "Wallet" || order.payment?.method === "wallet"
-                                ? "bg-purple-100 text-purple-700"
-                                : "bg-emerald-100 text-emerald-700"
-                            }`}>
-                              {order.paymentType === "Wallet" || order.payment?.method === "wallet" 
-                                ? "Wallet Refunded" 
-                                : "Refunded"}
-                            </span>
-                          ) : onRefund ? (
-                            <button 
-                              onClick={() => onRefund(order)}
-                              className={`px-3 py-1.5 rounded-md text-white text-xs font-medium hover:opacity-90 transition-colors shadow-sm flex items-center gap-1.5 ${
-                                order.paymentType === "Wallet" || order.payment?.method === "wallet"
-                                  ? "bg-purple-600 hover:bg-purple-700"
-                                  : "bg-blue-600 hover:bg-blue-700"
-                              }`}
-                              title={order.paymentType === "Wallet" || order.payment?.method === "wallet"
-                                ? "Process Wallet Refund (Add to user wallet)"
-                                : "Process Refund via Razorpay"}
-                            >
-                              <span className="text-sm">₹</span>
-                              <span>Refund</span>
-                            </button>
-                          ) : null}
-                        </>
-                      )}
-                    </div>
+                          <Printer className="w-4 h-4" />
+                          <span>Print Invoice</span>
+                        </DropdownMenuItem>
+                        {(() => {
+                          const isCancelled = order.orderStatus === "Cancelled by Restaurant" || 
+                                            order.orderStatus === "Cancelled" || 
+                                            order.orderStatus === "Canceled" ||
+                                            order.orderStatus === "Cancelled by User" ||
+                                            order.orderStatus === "Cancelled by Admin" ||
+                                            (order.status === "cancelled" && (order.cancelledBy === "user" || order.cancelledBy === "restaurant" || order.cancelledBy === "admin"));
+                          const paymentMethod = order.payment?.method || order.paymentMethod;
+                          const isOnlinePayment = order.paymentType === "Online" ||
+                                                (order.paymentType !== "Cash on Delivery" && 
+                                                 order.payment?.method !== "cash" && 
+                                                 order.payment?.method !== "cod" &&
+                                                 (order.paymentMethod === "razorpay" || 
+                                                  order.paymentMethod === "online" || 
+                                                  order.payment?.paymentMethod === "razorpay" || 
+                                                  order.payment?.method === "razorpay" ||
+                                                  order.payment?.method === "online"));
+                          const isWalletPayment = order.paymentType === "Wallet" || paymentMethod === "wallet";
+                          return isCancelled && (isOnlinePayment || isWalletPayment);
+                        })() && (
+                          <>
+                            <DropdownMenuSeparator />
+                            {order.refundStatus === 'processed' || order.refundStatus === 'initiated' ? (
+                              <DropdownMenuItem disabled className="flex items-center gap-2 text-emerald-600">
+                                <span className="text-sm font-semibold">₹</span>
+                                <span>{order.paymentType === "Wallet" || order.payment?.method === "wallet" ? "Wallet Refunded" : "Refunded"}</span>
+                              </DropdownMenuItem>
+                            ) : onRefund ? (
+                              <DropdownMenuItem
+                                onClick={() => onRefund(order)}
+                                className="cursor-pointer flex items-center gap-2 text-blue-600 focus:text-blue-700"
+                              >
+                                <span className="text-sm font-semibold">₹</span>
+                                <span>Refund</span>
+                              </DropdownMenuItem>
+                            ) : null}
+                          </>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </td>
                 )}
               </tr>
@@ -528,16 +538,20 @@ export default function OrdersTable({
       </div>
       
       {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
+      {(totalPages > 1 || (isServerPaginated && totalItems > 0)) && (
+        <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="text-sm text-slate-600">
-            Showing <span className="font-semibold">{(currentPage - 1) * itemsPerPage + 1}</span> to{" "}
-            <span className="font-semibold">{Math.min(currentPage * itemsPerPage, orders.length)}</span> of{" "}
-            <span className="font-semibold">{orders.length}</span> orders
+            Showing <span className="font-semibold">{rangeStart}</span> to{" "}
+            <span className="font-semibold">{rangeEnd}</span> of{" "}
+            <span className="font-semibold">{totalItems}</span> orders
+            {isServerPaginated && (
+              <span className="text-slate-400"> · {itemsPerPage} per page</span>
+            )}
           </div>
+          {totalPages > 1 && (
           <div className="flex items-center gap-2">
             <button
-              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+              onClick={() => handlePageChange(currentPage - 1)}
               disabled={currentPage === 1}
               className="px-3 py-1.5 text-sm font-medium rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
             >
@@ -558,7 +572,7 @@ export default function OrdersTable({
                 return (
                   <button
                     key={pageNum}
-                    onClick={() => setCurrentPage(pageNum)}
+                    onClick={() => handlePageChange(pageNum)}
                     className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-all ${
                       currentPage === pageNum
                         ? "bg-emerald-500 text-white shadow-md"
@@ -571,13 +585,14 @@ export default function OrdersTable({
               })}
             </div>
             <button
-              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+              onClick={() => handlePageChange(currentPage + 1)}
               disabled={currentPage === totalPages}
               className="px-3 py-1.5 text-sm font-medium rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
             >
               Next
             </button>
           </div>
+          )}
         </div>
       )}
     </div>

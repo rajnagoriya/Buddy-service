@@ -1,0 +1,450 @@
+import mongoose from 'mongoose';
+import { ValidationError, NotFoundError } from '../auth/errors.js';
+import { BuddyIdentity } from './buddyIdentity.model.js';
+import { FoodDeliveryPartner } from '../../modules/food/delivery/models/deliveryPartner.model.js';
+import { Driver } from '../../modules/taxi/driver/models/Driver.js';
+
+export const ONBOARDING_SERVICES = ['food', 'quickCommerce', 'taxi'];
+
+const SERVICE_LABELS = {
+  food: 'Food',
+  quickCommerce: 'Quick Commerce',
+  taxi: 'Taxi',
+};
+
+const normalizeService = (service) => {
+  const svc = String(service || '').trim();
+  if (!ONBOARDING_SERVICES.includes(svc)) {
+    throw new ValidationError(`Invalid service. Must be one of: ${ONBOARDING_SERVICES.join(', ')}`);
+  }
+  return svc;
+};
+
+const normalizeListStatus = (status) => {
+  const raw = String(status || 'pending').toLowerCase();
+  if (raw === 'denied' || raw === 'rejected') return 'rejected';
+  if (raw === 'approved') return 'approved';
+  return 'pending';
+};
+
+const legacyFoodStatus = (partner) => {
+  if (!partner) return 'not_enabled';
+  const s = String(partner.status || 'pending').toLowerCase();
+  if (s === 'rejected') return 'rejected';
+  if (s === 'approved') return 'approved';
+  return 'pending';
+};
+
+const legacyQcStatus = (partner) => {
+  if (!partner) return 'not_enabled';
+  if (partner.isVerified === true) return 'approved';
+  const s = String(partner.status || '').toLowerCase();
+  if (s === 'rejected') return 'rejected';
+  return 'pending';
+};
+
+const legacyTaxiStatus = (driver) => {
+  if (!driver) return 'not_enabled';
+  const s = String(driver.status || '').toLowerCase();
+  if (s === 'rejected') return 'rejected';
+  if (driver.approve === true || s === 'approved' || s === 'active') return 'approved';
+  return 'pending';
+};
+
+export const getEffectiveServiceStatus = (identity, service, partner = null, driver = null) => {
+  const svc = normalizeService(service);
+  const stored = identity?.serviceStatuses?.[svc];
+  if (stored?.status && stored.status !== 'not_enabled') {
+    return {
+      status: stored.status,
+      rejectionReason: stored.rejectionReason || '',
+      rejectedAt: stored.rejectedAt || null,
+      approvedAt: stored.approvedAt || null,
+    };
+  }
+
+  const selected = Array.isArray(identity?.onboardingServices)
+    ? identity.onboardingServices.includes(svc)
+    : false;
+  if (!selected) {
+    return { status: 'not_enabled', rejectionReason: '', rejectedAt: null, approvedAt: null };
+  }
+
+  if (svc === 'food') {
+    const status = legacyFoodStatus(partner);
+    return {
+      status,
+      rejectionReason: partner?.rejectionReason || '',
+      rejectedAt: partner?.rejectedAt || null,
+      approvedAt: partner?.approvedAt || null,
+    };
+  }
+  if (svc === 'quickCommerce') {
+    const status = legacyQcStatus(partner);
+    return {
+      status,
+      rejectionReason: partner?.rejectionReason || '',
+      rejectedAt: partner?.rejectedAt || null,
+      approvedAt: partner?.approvedAt || null,
+    };
+  }
+  const status = legacyTaxiStatus(driver);
+  return {
+    status,
+    rejectionReason: driver?.rejectionReason || driver?.rejected_reason || '',
+    rejectedAt: driver?.rejectedAt || null,
+    approvedAt: driver?.approvedAt || null,
+  };
+};
+
+export const setServiceStatusOnIdentity = (identity, service, patch) => {
+  const svc = normalizeService(service);
+  identity.serviceStatuses = identity.serviceStatuses || {};
+  const current = identity.serviceStatuses[svc] || {};
+  identity.serviceStatuses[svc] = {
+    status: patch.status ?? current.status ?? 'not_enabled',
+    rejectionReason: patch.rejectionReason ?? current.rejectionReason ?? '',
+    rejectedAt: patch.rejectedAt !== undefined ? patch.rejectedAt : current.rejectedAt ?? null,
+    approvedAt: patch.approvedAt !== undefined ? patch.approvedAt : current.approvedAt ?? null,
+  };
+  identity.markModified('serviceStatuses');
+};
+
+export const initServiceStatusesForOnboarding = (identity, services = []) => {
+  const selected = Array.isArray(services) ? services : [];
+  for (const svc of ONBOARDING_SERVICES) {
+    if (selected.includes(svc)) {
+      const existing = identity.serviceStatuses?.[svc];
+      if (existing?.status === 'approved') continue;
+      setServiceStatusOnIdentity(identity, svc, {
+        status: 'pending',
+        rejectionReason: '',
+        rejectedAt: null,
+        approvedAt: null,
+      });
+    } else {
+      setServiceStatusOnIdentity(identity, svc, {
+        status: 'not_enabled',
+        rejectionReason: '',
+        rejectedAt: null,
+        approvedAt: null,
+      });
+    }
+  }
+};
+
+export const resolveIdentityFromRequestId = async (id) => {
+  if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
+
+  const identity = await BuddyIdentity.findById(id);
+  if (identity) return identity;
+
+  const partner = await FoodDeliveryPartner.findById(id).select('identityId phone').lean();
+  if (partner?.identityId) {
+    return BuddyIdentity.findById(partner.identityId);
+  }
+
+  const driver = await Driver.findById(id).select('identityId phone').lean();
+  if (driver?.identityId) {
+    return BuddyIdentity.findById(driver.identityId);
+  }
+
+  return null;
+};
+
+const findProfilesForIdentity = async (identityId) => {
+  const [partner, driver] = await Promise.all([
+    FoodDeliveryPartner.findOne({ identityId }).lean(),
+    Driver.findOne({ identityId }).lean(),
+  ]);
+  return { partner, driver };
+};
+
+const formatServicesLabel = (services = []) =>
+  services.map((s) => SERVICE_LABELS[s] || s).join(', ');
+
+const buildJoinRequestRow = (identity, service, partner, driver, index = 0) => {
+  const svcStatus = getEffectiveServiceStatus(identity, service, partner, driver);
+  const services = Array.isArray(identity.onboardingServices) ? identity.onboardingServices : [];
+  const foodVehicle = identity.foodVehicle || {};
+  const taxiVehicle = identity.taxiVehicle || {};
+
+  return {
+    _id: partner?._id || identity._id,
+    identityId: identity._id,
+    partnerId: partner?._id || null,
+    driverId: driver?._id || null,
+    sl: index + 1,
+    name: identity.name || partner?.name || '',
+    email: identity.email || partner?.email || '',
+    phone: identity.phone || partner?.phone || '',
+    zone: identity.city || partner?.city || '',
+    jobType: partner?.jobType || '',
+    vehicleType:
+      service === 'taxi'
+        ? taxiVehicle.type || driver?.vehicleType || ''
+        : foodVehicle.type || partner?.vehicleType || '',
+    services,
+    servicesLabel: formatServicesLabel(services),
+    service,
+    serviceStatus: svcStatus.status,
+    status: svcStatus.status === 'rejected' ? 'denied' : svcStatus.status,
+    rejectionReason: svcStatus.rejectionReason || undefined,
+    isResubmission: Boolean(
+      (partner?.submissionHistory?.length || 0) > 0 ||
+        (identity.serviceStatuses?.[service]?.rejectedAt && svcStatus.status === 'pending'),
+    ),
+    profilePhoto: identity.onboardingSelfieUrl || partner?.profilePhoto || null,
+    profileImage: identity.onboardingSelfieUrl
+      ? { url: identity.onboardingSelfieUrl }
+      : partner?.profilePhoto
+        ? { url: partner.profilePhoto }
+        : null,
+    serviceStatuses: ONBOARDING_SERVICES.reduce((acc, svc) => {
+      acc[svc] = getEffectiveServiceStatus(identity, svc, partner, driver);
+      return acc;
+    }, {}),
+  };
+};
+
+export async function getJoinRequests(service, query = {}) {
+  const svc = normalizeService(service);
+  const listStatus = normalizeListStatus(query.status);
+
+  const filter = {
+    onboardingComplete: true,
+    onboardingServices: svc,
+  };
+
+  const andParts = [];
+  if (query.search && typeof query.search === 'string' && query.search.trim()) {
+    const term = query.search.trim();
+    andParts.push({
+      $or: [
+        { name: { $regex: term, $options: 'i' } },
+        { phone: { $regex: term, $options: 'i' } },
+        { email: { $regex: term, $options: 'i' } },
+      ],
+    });
+  }
+  if (query.zone && String(query.zone).trim()) {
+    const z = String(query.zone).trim();
+    andParts.push({ city: { $regex: z, $options: 'i' } });
+  }
+  if (andParts.length) filter.$and = andParts;
+
+  const skip = Math.max(0, (Number(query.page) || 1) - 1) * Math.max(1, Math.min(1000, Number(query.limit) || 100));
+  const limitNum = Math.max(1, Math.min(1000, Number(query.limit) || 100));
+
+  const identities = await BuddyIdentity.find(filter).sort({ updatedAt: -1 }).lean();
+  const identityIds = identities.map((i) => i._id);
+
+  const [partners, drivers] = await Promise.all([
+    FoodDeliveryPartner.find({ identityId: { $in: identityIds } }).lean(),
+    Driver.find({ identityId: { $in: identityIds } }).lean(),
+  ]);
+
+  const partnerByIdentity = new Map(partners.map((p) => [String(p.identityId), p]));
+  const driverByIdentity = new Map(drivers.map((d) => [String(d.identityId), d]));
+
+  const matched = [];
+  for (const identity of identities) {
+    const partner = partnerByIdentity.get(String(identity._id)) || null;
+    const driver = driverByIdentity.get(String(identity._id)) || null;
+    const svcStatus = getEffectiveServiceStatus(identity, svc, partner, driver);
+    if (svcStatus.status !== listStatus) continue;
+
+    if (query.vehicleType && String(query.vehicleType).trim()) {
+      const vt = String(query.vehicleType).trim().toLowerCase();
+      const rowType = (
+        svc === 'taxi'
+          ? identity.taxiVehicle?.type || driver?.vehicleType || ''
+          : identity.foodVehicle?.type || partner?.vehicleType || ''
+      ).toLowerCase();
+      if (!rowType.includes(vt)) continue;
+    }
+
+    matched.push(buildJoinRequestRow(identity, svc, partner, driver, matched.length));
+  }
+
+  return { requests: matched.slice(skip, skip + limitNum) };
+}
+
+export async function getJoinRequestDetail(identityId) {
+  const identity = await BuddyIdentity.findById(identityId).lean();
+  if (!identity) return null;
+
+  const { partner, driver } = await findProfilesForIdentity(identity._id);
+  const services = Array.isArray(identity.onboardingServices) ? identity.onboardingServices : [];
+
+  const serviceStatuses = ONBOARDING_SERVICES.reduce((acc, svc) => {
+    acc[svc] = getEffectiveServiceStatus(identity, svc, partner, driver);
+    return acc;
+  }, {});
+
+  return {
+    identityId: identity._id,
+    partnerId: partner?._id || null,
+    driverId: driver?._id || null,
+    name: identity.name || '',
+    email: identity.email || '',
+    phone: identity.phone || '',
+    city: identity.city || '',
+    gender: identity.gender || '',
+    onboardingServices: services,
+    servicesLabel: formatServicesLabel(services),
+    serviceStatuses,
+    onboardingComplete: Boolean(identity.onboardingComplete),
+    profilePhoto: identity.onboardingSelfieUrl || partner?.profilePhoto || null,
+    profileImage: identity.onboardingSelfieUrl ? { url: identity.onboardingSelfieUrl } : null,
+    kyc: identity.kyc || {},
+    bank: identity.bank || {},
+    foodVehicle: identity.foodVehicle || {},
+    taxiVehicle: identity.taxiVehicle || {},
+    selfieUrl: identity.onboardingSelfieUrl || '',
+    submissionHistory: Array.isArray(partner?.submissionHistory) ? partner.submissionHistory : [],
+    partner: partner || null,
+    driver: driver || null,
+  };
+};
+
+const syncFoodPartnerForService = async (identity, service, statusPatch) => {
+  const partner = await FoodDeliveryPartner.findOne({ identityId: identity._id });
+  if (!partner) return null;
+
+  if (service === 'food') {
+    if (statusPatch.status === 'approved') {
+      partner.status = 'approved';
+      partner.approvedAt = statusPatch.approvedAt || new Date();
+      partner.rejectedAt = undefined;
+      partner.rejectionReason = '';
+    } else if (statusPatch.status === 'rejected') {
+      partner.status = 'rejected';
+      partner.rejectedAt = statusPatch.rejectedAt || new Date();
+      partner.rejectionReason = statusPatch.rejectionReason || '';
+      partner.approvedAt = undefined;
+    } else if (statusPatch.status === 'pending') {
+      partner.status = 'pending';
+      partner.rejectionReason = '';
+      partner.rejectedAt = undefined;
+      partner.approvedAt = undefined;
+    }
+  }
+
+  if (service === 'quickCommerce') {
+    partner.isVerified = statusPatch.status === 'approved';
+    if (statusPatch.status === 'rejected') {
+      partner.status = 'rejected';
+      partner.rejectionReason = statusPatch.rejectionReason || '';
+      partner.rejectedAt = statusPatch.rejectedAt || new Date();
+    } else if (statusPatch.status === 'approved') {
+      if (partner.status !== 'approved') partner.status = partner.status || 'pending';
+    }
+  }
+
+  await partner.save();
+  return partner;
+};
+
+const syncTaxiDriverForService = async (identity, statusPatch) => {
+  const driver = await Driver.findOne({ identityId: identity._id });
+  if (!driver) return null;
+
+  if (statusPatch.status === 'approved') {
+    driver.approve = true;
+    driver.status = 'approved';
+    driver.approvedAt = statusPatch.approvedAt || new Date();
+  } else if (statusPatch.status === 'rejected') {
+    driver.approve = false;
+    driver.status = 'rejected';
+    driver.rejectionReason = statusPatch.rejectionReason || '';
+    driver.rejectedAt = statusPatch.rejectedAt || new Date();
+  } else if (statusPatch.status === 'pending') {
+    driver.approve = false;
+    driver.status = 'pending';
+    driver.rejectionReason = '';
+    driver.rejectedAt = undefined;
+  }
+
+  await driver.save();
+  return driver;
+};
+
+export async function approveDriverService(requestId, service) {
+  const svc = normalizeService(service);
+  const identity = await resolveIdentityFromRequestId(requestId);
+  if (!identity) throw new NotFoundError('Driver onboarding request not found');
+
+  const services = Array.isArray(identity.onboardingServices) ? identity.onboardingServices : [];
+  if (!services.includes(svc)) {
+    throw new ValidationError(`Driver did not apply for ${SERVICE_LABELS[svc]}`);
+  }
+
+  const approvedAt = new Date();
+  setServiceStatusOnIdentity(identity, svc, {
+    status: 'approved',
+    rejectionReason: '',
+    rejectedAt: null,
+    approvedAt,
+  });
+  await identity.save();
+
+  if (svc === 'food' || svc === 'quickCommerce') {
+    await syncFoodPartnerForService(identity, svc, { status: 'approved', approvedAt });
+  }
+  if (svc === 'taxi') {
+    await syncTaxiDriverForService(identity, { status: 'approved', approvedAt });
+  }
+
+  const { partner, driver } = await findProfilesForIdentity(identity._id);
+  return buildJoinRequestRow(identity.toObject(), svc, partner, driver);
+}
+
+export async function rejectDriverService(requestId, service, reason) {
+  const svc = normalizeService(service);
+  const normalizedReason = typeof reason === 'string' ? reason.trim() : '';
+  if (!normalizedReason) {
+    throw new ValidationError('Rejection reason is required');
+  }
+
+  const identity = await resolveIdentityFromRequestId(requestId);
+  if (!identity) throw new NotFoundError('Driver onboarding request not found');
+
+  const services = Array.isArray(identity.onboardingServices) ? identity.onboardingServices : [];
+  if (!services.includes(svc)) {
+    throw new ValidationError(`Driver did not apply for ${SERVICE_LABELS[svc]}`);
+  }
+
+  const rejectedAt = new Date();
+  setServiceStatusOnIdentity(identity, svc, {
+    status: 'rejected',
+    rejectionReason: normalizedReason,
+    rejectedAt,
+    approvedAt: null,
+  });
+  await identity.save();
+
+  if (svc === 'food' || svc === 'quickCommerce') {
+    await syncFoodPartnerForService(identity, svc, {
+      status: 'rejected',
+      rejectionReason: normalizedReason,
+      rejectedAt,
+    });
+  }
+  if (svc === 'taxi') {
+    await syncTaxiDriverForService(identity, {
+      status: 'rejected',
+      rejectionReason: normalizedReason,
+      rejectedAt,
+    });
+  }
+
+  const { partner, driver } = await findProfilesForIdentity(identity._id);
+  return buildJoinRequestRow(identity.toObject(), svc, partner, driver);
+}
+
+export const summariseCapabilitiesFromIdentity = (identity, partner = null, driver = null) => ({
+  food: getEffectiveServiceStatus(identity, 'food', partner, driver).status,
+  quickCommerce: getEffectiveServiceStatus(identity, 'quickCommerce', partner, driver).status,
+  taxi: getEffectiveServiceStatus(identity, 'taxi', partner, driver).status,
+});

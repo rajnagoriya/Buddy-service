@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
-import { ValidationError } from '../../../../core/auth/errors.js';
+import { ConflictError, ValidationError } from '../../../../core/auth/errors.js';
 import { FoodItem } from '../../admin/models/food.model.js';
+import { FoodOrder } from '../../orders/models/order.model.js';
 import { FoodCategory } from '../../admin/models/category.model.js';
 import { FoodRestaurant } from '../models/restaurant.model.js';
 import {
@@ -14,12 +15,54 @@ import {
     normalizeFoodVariantsInput
 } from '../../admin/services/foodVariant.service.js';
 import {
+    ACTIVE_PUBLIC_CATEGORY_FILTER,
     backfillLegacyCategoryWorkflow,
     categoryAllowsFoodType,
     GLOBAL_CATEGORY_FILTER
 } from '../../shared/categoryWorkflow.js';
 
 const toStr = (v) => (v != null ? String(v).trim() : '');
+
+const TERMINAL_ORDER_STATUSES = [
+    'delivered',
+    'cancelled_by_user',
+    'cancelled_by_restaurant',
+    'cancelled_by_admin',
+    'rejected_by_restaurant',
+];
+
+const formatBlockingOrderStatus = (status) => {
+    const normalized = String(status || '').toLowerCase();
+    const labels = {
+        created: 'pending',
+        scheduled: 'scheduled',
+        confirmed: 'confirmed',
+        preparing: 'in progress',
+        ready_for_pickup: 'ready for pickup',
+        reached_pickup: 'rider at pickup',
+        picked_up: 'out for delivery',
+        reached_drop: 'rider at drop',
+    };
+    return labels[normalized] || normalized.replace(/_/g, ' ');
+};
+
+const findActiveOrdersForFoodItem = async (restaurantId, foodId) => {
+    const foodIdStr = String(foodId);
+    const restaurantObjectId = new mongoose.Types.ObjectId(String(restaurantId));
+
+    return FoodOrder.find({
+        orderStatus: { $nin: TERMINAL_ORDER_STATUSES },
+        'items.itemId': foodIdStr,
+        $or: [
+            { restaurantId: restaurantObjectId },
+            { 'items.restaurantId': restaurantObjectId },
+        ],
+    })
+        .select('order_id orderId orderStatus')
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .lean();
+};
 const APPROVED_CATEGORY_FILTER = [
     { approvalStatus: 'approved' },
     { approvalStatus: { $exists: false }, isApproved: { $ne: false } }
@@ -190,7 +233,7 @@ const resolveCategoryForRestaurant = async (context, body = {}) => {
 
     const baseFilter = {
         ...getAccessibleCategoryFilter(context),
-        isActive: { $ne: false }
+        ...ACTIVE_PUBLIC_CATEGORY_FILTER
     };
     if (context.pureVegRestaurant) {
         baseFilter.foodTypeScope = 'Veg';
@@ -352,14 +395,29 @@ export async function updateRestaurantFood(restaurantId, foodId, body = {}) {
         update.categoryName = categoryName || '';
     }
 
-    const shouldResubmitForApproval = Object.keys(update).length > 0;
+    const requiresReapproval = (
+        body.name !== undefined ||
+        body.description !== undefined ||
+        body.image !== undefined ||
+        body.variants !== undefined ||
+        body.variations !== undefined ||
+        body.price !== undefined ||
+        body.foodType !== undefined ||
+        body.categoryId !== undefined ||
+        body.categoryName !== undefined ||
+        body.preparationTime !== undefined
+    );
 
-    if (shouldResubmitForApproval) {
+    if (requiresReapproval) {
         update.approvalStatus = 'pending';
         update.requestedAt = new Date();
         update.rejectionReason = '';
         update.approvedAt = null;
         update.rejectedAt = null;
+    }
+
+    if (Object.keys(update).length === 0) {
+        return existing;
     }
 
     const updated = await FoodItem.findOneAndUpdate(
@@ -368,7 +426,7 @@ export async function updateRestaurantFood(restaurantId, foodId, body = {}) {
         { new: true }
     ).lean();
 
-    if (updated && shouldResubmitForApproval) {
+    if (updated && requiresReapproval) {
         try {
             const { notifyAdminsSafely } = await import('../../../../core/notifications/firebase.service.js');
             void notifyAdminsSafely({
@@ -386,6 +444,37 @@ export async function updateRestaurantFood(restaurantId, foodId, body = {}) {
     }
 
     return updated;
+}
+
+export async function deleteRestaurantFood(restaurantId, foodId) {
+    const context = await getRestaurantContext(restaurantId);
+    if (!foodId || !mongoose.Types.ObjectId.isValid(String(foodId))) {
+        throw new ValidationError('Invalid food id');
+    }
+
+    const existing = await FoodItem.findOne({
+        _id: foodId,
+        restaurantId: context.restaurantId,
+    }).lean();
+    if (!existing?._id) return null;
+
+    const activeOrders = await findActiveOrdersForFoodItem(context.restaurantId, foodId);
+    if (activeOrders.length > 0) {
+        const first = activeOrders[0];
+        const orderRef = first.order_id || first.orderId || String(first._id || '');
+        const statusLabel = formatBlockingOrderStatus(first.orderStatus);
+        const extraCount = activeOrders.length > 1 ? ` (+${activeOrders.length - 1} more active order${activeOrders.length > 2 ? 's' : ''})` : '';
+        throw new ConflictError(
+            `Cannot delete this dish because it is part of an active order (#${orderRef}) that is ${statusLabel}${extraCount}. Wait until the order is delivered or cancelled.`
+        );
+    }
+
+    await deleteFoodImageAsset({
+        publicId: existing.imagePublicId,
+        url: existing.image,
+    });
+    await FoodItem.findOneAndDelete({ _id: foodId, restaurantId: context.restaurantId });
+    return { id: String(foodId) };
 }
 
 export async function bulkCreateFood(restaurantId, items = []) {

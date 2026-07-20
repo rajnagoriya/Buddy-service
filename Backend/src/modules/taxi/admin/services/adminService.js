@@ -5046,7 +5046,25 @@ export const updateDriver = async (id, payload, currentAdmin = null) => {
   // rejects) the taxi side here, mirror that decision onto the linked
   // FoodDeliveryPartner so the driver doesn't need to be approved twice for
   // food delivery + quick-commerce.
-  if ('approve' in payload || payload.status !== undefined) {
+  if (('approve' in payload || payload.status !== undefined) && driver.identityId) {
+    try {
+      const { approveDriverService, rejectDriverService } = await import(
+        '../../../../core/identity/driverOnboardingAdmin.service.js'
+      );
+      const normalizedStatus = String(update.status || '').toLowerCase();
+      if (update.approve === true || normalizedStatus === 'approved') {
+        await approveDriverService(driver.identityId, 'taxi');
+      } else if (normalizedStatus === 'rejected') {
+        await rejectDriverService(
+          driver.identityId,
+          'taxi',
+          payload.rejectionReason || payload.reason || 'Rejected by admin',
+        );
+      }
+    } catch (err) {
+      console.warn('[admin.updateDriver] identity onboarding sync failed:', err?.message || err);
+    }
+  } else if ('approve' in payload || payload.status !== undefined) {
     await syncFoodPartnerApproval(driver, update);
   }
 

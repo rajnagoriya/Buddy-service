@@ -1,7 +1,7 @@
 import { toast } from "sonner"
 import { useCart } from "@food/context/CartContext"
 import { useRestaurantChainRadiusModal } from "@food/context/RestaurantChainRadiusModalContext"
-import { getLastRestaurantFromCart } from "@food/utils/restaurantRadius"
+import { getFirstRestaurantFromCart } from "@food/utils/restaurantRadius"
 
 export function useAddToCartFeedback() {
   const { cart } = useCart()
@@ -15,9 +15,9 @@ export function useAddToCartFeedback() {
     if (!result || result.ok !== false) return true
 
     if (result.code === "RESTAURANT_CHAIN_RADIUS") {
-      const lastRestaurant = getLastRestaurantFromCart(cart)
+      const anchorRestaurant = getFirstRestaurantFromCart(cart)
       openRestaurantChainRadiusModal({
-        lastRestaurantName: lastRestaurant?.name || "Restaurant in cart",
+        lastRestaurantName: anchorRestaurant?.name || "First restaurant in cart",
         selectedRestaurantName: selectedRestaurantName || "Selected restaurant",
         distanceKm: result.distanceKm,
       })

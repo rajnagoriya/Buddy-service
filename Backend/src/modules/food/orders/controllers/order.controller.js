@@ -18,7 +18,7 @@ export async function validateRestaurantChainController(req, res, next) {
     try {
         const dto = validateRestaurantChainDto(req.body);
         const result = await validateNewRestaurantAgainstLast(
-            dto.lastRestaurantId,
+            dto.anchorRestaurantId,
             dto.newRestaurantId,
         );
         return sendResponse(res, 200, 'Restaurant chain validated', result);
@@ -43,7 +43,10 @@ export async function createOrderController(req, res, next) {
         const userId = req.user?.userId;
         const dto = validateCreateOrderDto(req.body);
         const result = await orderService.createOrder(userId, dto);
-        return sendResponse(res, 201, 'Order placed successfully', result);
+        const message = result?.requiresPayment
+            ? 'Checkout created. Complete payment to place order'
+            : 'Order placed successfully';
+        return sendResponse(res, result?.requiresPayment ? 200 : 201, message, result);
     } catch (err) {
         next(err);
     }
@@ -55,6 +58,17 @@ export async function verifyPaymentController(req, res, next) {
         const dto = validateVerifyPaymentDto(req.body);
         const result = await orderService.verifyPayment(userId, dto);
         return sendResponse(res, 200, 'Payment verified', result);
+    } catch (err) {
+        next(err);
+    }
+}
+
+export async function cancelCheckoutController(req, res, next) {
+    try {
+        const userId = req.user?.userId;
+        const checkoutId = req.params.checkoutId || req.body?.checkoutId;
+        const result = await orderService.cancelCheckout(userId, checkoutId);
+        return sendResponse(res, 200, 'Checkout cancelled', result);
     } catch (err) {
         next(err);
     }
@@ -369,12 +383,37 @@ export async function assignDeliveryPartnerController(req, res, next) {
     }
 }
 
+export async function cancelOrderAdminController(req, res, next) {
+    try {
+        const adminId = req.user?.userId;
+        const orderId = req.params.orderId;
+        const dto = validateCancelOrderDto(req.body || {});
+        const order = await orderService.cancelOrderAdmin(
+            orderId,
+            adminId,
+            dto.reason || '',
+        );
+        return sendResponse(res, 200, 'Order cancelled by admin successfully', { order });
+    } catch (err) {
+        next(err);
+    }
+}
+
 export async function deleteOrderAdminController(req, res, next) {
     try {
         const adminId = req.user?.userId;
         const orderId = req.params.orderId;
         const result = await orderService.deleteOrderAdmin(orderId, adminId);
         return sendResponse(res, 200, 'Order deleted successfully', result);
+    } catch (err) {
+        next(err);
+    }
+}
+
+export async function getMultiOrderSettlementReportController(req, res, next) {
+    try {
+        const data = await orderService.getMultiOrderSettlementReport(req.query || {});
+        return sendResponse(res, 200, 'Multi-order settlement report fetched', data);
     } catch (err) {
         next(err);
     }
@@ -395,7 +434,8 @@ export async function resendOrderToRestaurantController(req, res, next) {
     try {
         const deliveryPartnerId = req.user?.userId;
         const orderId = req.params.orderId;
-        const order = await orderService.resendOrderToRestaurant(orderId, deliveryPartnerId);
+        const restaurantId = req.body?.restaurantId || req.query?.restaurantId || null;
+        const order = await orderService.resendOrderToRestaurant(orderId, deliveryPartnerId, restaurantId);
         return sendResponse(res, 200, 'Order resent to restaurant successfully', { order });
     } catch (err) {
         next(err);

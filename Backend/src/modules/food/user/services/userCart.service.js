@@ -1,16 +1,18 @@
 import mongoose from 'mongoose';
 import { FoodUserCart } from '../models/foodUserCart.model.js';
 import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
+import { attachOutletTimingsToRestaurants } from '../../restaurant/services/outletTimings.service.js';
 import { getRestaurantOrderableStatus } from '../../shared/utils/restaurantAvailability.js';
 
 const toCartResponse = (cartDoc) => {
   if (!cartDoc) {
-    return { items: [], restaurantMeta: [], updatedAt: null };
+    return { items: [], restaurantMeta: [], cartType: null, updatedAt: null };
   }
   const plain = typeof cartDoc.toObject === 'function' ? cartDoc.toObject() : cartDoc;
   return {
     items: plain.items || [],
     restaurantMeta: plain.restaurantMeta || [],
+    cartType: plain.cartType || null,
     updatedAt: plain.updatedAt || null,
   };
 };
@@ -20,10 +22,10 @@ export const getUserCart = async (userId) => {
   return toCartResponse(cart);
 };
 
-export const syncUserCart = async (userId, { items, restaurantMeta }) => {
+export const syncUserCart = async (userId, { items, restaurantMeta, cartType }) => {
   const cart = await FoodUserCart.findOneAndUpdate(
     { userId },
-    { $set: { items, restaurantMeta } },
+    { $set: { items, restaurantMeta, cartType } },
     { upsert: true, new: true, setDefaultsOnInsert: true },
   ).lean();
   return toCartResponse(cart);
@@ -37,14 +39,14 @@ export const validateCartRestaurants = async ({ restaurants, force = false }) =>
 
   const restaurantDocs = objectIds.length
     ? await FoodRestaurant.find({ _id: { $in: objectIds } })
-      .select(
-        'restaurantName status isAcceptingOrders outletTimings openDays deliveryTimings openingTime closingTime',
-      )
+      .select('restaurantName status isAcceptingOrders')
       .lean()
     : [];
 
+  const restaurantsWithTimings = await attachOutletTimingsToRestaurants(restaurantDocs);
+
   const restaurantById = new Map(
-    restaurantDocs.map((doc) => [String(doc._id), doc]),
+    restaurantsWithTimings.map((doc) => [String(doc._id), doc]),
   );
   const now = new Date();
   const changed = [];

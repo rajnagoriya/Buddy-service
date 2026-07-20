@@ -34,14 +34,18 @@ const addressSchema = z.object({
 });
 
 const pricingSchema = z.object({
-    subtotal: z.number().min(0),
+    // Client-sent totals are ignored; server recalculates. Kept optional for backward compat.
+    subtotal: z.number().min(0).optional(),
     tax: z.number().min(0).optional(),
     packagingFee: z.number().min(0).optional(),
     deliveryFee: z.number().min(0).optional(),
     platformFee: z.number().min(0).optional(),
     discount: z.number().min(0).optional(),
-    total: z.number().min(0),
-    currency: z.string().optional()
+    total: z.number().min(0).optional(),
+    currency: z.string().optional(),
+    couponCode: z.string().optional().nullable(),
+    couponCreatedBy: z.string().optional().nullable(),
+    offerId: z.string().optional().nullable(),
 });
 
 export function validateCalculateOrderDto(body) {
@@ -61,7 +65,9 @@ export function validateCalculateOrderDto(body) {
         deliveryAddressId: z.string().optional(),
         zoneId: z.string().optional(),
         couponCode: z.string().optional(),
-        deliveryFleet: z.string().optional()
+        deliveryFleet: z.string().optional(),
+        deliverySpeedOptionId: z.string().optional(),
+        deliveryOption: z.string().optional(),
     });
     const result = schema.safeParse(body);
     if (!result.success) {
@@ -86,11 +92,12 @@ export function validateCreateOrderDto(body) {
         note: z.string().optional(),
         restaurantNote: z.string().optional(),
         sendCutlery: z.boolean().optional(),
-        // 'razorpay_qr' means COD-style flow, but payment is collected via Razorpay QR at delivery.
-        paymentMethod: z.enum(['cash', 'razorpay', 'razorpay_qr', 'card', 'wallet']),
+        // COD (cash / razorpay_qr-at-delivery) is disabled — prepaid only.
+        paymentMethod: z.enum(['razorpay', 'card', 'wallet']),
         zoneId: z.string().nullable().optional(),
         scheduledAt: z.string().datetime({ offset: true }).nullable().optional(),
         deliveryOption: z.string().optional(),
+        deliverySpeedOptionId: z.string().optional(),
         deliveryTime: z.string().optional(),
         estimatedTime: z.number().optional()
     });
@@ -104,10 +111,13 @@ export function validateCreateOrderDto(body) {
 
 export function validateVerifyPaymentDto(body) {
     const schema = z.object({
-        orderId: z.string().min(1, 'Order id required'),
+        checkoutId: z.string().min(1).optional(),
+        orderId: z.string().min(1).optional(),
         razorpayOrderId: z.string().min(1, 'Razorpay order id required'),
         razorpayPaymentId: z.string().min(1, 'Razorpay payment id required'),
         razorpaySignature: z.string().min(1, 'Razorpay signature required')
+    }).refine((data) => Boolean(data.checkoutId || data.orderId), {
+        message: 'checkoutId or orderId required',
     });
     const result = schema.safeParse(body);
     if (!result.success) {
@@ -172,15 +182,24 @@ export function validateDispatchSettingsDto(body) {
 
 export function validateRestaurantChainDto(body) {
     const schema = z.object({
-        lastRestaurantId: z.string().min(1, 'Last restaurant id required'),
+        // Preferred: first restaurant already in cart (anchor A)
+        anchorRestaurantId: z.string().min(1).optional(),
+        // Legacy alias — treated as the same anchor id
+        lastRestaurantId: z.string().min(1).optional(),
         newRestaurantId: z.string().min(1, 'New restaurant id required'),
-    });
+    }).refine(
+        (data) => Boolean(data.anchorRestaurantId || data.lastRestaurantId),
+        { message: 'First restaurant id required' },
+    );
     const result = schema.safeParse(body || {});
     if (!result.success) {
         const first = result.error.issues?.[0];
         throw new ValidationError(first?.message || 'Validation failed');
     }
-    return result.data;
+    return {
+        ...result.data,
+        anchorRestaurantId: result.data.anchorRestaurantId || result.data.lastRestaurantId,
+    };
 }
 
 export function validateOrderRatingsDto(body) {

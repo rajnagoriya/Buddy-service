@@ -14,7 +14,7 @@ const DEFAULT_FINANCE_SETTINGS = {
   deliveryPartnerRatePerKm: 5,
   fixedDeliveryFee: 30,
   handlingFeeStrategy: HANDLING_FEE_STRATEGY.HIGHEST_CATEGORY_FEE,
-  codEnabled: true,
+  codEnabled: false,
   onlineEnabled: true,
 };
 
@@ -67,7 +67,7 @@ export function normalizeFinanceSettings(raw = {}) {
     fleetCommissionRatePerKm: deliveryPartnerRatePerKm,
     fixedDeliveryFee,
     handlingFeeStrategy,
-    codEnabled: raw.codEnabled ?? DEFAULT_FINANCE_SETTINGS.codEnabled,
+    codEnabled: false,
     onlineEnabled: raw.onlineEnabled ?? DEFAULT_FINANCE_SETTINGS.onlineEnabled,
   };
 }

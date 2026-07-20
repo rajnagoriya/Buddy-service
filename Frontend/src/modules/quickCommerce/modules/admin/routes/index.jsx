@@ -21,6 +21,7 @@ import {
   Sparkles,
   User,
   MapPin,
+  ShieldCheck,
 } from "lucide-react";
 
 const Dashboard = React.lazy(() => import("../pages/Dashboard"));
@@ -135,6 +136,14 @@ const navItems = [
     children: [
       { label: "Help Tickets", path: "/qc/admin/support-tickets" },
       { label: "Review Content", path: "/qc/admin/moderation" },
+    ],
+  },
+  {
+    label: "Global Support Management",
+    icon: ShieldCheck,
+    color: "emerald",
+    children: [
+      { label: "Global Support Tickets", path: "/admin/support/tickets" },
     ],
   },
   {

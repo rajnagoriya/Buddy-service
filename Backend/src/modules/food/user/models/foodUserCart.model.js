@@ -11,7 +11,6 @@ const cartItemSchema = new mongoose.Schema(
     name: { type: String, trim: true, default: 'Item' },
     price: { type: Number, default: 0 },
     quantity: { type: Number, default: 1, min: 1 },
-    image: { type: String, trim: true, default: '' },
     imageUrl: { type: String, trim: true, default: '' },
     description: { type: String, trim: true, default: '' },
     restaurant: { type: String, trim: true, default: '' },
@@ -46,6 +45,22 @@ const foodUserCartSchema = new mongoose.Schema(
     },
     items: { type: [cartItemSchema], default: [] },
     restaurantMeta: { type: [restaurantMetaSchema], default: [] },
+    cartType: {
+      type: new mongoose.Schema(
+        {
+          restaurantScope: {
+            type: String,
+            enum: ['single_restaurant', 'multi_restaurant'],
+          },
+          itemScope: {
+            type: String,
+            enum: ['single_item', 'multi_item'],
+          },
+        },
+        { _id: false },
+      ),
+      default: null,
+    },
   },
   { timestamps: true },
 );

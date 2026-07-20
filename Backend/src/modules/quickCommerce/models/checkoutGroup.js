@@ -35,7 +35,7 @@ const checkoutGroupSchema = new mongoose.Schema(
     paymentMode: {
       type: String,
       enum: ALL_PAYMENT_MODES,
-      default: "COD",
+      default: "ONLINE",
       index: true,
     },
     paymentStatus: {

@@ -15,6 +15,45 @@ const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
 
+const formatDetailDate = (value) => {
+  if (!value) return "—"
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString()
+}
+
+const displayDetailValue = (value) => {
+  if (value === null || value === undefined || value === "") return "—"
+  if (typeof value === "boolean") return value ? "Yes" : "No"
+  return String(value)
+}
+
+function DetailField({ label, value, full = false }) {
+  return (
+    <div className={full ? "col-span-full" : ""}>
+      <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-gray-400">{label}</label>
+      <p className="break-all whitespace-pre-wrap text-sm text-gray-900">{displayDetailValue(value)}</p>
+    </div>
+  )
+}
+
+function ImagePreviewRow({ images = [] }) {
+  const list = (Array.isArray(images) ? images : []).filter((img) => img && typeof img === "string")
+  if (!list.length) return null
+  return (
+    <div className="flex flex-wrap gap-3">
+      {list.map((img, idx) => (
+        <img
+          key={idx}
+          src={img}
+          alt="Preview"
+          className="h-20 w-20 cursor-zoom-in rounded-xl border border-gray-100 object-cover shadow-sm"
+          onClick={() => window.open(img, "_blank")}
+          onError={(e) => { e.target.style.display = "none" }}
+        />
+      ))}
+    </div>
+  )
+}
 
 export default function FoodApproval() {
   const [foodRequests, setFoodRequests] = useState([])
@@ -344,100 +383,139 @@ export default function FoodApproval() {
 
       {/* Item Details Modal */}
       <Dialog open={showDetailModal} onOpenChange={setShowDetailModal}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto p-0 bg-white shadow-2xl rounded-2xl border-none">
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto p-0 bg-white shadow-2xl rounded-2xl border-none">
           <DialogHeader className="p-6 pb-4 border-b border-gray-100 bg-slate-50/50">
             <DialogTitle className="text-xl font-bold text-gray-900">
               {selectedRequest?.entityType === 'addon' ? 'Add-on Details' : 'Food Item Details'}
             </DialogTitle>
             <DialogDescription className="text-sm text-gray-500 mt-1">
-              Review the submitted details before approval.
+              Review item details before approval.
             </DialogDescription>
           </DialogHeader>
           {selectedRequest && (
             <div className="p-6 space-y-6">
-              {/* Restaurant Info */}
-              <div className="p-4 bg-blue-50/50 rounded-xl border border-blue-100/50 flex items-center justify-between">
+              <div className="p-4 bg-blue-50/50 rounded-xl border border-blue-100/50 flex items-center justify-between gap-3">
                 <div>
-                   <h3 className="font-bold text-xs text-blue-700 uppercase tracking-wider mb-1">Restaurant</h3>
-                   <p className="text-sm font-semibold text-gray-900">{selectedRequest.restaurantName || '-'}</p>
-                   <p className="text-xs text-gray-500">ID: {selectedRequest.restaurantId || '-'}</p>
+                  <h3 className="font-bold text-xs text-blue-700 uppercase tracking-wider mb-1">Restaurant</h3>
+                  <p className="text-sm font-semibold text-gray-900">{selectedRequest.restaurantName || "—"}</p>
+                  <p className="text-xs text-gray-500">Restaurant ID: {selectedRequest.restaurantId || "—"}</p>
                 </div>
                 <div className="px-3 py-1 bg-white rounded-full border border-blue-100 text-[10px] font-bold text-blue-600">
-                    {selectedRequest.entityType?.toUpperCase()}
+                  {selectedRequest.entityType === "addon" ? "Add-on" : "Food Item"}
                 </div>
               </div>
 
-              {/* Item Info */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-4">
-                    <div>
-                        <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Item Name</label>
-                        <p className="text-sm font-semibold text-gray-900">{selectedRequest.itemName || '-'}</p>
-                    </div>
-                    <div>
-                        <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Category</label>
-                        <p className="text-sm text-gray-700">{selectedRequest.category || '-'}</p>
-                    </div>
-                    <div>
-                        <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Price</label>
-                        <p className="text-sm font-bold text-green-600">{selectedRequest.price !== null && selectedRequest.price !== undefined ? `₹${selectedRequest.price}` : '-'}</p>
-                    </div>
-                    <div>
-                        <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Status</label>
-                        <p className="text-sm text-gray-700 capitalize font-medium">{selectedRequest.approvalStatus || 'pending'}</p>
-                    </div>
-                </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <DetailField label="Item Name" value={selectedRequest.itemName || selectedRequest.name} />
+                <DetailField label="Category" value={selectedRequest.category || selectedRequest.categoryName} />
+                <DetailField label="Food Type" value={selectedRequest.foodType} />
+                <DetailField label="Approval Status" value={selectedRequest.approvalStatus} />
+                <DetailField
+                  label="Price"
+                  value={selectedRequest.price !== null && selectedRequest.price !== undefined ? `₹${selectedRequest.price}` : "—"}
+                />
+                <DetailField label="Available" value={selectedRequest.isAvailable !== false ? "Yes" : "No"} />
+                <DetailField label="Preparation Time" value={selectedRequest.preparationTime} />
+                <DetailField label="Requested On" value={formatDetailDate(selectedRequest.requestedAt)} />
+                {selectedRequest.rejectionReason ? (
+                  <DetailField label="Rejection Reason" value={selectedRequest.rejectionReason} full />
+                ) : null}
+                {selectedRequest.description ? (
+                  <DetailField label="Description" value={selectedRequest.description} full />
+                ) : null}
+              </div>
 
-                <div className="space-y-4">
-                    {selectedRequest.foodType && (
-                        <div>
-                            <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Food Type</label>
-                            <p className="text-sm text-gray-700">{selectedRequest.foodType}</p>
-                        </div>
-                    )}
-                    {selectedRequest.requestedAt && (
-                        <div>
-                            <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Requested On</label>
-                            <p className="text-sm text-gray-700">{new Date(selectedRequest.requestedAt).toLocaleString()}</p>
-                        </div>
-                    )}
-                </div>
-
-                {selectedRequest.description && (
-                  <div className="col-span-full">
-                    <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Description</label>
-                    <p className="text-sm text-gray-700 leading-relaxed bg-slate-50 p-3 rounded-lg border border-slate-100">{selectedRequest.description}</p>
-                  </div>
-                )}
-
-                {/* Images */}
-                {(() => {
-                  const allImages = (selectedRequest.images || []).filter(img => img && typeof img === 'string');
-                  if (selectedRequest.image && !allImages.includes(selectedRequest.image)) {
-                      allImages.unshift(selectedRequest.image);
-                  }
-                  
-                  return allImages.length > 0 ? (
-                    <div className="col-span-full">
-                      <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">
-                        Images ({allImages.length})
-                      </label>
-                      <div className="flex flex-wrap gap-3">
-                        {allImages.map((img, idx) => (
-                            <img 
-                              key={idx}
-                              src={img} 
-                              alt="Item preview"
-                              className="w-24 h-24 object-cover rounded-xl border border-gray-100 shadow-sm hover:scale-105 transition-transform cursor-zoom-in"
-                              onClick={() => window.open(img, '_blank')}
-                              onError={(e) => { e.target.style.display = 'none'; }}
-                            />
+              {Array.isArray(selectedRequest.variants) && selectedRequest.variants.length > 0 ? (
+                <div>
+                  <label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                    Variants ({selectedRequest.variants.length})
+                  </label>
+                  <div className="overflow-x-auto rounded-xl border border-gray-100">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-slate-50 text-left text-xs uppercase text-gray-500">
+                        <tr>
+                          <th className="px-3 py-2">Name</th>
+                          <th className="px-3 py-2">Price</th>
+                          <th className="px-3 py-2">Unit</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedRequest.variants.map((variant, idx) => (
+                          <tr key={variant?.id || idx} className="border-t border-gray-100">
+                            <td className="px-3 py-2">{variant?.name || "—"}</td>
+                            <td className="px-3 py-2">₹{Number(variant?.price || 0)}</td>
+                            <td className="px-3 py-2">{variant?.unit || "—"}</td>
+                          </tr>
                         ))}
-                      </div>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
+
+              {selectedRequest.entityType === "addon" ? (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div className="rounded-xl border border-purple-100 bg-purple-50/40 p-4">
+                    <p className="mb-3 text-xs font-bold uppercase tracking-wider text-purple-700">Pending Submission</p>
+                    <div className="space-y-3">
+                      <DetailField label="Name" value={selectedRequest.draft?.name} />
+                      <DetailField label="Price" value={selectedRequest.draft?.price !== undefined ? `₹${selectedRequest.draft.price}` : "—"} />
+                      {selectedRequest.draft?.description ? (
+                        <DetailField label="Description" value={selectedRequest.draft.description} full />
+                      ) : null}
+                      <ImagePreviewRow
+                        images={[
+                          ...(Array.isArray(selectedRequest.draft?.images) ? selectedRequest.draft.images : []),
+                          ...(selectedRequest.draft?.image ? [selectedRequest.draft.image] : []),
+                        ]}
+                      />
                     </div>
-                  ) : null;
-                })()}
-              </div>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                    <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-600">Currently Live</p>
+                    <div className="space-y-3">
+                      <DetailField label="Name" value={selectedRequest.published?.name} />
+                      <DetailField label="Price" value={selectedRequest.published?.price !== undefined ? `₹${selectedRequest.published.price}` : "—"} />
+                      {selectedRequest.published?.description ? (
+                        <DetailField label="Description" value={selectedRequest.published.description} full />
+                      ) : null}
+                      <ImagePreviewRow
+                        images={[
+                          ...(Array.isArray(selectedRequest.published?.images) ? selectedRequest.published.images : []),
+                          ...(selectedRequest.published?.image ? [selectedRequest.published.image] : []),
+                        ]}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {(() => {
+                const allImages = (selectedRequest.images || []).filter((img) => img && typeof img === "string")
+                if (selectedRequest.image && !allImages.includes(selectedRequest.image)) {
+                  allImages.unshift(selectedRequest.image)
+                }
+
+                return allImages.length > 0 ? (
+                  <div>
+                    <label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                      Images ({allImages.length})
+                    </label>
+                    <div className="flex flex-wrap gap-3">
+                      {allImages.map((img, idx) => (
+                        <img
+                          key={idx}
+                          src={img}
+                          alt="Item preview"
+                          className="h-24 w-24 cursor-zoom-in rounded-xl border border-gray-100 object-cover shadow-sm transition-transform hover:scale-105"
+                          onClick={() => window.open(img, "_blank")}
+                          onError={(e) => { e.target.style.display = "none" }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ) : null
+              })()}
             </div>
           )}
           <DialogFooter className="p-6 pt-4 border-t border-gray-100 bg-slate-50/50 flex gap-2">

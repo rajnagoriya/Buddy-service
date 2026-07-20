@@ -249,20 +249,43 @@ export const LiveMap = ({ onMapClick, onMapLoad, onPathReceived, onPolylineRecei
     return { remainingPath: remaining, traveledPath: traveled };
   }, [directions, parsedRiderLocation]);
 
+  // Fetch directions for the Rider to Target Location path
+  useEffect(() => {
+    if (!isLoaded || !parsedRiderLocation || !targetLocation || !window.google) return;
+    if (!shouldUpdateRoute) return;
+
+    const directionsService = new window.google.maps.DirectionsService();
+    directionsService.route(
+      {
+        origin: parsedRiderLocation,
+        destination: targetLocation,
+        travelMode: window.google.maps.TravelMode.DRIVING,
+      },
+      (result, status) => {
+        directionsCallback(result, status);
+      }
+    );
+  }, [isLoaded, parsedRiderLocation?.lat, parsedRiderLocation?.lng, targetLocation?.lat, targetLocation?.lng, shouldUpdateRoute, directionsCallback]);
+
+  // Fetch baseline directions (Restaurant to Customer)
+  useEffect(() => {
+    if (!isLoaded || !restaurantPoint || !customerPoint || !window.google || baselineDirections) return;
+
+    const directionsService = new window.google.maps.DirectionsService();
+    directionsService.route(
+      {
+        origin: restaurantPoint,
+        destination: customerPoint,
+        travelMode: window.google.maps.TravelMode.DRIVING,
+      },
+      (result, status) => {
+        baselineDirectionsCallback(result, status);
+      }
+    );
+  }, [isLoaded, restaurantPoint?.lat, restaurantPoint?.lng, customerPoint?.lat, customerPoint?.lng, baselineDirections, baselineDirectionsCallback]);
+
   if (loadError) return <div className="absolute inset-0 flex items-center justify-center bg-gray-50 text-red-500 font-bold">Map Load Error</div>;
   if (!isLoaded) return <div className="absolute inset-0 flex items-center justify-center bg-gray-50"><div className="w-10 h-10 border-4 border-green-500 border-t-transparent rounded-full animate-spin" /></div>;
-
-  const directionsServiceOptions = (parsedRiderLocation && targetLocation) ? {
-    origin: parsedRiderLocation,
-    destination: targetLocation,
-    travelMode: 'DRIVING',
-  } : null;
-
-  const baselineServiceOptions = (restaurantPoint && customerPoint) ? {
-    origin: restaurantPoint,
-    destination: customerPoint,
-    travelMode: 'DRIVING',
-  } : null;
 
   const defaultCenter = { lat: 22.7196, lng: 75.8577 }; // Center on Indore as fallback
 
@@ -278,13 +301,6 @@ export const LiveMap = ({ onMapClick, onMapLoad, onPathReceived, onPolylineRecei
         onClick={(e) => onMapClick?.(e.latLng.lat(), e.latLng.lng())}
         options={mapOptions}
       >
-        {directionsServiceOptions && shouldUpdateRoute && (
-          <DirectionsService options={directionsServiceOptions} callback={directionsCallback} />
-        )}
-
-        {baselineServiceOptions && !baselineDirections && (
-          <DirectionsService options={baselineServiceOptions} callback={baselineDirectionsCallback} />
-        )}
 
         {traveledPath.length > 0 && (
           <Polyline 

@@ -56,7 +56,11 @@ export const useOrderManager = () => {
         // For multi-restaurant, find the next pending pickup location
         let resLoc = null;
         if (fullOrder.isMultiRestaurant && Array.isArray(fullOrder.pickups)) {
-          const nextPickup = fullOrder.pickups.find(p => !['picked_up', 'cancelled'].includes(p.status));
+          const nextPickup = fullOrder.pickups.find(
+            (p) =>
+              !p.permanentlyDropped &&
+              !['picked_up', 'cancelled'].includes(String(p.status || '')),
+          );
           if (nextPickup) {
             resLoc = getLoc(nextPickup, ['latitude', 'lat'], ['longitude', 'lng']);
           }
@@ -112,8 +116,16 @@ export const useOrderManager = () => {
     try {
       const response = await deliveryAPI.confirmReachedPickup(orderId);
       if (response?.data?.success) {
+        const updatedOrder = response.data.data?.order;
+        if (updatedOrder) {
+          setActiveOrder({
+            ...(activeOrder || {}),
+            ...updatedOrder,
+            restaurantLocation: activeOrder?.restaurantLocation,
+            customerLocation: activeOrder?.customerLocation,
+          });
+        }
         updateTripStatus('REACHED_PICKUP');
-        // toast.info('Arrived at Restaurant');
       } else {
         throw new Error('Confirm pickup failed');
       }
@@ -144,10 +156,36 @@ export const useOrderManager = () => {
       if (response?.data?.success) {
         const updatedOrder = response.data.data?.order;
         if (updatedOrder) {
-          // Sync local order state (includes updated pickups array)
+          const getLoc = (ref, keysLat, keysLng) => {
+            if (!ref) return null;
+            if (ref.location) {
+              if (Array.isArray(ref.location.coordinates) && ref.location.coordinates.length >= 2) {
+                return { lat: ref.location.coordinates[1], lng: ref.location.coordinates[0] };
+              }
+              return { lat: ref.location.latitude || ref.location.lat, lng: ref.location.longitude || ref.location.lng };
+            }
+            for (const k of keysLat) { if (ref[k] != null) return { lat: ref[k], lng: ref[keysLng[keysLat.indexOf(k)]] }; }
+            return null;
+          };
+
+          let nextRestaurantLocation = activeOrder?.restaurantLocation || null;
+          if (updatedOrder.isMultiRestaurant && Array.isArray(updatedOrder.pickups)) {
+            const nextPickup = updatedOrder.pickups.find(
+              (p) => !p.permanentlyDropped && !['picked_up', 'ready_for_handover', 'cancelled'].includes(String(p.status || '')),
+            );
+            if (nextPickup) {
+              nextRestaurantLocation = getLoc(nextPickup, ['latitude', 'lat'], ['longitude', 'lng'])
+                || getLoc(nextPickup.location, ['latitude', 'lat'], ['longitude', 'lng'])
+                || nextRestaurantLocation;
+            }
+          }
+
+          // Sync local order state (includes updated pickups array + next stop coords)
           setActiveOrder({
             ...activeOrder,
-            ...updatedOrder
+            ...updatedOrder,
+            restaurantLocation: nextRestaurantLocation,
+            customerLocation: activeOrder?.customerLocation,
           });
 
           // If order is still not fully 'picked_up', it means there are more pickups
@@ -159,7 +197,7 @@ export const useOrderManager = () => {
           } else {
             // Revert to PICKING_UP to target the NEXT restaurant in the pickups array
             updateTripStatus('PICKING_UP');
-            toast.info('Pickup confirmed. Moving to next restaurant.');
+            toast.info('Pickup confirmed. Capture bill at the next restaurant.');
           }
         } else {
           updateTripStatus('PICKED_UP');

@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import * as adminService from '../services/admin.service.js';
 import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
 import { validateCategoryListQuery, validateCategoryRejectDto, validateCategoryUpsertDto } from '../validators/category.validator.js';
-import { validateCreateOfferDto, validateUpdateOfferCartVisibilityDto } from '../validators/offer.validator.js';
+import { validateCreateOfferDto, validateUpdateOfferDto, validateUpdateOfferCartVisibilityDto } from '../validators/offer.validator.js';
 import { validateAddDeliveryBonusDto } from '../validators/deliveryBonus.validator.js';
 import { validateCheckCompletionsDto, validateEarningAddonHistoryActionDto, validateEarningAddonUpsertDto, validateToggleEarningAddonStatusDto } from '../validators/earningAddon.validator.js';
 import { validateDeliveryCommissionRuleDto, validateOptionalStatusDto, validateRestaurantCommissionUpsertDto } from '../validators/commission.validator.js';
@@ -43,7 +43,7 @@ export async function updateCustomerStatus(req, res, next) {
         const isActive = req.body?.isActive;
         const updated = await adminService.updateCustomerStatus(id, isActive);
         if (!updated) return res.status(404).json({ success: false, message: 'Customer not found' });
-        res.status(200).json({ success: true, message: 'Customer status updated successfully', data: { user: updated, customer: updated } });
+        res.status(200).json({ success: true, message: 'Customer status updated successfully' });
     } catch (error) {
         next(error);
     }
@@ -632,8 +632,27 @@ export async function getAllOffers(req, res, next) {
 export async function createAdminOffer(req, res, next) {
     try {
         const body = validateCreateOfferDto(req.body || {});
-        const created = await adminService.createAdminOffer(body);
-        res.status(201).json({ success: true, message: 'Offer created successfully', data: { offer: created } });
+        const adminId = req.user?.userId || req.user?._id;
+        const created = await adminService.createAdminOffer(body, adminId);
+        res.status(201).json({ success: true, message: 'Offer submitted for approval', data: { offer: created } });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function updateAdminOffer(req, res, next) {
+    try {
+        const { id } = req.params;
+        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ success: false, message: 'Invalid offer id' });
+        }
+        const body = validateUpdateOfferDto(req.body || {});
+        const adminId = req.user?.userId || req.user?._id;
+        const updated = await adminService.updateAdminOffer(id, body, adminId);
+        if (!updated) {
+            return res.status(404).json({ success: false, message: 'Offer not found' });
+        }
+        res.status(200).json({ success: true, message: 'Offer updated successfully', data: { offer: updated } });
     } catch (error) {
         next(error);
     }
@@ -667,6 +686,65 @@ export async function deleteAdminOffer(req, res, next) {
             return res.status(404).json({ success: false, message: 'Offer not found' });
         }
         res.status(200).json({ success: true, message: 'Offer deleted successfully', data: result });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function approveAdminOffer(req, res, next) {
+    try {
+        const { id } = req.params;
+        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ success: false, message: 'Invalid offer id' });
+        }
+        const updated = await adminService.approveAdminOffer(id);
+        if (!updated) {
+            return res.status(404).json({ success: false, message: 'Offer not found' });
+        }
+        res.status(200).json({ success: true, message: 'Offer approved successfully', data: { offer: updated } });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function rejectAdminOffer(req, res, next) {
+    try {
+        const { id } = req.params;
+        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ success: false, message: 'Invalid offer id' });
+        }
+        const reason = req.body?.reason || req.body?.rejectionReason || '';
+        const updated = await adminService.rejectAdminOffer(id, reason);
+        if (!updated) {
+            return res.status(404).json({ success: false, message: 'Offer not found' });
+        }
+        res.status(200).json({ success: true, message: 'Offer rejected successfully', data: { offer: updated } });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function getAdminOfferAnalytics(req, res, next) {
+    try {
+        const { id } = req.params;
+        const data = await adminService.getAdminOfferAnalytics(id);
+        if (!data) {
+            return res.status(404).json({ success: false, message: 'Offer not found' });
+        }
+        res.status(200).json({ success: true, message: 'Analytics fetched', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function getAdminOfferUsageHistory(req, res, next) {
+    try {
+        const { id } = req.params;
+        const data = await adminService.getAdminOfferUsageHistory(id, req.query || {});
+        if (!data) {
+            return res.status(404).json({ success: false, message: 'Offer not found' });
+        }
+        res.status(200).json({ success: true, message: 'Usage history fetched', data });
     } catch (error) {
         next(error);
     }
@@ -1056,6 +1134,15 @@ export async function getFeeSettings(req, res, next) {
     }
 }
 
+export async function getPublicFeeSettings(req, res, next) {
+    try {
+        const data = await adminService.getPublicFeeSettings();
+        res.status(200).json({ success: true, message: 'Fee settings fetched successfully', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
 export async function createOrUpdateFeeSettings(req, res, next) {
     try {
         const body = validateFeeSettingsUpsertDto(req.body || {});
@@ -1081,25 +1168,6 @@ export async function createOrUpdateReferralSettings(req, res, next) {
         const body = validateReferralSettingsUpsertDto(req.body || {});
         const referralSettings = await adminService.upsertReferralSettings(body);
         res.status(200).json({ success: true, message: 'Referral settings saved successfully', data: { referralSettings } });
-    } catch (error) {
-        next(error);
-    }
-}
-
-// ----- Delivery Cash Limit (admin) -----
-export async function getDeliveryCashLimit(req, res, next) {
-    try {
-        const data = await adminService.getDeliveryCashLimitSettings();
-        res.status(200).json({ success: true, message: 'Delivery cash limit fetched successfully', data });
-    } catch (error) {
-        next(error);
-    }
-}
-
-export async function updateDeliveryCashLimit(req, res, next) {
-    try {
-        const data = await adminService.upsertDeliveryCashLimitSettings(req.body || {});
-        res.status(200).json({ success: true, message: 'Delivery cash limit updated successfully', data });
     } catch (error) {
         next(error);
     }
@@ -1356,6 +1424,19 @@ export async function getContactMessages(req, res, next) {
     }
 }
 
+export async function getDeliveryJoinRequestDetail(req, res, next) {
+    try {
+        const { getJoinRequestDetail } = await import('../../../../core/identity/driverOnboardingAdmin.service.js');
+        const detail = await getJoinRequestDetail(req.params.identityId);
+        if (!detail) {
+            return res.status(404).json({ success: false, message: 'Join request not found' });
+        }
+        res.status(200).json({ success: true, data: detail });
+    } catch (error) {
+        next(error);
+    }
+}
+
 export async function getDeliveryPartnerById(req, res, next) {
     try {
         const delivery = await adminService.getDeliveryPartnerById(req.params.id);
@@ -1396,7 +1477,8 @@ export async function updateDeliveryPartner(req, res, next) {
 
 export async function approveDeliveryPartner(req, res, next) {
     try {
-        const partner = await adminService.approveDeliveryPartner(req.params.id);
+        const service = req.body?.service || 'food';
+        const partner = await adminService.approveDeliveryPartner(req.params.id, service);
         if (!partner) {
             return res.status(404).json({
                 success: false,
@@ -1416,7 +1498,14 @@ export async function approveDeliveryPartner(req, res, next) {
 export async function rejectDeliveryPartner(req, res, next) {
     try {
         const reason = req.body?.reason != null ? String(req.body.reason).trim() : '';
-        const partner = await adminService.rejectDeliveryPartner(req.params.id, reason);
+        if (!reason) {
+            return res.status(400).json({
+                success: false,
+                message: 'Rejection reason is required',
+            });
+        }
+        const service = req.body?.service || 'food';
+        const partner = await adminService.rejectDeliveryPartner(req.params.id, reason, service);
         if (!partner) {
             return res.status(404).json({
                 success: false,
@@ -1603,15 +1692,6 @@ export async function getDeliveryWallets(req, res, next) {
     try {
         const data = await adminService.getDeliveryWallets(req.query || {});
         res.status(200).json({ success: true, message: 'Delivery wallets fetched successfully', data });
-    } catch (error) {
-        next(error);
-    }
-}
-
-export async function getCashLimitSettlements(req, res, next) {
-    try {
-        const data = await adminService.getCashLimitSettlements(req.query || {});
-        res.status(200).json({ success: true, message: 'Cash limit settlements fetched successfully', data });
     } catch (error) {
         next(error);
     }

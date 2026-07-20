@@ -1,4 +1,4 @@
-import { Banknote, ChevronRight, Wallet, Zap } from "lucide-react"
+import { Banknote, ChevronRight, Loader2, Wallet, Zap } from "lucide-react"
 
 export default function CartCheckoutBar({
   rupeeSymbol,
@@ -60,9 +60,18 @@ export default function CartCheckoutBar({
             <p className="text-lg font-black leading-none">{rupeeSymbol}{total.toFixed(2)}</p>
             <p className="text-[10px] font-semibold text-white/80 mt-0.5 uppercase tracking-wide">Total</p>
           </div>
-          <span className="flex items-center gap-1 text-base">
-            {isPlacingOrder ? "Processing..." : !hasSavedAddress ? "Select address" : "Place order"}
-            <ChevronRight className="h-5 w-5" />
+          <span className="flex items-center gap-1.5 text-base">
+            {isPlacingOrder ? (
+              <>
+                <Loader2 className="h-5 w-5 animate-spin" />
+                Placing order...
+              </>
+            ) : !hasSavedAddress ? (
+              "Select address"
+            ) : (
+              "Place order"
+            )}
+            {!isPlacingOrder && <ChevronRight className="h-5 w-5" />}
           </span>
         </button>
       </div>

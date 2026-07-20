@@ -25,7 +25,15 @@ import { fetchPolyline } from '../utils/googleMaps.js';
 import * as foodTransactionService from './foodTransaction.service.js';
 import * as dispatchService from './order-dispatch.service.js';
 import {
+  isActivePickup,
+  assertCanShareSecondDriver,
+  isShareRequired,
+  isSharedDriverJoined,
+  pushSettlementSnapshot,
+} from './order-lifecycle.policy.js';
+import {
   buildOrderIdentityFilter,
+  buildRestaurantScopedOrder,
   emitDeliveryDropOtpToUser,
   enqueueOrderEvent,
   generateFourDigitDeliveryOtp,
@@ -35,6 +43,7 @@ import {
   pushStatusHistory,
   sanitizeOrderForExternal,
   isStatusAdvance,
+  buildDeliverySocketPayload,
 } from './order.helpers.js';
 
 function normalizeOtpValue(value) {
@@ -252,11 +261,20 @@ function emitOrderUpdate(order, deliveryPartnerId, options = {}) {
         orderStatus: order.orderStatus,
         deliveryState: order.deliveryState,
         deliveryVerification: dv,
+        pickups: order.pickups || [],
+        dispatch: order.dispatch || null,
+        isMultiRestaurant: Boolean(order.isMultiRestaurant),
       };
-      io.to(rooms.delivery(deliveryPartnerId)).emit(
-        'order_status_update',
-        payload,
-      );
+      const riderIds = [
+        deliveryPartnerId,
+        order.dispatch?.deliveryPartnerId,
+        order.dispatch?.sharedPartnerId,
+      ]
+        .filter(Boolean)
+        .map((id) => String(id));
+      for (const riderId of [...new Set(riderIds)]) {
+        io.to(rooms.delivery(riderId)).emit('order_status_update', payload);
+      }
       const pickupRestaurantIds = Array.isArray(order.pickups)
         ? [...new Set(order.pickups.map((p) => String(p?.restaurantId || '')).filter(Boolean))]
         : [];
@@ -403,7 +421,16 @@ export async function getCurrentTripDelivery(deliveryPartnerId) {
     ],
     'dispatch.status': 'accepted',
     orderStatus: {
-      $in: ['created', 'accepted', 'confirmed', 'preparing', 'ready_for_pickup', 'picked_up'],
+      $in: [
+        'created',
+        'accepted',
+        'confirmed',
+        'preparing',
+        'ready_for_pickup',
+        'reached_pickup',
+        'picked_up',
+        'reached_drop',
+      ],
     },
   })
     .populate({
@@ -556,14 +583,38 @@ export async function listOrdersAvailableDelivery(deliveryPartnerId, query) {
 
   const enriched = (docs || []).map((doc) => {
     const tx = txByOrderId.get(String(doc?._id)) || null;
-    if (!tx) return doc;
+    const pricing = tx?.pricing || doc.pricing;
+    const riderEarning = (() => {
+      const candidates = [
+        doc?.riderEarning,
+        pricing?.deliveryFeeBreakdown?.riderFee,
+        pricing?.deliveryFeeBreakdown?.deliveryBoyFee,
+      ];
+      for (const value of candidates) {
+        const n = Number(value);
+        if (Number.isFinite(n) && n > 0) return n;
+      }
+      for (const value of candidates) {
+        const n = Number(value);
+        if (Number.isFinite(n) && n >= 0) return n;
+      }
+      return 0;
+    })();
+    const base = tx
+      ? {
+          ...doc,
+          paymentMethod: tx.payment?.method || tx.paymentMethod || doc.paymentMethod,
+          payment: tx.payment || doc.payment,
+          pricing,
+          amounts: tx.amounts || doc.amounts,
+          transactionStatus: tx.status || doc.transactionStatus,
+        }
+      : { ...doc, pricing };
     return {
-      ...doc,
-      paymentMethod: tx.payment?.method || tx.paymentMethod || doc.paymentMethod,
-      payment: tx.payment || doc.payment,
-      pricing: tx.pricing || doc.pricing,
-      amounts: tx.amounts || doc.amounts,
-      transactionStatus: tx.status || doc.transactionStatus,
+      ...base,
+      riderEarning,
+      earnings: riderEarning,
+      deliveryBoyFee: Number(pricing?.deliveryFeeBreakdown?.deliveryBoyFee ?? riderEarning) || 0,
     };
   });
 
@@ -723,6 +774,15 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
           'dispatch.status': 'assigned',
           'dispatch.deliveryPartnerId': partnerId,
         },
+        {
+          'dispatch.status': 'offered',
+          'dispatch.offeredTo': {
+            $elemMatch: {
+              partnerId,
+              action: 'offered',
+            },
+          },
+        },
       ],
     },
     {
@@ -732,13 +792,22 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
         'dispatch.assignedAt': now,
         'dispatch.acceptedAt': now,
         riderEarning: finalRiderEarning,
-        platformProfit: newPlatformProfit
+        platformProfit: newPlatformProfit,
+        'dispatch.offeredTo.$[acceptedOffer].action': 'accepted',
       },
       $push: {
         statusHistory: statusHistoryEntry,
       },
     },
-    { new: true },
+    {
+      new: true,
+      arrayFilters: [
+        {
+          'acceptedOffer.partnerId': partnerId,
+          'acceptedOffer.action': 'offered',
+        },
+      ],
+    },
   ).populate('restaurantId userId');
 
   if (!order) {
@@ -773,10 +842,77 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
       throw new ForbiddenError('Order already accepted by another partner');
     }
 
+    if (existing.dispatch?.status === 'offered') {
+      const wasOffered = (existing.dispatch?.offeredTo || []).some(
+        (entry) =>
+          String(entry?.partnerId || '') === String(deliveryPartnerId) &&
+          entry?.action === 'offered',
+      );
+      if (!wasOffered) {
+        throw new ValidationError('This order was offered to other delivery partners');
+      }
+    }
+
     throw new ValidationError('Order is no longer available to accept');
   }
 
   const responseOrder = sanitizeOrderForExternal(order);
+
+  // Bulk orders: auto-open share slot so a 2nd driver can join (required before complete)
+  try {
+    pushSettlementSnapshot(
+      order,
+      'accept',
+      `Rider accepted; riderEarning=₹${Number(order.riderEarning) || 0}`,
+    );
+
+    const boySettings =
+      (await FoodDeliveryBoySettings.findOne({ isActive: true }).sort({ createdAt: -1 }).lean()) ||
+      (await FoodDeliveryBoySettings.findOne().sort({ createdAt: -1 }).lean());
+    if (
+      isShareRequired(order, boySettings || {}) &&
+      !order.dispatch?.sharedPartnerId &&
+      !order.dispatch?.isShared
+    ) {
+      const totalEarning = Number(order.riderEarning || order.pricing?.deliveryFee || 0);
+      const sharedSplit = Math.round(totalEarning / 2);
+      order.dispatch.isShared = true;
+      order.sharedRiderEarning = sharedSplit;
+      order.riderEarning = Math.max(0, totalEarning - sharedSplit);
+      pushStatusHistory(order, {
+        byRole: 'SYSTEM',
+        byId: deliveryPartnerId,
+        from: order.orderStatus,
+        to: order.orderStatus,
+        note: 'Bulk order auto-opened for second delivery partner (share required)',
+      });
+      pushSettlementSnapshot(
+        order,
+        'share',
+        `Auto-share bulk: primary ₹${order.riderEarning}, shared ₹${order.sharedRiderEarning}`,
+      );
+      await order.save();
+      Object.assign(responseOrder, sanitizeOrderForExternal(order));
+
+      try {
+        const io = getIO();
+        if (io) {
+          const payload = buildDeliverySocketPayload(order, order.restaurantId);
+          io.to('all_delivery').emit('shareable_order_available', {
+            ...payload,
+            sharedFrom: deliveryPartnerId,
+            shareRequired: true,
+          });
+        }
+      } catch (sockErr) {
+        logger.warn(`Auto-share socket emit failed: ${sockErr?.message || sockErr}`);
+      }
+    } else {
+      await order.save();
+    }
+  } catch (shareErr) {
+    logger.warn(`Accept settlement / auto-share failed: ${shareErr?.message || shareErr}`);
+  }
 
   void (async () => {
     try {
@@ -830,16 +966,59 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
 
     try {
       const io = getIO();
+      const restaurantIdStr =
+        order.restaurantId?._id?.toString?.() ||
+        order.restaurantId?.toString?.() ||
+        String(order.restaurantId || '');
+      const userIdStr =
+        order.userId?._id?.toString?.() ||
+        order.userId?.toString?.() ||
+        String(order.userId || '');
+
       if (io) {
-        const payload = {
+        const basePayload = {
           orderMongoId: order._id?.toString?.(),
-          orderId: order._id.toString(),
+          orderId: order.order_id || order._id.toString(),
           orderStatus: order.orderStatus,
+          status: order.orderStatus,
           dispatchStatus: order.dispatch?.status,
+          dispatch: order.dispatch,
+          pickups: order.pickups || [],
+          deliveryState: order.deliveryState || null,
+          isMultiRestaurant: Boolean(order.isMultiRestaurant),
         };
-        io.to(rooms.delivery(deliveryPartnerId)).emit('order_status_update', payload);
-        io.to(rooms.restaurant(order.restaurantId)).emit('order_status_update', payload);
-        io.to(rooms.user(order.userId)).emit('order_status_update', payload);
+        io.to(rooms.delivery(deliveryPartnerId)).emit('order_status_update', basePayload);
+        const sharedId = order.dispatch?.sharedPartnerId;
+        if (sharedId) {
+          io.to(rooms.delivery(sharedId)).emit('order_status_update', basePayload);
+        }
+        if (userIdStr) {
+          io.to(rooms.user(userIdStr)).emit('order_status_update', basePayload);
+        }
+
+        // Notify EVERY active pickup restaurant with THEIR scoped status (not aggregate)
+        const pickupRestaurantIdsForSocket = Array.isArray(order.pickups)
+          ? [...new Set(
+              order.pickups
+                .filter((p) => isActivePickup(p))
+                .map((p) => String(p?.restaurantId || ''))
+                .filter(Boolean),
+            )]
+          : [];
+        const restaurantTargets = pickupRestaurantIdsForSocket.length
+          ? pickupRestaurantIdsForSocket
+          : (restaurantIdStr ? [restaurantIdStr] : []);
+
+        for (const rid of restaurantTargets) {
+          const scoped = buildRestaurantScopedOrder(order, rid);
+          io.to(rooms.restaurant(rid)).emit('order_status_update', {
+            ...basePayload,
+            orderStatus: scoped.orderStatus,
+            status: scoped.status,
+            myPickupStatus: scoped.myPickupStatus,
+            restaurantId: rid,
+          });
+        }
 
         // Broadcast order_claimed to ALL online delivery partners so every popup is dismissed
         const claimedPayload = {
@@ -869,7 +1048,12 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
       );
 
       const pickupRestaurantIds = Array.isArray(order.pickups)
-        ? [...new Set(order.pickups.map((p) => String(p?.restaurantId || '')).filter(Boolean))]
+        ? [...new Set(
+            order.pickups
+              .filter((p) => isActivePickup(p))
+              .map((p) => String(p?.restaurantId || ''))
+              .filter(Boolean),
+          )]
         : [];
 
       if (pickupRestaurantIds.length > 0) {
@@ -878,10 +1062,10 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
           await notifyOwnerSafely(
             { ownerType: 'RESTAURANT', ownerId: rid },
             {
-              title: 'Rider assigned',
-              body: `Order #${order._id.toString()} is now assigned to a delivery partner.`,
+              title: 'New order — rider assigned',
+              body: `Order #${order.order_id || order._id.toString()} needs your acceptance.`,
               data: {
-                type: 'delivery_accepted',
+                type: 'new_order',
                 orderId: order._id.toString(),
                 orderMongoId: order._id?.toString?.() || '',
                 dispatchStatus: order.dispatch?.status,
@@ -893,12 +1077,12 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
       } else {
         await notifyRestaurantNewOrder(order);
         await notifyOwnerSafely(
-          { ownerType: 'RESTAURANT', ownerId: order.restaurantId },
+          { ownerType: 'RESTAURANT', ownerId: restaurantIdStr || order.restaurantId },
           {
-            title: 'Rider assigned',
-            body: `Order #${order._id.toString()} is now assigned to a delivery partner.`,
+            title: 'New order — rider assigned',
+            body: `Order #${order.order_id || order._id.toString()} needs your acceptance.`,
             data: {
-              type: 'delivery_accepted',
+              type: 'new_order',
               orderId: order._id.toString(),
               orderMongoId: order._id?.toString?.() || '',
               dispatchStatus: order.dispatch?.status,
@@ -972,13 +1156,18 @@ export async function rejectOrderDelivery(orderId, deliveryPartnerId) {
     throw new NotFoundError('Order not found');
   }
 
+  const wasOffered = (order.dispatch?.offeredTo || []).some(
+    (item) =>
+      String(item.partnerId) === String(deliveryPartnerId) &&
+      item.action === 'offered',
+  );
   const isPrimary = order.dispatch?.deliveryPartnerId?.toString() === deliveryPartnerId.toString();
   const isShared = order.dispatch?.sharedPartnerId?.toString() === deliveryPartnerId.toString();
-  if (!isPrimary && !isShared) {
+  if (!isPrimary && !isShared && !wasOffered) {
     throw new ForbiddenError('Not your order');
   }
 
-  const offer = order.dispatch.offeredTo.find(
+  const offer = (order.dispatch?.offeredTo || []).find(
     (item) =>
       String(item.partnerId) === String(deliveryPartnerId) &&
       item.action === 'offered',
@@ -1214,16 +1403,25 @@ export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImag
 
   // Handle Multi-Restaurant Pickup Logic
   if (order.isMultiRestaurant && Array.isArray(order.pickups) && order.pickups.length > 0) {
-    // 1. Find the current pending pickup (first one that isn't picked_up or cancelled)
-    const currentPickup = order.pickups.find(p => !['picked_up', 'cancelled'].includes(p.status));
+    // 1. Find the current pending pickup (first active one that isn't picked_up)
+    const currentPickup = order.pickups.find(
+      (p) =>
+        isActivePickup(p) && !['picked_up'].includes(String(p.status || '')),
+    );
     
     if (currentPickup) {
       currentPickup.status = 'picked_up';
       currentPickup.pickedAt = new Date();
+      if (billImageUrl) currentPickup.billImageUrl = billImageUrl;
     }
 
-    // 2. Check if all relevant pickups are now completed
-    const allPicked = order.pickups.every(p => ['picked_up', 'cancelled'].includes(p.status));
+    // 2. All non-dropped pickups must be picked_up before leaving for drop
+    const remaining = order.pickups.filter(
+      (p) => !p.permanentlyDropped && String(p.status || '') !== 'cancelled',
+    );
+    const allPicked =
+      remaining.length > 0 &&
+      remaining.every((p) => String(p.status) === 'picked_up');
 
     if (allPicked) {
       // Final restaurant picked up - advance to delivery phase
@@ -1236,15 +1434,13 @@ export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImag
         billImageUrl,
       };
     } else {
-      // More restaurants to visit - stay in pickup phase but move to next restaurant
-      // We don't advance order.orderStatus yet.
+      // More restaurants to visit — stay in pickup phase and require bill at next stop
       order.deliveryState = {
         ...(order.deliveryState?.toObject?.() || order.deliveryState || {}),
         currentPhase: 'en_route_to_pickup',
-        status: 'ready_for_pickup', // Reset status so rider can "reach" the next store
-        // We keep the billImageUrl but maybe we should append it? 
-        // For now, we'll just update it or keep it.
-        billImageUrl: billImageUrl || order.deliveryState?.billImageUrl,
+        status: 'ready_for_pickup',
+        billImageUrl: null,
+        lastPickupBillImageUrl: billImageUrl || null,
       };
       
       // We mark this history entry as a partial pickup
@@ -1744,6 +1940,15 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
   if (isShared && !order.deliveryState?.isSplitConfirmed) {
     throw new ValidationError('Earnings split must be confirmed by the primary partner before completing the delivery.');
   }
+
+  const boySettings =
+    (await FoodDeliveryBoySettings.findOne({ isActive: true }).sort({ createdAt: -1 }).lean()) ||
+    (await FoodDeliveryBoySettings.findOne().sort({ createdAt: -1 }).lean());
+  if (isShareRequired(order, boySettings || {}) && !isSharedDriverJoined(order)) {
+    throw new ValidationError(
+      'This is a bulk order and requires a second delivery partner. Share the order and wait for a partner to join before completing.',
+    );
+  }
   
   // 2. Financial Context Resolution
   const tx = await FoodTransaction.findOne({ orderId: order._id }).lean();
@@ -1797,6 +2002,11 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
     note: `Delivery completed by ${isPrimaryRider ? 'Primary' : 'Shared'} Partner using ${finalPayMethod}.`,
   });
 
+  pushSettlementSnapshot(
+    order,
+    'complete',
+    `Delivered via ${finalPayMethod}; primary ₹${Number(order.riderEarning) || 0}, shared ₹${Number(order.sharedRiderEarning) || 0}`,
+  );
   await order.save();
 
   // 5. Update Financial Ledger (FoodTransaction)

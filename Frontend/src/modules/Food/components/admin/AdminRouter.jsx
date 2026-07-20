@@ -45,6 +45,7 @@ const AddonsList = lazy(() => import("@food/pages/admin/addons/AddonsList"));
 const BasicCampaign = lazy(() => import("@food/pages/admin/campaigns/BasicCampaign"));
 const FoodCampaign = lazy(() => import("@food/pages/admin/campaigns/FoodCampaign"));
 const Coupons = lazy(() => import("@food/pages/admin/Coupons"));
+const CouponAnalytics = lazy(() => import("@food/pages/shared/CouponAnalytics"));
 const Cashback = lazy(() => import("@food/pages/admin/Cashback"));
 const Banners = lazy(() => import("@food/pages/admin/Banners"));
 const PromotionalBanner = lazy(() => import("@food/pages/admin/PromotionalBanner"));
@@ -65,8 +66,6 @@ const LoyaltyPointReport = lazy(() => import("@food/pages/admin/loyalty-point/Re
 const SubscribedMailList = lazy(() => import("@food/pages/admin/SubscribedMailList"));
 // Deliveryman Management
 const DeliveryBoyCommission = lazy(() => import("@food/pages/admin/DeliveryBoyCommission"));
-const DeliveryCashLimit = lazy(() => import("@food/pages/admin/DeliveryCashLimit"));
-const CashLimitSettlement = lazy(() => import("@food/pages/admin/CashLimitSettlement"));
 const DeliveryWithdrawal = lazy(() => import("@food/pages/admin/DeliveryWithdrawal"));
 const DeliveryBoyWallet = lazy(() => import("@food/pages/admin/DeliveryBoyWallet"));
 const DeliveryEmergencyHelp = lazy(() => import("@food/pages/admin/DeliveryEmergencyHelp"));
@@ -91,7 +90,7 @@ const RestaurantReport = lazy(() => import("@food/pages/admin/reports/Restaurant
 const FeedbackExperienceReport = lazy(() => import("@food/pages/admin/reports/FeedbackExperienceReport"));
 const TaxReport = lazy(() => import("@food/pages/admin/reports/TaxReport"));
 const RestaurantVATReport = lazy(() => import("@food/pages/admin/reports/RestaurantVATReport"));
-// Transaction Management
+// Withdrawal Management
 const RestaurantWithdraws = lazy(() => import("@food/pages/admin/transactions/RestaurantWithdraws"));
 const WithdrawMethod = lazy(() => import("@food/pages/admin/transactions/WithdrawMethod"));
 // Employee Management
@@ -221,6 +220,9 @@ export default function AdminRouter() {
             </ProtectedRoute>
           }
         >
+          <Route path="coupons" element={<Navigate to="food/coupons" replace />} />
+          <Route path="coupons/:id/analytics" element={<CouponAnalytics mode="admin" />} />
+
           {/* Default Admin Redirect */}
           <Route path="/" element={<Navigate to="food" replace />} />
 
@@ -278,6 +280,7 @@ export default function AdminRouter() {
             <Route path="campaigns/basic" element={<BasicCampaign />} />
             <Route path="campaigns/food" element={<FoodCampaign />} />
             <Route path="coupons" element={<Coupons />} />
+            <Route path="coupons/:id/analytics" element={<CouponAnalytics mode="admin" />} />
             <Route path="cashback" element={<Cashback />} />
             <Route path="banners" element={<Banners />} />
             <Route path="promotional-banner" element={<PromotionalBanner />} />
@@ -297,8 +300,6 @@ export default function AdminRouter() {
             <Route path="subscribed-mail-list" element={<SubscribedMailList />} />
 
             <Route path="delivery-boy-commission" element={<DeliveryBoyCommission />} />
-            <Route path="delivery-cash-limit" element={<DeliveryCashLimit />} />
-            <Route path="cash-limit-settlement" element={<CashLimitSettlement />} />
             <Route path="delivery-withdrawal" element={<DeliveryWithdrawal />} />
             <Route path="delivery-boy-wallet" element={<DeliveryBoyWallet />} />
             <Route path="delivery-emergency-help" element={<DeliveryEmergencyHelp />} />

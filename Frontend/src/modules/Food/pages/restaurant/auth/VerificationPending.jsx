@@ -135,11 +135,11 @@ export default function VerificationPending() {
       <div className="flex flex-col items-center justify-center space-y-6">
         <div className="flex justify-center">
           {isRejected ? (
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-red-50 text-red-500 shadow-sm">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-red-50 text-red-500 shadow-sm ring-4 ring-red-50/60">
               <AlertCircle className="h-8 w-8" />
             </div>
           ) : (
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-50 text-amber-500 shadow-sm">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-50 text-amber-500 shadow-sm ring-4 ring-amber-50/60">
               <Clock3 className="h-8 w-8 animate-pulse" />
             </div>
           )}
@@ -148,17 +148,16 @@ export default function VerificationPending() {
         <div className="w-full space-y-4">
           {!isRejected ? (
             <div className="text-center">
-              <p className="text-sm font-semibold text-amber-600">
-                Status:{" "}
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-600 ring-1 ring-inset ring-amber-200">
                 {onboardingStatus === "UNDER_REVIEW" ? "Under Review" : "Pending Review"}
-              </p>
+              </span>
               {checkingStatus ? (
-                <p className="mt-1 text-xs text-gray-400">Checking approval status...</p>
+                <p className="mt-2 text-xs text-gray-400">Checking approval status...</p>
               ) : null}
             </div>
           ) : (
             <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-center">
-              <p className="text-sm font-bold text-red-700">You are rejected</p>
+              <p className="text-sm font-bold text-red-700">Your registration was rejected</p>
               <p className="mt-1 text-xs text-red-600">
                 Update your details and submit again for review.
               </p>
@@ -178,10 +177,10 @@ export default function VerificationPending() {
           ) : null}
 
           {!isRejected ? (
-            <div className="rounded-xl border border-gray-100 bg-gray-50 p-4">
+            <div className="rounded-xl border border-[var(--rt-border,#e8edf2)] bg-[var(--rt-surface-muted,#f4f6f9)] p-4">
               <div className="flex items-start gap-3">
                 <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white shadow-sm">
-                  <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                  <ShieldCheck className="h-4 w-4 text-[var(--rt-primary-strong,#27A344)]" />
                 </div>
                 <div className="text-sm text-gray-600">
                   <p className="font-semibold text-gray-900">What&apos;s next?</p>
@@ -195,6 +194,38 @@ export default function VerificationPending() {
                     </p>
                   ) : null}
                 </div>
+              </div>
+
+              <div className="mt-4 flex items-center gap-2 border-t border-[var(--rt-border,#e8edf2)] pt-3">
+                {["Submitted", "Reviewing", "Approved"].map((label, idx) => {
+                  const activeIdx = onboardingStatus === "UNDER_REVIEW" ? 1 : 0
+                  const isDone = idx <= activeIdx
+                  return (
+                    <div key={label} className="flex flex-1 items-center gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className={`h-2 w-2 rounded-full ${
+                            isDone ? "bg-[var(--rt-primary-strong,#27A344)]" : "bg-gray-300"
+                          }`}
+                        />
+                        <span
+                          className={`text-[11px] font-medium ${
+                            isDone ? "text-gray-700" : "text-gray-400"
+                          }`}
+                        >
+                          {label}
+                        </span>
+                      </div>
+                      {idx < 2 ? (
+                        <span
+                          className={`h-px flex-1 ${
+                            idx < activeIdx ? "bg-[var(--rt-primary-strong,#27A344)]" : "bg-gray-200"
+                          }`}
+                        />
+                      ) : null}
+                    </div>
+                  )
+                })}
               </div>
             </div>
           ) : null}

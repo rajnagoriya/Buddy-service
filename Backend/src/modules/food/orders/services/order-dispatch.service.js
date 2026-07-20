@@ -10,13 +10,16 @@ import { logger } from '../../../../utils/logger.js';
 import { config } from '../../../../config/env.js';
 import { getIO, rooms } from '../../../../config/socket.js';
 import { addOrderJob } from '../../../../queues/producers/order.producer.js';
+import { haversineKm } from '../../../../core/location/haversine.util.js';
+import { getRoadDistanceBatch } from '../../../../core/location/distance.service.js';
 import {
   buildDeliverySocketPayload,
   buildOrderIdentityFilter,
-  haversineKm,
   notifyOwnerSafely,
   notifyOwnersSafely,
+  MAX_DISPATCH_ATTEMPTS,
 } from './order.helpers.js';
+import { fetchRoadDistancesKm } from '../utils/googleMaps.js';
 
 // Singleton initializer loop for Socket Bridge at server boot
 let socketBridgeInitialized = false;
@@ -242,12 +245,56 @@ async function listNearbyOnlineDeliveryPartners(
 
     const d = haversineKm(rLat, rLng, p.lastLat, p.lastLng);
     if (Number.isFinite(d) && d <= maxKm) {
-      scored.push({ partnerId: p._id, distanceKm: d, status: p.status });
+      scored.push({ partnerId: p._id, distanceKm: d, status: p.status, lat: p.lastLat, lng: p.lastLng });
     }
   }
 
   scored.sort((a, b) => a.distanceKm - b.distanceKm);
-  const picked = scored.slice(0, Math.max(1, limit));
+  let picked = scored.slice(0, Math.max(1, limit));
+
+  // Refine the already stale-filtered, straight-line-sorted shortlist with real
+  // road distance. Bounded to `picked.length` (<= limit, default 25) so this
+  // never balloons into a Distance Matrix call per online partner.
+  const withCoords = picked.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  if (withCoords.length > 0) {
+    const roadResults = await getRoadDistanceBatch(
+      { lat: rLat, lng: rLng },
+      withCoords.map((p) => ({ lat: p.lat, lng: p.lng })),
+    );
+    withCoords.forEach((p, i) => {
+      if (roadResults[i]) p.distanceKm = roadResults[i].meters / 1000;
+    });
+    picked = picked.slice().sort((a, b) => a.distanceKm - b.distanceKm);
+  }
+
+  // Re-rank top candidates by road distance when Google Maps is configured.
+  if (picked.length > 0 && Number.isFinite(rLat) && Number.isFinite(rLng)) {
+    const partnerById = new Map(allOnline.map((p) => [String(p._id), p]));
+    const roadCandidates = picked
+      .map((entry) => {
+        const p = partnerById.get(String(entry.partnerId));
+        if (!p || p.lastLat == null || p.lastLng == null) return null;
+        return { entry, lat: p.lastLat, lng: p.lastLng };
+      })
+      .filter(Boolean);
+
+    if (roadCandidates.length > 0) {
+      const roadKmList = await fetchRoadDistancesKm(
+        { lat: rLat, lng: rLng },
+        roadCandidates.map((c) => ({ lat: c.lat, lng: c.lng })),
+      );
+      if (Array.isArray(roadKmList)) {
+        roadCandidates.forEach((c, idx) => {
+          const roadKm = roadKmList[idx];
+          if (Number.isFinite(roadKm)) {
+            c.entry.distanceKm = roadKm;
+            c.entry.distanceSource = 'road';
+          }
+        });
+        picked.sort((a, b) => a.distanceKm - b.distanceKm);
+      }
+    }
+  }
 
   if (picked.length === 0) {
     const anyOnline = await FoodDeliveryPartner.find({
@@ -445,6 +492,16 @@ export async function tryAutoAssign(orderId, options = {}) {
 
     if (eligible.length === 0) {
       logger.info(`tryAutoAssign: No NEW eligible partners in ${maxKm}km for order ${order._id}. Restarting hunt...`);
+
+      if (!isQc && attempt >= MAX_DISPATCH_ATTEMPTS) {
+        try {
+          const { cancelOrderNoDriverFound } = await import('./order.service.js');
+          await cancelOrderNoDriverFound(order._id.toString());
+        } catch (err) {
+          logger.error(`tryAutoAssign: cancelOrderNoDriverFound failed for ${order._id}: ${err.message}`);
+        }
+        return order;
+      }
       
       const io = getIO();
       if (io && partners.length > 0) {
@@ -575,7 +632,7 @@ export async function tryAutoAssign(orderId, options = {}) {
 }
 
 
-export async function processDispatchTimeout(orderId, partnerId) {
+export async function processDispatchTimeout(orderId, partnerId, options = {}) {
   const FoodOrder = mongoose.model('FoodOrder');
   const Order = mongoose.model('Order');
 
@@ -586,6 +643,21 @@ export async function processDispatchTimeout(orderId, partnerId) {
     if (order) isQc = true;
   }
   if (!order) return;
+
+  const jobAttempt = Number(options.attempt || 0);
+  const nextAttempt = jobAttempt > 0
+    ? jobAttempt
+    : (order.dispatch?.offeredTo?.length || 0) + 1;
+
+  if (!isQc && nextAttempt >= MAX_DISPATCH_ATTEMPTS) {
+    try {
+      const { cancelOrderNoDriverFound } = await import('./order.service.js');
+      await cancelOrderNoDriverFound(order._id.toString());
+    } catch (err) {
+      logger.error(`processDispatchTimeout: cancelOrderNoDriverFound failed for ${orderId}: ${err.message}`);
+    }
+    return;
+  }
 
   const stillAssigned = order.dispatch?.status === 'assigned' &&
     String(order.dispatch?.deliveryPartnerId) === String(partnerId) &&
@@ -613,12 +685,9 @@ export async function processDispatchTimeout(orderId, partnerId) {
       }
     );
     
-    const attempt = (order.dispatch.offeredTo?.length || 0) + 1;
-    await tryAutoAssign(order._id, { attempt });
+    await tryAutoAssign(order._id, { attempt: nextAttempt });
   } else if (order.dispatch?.status === 'unassigned' || order.dispatch?.status === 'offered') {
-    // If it's still unassigned or offered (no one accepted), keep hunting
-    const attempt = (order.dispatch?.offeredTo?.length || 0) + 1;
-    await tryAutoAssign(order._id, { attempt });
+    await tryAutoAssign(order._id, { attempt: nextAttempt });
   }
 }
 

@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import Lenis from "lenis"
-import BottomNavbar from "@food/components/restaurant/BottomNavbar"
 import MenuOverlay from "@food/components/restaurant/MenuOverlay"
 import { 
   Home,
@@ -205,7 +204,7 @@ export default function RestaurantDetailsPage() {
       </div>
 
       {/* Main Content */}
-      <div className="px-4 py-3 pb-24 md:pb-6">
+      <div className="px-4 py-3 pb-8 md:pb-6">
         {/* All Foods Section */}
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-lg md:text-xl font-bold text-gray-900">All Foods</h3>
@@ -327,15 +326,6 @@ export default function RestaurantDetailsPage() {
           )))}
         </div>
       </div>
-
-      {/* Bottom Navigation Bar - Mobile Only */}
-      <BottomNavbar onMenuClick={(e) => {
-        if (e) {
-          e.preventDefault()
-          e.stopPropagation()
-        }
-        setShowMenu(true)
-      }} />
 
       {/* Menu Overlay */}
       <MenuOverlay showMenu={showMenu} setShowMenu={setShowMenu} />

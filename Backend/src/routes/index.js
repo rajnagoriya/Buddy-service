@@ -25,6 +25,7 @@ import identityRoutes from '../core/identity/identity.routes.js';
 import driverOnboardingRoutes from '../core/identity/driverOnboarding.routes.js';
 import driverModeRoutes from '../core/identity/driverMode.routes.js';
 import { cacheResponse } from '../middleware/cache.js';
+import locationRoutes from '../core/location/routes/location.routes.js';
 
 const router = express.Router();
 
@@ -69,6 +70,7 @@ router.use('/v1/food/user', authMiddleware, requireRoles('USER'), userRoutes);
 router.use('/v1/profile', authMiddleware, requireRoles('USER'), masterProfileRoutes);
 
 router.use('/v1/food/notifications', authMiddleware, requireRoles('USER', 'RESTAURANT', 'DELIVERY_PARTNER'), notificationRoutes);
+router.use('/v1/location', authMiddleware, requireRoles('USER', 'RESTAURANT', 'DELIVERY_PARTNER'), locationRoutes);
 router.use('/v1/food/orders', authMiddleware, requireRoles('USER'), orderUserRoutes);
 router.use('/v1/food/payments', authMiddleware, paymentRoutes);
 router.use('/v1/payments/webhook', webhookRoutes); // ✅ NEW: Public Webhook

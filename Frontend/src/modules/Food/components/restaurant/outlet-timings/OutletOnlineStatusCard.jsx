@@ -7,13 +7,16 @@ export default function OutletOnlineStatusCard({
   restaurantMeta,
   loading,
   deliveryStatus,
+  isCustomerVisibleOnline,
   onDeliveryStatusChange,
   todaySlotLabel,
   isDayClosed,
   isWithinTimings,
-  showOutsideWarning,
   isUnderReview = false,
 }) {
+  const showCustomerOnline =
+    typeof isCustomerVisibleOnline === "boolean" ? isCustomerVisibleOnline : deliveryStatus
+
   return (
     <PanelSurface className="overflow-hidden p-0">
       <div className="border-b border-[var(--rt-border)] bg-[var(--rt-primary-soft)]/50 px-4 py-3 sm:px-5">
@@ -43,12 +46,12 @@ export default function OutletOnlineStatusCard({
           </div>
           <div
             className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-              deliveryStatus
+              showCustomerOnline
                 ? "bg-emerald-100 text-emerald-700"
                 : "bg-gray-100 text-gray-600"
             }`}
           >
-            {deliveryStatus ? "Online" : "Offline"}
+            {showCustomerOnline ? "Online" : "Offline"}
           </div>
         </div>
 
@@ -82,20 +85,13 @@ export default function OutletOnlineStatusCard({
           ) : null}
         </div>
 
-        {showOutsideWarning && !isDayClosed ? (
+        {!isWithinTimings && !isDayClosed ? (
           <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
             <p className="text-xs text-amber-800">
-              You are outside today&apos;s scheduled hours. Update timings below or turn on delivery manually.
-            </p>
-          </div>
-        ) : null}
-
-        {!isWithinTimings && deliveryStatus && !isDayClosed ? (
-          <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5">
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
-            <p className="text-xs text-rose-800">
-              Delivery is on outside scheduled hours. Customers may still order if your outlet is open.
+              You are outside today&apos;s scheduled hours ({todaySlotLabel}). Update and save
+              today&apos;s hours below, then turn on accepting orders. Customers see you as offline
+              until you are within your schedule.
             </p>
           </div>
         ) : null}

@@ -228,16 +228,6 @@ export default function AboutUs() {
                 className="mt-1 w-full"
               />
             </div>
-            <div>
-              <Label htmlFor="logo">Logo URL</Label>
-              <Input
-                id="logo"
-                value={aboutData.logo}
-                onChange={(e) => setAboutData(prev => ({ ...prev, logo: e.target.value }))}
-                placeholder="https://example.com/logo.png"
-                className="mt-1"
-              />
-            </div>
           </CardContent>
         </Card>
 

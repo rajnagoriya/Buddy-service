@@ -35,6 +35,7 @@ import {
     syncUserCartController,
     validateCartRestaurantsController
 } from '../controllers/userCart.controller.js';
+import { saveUserCurrentLocationController } from '../../../../core/location/location.controller.js';
 
 const router = express.Router();
 
@@ -62,6 +63,9 @@ router.get('/support/my-tickets', listMySupportTicketsController);
 router.get('/cart', getUserCartController);
 router.put('/cart', syncUserCartController);
 router.post('/cart/validate-restaurants', validateCartRestaurantsController);
+
+// Raw GPS "current location" ping - independent of saved addresses (Bearer USER)
+router.post('/location', saveUserCurrentLocationController);
 
 router.get('/addresses', listAddressesController);
 router.post('/addresses', addAddressController);

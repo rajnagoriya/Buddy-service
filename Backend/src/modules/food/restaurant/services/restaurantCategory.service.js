@@ -5,6 +5,7 @@ import { FoodItem } from '../../admin/models/food.model.js';
 import { FoodRestaurant } from '../models/restaurant.model.js';
 import { deleteFoodImageAsset } from '../../services/foodImage.service.js';
 import {
+    ACTIVE_PUBLIC_CATEGORY_FILTER,
     backfillLegacyCategoryWorkflow,
     categoryAllowsFoodType,
     GLOBAL_CATEGORY_FILTER,
@@ -123,8 +124,8 @@ export async function listRestaurantCategories(restaurantId, query = {}) {
         .limit(limit)
         .select(
             compact
-                ? 'name image type foodTypeScope approvalStatus rejectionReason zoneId restaurantId createdByRestaurantId isActive sortOrder requestedAt approvedAt rejectedAt globalizedAt'
-                : 'name image type foodTypeScope approvalStatus rejectionReason zoneId restaurantId createdByRestaurantId isActive sortOrder requestedAt approvedAt rejectedAt globalizedAt createdAt updatedAt'
+                ? 'name image type foodTypeScope approvalStatus rejectionReason zoneId restaurantId createdByRestaurantId isActive adminDeactivated sortOrder requestedAt approvedAt rejectedAt globalizedAt'
+                : 'name image type foodTypeScope approvalStatus rejectionReason zoneId restaurantId createdByRestaurantId isActive adminDeactivated sortOrder requestedAt approvedAt rejectedAt globalizedAt createdAt updatedAt'
         );
 
     const [list, total] = await Promise.all([
@@ -199,7 +200,7 @@ export async function listPublicCategories(query = {}) {
 
     const filter = {
         _id: { $in: approvedCategoryIds },
-        isActive: true,
+        ...ACTIVE_PUBLIC_CATEGORY_FILTER,
         $and: [{ $or: GLOBAL_CATEGORY_FILTER }, { $or: APPROVED_CATEGORY_FILTER }]
     };
 
@@ -292,7 +293,13 @@ export async function updateRestaurantCategory(restaurantId, id, body = {}) {
     }
     if (body.image !== undefined) doc.image = String(body.image || '').trim();
     if (body.type !== undefined) doc.type = String(body.type || '').trim();
-    if (body.isActive !== undefined) doc.isActive = body.isActive !== false;
+    if (body.isActive !== undefined) {
+        const nextActive = body.isActive !== false;
+        if (nextActive && doc.adminDeactivated === true) {
+            throw new ValidationError('This category was deactivated by admin and cannot be reactivated');
+        }
+        doc.isActive = nextActive;
+    }
     if (body.sortOrder !== undefined) doc.sortOrder = Number(body.sortOrder) || 0;
     if (body.foodTypeScope !== undefined) {
         const incompatibleFoods = nextFoodTypeScope === 'Both'
@@ -307,13 +314,21 @@ export async function updateRestaurantCategory(restaurantId, id, body = {}) {
         doc.foodTypeScope = nextFoodTypeScope;
     }
 
-    doc.createdByRestaurantId = doc.createdByRestaurantId || context.restaurantId;
-    doc.approvalStatus = 'pending';
-    doc.isApproved = false;
-    doc.rejectionReason = '';
-    doc.requestedAt = new Date();
-    doc.approvedAt = undefined;
-    doc.rejectedAt = undefined;
+    const requiresReapproval = (
+        body.name !== undefined ||
+        body.image !== undefined ||
+        body.type !== undefined ||
+        body.foodTypeScope !== undefined
+    );
+    if (requiresReapproval) {
+        doc.createdByRestaurantId = doc.createdByRestaurantId || context.restaurantId;
+        doc.approvalStatus = 'pending';
+        doc.isApproved = false;
+        doc.rejectionReason = '';
+        doc.requestedAt = new Date();
+        doc.approvedAt = undefined;
+        doc.rejectedAt = undefined;
+    }
 
     await doc.save();
     return doc.toObject();

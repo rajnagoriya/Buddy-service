@@ -6,6 +6,7 @@ import { FoodDeliveryCashDeposit } from '../models/foodDeliveryCashDeposit.model
 import { FoodDeliveryPartner } from '../models/deliveryPartner.model.js';
 import { DeliveryBonusTransaction } from '../../admin/models/deliveryBonusTransaction.model.js';
 import { getDeliveryCashLimitSettings } from '../../admin/services/admin.service.js';
+import { getBalance } from '../../../../core/payments/transaction.service.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { createRazorpayOrder, getRazorpayKeyId, isRazorpayConfigured, verifyPaymentSignature } from '../../orders/helpers/razorpay.helper.js';
 
@@ -22,9 +23,13 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
         throw new ValidationError('Invalid delivery partner ID');
     }
 
-    const partnerId = new mongoose.Types.ObjectId(deliveryPartnerId);
-    const partner = await FoodDeliveryPartner.findById(partnerId).lean();
+    let partner = await FoodDeliveryPartner.findById(deliveryPartnerId).lean();
+    if (!partner) {
+        partner = await FoodDeliveryPartner.findOne({ identityId: deliveryPartnerId }).lean();
+    }
     if (!partner) throw new ValidationError('Delivery partner not found');
+
+    const partnerId = partner._id;
 
     const [cashLimitSettings, ordersRes, cashCollectedRes, depositsRes, bonusRes, withdrawalsRes] = await Promise.all([
         getDeliveryCashLimitSettings(),
@@ -186,16 +191,22 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
     const totalWithdrawn = Number(withdrawalsMap['approved'] || 0) + Number(withdrawalsMap['processed'] || 0);
     const pendingWithdrawals = Number(withdrawalsMap['pending'] || 0);
 
+    const ledger = await getBalance('deliveryBoy', String(partnerId));
+
     // Lifetime Earnings = Total from orders + bonuses
     const lifetimeEarnings = totalEarned + totalBonus;
     
     // 1. Calculate raw earnings available for withdrawal/substitution
     const rawEarningsBalance = Math.max(0, lifetimeEarnings - (totalWithdrawn + pendingWithdrawals));
+    const ledgerAvailable = Math.max(
+        0,
+        (Number(ledger.availableBalance) || 0) - pendingWithdrawals
+    );
     
     // 2. Calculate actual cash in hand (already delivered - total deposited)
     const actualCashInHand = Math.max(0, actualCashCollected - totalCashDeposited);
 
-    const pocketBalance = rawEarningsBalance;
+    const pocketBalance = Math.max(rawEarningsBalance, ledgerAvailable);
     const netCashInHand = actualCashInHand;
 
     const totalCashLimit = Number(partner?.cashLimit || cashLimitSettings?.deliveryCashLimit) || 2000;
@@ -302,33 +313,58 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
  */
 export const requestDeliveryWithdrawal = async (deliveryPartnerId, payload) => {
     const { amount, bankDetails, paymentMethod = 'bank_transfer' } = payload;
+    const numericAmount = Number(amount);
 
-    if (!amount || amount < 1) throw new ValidationError('Invalid amount');
+    if (!Number.isFinite(numericAmount) || numericAmount < 1) {
+        throw new ValidationError('Invalid amount');
+    }
 
-    const wallet = await getDeliveryPartnerWalletEnhanced(deliveryPartnerId);
-    if (amount < wallet.deliveryWithdrawalLimit) {
+    // Resolve partner for both legacy DELIVERY_PARTNER tokens and unified DRIVER tokens.
+    let partner = null;
+    if (deliveryPartnerId && mongoose.Types.ObjectId.isValid(deliveryPartnerId)) {
+        partner = await FoodDeliveryPartner.findById(deliveryPartnerId).lean();
+        if (!partner) {
+            partner = await FoodDeliveryPartner.findOne({ identityId: deliveryPartnerId }).lean();
+        }
+    }
+    if (!partner) throw new ValidationError('Delivery partner not found');
+
+    const partnerId = partner._id;
+    const wallet = await getDeliveryPartnerWalletEnhanced(partnerId);
+    if (numericAmount < wallet.deliveryWithdrawalLimit) {
         throw new ValidationError(`Minimum withdrawal amount is ₹${wallet.deliveryWithdrawalLimit}`);
     }
-    if (amount > wallet.pocketBalance) {
+    if (numericAmount > wallet.pocketBalance) {
         throw new ValidationError('Insufficient balance for this withdrawal');
     }
 
-    const partner = await FoodDeliveryPartner.findById(deliveryPartnerId).lean();
-    if (!partner) throw new ValidationError('Delivery partner not found');
+    const pendingExists = await FoodDeliveryWithdrawal.exists({
+        deliveryPartnerId: partnerId,
+        status: 'pending',
+    });
+    if (pendingExists) {
+        throw new ValidationError('You already have a pending withdrawal request');
+    }
+
+    const resolvedBankDetails = bankDetails || {
+        accountNumber: partner.bankAccountNumber,
+        ifscCode: partner.bankIfscCode,
+        bankName: partner.bankName,
+        accountHolderName: partner.bankAccountHolderName,
+    };
+
+    if (!resolvedBankDetails?.accountNumber) {
+        throw new ValidationError('Please add bank details before requesting a withdrawal');
+    }
 
     const withdrawal = await FoodDeliveryWithdrawal.create({
-        deliveryPartnerId,
-        amount,
+        deliveryPartnerId: partnerId,
+        amount: numericAmount,
         paymentMethod,
-        bankDetails: bankDetails || {
-            accountNumber: partner.bankAccountNumber,
-            ifscCode: partner.bankIfscCode,
-            bankName: partner.bankName,
-            accountHolderName: partner.bankAccountHolderName
-        },
+        bankDetails: resolvedBankDetails,
         upiId: partner.upiId,
         upiQrCode: partner.upiQrCode,
-        status: 'pending'
+        status: 'pending',
     });
 
     return withdrawal;

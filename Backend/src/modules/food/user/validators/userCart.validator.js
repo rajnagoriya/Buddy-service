@@ -1,5 +1,23 @@
 import { ValidationError } from '../../../../core/auth/errors.js';
 
+export const deriveCartType = (items = []) => {
+  if (!Array.isArray(items) || items.length === 0) {
+    return null;
+  }
+
+  const restaurantIds = new Set(
+    items.map((item) => String(item.restaurantId || '').trim()).filter(Boolean),
+  );
+  const lineItemIds = new Set(
+    items.map((item) => String(item.lineItemId || item.itemId || '').trim()).filter(Boolean),
+  );
+
+  return {
+    restaurantScope: restaurantIds.size > 1 ? 'multi_restaurant' : 'single_restaurant',
+    itemScope: lineItemIds.size > 1 ? 'multi_item' : 'single_item',
+  };
+};
+
 const normalizeCartItem = (item, index) => {
   if (!item || typeof item !== 'object') {
     throw new ValidationError(`Cart item at index ${index} is invalid`);
@@ -30,7 +48,6 @@ const normalizeCartItem = (item, index) => {
     name: String(item.name || item.product?.name || 'Item').trim(),
     price: Number.isFinite(price) ? price : 0,
     quantity: Math.floor(quantity),
-    image: String(item.image || item.imageUrl || item.product?.imageUrl || '').trim(),
     imageUrl: String(item.imageUrl || item.image || item.product?.imageUrl || '').trim(),
     description: String(item.description || '').trim(),
     restaurant: String(
@@ -72,7 +89,8 @@ export const validateSyncCartDto = (body = {}) => {
   const restaurantMeta = Array.isArray(body.restaurantMeta)
     ? body.restaurantMeta.map(normalizeRestaurantMeta)
     : [];
-  return { items, restaurantMeta };
+  const cartType = deriveCartType(items);
+  return { items, restaurantMeta, cartType };
 };
 
 export const validateRestaurantAvailabilityDto = (body = {}) => {

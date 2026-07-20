@@ -21,13 +21,18 @@ export const useProximityCheck = () => {
     // If heading to pickup or arrived at pickup, target is restaurant
     if (['PICKING_UP', 'REACHED_PICKUP'].includes(tripStatus)) {
       if (activeOrder.isMultiRestaurant && activeOrder.pickups?.length > 0) {
-        // Find first pickup that isn't picked_up yet
-        const pendingPickup = activeOrder.pickups.find(p => !['picked_up', 'ready_for_handover'].includes(p.status));
+        // Find first active pickup that isn't picked_up yet (skip dropped/cancelled restos)
+        const pendingPickup = activeOrder.pickups.find(
+          (p) =>
+            !p.permanentlyDropped &&
+            p.status !== 'cancelled' &&
+            !['picked_up', 'ready_for_handover'].includes(p.status),
+        );
         if (pendingPickup && pendingPickup.location) {
           const loc = pendingPickup.location;
           return {
             lat: loc.coordinates?.[1] ?? loc.latitude ?? loc.lat,
-            lng: loc.coordinates?.[0] ?? loc.longitude ?? loc.lng
+            lng: loc.coordinates?.[0] ?? loc.longitude ?? loc.lng,
           };
         }
       }

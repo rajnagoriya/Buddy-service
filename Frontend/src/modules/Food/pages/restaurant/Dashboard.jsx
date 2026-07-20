@@ -14,7 +14,6 @@ import {
   RefreshCw,
   TrendingUp,
 } from "lucide-react"
-import BottomNavOrders from "@food/components/restaurant/BottomNavOrders"
 import RestaurantPanelHeader from "@food/components/restaurant/panel/RestaurantPanelHeader"
 import PanelCard from "@food/components/restaurant/panel/PanelCard"
 import useRestaurantDashboardData from "@food/hooks/useRestaurantDashboardData"
@@ -318,8 +317,6 @@ export default function Dashboard() {
           </div>
         </div>
       ) : null}
-
-      <BottomNavOrders />
     </div>
   )
 }

@@ -8,8 +8,9 @@ import { fetchOutletTimingsCached } from "@food/utils/outletTimingsCache"
 import { fetchRestaurantsCached } from "@food/utils/restaurantListCache"
 import { API_BASE_URL } from "@food/api/config"
 import { toast } from "sonner"
-import { useLocation } from "@food/hooks/useLocation"
+import useEffectiveDeliveryLocation from "@food/hooks/useEffectiveDeliveryLocation"
 import { useZone } from "@food/hooks/useZone"
+import { formatDistanceFromMeters, calculateDistanceKm } from "@food/utils/restaurantDisplay"
 import {
   ArrowLeft,
   Search,
@@ -63,6 +64,8 @@ import {
   getRestaurantFssaiImage,
   getRestaurantFssaiNumber,
   resolveFoodItemImage,
+  extractImages,
+  normalizeImageUrl,
 } from "@food/utils/common"
 import { RestaurantDetailSkeleton } from "@food/components/ui/loading-skeletons"
 import {
@@ -153,7 +156,7 @@ function RestaurantDetailsContent() {
   const targetDishId = useMemo(() => String(searchParams.get('dish') || '').trim(), [searchParams])
   const { addToCart, updateQuantity, removeFromCart, getCartItem, cart } = useCart()
   const { vegMode, addDishFavorite, removeDishFavorite, isDishFavorite, getDishFavorites, getFavorites, addFavorite, removeFavorite, isFavorite } = useProfile()
-  const { location: userLocation } = useLocation() // Get user's current location
+  const { effectiveLocation: userLocation } = useEffectiveDeliveryLocation() // Respects saved-address vs current-GPS delivery mode
   const { zoneId, zone, loading: loadingZone, isOutOfService } = useZone(userLocation) // Get user's zone for zone-based filtering
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
   const [highlightIndex, setHighlightIndex] = useState(0)
@@ -300,6 +303,8 @@ function RestaurantDetailsContent() {
 
   // Restaurant data state
   const [restaurant, setRestaurant] = useState(null)
+  const [pageCoupons, setPageCoupons] = useState([])
+  const [pageCouponsSource, setPageCouponsSource] = useState(null)
   const [loadingRestaurant, setLoadingRestaurant] = useState(true)
   const [restaurantError, setRestaurantError] = useState(null)
   const fetchedRestaurantRef = useRef(false) // Track if restaurant has been fetched for current slug
@@ -485,10 +490,17 @@ function RestaurantDetailsContent() {
         let response = null
         let apiRestaurant = null
 
+        // Send the user's current location so the backend can attach the same
+        // road-distance value (Google Directions, with haversine fallback) used
+        // by the restaurant list page, instead of leaving distance unset.
+        const locationConfig = Number.isFinite(userLocation?.latitude) && Number.isFinite(userLocation?.longitude)
+          ? { params: { lat: userLocation.latitude, lng: userLocation.longitude } }
+          : {}
+
         // Try dining API first (if available). If it doesn't return a valid restaurant,
         // always fall back to restaurant API (important when diningAPI is stubbed).
         try {
-          response = await diningAPI.getRestaurantBySlug(slug)
+          response = await diningAPI.getRestaurantBySlug(slug, locationConfig)
           if (response?.data?.success && response?.data?.data) {
             apiRestaurant = response.data.data
             debugLog('? Found restaurant in dining API:', apiRestaurant)
@@ -509,7 +521,7 @@ function RestaurantDetailsContent() {
           try {
             // First, try to get restaurant directly by slug/ID (no zoneId needed)
             try {
-              response = await restaurantAPI.getRestaurantById(slug)
+              response = await restaurantAPI.getRestaurantById(slug, locationConfig)
               if (response?.data?.success && response?.data?.data) {
                 apiRestaurant = response.data.data
                 debugLog('? Found restaurant in restaurant API by slug/ID:', apiRestaurant)
@@ -538,7 +550,7 @@ function RestaurantDetailsContent() {
 
                   if (matchingRestaurant) {
                     // Get full restaurant details by ID
-                    const fullResponse = await restaurantAPI.getRestaurantById(matchingRestaurant._id || matchingRestaurant.restaurantId)
+                    const fullResponse = await restaurantAPI.getRestaurantById(matchingRestaurant._id || matchingRestaurant.restaurantId, locationConfig)
                     if (fullResponse.data && fullResponse.data.success && fullResponse.data.data) {
                       apiRestaurant = fullResponse.data.data
                       debugLog('? Found restaurant in restaurant API by name search:', apiRestaurant)
@@ -667,54 +679,29 @@ function RestaurantDetailsContent() {
           const formattedAddress = formatRestaurantAddress(locationObj)
           debugLog('? Final Formatted Address:', formattedAddress)
 
-          // Calculate distance from user to restaurant
-          const calculateDistance = (lat1, lng1, lat2, lng2) => {
-            const R = 6371 // Earth's radius in kilometers
-            const dLat = (lat2 - lat1) * Math.PI / 180
-            const dLng = (lng2 - lng1) * Math.PI / 180
-            const a =
-              Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-              Math.sin(dLng / 2) * Math.sin(dLng / 2)
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-            return R * c // Distance in kilometers
-          }
-
           // Get restaurant coordinates
           // Priority: latitude/longitude fields > coordinates array (GeoJSON format: [lng, lat])
           const restaurantLat = locationObj?.latitude || (locationObj?.coordinates && Array.isArray(locationObj.coordinates) ? locationObj.coordinates[1] : null)
           const restaurantLng = locationObj?.longitude || (locationObj?.coordinates && Array.isArray(locationObj.coordinates) ? locationObj.coordinates[0] : null)
 
-          debugLog('? Restaurant coordinates:', { restaurantLat, restaurantLng, locationObj })
-
           // Get user coordinates
           const userLat = userLocation?.latitude
           const userLng = userLocation?.longitude
 
-          debugLog('? User location:', { userLat, userLng, userLocation })
+          // Prefer the distance the backend attached to the response (same
+          // road-distance/haversine-fallback pipeline the restaurant list page
+          // uses, via the lat/lng sent with the request above). Only fall back
+          // to a client-side straight-line estimate when the backend couldn't
+          // supply one (e.g. userLocation wasn't resolved yet at fetch time).
+          let calculatedDistance = actualRestaurant?.distance || apiRestaurant?.distance || null
 
-          // Calculate distance if both coordinates are available
-          let calculatedDistance = null
-          if (userLat && userLng && restaurantLat && restaurantLng &&
+          if (!calculatedDistance && userLat && userLng && restaurantLat && restaurantLng &&
             !isNaN(userLat) && !isNaN(userLng) && !isNaN(restaurantLat) && !isNaN(restaurantLng)) {
-            const distanceInKm = calculateDistance(userLat, userLng, restaurantLat, restaurantLng)
-            // Format distance: show 1 decimal place if >= 1km, otherwise show in meters
-            if (distanceInKm >= 1) {
-              calculatedDistance = `${distanceInKm.toFixed(1)} km`
-            } else {
-              const distanceInMeters = Math.round(distanceInKm * 1000)
-              calculatedDistance = `${distanceInMeters} m`
-            }
-            debugLog('? Calculated distance from user to restaurant:', calculatedDistance, 'km:', distanceInKm)
+            const distanceInKm = calculateDistanceKm(userLat, userLng, restaurantLat, restaurantLng)
+            calculatedDistance = formatDistanceFromMeters(distanceInKm * 1000)
+            debugLog('? Calculated fallback straight-line distance:', calculatedDistance, 'km:', distanceInKm)
           } else {
-            debugWarn('? Cannot calculate distance - missing coordinates:', {
-              hasUserLocation: !!(userLat && userLng),
-              hasRestaurantLocation: !!(restaurantLat && restaurantLng),
-              userLat,
-              userLng,
-              restaurantLat,
-              restaurantLng
-            })
+            debugLog('? Distance resolved:', { calculatedDistance, distanceSource: actualRestaurant?.distanceSource })
           }
 
           // Resolve display category/cuisine with broad API compatibility
@@ -745,21 +732,21 @@ function RestaurantDetailsContent() {
 
           const onboardingStep2 = actualRestaurant?.onboarding?.step2 || apiRestaurant?.onboarding?.step2 || {}
           const onboardingStep4 = actualRestaurant?.onboarding?.step4 || apiRestaurant?.onboarding?.step4 || {}
-          const normalizedProfileImage = actualRestaurant?.profileImage || apiRestaurant?.profileImage || onboardingStep2?.profileImageUrl || null
-          const normalizedCoverImages =
+          const normalizedProfileImage = extractImages(actualRestaurant?.profileImage || apiRestaurant?.profileImage || onboardingStep2?.profileImageUrl, BACKEND_ORIGIN)[0] || null
+          const normalizedCoverImages = extractImages(
             Array.isArray(actualRestaurant?.coverImages) && actualRestaurant.coverImages.length > 0
               ? actualRestaurant.coverImages
               : Array.isArray(apiRestaurant?.coverImages) && apiRestaurant.coverImages.length > 0
                 ? apiRestaurant.coverImages
-                : []
-          const normalizedMenuImages =
+                : [], BACKEND_ORIGIN)
+          const normalizedMenuImages = extractImages(
             Array.isArray(actualRestaurant?.menuImages) && actualRestaurant.menuImages.length > 0
               ? actualRestaurant.menuImages
               : Array.isArray(apiRestaurant?.menuImages) && apiRestaurant.menuImages.length > 0
                 ? apiRestaurant.menuImages
                 : Array.isArray(onboardingStep2?.menuImageUrls)
                   ? onboardingStep2.menuImageUrls
-                  : []
+                  : [], BACKEND_ORIGIN)
           const normalizedRestaurantOffers = actualRestaurant?.restaurantOffers || apiRestaurant?.restaurantOffers || {}
 
           // Transform API data to match expected format with comprehensive fallbacks
@@ -781,15 +768,11 @@ function RestaurantDetailsContent() {
             distance: calculatedDistance || actualRestaurant?.distance || apiRestaurant?.distance || actualRestaurant?.distanceFromUser || apiRestaurant?.distanceFromUser || "1.2 km",
             location: formattedAddress,
             locationObject: locationObj, // Store full location object for reference
-            image: normalizedCoverImages?.[0]?.url
-              || normalizedCoverImages?.[0]
-              || normalizedProfileImage?.url
+            image: normalizedCoverImages?.[0]
               || normalizedProfileImage
-              || (normalizedMenuImages.length > 0
-                ? (normalizedMenuImages[0]?.url || normalizedMenuImages[0])
-                : null)
-              || actualRestaurant?.image
-              || apiRestaurant?.image
+              || (normalizedMenuImages.length > 0 ? normalizedMenuImages[0] : null)
+              || normalizeImageUrl(actualRestaurant?.image, BACKEND_ORIGIN)
+              || normalizeImageUrl(apiRestaurant?.image, BACKEND_ORIGIN)
               || null,
             priceRange: actualRestaurant?.priceRange || apiRestaurant?.priceRange || onboardingStep4?.priceRange || "$$",
             offers: Array.isArray(actualRestaurant?.offers) ? actualRestaurant.offers : (Array.isArray(apiRestaurant?.offers) ? apiRestaurant.offers : []), // Will be populated from menu/offers API later
@@ -812,8 +795,8 @@ function RestaurantDetailsContent() {
             slug: actualRestaurant?.slug || apiRestaurant?.slug || actualRestaurant?.name?.toLowerCase().replace(/\s+/g, '-') || apiRestaurant?.name?.toLowerCase().replace(/\s+/g, '-') || slug || "unknown",
             restaurantId: actualRestaurant?.restaurantId || actualRestaurant?._id || actualRestaurant?.id || apiRestaurant?.restaurantId || apiRestaurant?._id || apiRestaurant?.id || null,
             // Add other fields with defaults
-            featuredDish: actualRestaurant?.featuredDish || apiRestaurant?.featuredDish || onboardingStep4?.featuredDish || "Special Dish",
-            featuredPrice: actualRestaurant?.featuredPrice || apiRestaurant?.featuredPrice || onboardingStep4?.featuredPrice || 249,
+            featuredDish: actualRestaurant?.featuredDish || apiRestaurant?.featuredDish || onboardingStep4?.featuredDish || null,
+            featuredPrice: actualRestaurant?.featuredPrice || apiRestaurant?.featuredPrice || onboardingStep4?.featuredPrice || null,
             // Additional safety fields
             openDays: Array.isArray(actualRestaurant?.openDays)
               ? actualRestaurant.openDays
@@ -1288,6 +1271,47 @@ function RestaurantDetailsContent() {
     fetchRestaurant()
   }, [slug, zoneId, restaurant])
 
+  useEffect(() => {
+    const restaurantId = restaurant?.mongoId || restaurant?.id || restaurant?.restaurantId
+    if (!restaurantId) {
+      setPageCoupons([])
+      setPageCouponsSource(null)
+      return
+    }
+    let cancelled = false
+    restaurantAPI.getRestaurantPageOffers(restaurantId)
+      .then((res) => {
+        if (cancelled) return
+        const data = res?.data?.data || res?.data || {}
+        const coupons = Array.isArray(data.coupons) ? data.coupons : []
+        setPageCoupons(coupons)
+        setPageCouponsSource(data.source || null)
+        if (coupons.length > 0) {
+          setRestaurant((prev) => prev ? {
+            ...prev,
+            restaurantOffers: {
+              ...(prev.restaurantOffers || {}),
+              coupons: coupons.map((c) => ({
+                id: c.id || c.offerId,
+                code: c.code || c.couponCode,
+                title: c.title,
+                subtitle: c.subtitle,
+                isFreeDelivery: c.isFreeDelivery,
+                minOrderValue: c.minOrderValue,
+              })),
+            },
+          } : prev)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPageCoupons([])
+          setPageCouponsSource(null)
+        }
+      })
+    return () => { cancelled = true }
+  }, [restaurant?.mongoId, restaurant?.id, restaurant?.restaurantId])
+
   // Track previous values to prevent unnecessary recalculations
   const prevCoordsRef = useRef({ userLat: null, userLng: null, restaurantLat: null, restaurantLng: null })
   const prevDistanceRef = useRef(null)
@@ -1328,29 +1352,13 @@ function RestaurantDetailsContent() {
     if (userLat && userLng && restaurantLat && restaurantLng &&
       !isNaN(userLat) && !isNaN(userLng) && !isNaN(restaurantLat) && !isNaN(restaurantLng)) {
 
-      // Calculate distance
-      const calculateDistance = (lat1, lng1, lat2, lng2) => {
-        const R = 6371 // Earth's radius in kilometers
-        const dLat = (lat2 - lat1) * Math.PI / 180
-        const dLng = (lng2 - lng1) * Math.PI / 180
-        const a =
-          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-          Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-          Math.sin(dLng / 2) * Math.sin(dLng / 2)
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-        return R * c // Distance in kilometers
-      }
-
-      const distanceInKm = calculateDistance(userLat, userLng, restaurantLat, restaurantLng)
-      let calculatedDistance = null
-
-      // Format distance: show 1 decimal place if >= 1km, otherwise show in meters
-      if (distanceInKm >= 1) {
-        calculatedDistance = `${distanceInKm.toFixed(1)} km`
-      } else {
-        const distanceInMeters = Math.round(distanceInKm * 1000)
-        calculatedDistance = `${distanceInMeters} m`
-      }
+      // Straight-line fallback only: the road distance from the backend was
+      // computed once at fetch time for a fixed origin, so once the user's
+      // live location moves we re-estimate locally rather than re-hitting the
+      // Directions API on every GPS tick. Uses the same haversine helper the
+      // restaurant list page falls back to (resolveRestaurantDistance).
+      const distanceInKm = calculateDistanceKm(userLat, userLng, restaurantLat, restaurantLng)
+      const calculatedDistance = formatDistanceFromMeters(distanceInKm * 1000)
 
       // Only update if distance actually changed
       if (calculatedDistance !== prevDistanceRef.current) {
@@ -1396,7 +1404,7 @@ function RestaurantDetailsContent() {
   }, [selectedItem])
 
   // Helper function to update item quantity in both local state and cart
-  const updateItemQuantity = (item, newQuantity, event = null, preferredVariant = null) => {
+  const updateItemQuantity = async (item, newQuantity, event = null, preferredVariant = null) => {
     // Check authentication
     if (!isModuleAuthenticated('user')) {
       toast.error("Please login to add items to cart")
@@ -1533,9 +1541,9 @@ function RestaurantDetailsContent() {
 
         // If incrementing quantity, trigger add animation with sourcePosition
         if (newQuantity > existingCartItem.quantity && sourcePosition) {
-          const result = addToCart(cartItem, sourcePosition)
+          const result = await addToCart(cartItem, sourcePosition)
           if (result?.ok === false) {
-            toast.error(result.error || 'Cannot add item from different restaurant. Please clear cart first.')
+            toast.error(result.error || 'Cannot add this item to cart.')
             return
           }
           if (newQuantity > existingCartItem.quantity + 1) {
@@ -1553,9 +1561,9 @@ function RestaurantDetailsContent() {
       } else {
         // Add to cart first (adds with quantity 1), then update to desired quantity
         // Pass sourcePosition when adding a new item
-        const result = addToCart(cartItem, sourcePosition)
+        const result = await addToCart(cartItem, sourcePosition)
         if (result?.ok === false) {
-          toast.error(result.error || 'Cannot add item from different restaurant. Please clear cart first.')
+          toast.error(result.error || 'Cannot add this item to cart.')
           return
         }
         if (newQuantity > 1) {
@@ -2211,14 +2219,16 @@ function RestaurantDetailsContent() {
   const activeOfferText = offersForDisplay[highlightIndex % offersForDisplay.length]
   const offerIndicatorCount = Math.min(offersForDisplay.length, 5)
   const activeOfferIndicator = offerIndicatorCount > 0 ? highlightIndex % offerIndicatorCount : 0
-  const primaryOffer = Array.isArray(restaurant?.offers) && restaurant.offers.length > 0
+  const primaryPageCoupon = pageCoupons.length > 0 ? pageCoupons[0] : null
+  const primaryOffer = primaryPageCoupon || (Array.isArray(restaurant?.offers) && restaurant.offers.length > 0
     ? restaurant.offers[0]
-    : null
+    : null)
   const offerHeadline = primaryOffer?.title || restaurant?.offerText || activeOfferText
   const offerSubline =
-    primaryOffer?.description ||
     primaryOffer?.subtitle ||
-    (primaryOffer?.code ? `Use ${primaryOffer.code}` : "Tap to view all offers")
+    primaryOffer?.description ||
+    (primaryOffer?.code || primaryOffer?.couponCode ? `Use ${primaryOffer.code || primaryOffer.couponCode}` : "Tap to view all offers")
+  const hasPageOffers = pageCoupons.length > 0
 
   // Auto-rotate images every 3 seconds
   useEffect(() => {
@@ -2323,13 +2333,15 @@ function RestaurantDetailsContent() {
         onOutletsClick={() => setShowLocationSheet(true)}
       />
 
-      <RestaurantOfferStrip
-        headline={offerHeadline}
-        subline={offerSubline}
-        indicatorCount={offerIndicatorCount}
-        activeIndicator={activeOfferIndicator}
-        onClick={() => setShowOffersSheet(true)}
-      />
+      {hasPageOffers && (
+        <RestaurantOfferStrip
+          headline={offerHeadline}
+          subline={offerSubline}
+          indicatorCount={Math.min(pageCoupons.length, 5)}
+          activeIndicator={activeOfferIndicator}
+          onClick={() => setShowOffersSheet(true)}
+        />
+      )}
 
       {isRestaurantOffline && <RestaurantOfflineBanner />}
 
@@ -3365,16 +3377,18 @@ function RestaurantDetailsContent() {
                       </div>
                     )}
 
-                    {/* Restaurant Coupons Section */}
-                    {restaurant?.restaurantOffers?.coupons && Array.isArray(restaurant.restaurantOffers.coupons) && restaurant.restaurantOffers.coupons.length > 0 && (
+                    {/* Available Offers */}
+                    {pageCoupons.length > 0 && (
                       <div>
                         <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
-                          Restaurant coupons
+                          Available Offers
+                          {pageCouponsSource === "restaurant" ? "" : pageCouponsSource === "admin" ? " (Platform)" : ""}
                         </h3>
                         <div className="space-y-3">
-                          {restaurant.restaurantOffers.coupons.map((coupon, couponIndex) => {
+                          {pageCoupons.map((coupon, couponIndex) => {
                             const couponKey = coupon?.id || coupon?.code || `coupon-${couponIndex}`
                             const isExpanded = expandedCoupons.has(couponKey)
+                            const isFreeDel = coupon?.isFreeDelivery || coupon?.couponCategory === "free_delivery"
                             return (
                               <div
                                 key={couponKey}
@@ -3394,13 +3408,13 @@ function RestaurantDetailsContent() {
                                     })
                                   }}
                                 >
-                                  <Percent className="h-5 w-5 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                                  <Percent className={`h-5 w-5 flex-shrink-0 ${isFreeDel ? "text-green-600 dark:text-green-400" : "text-blue-600 dark:text-blue-400"}`} />
                                   <div className="flex-1 text-left">
                                     <p className="text-sm font-medium text-gray-900 dark:text-white mb-1">
-                                      {coupon?.title || "Restaurant coupon"}
+                                      {coupon?.title || (isFreeDel ? "FREE DELIVERY" : "Offer")}
                                     </p>
                                     <p className="text-xs text-gray-500 dark:text-gray-400">
-                                      Use code {coupon?.code || "N/A"}
+                                      {coupon?.subtitle || (coupon?.minOrderValue > 0 ? `Minimum ₹${coupon.minOrderValue}` : "Use code below")}
                                     </p>
                                   </div>
                                   <div className="flex items-center gap-2">
@@ -3408,13 +3422,14 @@ function RestaurantDetailsContent() {
                                       className="px-3 py-1 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-xs font-medium rounded"
                                       onClick={(e) => {
                                         e.stopPropagation()
-                                        // Copy code to clipboard
-                                        if (coupon?.code) {
-                                          navigator.clipboard.writeText(coupon.code)
+                                        const code = coupon?.code || coupon?.couponCode
+                                        if (code) {
+                                          navigator.clipboard.writeText(code)
+                                          toast.success("Coupon copied")
                                         }
                                       }}
                                     >
-                                      {coupon?.code || "Copy"}
+                                      {coupon?.code || coupon?.couponCode || "Copy"}
                                     </button>
                                     <ChevronDown
                                       className={`h-4 w-4 text-gray-500 dark:text-gray-400 transition-transform ${isExpanded ? "rotate-180" : ""

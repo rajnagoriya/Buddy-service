@@ -35,7 +35,6 @@ export default function ManageOutlets() {
       title="Manage outlets"
       subtitle="Update outlet profile and compliance"
       backTo={`${RESTAURANT_BASE}/explore`}
-      showBottomNav
     >
       <PanelSurface className="overflow-hidden p-0">
         <div className="border-b border-[var(--rt-border)] bg-[var(--rt-surface-muted)] px-4 py-3">

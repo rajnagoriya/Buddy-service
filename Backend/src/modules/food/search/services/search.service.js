@@ -1,6 +1,8 @@
 import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
+import { attachOutletTimingsToRestaurants } from '../../restaurant/services/outletTimings.service.js';
 import { FoodItem } from '../../admin/models/food.model.js';
 import { FoodCategory } from '../../admin/models/category.model.js';
+import { ACTIVE_PUBLIC_CATEGORY_FILTER, buildFoodVisibleCategoryFilter } from '../../shared/categoryWorkflow.js';
 import mongoose from 'mongoose';
 
 const RESTAURANT_LIST_FIELDS = [
@@ -91,8 +93,19 @@ export const searchUnified = async (query = {}) => {
     let restaurantDetailsMap = new Map();
 
     if (categoryId && mongoose.Types.ObjectId.isValid(categoryId)) {
+        const category = await FoodCategory.findOne({
+            _id: new mongoose.Types.ObjectId(categoryId),
+            ...ACTIVE_PUBLIC_CATEGORY_FILTER
+        }).select('_id').lean();
+        if (!category?._id) {
+            return {
+                success: true,
+                data: { restaurants: [], total: 0, page: parseInt(page, 10), limit: parseInt(limit, 10) },
+            };
+        }
+
         const catFoodItems = await FoodItem.find({
-            categoryId: new mongoose.Types.ObjectId(categoryId),
+            categoryId: category._id,
             approvalStatus: 'approved',
         })
             .select('restaurantId')
@@ -130,6 +143,10 @@ export const searchUnified = async (query = {}) => {
 
         const foodFilters = { approvalStatus: 'approved', name: nameMatcher };
         if (isVeg === 'true') foodFilters.foodType = 'Veg';
+        const visibleCategoryFilter = await buildFoodVisibleCategoryFilter();
+        if (visibleCategoryFilter) {
+            foodFilters.$and = [...(foodFilters.$and || []), visibleCategoryFilter];
+        }
 
         const matchedFoods = await FoodItem.find(foodFilters)
             .select(FOOD_MATCH_FIELDS)
@@ -168,7 +185,9 @@ export const searchUnified = async (query = {}) => {
         });
     }
 
-    let results = Array.from(restaurantDetailsMap.values());
+    let results = await attachOutletTimingsToRestaurants(
+        Array.from(restaurantDetailsMap.values()),
+    );
 
     if (lat && lng && results.length > 0) {
         const latNum = Number(lat);
@@ -216,7 +235,7 @@ export const searchUnified = async (query = {}) => {
  */
 export const getAdminCategories = async (query = {}) => {
     const filter = {
-        isActive: true,
+        ...ACTIVE_PUBLIC_CATEGORY_FILTER,
         isApproved: true,
         $or: [
             { restaurantId: { $exists: false } },

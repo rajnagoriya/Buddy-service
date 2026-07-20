@@ -193,6 +193,10 @@ export default function AddressSelectorPage() {
         try {
           localStorage.setItem("deliveryAddressMode", "current")
           localStorage.setItem("userLocation", JSON.stringify(loc))
+          window.dispatchEvent(new CustomEvent("deliveryAddressModeUpdated"))
+          window.dispatchEvent(
+            new CustomEvent("userLocationUpdated", { detail: { location: loc } }),
+          )
         } catch {}
 
         toast.success("Location ready: " + (loc.area || loc.city || "Current Location"), { id: "geo" })
@@ -212,7 +216,11 @@ export default function AddressSelectorPage() {
     const id = getAddressId(address)
     if (id) {
       await setDefaultAddress(id)
-      try { localStorage.setItem("deliveryAddressMode", "saved") } catch {}
+      try {
+        localStorage.setItem("deliveryAddressMode", "saved")
+        window.dispatchEvent(new CustomEvent("deliveryAddressModeUpdated"))
+        window.dispatchEvent(new CustomEvent("userAddressesUpdated"))
+      } catch {}
       toast.success("Address selected")
       goBack()
     }
@@ -357,8 +365,12 @@ export default function AddressSelectorPage() {
       const created = await addAddress(payload)
       if (created) {
         const id = getAddressId(created)
-        if (id) await setDefaultAddress(id)
-        try { localStorage.setItem("deliveryAddressMode", "saved") } catch {}
+        if (id) await setDefaultAddress(id, created)
+        try {
+          localStorage.setItem("deliveryAddressMode", "saved")
+          window.dispatchEvent(new CustomEvent("deliveryAddressModeUpdated"))
+          window.dispatchEvent(new CustomEvent("userAddressesUpdated"))
+        } catch {}
         toast.success("Address saved")
         goBack()
       }

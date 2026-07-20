@@ -166,7 +166,12 @@ export default function useRestaurantDashboardData({ pollMs = 60_000 } = {}) {
         preparingCount: statusCounts.preparing,
         readyCount: statusCounts.ready,
         pendingCount: statusCounts.pending,
-        availableBalance: Number(finance?.currentCycle?.estimatedPayout ?? 0),
+        availableBalance: Number(
+          finance?.wallet?.availableBalance ??
+            finance?.availableBalance ??
+            finance?.currentCycle?.estimatedPayout ??
+            0,
+        ),
         currentCycleOrders: Number(finance?.currentCycle?.totalOrders ?? 0),
         openComplaints: countOpenComplaints(complaints),
         upcomingReservations,

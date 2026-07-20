@@ -96,13 +96,24 @@ export async function createInitialTransaction(order) {
     Number.isFinite(restaurantCommissionFromOrder) && restaurantCommissionFromOrder > 0
       ? restaurantCommissionFromOrder
       : (commissionAmount || 0);
-  const restaurantNet = Number(((order.pricing?.subtotal || 0) + (order.pricing?.packagingFee || 0) - restaurantCommission).toFixed(2));
+
+  const discount = Number(order.pricing?.discount || 0) || 0;
+  const platformSubsidy = Number(order.pricing?.platformSubsidy || 0) || 0;
+  const couponCreatedBy = order.pricing?.couponCreatedBy || null;
+  const isRestaurantCoupon = couponCreatedBy === 'restaurant';
+
+  let restaurantNet = Number(((order.pricing?.subtotal || 0) + (order.pricing?.packagingFee || 0) - restaurantCommission).toFixed(2));
+  if (isRestaurantCoupon && discount > 0) {
+    restaurantNet = Math.max(0, Number((restaurantNet - discount).toFixed(2)));
+  }
+
   const platformNetProfit = Number((
     (order.pricing?.platformFee || 0) +
     (order.pricing?.deliveryFee || 0) +
     restaurantCommission -
     riderShare -
-    (order.pricing?.discount || 0)
+    (isRestaurantCoupon ? 0 : discount) -
+    platformSubsidy
   ).toFixed(2));
 
   const transaction = new FoodTransaction({

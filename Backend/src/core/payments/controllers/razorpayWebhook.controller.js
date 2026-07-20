@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import mongoose from 'mongoose';
 import { FoodOrder } from '../../../modules/food/orders/models/order.model.js';
 import * as foodTransactionService from '../../../modules/food/orders/services/foodTransaction.service.js';
+import { finalizeCheckoutFromWebhook } from '../../../modules/food/orders/services/order.service.js';
 import { config } from '../../../config/env.js';
 import { logger } from '../../../utils/logger.js';
 
@@ -67,8 +68,17 @@ export const handleRazorpayWebhook = async (req, res) => {
                 }
                 logger.info(`Webhook [payment.captured]: Synced Order ${order.orderId} (Status=paid)`);
             } else {
-                // ✅ ADDED: Log warn if order not found but payment was captured
-                logger.warn(`Webhook [payment.captured]: Order not found or already paid for RZ-Order: ${rzOrderId}`);
+                // Pay-then-place: create FoodOrder from checkout session
+                try {
+                    const created = await finalizeCheckoutFromWebhook(rzOrderId, rzPaymentId);
+                    if (created) {
+                        logger.info(`Webhook [payment.captured]: Created order ${created._id || created.orderId} from checkout`);
+                    } else {
+                        logger.warn(`Webhook [payment.captured]: No order/checkout for RZ-Order: ${rzOrderId}`);
+                    }
+                } catch (checkoutErr) {
+                    logger.error(`Webhook checkout finalize error: ${checkoutErr.message}`);
+                }
             }
         }
 

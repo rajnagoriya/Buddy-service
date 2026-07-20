@@ -93,12 +93,15 @@ export const useUserNotifications = () => {
       const message = data.message || `Your order status is now ${String(data.orderStatus || '').replace(/_/g, ' ')}`;
 
       // Optional: Show toast for important updates (Cancel, Ready, etc.)
-      const isImportant = String(data.orderStatus).includes('cancel') || ['ready_for_pickup', 'ready', 'confirmed'].includes(data.orderStatus);
+      const isImportant =
+        String(data.orderStatus).includes('cancel') ||
+        data.failureReason === 'restaurant_partially_dropped' ||
+        ['ready_for_pickup', 'ready', 'confirmed'].includes(data.orderStatus);
       const isOrderTrackingScreen =
         typeof window !== 'undefined' &&
         String(window.location?.pathname || '').includes('/user/orders/');
 
-      const statusKey = `${String(data.orderId || '')}:${String(data.orderStatus || '')}`;
+      const statusKey = `${String(data.orderId || '')}:${String(data.orderStatus || '')}:${String(data.failureReason || '')}`;
       const now = Date.now();
       const isDuplicateStatusToast =
         statusKey &&
@@ -111,7 +114,7 @@ export const useUserNotifications = () => {
         toast.message(title, {
           id: ORDER_STATUS_TOAST_ID,
           description: message,
-          duration: 6000
+          duration: 8000
         });
       }
 
@@ -121,15 +124,58 @@ export const useUserNotifications = () => {
           orderMongoId: data.orderMongoId,
           orderId: data.orderId,
           status: data.orderStatus,
-          orderStatus: data.orderStatus, // Ensure compatibility with different UI checks
+          orderStatus: data.orderStatus,
           title,
           message,
+          failureReason: data.failureReason || null,
+          refundAmount: data.refundAmount,
+          restaurantName: data.restaurantName,
+          dispatch: data.dispatch || null,
+          payment: data.payment || null,
           deliveryState: data.deliveryState,
           deliveryVerification: data.deliveryVerification,
+          pricing: data.pricing,
+          pickups: data.pickups,
           timestamp: new Date().toISOString()
         }
       });
       window.dispatchEvent(event);
+    });
+
+    socketRef.current.on('order_partial_restaurant_dropped', (data) => {
+      debugLog('🔔 Partial restaurant dropped:', data);
+      const title = data.title || 'Restaurant removed from your order';
+      const message =
+        data.message ||
+        `One restaurant rejected your order. ₹${Number(data.refundAmount || 0).toFixed(0)} has been refunded to your wallet.`;
+
+      window.dispatchEvent(
+        new CustomEvent('orderPartialRestaurantDropped', {
+          detail: {
+            ...data,
+            title,
+            message,
+          },
+        }),
+      );
+      window.dispatchEvent(
+        new CustomEvent('orderStatusNotification', {
+          detail: {
+            orderMongoId: data.orderMongoId,
+            orderId: data.orderId,
+            status: data.orderStatus,
+            orderStatus: data.orderStatus,
+            title,
+            message,
+            failureReason: 'restaurant_partially_dropped',
+            refundAmount: data.refundAmount,
+            restaurantName: data.restaurantName,
+            pricing: data.pricing,
+            pickups: data.pickups,
+            timestamp: new Date().toISOString(),
+          },
+        }),
+      );
     });
 
     /** Customer receives handover OTP when partner confirms "reached drop" (never shown to partner). */
