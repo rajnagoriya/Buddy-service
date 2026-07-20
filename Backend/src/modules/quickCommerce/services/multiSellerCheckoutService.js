@@ -320,7 +320,7 @@ export async function processMultiSellerCheckout(params) {
       customer: customerId,
       address,
       payment: {
-        method: payment?.method || "cash",
+        method: payment?.method || "online",
         status: "pending",
       },
       timeSlot: timeSlot || "now",

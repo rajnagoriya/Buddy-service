@@ -6,6 +6,7 @@ import { FoodDeliveryCashDeposit } from '../models/foodDeliveryCashDeposit.model
 import { FoodDeliveryPartner } from '../models/deliveryPartner.model.js';
 import { DeliveryBonusTransaction } from '../../admin/models/deliveryBonusTransaction.model.js';
 import { getDeliveryCashLimitSettings } from '../../admin/services/admin.service.js';
+import { getBalance } from '../../../../core/payments/transaction.service.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { createRazorpayOrder, getRazorpayKeyId, isRazorpayConfigured, verifyPaymentSignature } from '../../orders/helpers/razorpay.helper.js';
 
@@ -190,16 +191,22 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
     const totalWithdrawn = Number(withdrawalsMap['approved'] || 0) + Number(withdrawalsMap['processed'] || 0);
     const pendingWithdrawals = Number(withdrawalsMap['pending'] || 0);
 
+    const ledger = await getBalance('deliveryBoy', String(partnerId));
+
     // Lifetime Earnings = Total from orders + bonuses
     const lifetimeEarnings = totalEarned + totalBonus;
     
     // 1. Calculate raw earnings available for withdrawal/substitution
     const rawEarningsBalance = Math.max(0, lifetimeEarnings - (totalWithdrawn + pendingWithdrawals));
+    const ledgerAvailable = Math.max(
+        0,
+        (Number(ledger.availableBalance) || 0) - pendingWithdrawals
+    );
     
     // 2. Calculate actual cash in hand (already delivered - total deposited)
     const actualCashInHand = Math.max(0, actualCashCollected - totalCashDeposited);
 
-    const pocketBalance = rawEarningsBalance;
+    const pocketBalance = Math.max(rawEarningsBalance, ledgerAvailable);
     const netCashInHand = actualCashInHand;
 
     const totalCashLimit = Number(partner?.cashLimit || cashLimitSettings?.deliveryCashLimit) || 2000;

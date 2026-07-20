@@ -104,6 +104,17 @@ export default function HubFinance() {
   const [withdrawalRequests, setWithdrawalRequests] = useState([])
   const [loadingWithdrawals, setLoadingWithdrawals] = useState(false)
 
+  const walletAvailableBalance = useMemo(() => {
+    return Number(
+      financeData?.wallet?.availableBalance ??
+        financeData?.availableBalance ??
+        financeData?.currentCycle?.estimatedPayout ??
+        0,
+    )
+  }, [financeData])
+
+  const unsettledOrderCount = Number(financeData?.currentCycle?.totalOrders ?? 0)
+
   // Fetch finance data on mount
   useEffect(() => {
     const fetchFinanceData = async () => {
@@ -828,25 +839,25 @@ export default function HubFinance() {
       <div className="mx-auto w-full max-w-6xl flex-1 overflow-y-auto px-4 pb-8 pt-2 lg:px-6">
         {activeTab === "payouts" && (
           <div className="space-y-6">
-            {/* Current cycle */}
+            {/* Wallet balance */}
             <div>
-              <h2 className="mb-3 text-base font-bold text-gray-900">Current cycle</h2>
+              <h2 className="mb-3 text-base font-bold text-gray-900">Wallet balance</h2>
               <PanelSurface className="p-4">
                 {loading ? (
                   <div className="py-8 text-center text-gray-500">Loading...</div>
                 ) : (
                   <>
                     <p className="text-4xl font-bold text-gray-900 mb-2">
-                      ₹{(financeData?.currentCycle?.estimatedPayout || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      ₹{walletAvailableBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </p>
                     <p className="text-sm text-gray-600 mb-4">
-                      {financeData?.currentCycle?.totalOrders || 0} {financeData?.currentCycle?.totalOrders === 1 ? 'order' : 'orders'}
+                      {unsettledOrderCount} unsettled {unsettledOrderCount === 1 ? 'order' : 'orders'}
                     </p>
                     <button
                       onClick={() => setShowWithdrawalModal(true)}
-                      disabled={!(financeData?.currentCycle?.estimatedPayout > 0)}
+                      disabled={!(walletAvailableBalance > 0)}
                       className={`mt-4 flex w-full items-center justify-center gap-2 rounded-2xl py-3 px-4 font-semibold transition-colors ${
-                        financeData?.currentCycle?.estimatedPayout > 0
+                        walletAvailableBalance > 0
                           ? "rt-btn-primary"
                           : "cursor-not-allowed bg-gray-200 text-gray-500"
                       }`}
@@ -1311,7 +1322,7 @@ export default function HubFinance() {
                   alert('Please enter a valid amount')
                   return
                 }
-                if (amount > (financeData?.currentCycle?.estimatedPayout || 0)) {
+                if (amount > walletAvailableBalance) {
                   alert('Amount cannot exceed available balance')
                   return
                 }
@@ -1345,7 +1356,7 @@ export default function HubFinance() {
                   setSubmittingWithdrawal(false)
                 }
               }}
-              disabled={submittingWithdrawal || !withdrawalAmount || parseFloat(withdrawalAmount) <= 0 || parseFloat(withdrawalAmount) > (financeData?.currentCycle?.estimatedPayout || 0)}
+              disabled={submittingWithdrawal || !withdrawalAmount || parseFloat(withdrawalAmount) <= 0 || parseFloat(withdrawalAmount) > walletAvailableBalance}
               className="flex-1 rounded-lg bg-black px-4 py-3 font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-300"
             >
               {submittingWithdrawal ? 'Submitting...' : 'Submit Request'}
@@ -1356,7 +1367,7 @@ export default function HubFinance() {
         <p className="mb-4 text-sm text-gray-600">
           Available Balance:{' '}
           <span className="font-semibold text-gray-900">
-            ₹{(financeData?.currentCycle?.estimatedPayout || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            ₹{walletAvailableBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </span>
         </p>
         <label className="mb-2 block text-sm font-medium text-gray-700">
@@ -1365,14 +1376,14 @@ export default function HubFinance() {
         <input
           type="number"
           min="0.01"
-          max={financeData?.currentCycle?.estimatedPayout || 0}
+          max={walletAvailableBalance}
           step="0.01"
           value={withdrawalAmount}
           onChange={(e) => setWithdrawalAmount(e.target.value)}
           placeholder="0.00"
           className="w-full rounded-lg border border-gray-300 px-4 py-3 outline-none focus:border-transparent focus:ring-2 focus:ring-black"
         />
-        {withdrawalAmount && parseFloat(withdrawalAmount) > (financeData?.currentCycle?.estimatedPayout || 0) && (
+        {withdrawalAmount && parseFloat(withdrawalAmount) > walletAvailableBalance && (
           <p className="mt-1 text-sm text-red-600">Amount cannot exceed available balance</p>
         )}
       </RestaurantPanelModal>

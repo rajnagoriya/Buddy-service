@@ -92,8 +92,8 @@ export function validateCreateOrderDto(body) {
         note: z.string().optional(),
         restaurantNote: z.string().optional(),
         sendCutlery: z.boolean().optional(),
-        // 'razorpay_qr' means COD-style flow, but payment is collected via Razorpay QR at delivery.
-        paymentMethod: z.enum(['cash', 'razorpay', 'razorpay_qr', 'card', 'wallet']),
+        // COD (cash / razorpay_qr-at-delivery) is disabled — prepaid only.
+        paymentMethod: z.enum(['razorpay', 'card', 'wallet']),
         zoneId: z.string().nullable().optional(),
         scheduledAt: z.string().datetime({ offset: true }).nullable().optional(),
         deliveryOption: z.string().optional(),

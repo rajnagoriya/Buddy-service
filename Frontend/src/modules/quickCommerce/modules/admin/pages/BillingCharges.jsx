@@ -31,7 +31,7 @@ const BillingCharges = () => {
         deliveryPartnerRatePerKm: 5,
         fixedCharge: 30,
         handlingFeeStrategy: "highest_category_fee",
-        codEnabled: true,
+        codEnabled: false,
         onlineEnabled: true,
     });
 

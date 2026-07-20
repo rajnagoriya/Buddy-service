@@ -126,7 +126,7 @@ const userSchema = new mongoose.Schema(
         },
         isCodEnabled: {
             type: Boolean,
-            default: true,
+            default: false,
             index: true
         },
         role: {

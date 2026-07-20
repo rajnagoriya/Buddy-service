@@ -34,7 +34,7 @@ export const checkoutPreviewSchema = Joi.object({
   discountTotal: Joi.number().min(0).default(0),
   taxTotal: Joi.number().min(0).default(0),
   tipAmount: Joi.number().min(0).default(0),
-  paymentMode: Joi.string().valid("ONLINE", "COD").default("COD"),
+  paymentMode: Joi.string().valid("ONLINE", "COD").default("ONLINE"),
   timeSlot: Joi.string().allow("", null),
   couponId: Joi.string().allow("", null).optional(),
 });

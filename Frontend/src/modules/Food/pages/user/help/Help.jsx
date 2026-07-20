@@ -62,7 +62,7 @@ const helpCategories = [
     topics: [
       {
         question: "What payment methods do you accept?",
-        answer: "We accept all major credit cards, debit cards, digital wallets (Apple Pay, Google Pay), and cash on delivery in select areas."
+        answer: "We accept major credit cards, debit cards, UPI, netbanking, and wallet payment."
       },
       {
         question: "Is my payment information secure?",

@@ -214,7 +214,10 @@ export async function createOrder(userId, dto, options = {}) {
   };
 
   const paymentMethod = dto.paymentMethod === "card" ? "razorpay" : dto.paymentMethod;
-  const isCash = paymentMethod === "cash";
+  const isCash = paymentMethod === "cash" || paymentMethod === "razorpay_qr";
+  if (isCash) {
+    throw new ValidationError('Cash on Delivery is no longer available. Please pay online or with wallet.');
+  }
   const isWallet = paymentMethod === "wallet";
   const verifiedPrepaid = options.verifiedPrepaid || null;
 

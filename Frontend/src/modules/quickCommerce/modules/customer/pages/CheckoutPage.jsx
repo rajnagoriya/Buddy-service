@@ -12,7 +12,6 @@ import {
   MapPin,
   Clock,
   CreditCard,
-  Banknote,
   ChevronRight,
   ChevronLeft,
   Share2,
@@ -128,7 +127,7 @@ const CheckoutPage = () => {
 
   // State management
   const [selectedTimeSlot, setSelectedTimeSlot] = useState("now");
-  const [selectedPayment, setSelectedPayment] = useState("cash");
+  const [selectedPayment, setSelectedPayment] = useState("online");
   const [selectedTip, setSelectedTip] = useState(0);
   const [showAllCartItems, setShowAllCartItems] = useState(false);
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
@@ -193,16 +192,6 @@ const CheckoutPage = () => {
             label: "Pay Online",
             icon: CreditCard,
             sublabel: "UPI / Cards / NetBanking",
-          },
-        ]),
-    ...(settings?.codEnabled === false
-      ? []
-      : [
-          {
-            id: "cash",
-            label: "Cash on Delivery",
-            icon: Banknote,
-            sublabel: "Pay after delivery",
           },
         ]),
   ];
@@ -677,7 +666,7 @@ const CheckoutPage = () => {
       discountTotal: discountAmount,
       taxTotal: 0,
       tipAmount: selectedTip,
-      paymentMode: selectedPayment === "online" ? "ONLINE" : "COD",
+      paymentMode: "ONLINE",
       timeSlot: selectedTimeSlot,
     });
 
@@ -740,7 +729,7 @@ const CheckoutPage = () => {
       const taxAmount = pricingPreview?.taxTotal || 0;
       const orderData = {
         address: buildAddressForOrder(),
-        paymentMode: selectedPayment === "online" ? "ONLINE" : "COD",
+        paymentMode: "ONLINE",
         discountTotal: discountAmount,
         taxTotal: taxAmount,
         tipAmount: selectedTip,
@@ -777,47 +766,29 @@ const CheckoutPage = () => {
           return;
         }
 
-        if (selectedPayment === "online") {
-          try {
-            const paymentRes = await customerApi.createPaymentOrder({
-              orderRef: paymentRef,
-              orderId: mainOrderId,
-            });
-            if (paymentRes.data.success && paymentRes.data.result?.redirectUrl) {
-              clearCart();
-              window.location.href = paymentRes.data.result.redirectUrl;
-              return;
-            } else {
-              throw new Error(
-                paymentRes.data.message || "Failed to initiate payment gateway"
-              );
-            }
-          } catch (payError) {
-            setIsPlacingOrder(false);
-            showToast(
-              payError.message ||
-                "Order created but payment gateway failed. Please pay from order details.",
-              "error"
-            );
-            navigate(`/qc/orders/${mainOrderId}`);
+        try {
+          const paymentRes = await customerApi.createPaymentOrder({
+            orderRef: paymentRef,
+            orderId: mainOrderId,
+          });
+          if (paymentRes.data.success && paymentRes.data.result?.redirectUrl) {
+            clearCart();
+            window.location.href = paymentRes.data.result.redirectUrl;
             return;
           }
-        }
-
-        // COD flow
-        clearCart();
-        showToast("Order placed — waiting for seller to accept.", "success");
-        setOrderId(mainOrderId);
-        setShowSuccess(true);
-
-        if (postOrderNavigateRef.current) {
-          clearTimeout(postOrderNavigateRef.current);
-        }
-        postOrderNavigateRef.current = setTimeout(() => {
-          postOrderNavigateRef.current = null;
+          throw new Error(
+            paymentRes.data.message || "Failed to initiate payment gateway"
+          );
+        } catch (payError) {
           setIsPlacingOrder(false);
+          showToast(
+            payError.message ||
+              "Order created but payment gateway failed. Please pay from order details.",
+            "error"
+          );
           navigate(`/qc/orders/${mainOrderId}`);
-        }, 3000);
+          return;
+        }
       } else {
         setIsPlacingOrder(false);
         showToast(response.data.message || "Could not place order.", "error");
