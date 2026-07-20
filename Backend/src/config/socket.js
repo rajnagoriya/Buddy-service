@@ -359,7 +359,7 @@ export const initSocket = async (server) => {
         });
 
         // 🆕 Resync State on Reconnect
-        socket.on('resync', async () => {
+        socket.on('resync', async (data) => {
           try {
             if (isFoodDeliveryRole(role)) {
               logDeliverySocket('Resync requested', {
@@ -368,7 +368,12 @@ export const initSocket = async (server) => {
               });
             }
             const { resyncState } = await import('../modules/food/orders/services/order.service.js');
-            const state = await resyncState(userId, role);
+            const sinceSeq = Number(data?.sinceSeq);
+            const state = await resyncState(
+              userId,
+              role,
+              Number.isFinite(sinceSeq) ? { sinceSeq } : {},
+            );
             if (state.activeOrder) {
               const eventName = role === 'USER' ? 'order_state' : 'active_order';
               socket.emit(eventName, state.activeOrder);
@@ -394,7 +399,11 @@ export const initSocket = async (server) => {
                 });
               }
             }
-            socket.emit('resync_complete', { timestamp: Date.now() });
+            socket.emit('resync_complete', {
+              timestamp: Date.now(),
+              lastEventSeq: state.lastEventSeq || 0,
+              missedEvents: state.recentEvents || [],
+            });
             if (isFoodDeliveryRole(role)) {
               logDeliverySocket('Resync complete', {
                 socketId: socket.id,

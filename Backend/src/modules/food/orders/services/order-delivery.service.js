@@ -30,6 +30,7 @@ import {
   isShareRequired,
   isSharedDriverJoined,
   pushSettlementSnapshot,
+  canOrderTransition,
 } from './order-lifecycle.policy.js';
 import {
   buildOrderIdentityFilter,
@@ -2017,6 +2018,11 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
   const nextStatus = 'delivered';
   if (!isStatusAdvance(from, nextStatus)) {
       throw new ValidationError(`Order is already at status '${from}'. Cannot re-mark as '${nextStatus}'.`);
+  }
+  // 4A: adjacency guard — 'delivered' may only follow 'picked_up'. Closes the rank-only hole
+  // where ready_for_pickup → delivered (skipping pickup) was accepted because 80 > 40.
+  if (!canOrderTransition(from, nextStatus)) {
+    throw new ValidationError('Cannot complete delivery: the order must be picked up first.');
   }
 
   // Blocking check for split confirmation on shared orders

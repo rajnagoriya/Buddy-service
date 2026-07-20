@@ -8,6 +8,48 @@ import { ValidationError } from '../../../../core/auth/errors.js';
 export const MAX_RESTAURANTS_PER_ORDER = 3;
 export const MAX_DRIVERS_PER_ORDER = 2;
 
+/**
+ * Canonical order-status adjacency map (the real state machine, not just monotonic rank).
+ * `from → [allowed next]`. Terminal states have no outgoing edges. Used by `canOrderTransition`
+ * to block bypassable jumps (e.g. ready_for_pickup → delivered, skipping pickup) that the older
+ * rank-only `isStatusAdvance` let through. Note: `reached_pickup` / `reached_drop` are tracked on
+ * `deliveryState`, not `orderStatus`, so they are not modelled here.
+ */
+export const ORDER_STATUS_TRANSITIONS = {
+  scheduled: ['created', 'cancelled_by_user', 'cancelled_by_restaurant', 'cancelled_by_admin'],
+  created: [
+    'confirmed', 'preparing', 'ready_for_pickup', 'picked_up',
+    'rejected_by_restaurant', 'cancelled_by_user', 'cancelled_by_restaurant', 'cancelled_by_admin',
+  ],
+  confirmed: [
+    'preparing', 'ready_for_pickup', 'picked_up',
+    'rejected_by_restaurant', 'cancelled_by_user', 'cancelled_by_restaurant', 'cancelled_by_admin',
+  ],
+  preparing: ['ready_for_pickup', 'picked_up', 'cancelled_by_restaurant', 'cancelled_by_admin'],
+  ready_for_pickup: ['picked_up', 'cancelled_by_restaurant', 'cancelled_by_admin'],
+  picked_up: ['delivered', 'cancelled_by_admin'],
+  delivered: [],
+  rejected_by_restaurant: ['created', 'confirmed', 'cancelled_by_restaurant', 'cancelled_by_admin'],
+  cancelled_by_user: [],
+  cancelled_by_restaurant: [],
+  cancelled_by_admin: [],
+};
+
+/** True if `to` is a valid successor of `from` per ORDER_STATUS_TRANSITIONS. */
+export function canOrderTransition(from, to) {
+  if (!from) return true; // start of flow
+  if (from === to) return false; // no self-loops (idempotency handled by callers)
+  const allowed = ORDER_STATUS_TRANSITIONS[from];
+  if (!allowed) return false;
+  return allowed.includes(to);
+}
+
+export function assertOrderTransition(from, to) {
+  if (!canOrderTransition(from, to)) {
+    throw new ValidationError(`Illegal order transition: '${from}' → '${to}'.`);
+  }
+}
+
 /** Pickup statuses that still participate in the active multi-restaurant trip */
 const ACTIVE_PICKUP_STATUSES = new Set([
   'pending',

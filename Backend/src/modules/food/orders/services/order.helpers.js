@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { randomUUID } from 'crypto';
 import { logger } from '../../../../utils/logger.js';
 import {
   sendNotificationToOwner,
@@ -6,10 +7,49 @@ import {
 } from "../../../../core/notifications/firebase.service.js";
 import { getIO, rooms } from '../../../../config/socket.js';
 import { addOrderJob } from '../../../../queues/producers/order.producer.js';
+import { FoodOrderEvent } from '../models/foodOrderEvent.model.js';
 
-export function enqueueOrderEvent(action, payload = {}) {
+/**
+ * Record an order lifecycle milestone.
+ *
+ * Single chokepoint for every milestone: it (1) atomically allocates a per-order monotonic
+ * `seq`, (2) appends the event to the durable outbox (food_order_events) with a unique
+ * `eventId`, and (3) enqueues the BullMQ job (now carrying seq/eventId). The outbox is what
+ * `/sync` replays so a reconnecting client can detect gaps and recover missed milestones.
+ *
+ * Fire-and-forget: callers do not await it. All failures are swallowed/logged so a milestone
+ * record never blocks or breaks the primary state change (which has already been persisted).
+ */
+export async function enqueueOrderEvent(action, payload = {}) {
+  let eventId = null;
+  let seq = null;
   try {
-    void addOrderJob({ action, ...payload }).catch((err) => {
+    const rawOrderId = payload.orderMongoId || payload.orderId;
+    if (rawOrderId && mongoose.Types.ObjectId.isValid(String(rawOrderId))) {
+      eventId = randomUUID();
+      // Atomically allocate the next per-order sequence, then append to the outbox.
+      const updated = await mongoose
+        .model('FoodOrder')
+        .findByIdAndUpdate(rawOrderId, { $inc: { eventSeq: 1 } }, { new: true, select: 'eventSeq' })
+        .lean();
+      seq = updated?.eventSeq ?? null;
+      if (seq != null) {
+        await FoodOrderEvent.create({
+          orderId: rawOrderId,
+          seq,
+          eventId,
+          type: action,
+          payload,
+          at: new Date(),
+        });
+      }
+    }
+  } catch (err) {
+    logger.warn(`Order event outbox append failed: ${action} - ${err?.message || err}`);
+  }
+
+  try {
+    void addOrderJob({ action, eventId, seq, ...payload }).catch((err) => {
       logger.warn(`BullMQ enqueue order event failed: ${action} - ${err?.message || err}`);
     });
   } catch (err) {

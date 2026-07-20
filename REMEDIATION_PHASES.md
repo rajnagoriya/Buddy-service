@@ -38,10 +38,12 @@ Interim safety for the current earnings-share model, before the Phase 6 rebuild.
 
 *Kept:* `resendDeliveryNotificationRestaurant` (restaurant-initiated **driver** re-search) — unrelated, still live.
 
-## Phase 4 — State-machine & real-time integrity · M
-- ⬜ Replace rank-only `isStatusAdvance` with an explicit adjacency transition table (block stage-skips at the guard).
-- ⬜ Add `event_id` + `seq` to every order event; client dedup; seq-aware `/sync`; include shared/second driver in `/sync`.
-- ⬜ Turn the log-only BullMQ `order.processor` into a real outbox.
+## Phase 4 — State-machine & real-time integrity · M ✅ (backend; client dedup deferred → 4b)
+- ✅ **4A** Explicit `ORDER_STATUS_TRANSITIONS` adjacency map + `canOrderTransition`/`assertOrderTransition` in policy (canonical state machine). Wired into `completeDelivery`: `delivered` may only follow `picked_up` — closes the rank-only hole where `ready_for_pickup → delivered` (skipping pickup) was accepted because 80 > 40.
+- ✅ **Durable event outbox** — new `FoodOrderEvent` model (`food_order_events`) + `order.eventSeq` counter. `enqueueOrderEvent` (the single milestone chokepoint, 19 call sites) now atomically allocates a per-order `seq`, generates a unique `eventId`, appends to the outbox, and passes seq/eventId into the BullMQ job.
+- ✅ **Seq-aware, multi-driver `/sync`** — `resyncState` now matches primary **OR** shared partner (shared driver can finally recover), accepts `sinceSeq`, and returns `lastEventSeq` + the missed-event tail; socket `resync` forwards `sinceSeq` and emits `{ lastEventSeq, missedEvents }` in `resync_complete`.
+
+*Deferred to Phase 4b:* threading `seq`/`eventId` onto every live socket payload + client-side dedup across the 3 frontends. The outbox + seq-aware `/sync` already give clients a reliable gap-detection/replay path on reconnect; live-payload dedup is an optimization, not a correctness gap.
 
 ## Phase 5 — Flow 2 orchestration · M
 - ⬜ Combined ETA from per-kitchen prep times.
@@ -67,3 +69,4 @@ Interim safety for the current earnings-share model, before the Phase 6 rebuild.
 - **Phase 1 — done & committed** on branch `phase1-two-driver-safety` (`b02d667`). Files: `order.model.js` (`dispatch.shareOpenedAt`), `order.helpers.js` (`SHARE_TIMEOUT_MS`), `order-delivery.service.js` (auto-share timestamp + solo-complete fallback), `order.service.js` (atomic shared join, manual-share timestamp, admin-reassign shared handling). `main` restored to `c6cdb87`.
 - **Phase 2 — done** on branch `phase2-driver-first-holes` (stacked on Phase 1). Files: `order.model.js` (`dispatch.restaurantAckResendAt`), `order.helpers.js` (ack + geofence constants), `order-delivery.service.js` (`assertRiderAtTarget` geofence + pickup ready-state guard), `order.service.js` (F-1A escalation in `recoverStuckOrders` + F-3D share eligibility). All pass `node --check`. Runtime/device test still pending (no automated test harness).
 - **Phase 3 — done** on branch `phase3-reject-policy` (stacked on Phase 2). Backend: `order.service.js` (removed `resendOrderToRestaurant`, immediate-drop messaging, post-pickup reject guards + auto-advance), `order-lifecycle.policy.js` (removed strike constant/helpers), `order.helpers.js` (`failureReason` classifier), `order.controller.js` + `delivery.routes.js` (removed resend endpoint), `order.model.js` (comment fixes). Frontend: deleted `RejectedOrderModal.jsx`, removed `resendOrderToRestaurant` API. All backend pass `node --check`; frontend api parses as ESM. Runtime test pending.
+- **Phase 4 — done** on branch `phase4-state-machine-events` (stacked on Phase 3). New `foodOrderEvent.model.js` outbox. `order.model.js` (`eventSeq`), `order-lifecycle.policy.js` (transition table + validators), `order-delivery.service.js` (completeDelivery adjacency guard), `order.helpers.js` (`enqueueOrderEvent` → seq + outbox), `order.service.js` (seq-aware multi-driver `resyncState`), `config/socket.js` (resync forwards `sinceSeq`, emits recovery envelope). All pass `node --check`. Client-side dedup deferred to 4b. Runtime test pending.

@@ -479,7 +479,9 @@ const orderSchema = new mongoose.Schema(
             reason: { type: String, default: '' },
             reportedBy: { type: String, enum: ['RESTAURANT', 'DELIVERY_PARTNER', 'SYSTEM'] },
             reportedAt: { type: Date }
-        }
+        },
+        /** Monotonic per-order event sequence counter; allocated via $inc for the event outbox. */
+        eventSeq: { type: Number, default: 0 }
     },
 
     {

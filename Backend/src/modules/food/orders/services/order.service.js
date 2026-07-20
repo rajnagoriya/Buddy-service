@@ -17,6 +17,7 @@ import { recordOfferRedemption } from '../../admin/services/offer.service.js';
 import { FoodDeliveryCommissionRule } from '../../admin/models/deliveryCommissionRule.model.js';
 import { FoodRestaurantCommission } from '../../admin/models/restaurantCommission.model.js';
 import { FoodTransaction } from '../models/foodTransaction.model.js';
+import { FoodOrderEvent } from '../models/foodOrderEvent.model.js';
 import { FoodSupportTicket } from '../../user/models/supportTicket.model.js';
 import { config } from '../../../../config/env.js';
 import { FoodDeliveryBoySettings } from '../../admin/models/deliveryBoySettings.model.js';
@@ -1295,18 +1296,46 @@ export async function recoverStuckOrders() {
   }
 }
 
-export async function resyncState(userId, role) {
+export async function resyncState(userId, role, options = {}) {
+  const NON_ACTIVE = [
+    "delivered",
+    "cancelled_by_user",
+    "cancelled_by_restaurant",
+    "cancelled_by_admin",
+  ];
+
+  // Attach the recovery envelope: the current seq + the recent event tail (or everything after
+  // `sinceSeq` when the client supplies it) so a reconnecting client can detect gaps and replay
+  // any milestone it missed while offline.
+  const withEvents = async (activeOrder, rawOrderId, rawEventSeq = 0) => {
+    if (!activeOrder || !rawOrderId) {
+      return { activeOrder: activeOrder || null, lastEventSeq: 0, recentEvents: [] };
+    }
+    let recentEvents = [];
+    try {
+      const sinceSeq = Number(options.sinceSeq);
+      const query = { orderId: rawOrderId };
+      if (Number.isFinite(sinceSeq) && sinceSeq > 0) query.seq = { $gt: sinceSeq };
+      const rows = await FoodOrderEvent.find(query)
+        .sort({ seq: -1 })
+        .limit(50)
+        .lean();
+      recentEvents = rows
+        .map((e) => ({ seq: e.seq, eventId: e.eventId, type: e.type, at: e.at, payload: e.payload }))
+        .sort((a, b) => a.seq - b.seq);
+    } catch (err) {
+      logger.warn(`resyncState outbox read failed: ${err?.message || err}`);
+    }
+    const lastEventSeq =
+      Number(rawEventSeq) ||
+      (recentEvents.length ? recentEvents[recentEvents.length - 1].seq : 0);
+    return { activeOrder, lastEventSeq, recentEvents };
+  };
+
   if (role === "USER") {
     const order = await FoodOrder.findOne({
       userId: new mongoose.Types.ObjectId(userId),
-      orderStatus: {
-        $nin: [
-          "delivered",
-          "cancelled_by_user",
-          "cancelled_by_restaurant",
-          "cancelled_by_admin",
-        ],
-      },
+      orderStatus: { $nin: NON_ACTIVE },
     })
       .select("+deliveryOtp")
       .sort({ createdAt: -1 })
@@ -1322,27 +1351,25 @@ export async function resyncState(userId, role) {
       ) {
         out.handoverOtp = order.deliveryOtp;
       }
-      return { activeOrder: out };
+      return withEvents(out, order._id, order.eventSeq);
     }
-    return { activeOrder: null };
+    return { activeOrder: null, lastEventSeq: 0, recentEvents: [] };
   }
 
   if (role === "DELIVERY_PARTNER" || role === "DRIVER") {
+    const partnerObjectId = new mongoose.Types.ObjectId(userId);
+    // Match the primary OR the shared (second) partner, so both legs of a shared order recover.
     const order = await FoodOrder.findOne({
-      "dispatch.deliveryPartnerId": new mongoose.Types.ObjectId(userId),
+      $or: [
+        { "dispatch.deliveryPartnerId": partnerObjectId },
+        { "dispatch.sharedPartnerId": partnerObjectId },
+      ],
       "dispatch.status": { $in: ["assigned", "accepted"] },
-      orderStatus: {
-        $nin: [
-          "delivered",
-          "cancelled_by_user",
-          "cancelled_by_restaurant",
-          "cancelled_by_admin",
-        ],
-      },
+      orderStatus: { $nin: NON_ACTIVE },
     })
       .populate("restaurantId")
       .lean();
-    return { activeOrder: order ? sanitizeOrderForExternal(order) : null };
+    return withEvents(order ? sanitizeOrderForExternal(order) : null, order?._id, order?.eventSeq);
   }
 
   return {};
