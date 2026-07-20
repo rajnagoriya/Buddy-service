@@ -15,7 +15,6 @@ import { NewOrderModal } from '@/modules/DeliveryV2/components/modals/NewOrderMo
 import { PickupActionModal } from '@/modules/DeliveryV2/components/modals/PickupActionModal';
 import { DeliveryVerificationModal } from '@/modules/DeliveryV2/components/modals/DeliveryVerificationModal';
 import { OrderSummaryModal } from '@/modules/DeliveryV2/components/modals/OrderSummaryModal';
-import { RejectedOrderModal } from '@/modules/DeliveryV2/components/modals/RejectedOrderModal';
 import ActionSlider from '@/modules/DeliveryV2/components/ui/ActionSlider';
 
 // Sub Pages
@@ -834,18 +833,46 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
         return;
       }
 
-      if (orderStatusUpdate.orderStatus === 'rejected_by_restaurant' || orderStatusUpdate.status === 'rejected_by_restaurant') {
-        if (matchesActiveOrder && currentActive) {
-          setActiveOrder({
-            ...currentActive,
-            orderStatus: 'rejected_by_restaurant',
-            restaurantRejectionCount:
-              orderStatusUpdate.restaurantRejectionCount ||
-              (currentActive.restaurantRejectionCount || 0) + 1,
-            pickups: orderStatusUpdate.pickups || currentActive.pickups,
+      const isPartialRestaurantDrop =
+        String(orderStatusUpdate.failureReason || '').toLowerCase() ===
+          'restaurant_partially_dropped' ||
+        String(orderStatusUpdate.type || '').toLowerCase() ===
+          'order_partial_restaurant_dropped';
+
+      if (isPartialRestaurantDrop && matchesActiveOrder && currentActive) {
+        toast.warning(
+          orderStatusUpdate.message ||
+            'A restaurant was removed. Continue with remaining pickups.',
+        );
+        deliveryAPI
+          .getCurrentDelivery()
+          .then((response) => {
+            const trip = extractCurrentTripRef.current?.(response) ?? null;
+            if (trip) {
+              applyServerTripRef.current?.(trip);
+              return;
+            }
+            const latest = useDeliveryStore.getState().activeOrder;
+            if (!latest) return;
+            setActiveOrder({
+              ...latest,
+              orderStatus: orderStatusUpdate.orderStatus || latest.orderStatus,
+              status: orderStatusUpdate.status || latest.status,
+              pickups: orderStatusUpdate.pickups || latest.pickups,
+              pricing: orderStatusUpdate.pricing || latest.pricing,
+              items: orderStatusUpdate.items || latest.items,
+            });
+          })
+          .catch(() => {
+            const latest = useDeliveryStore.getState().activeOrder;
+            if (!latest) return;
+            setActiveOrder({
+              ...latest,
+              orderStatus: orderStatusUpdate.orderStatus || latest.orderStatus,
+              pickups: orderStatusUpdate.pickups || latest.pickups,
+              pricing: orderStatusUpdate.pricing || latest.pricing,
+            });
           });
-          toast.warning('Restaurant rejected the order. You can try resending.');
-        }
         clearOrderStatusUpdate();
         return;
       }
@@ -1387,17 +1414,6 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                   />
                 )}
                 {tripStatus === 'COMPLETED' && activeOrder && <OrderSummaryModal order={activeOrder} onDone={resetTrip} />}
-                {activeOrder?.orderStatus === 'rejected_by_restaurant' && (
-                  <RejectedOrderModal 
-                    order={activeOrder} 
-                    onResent={(updated) => {
-                      setActiveOrder(updated);
-                      // After resending, we set it back to PICKING_UP so it shows the map/pickup UI
-                      updateTripStatus('PICKING_UP');
-                    }}
-                    onMinimize={() => setIsModalMinimized(true)}
-                  />
-                )}
               </div>
             </motion.div>
           )}

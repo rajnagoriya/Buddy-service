@@ -604,6 +604,12 @@ export const useRestaurantNotifications = () => {
       debugLog('?? New order received:', normalizedOrder);
       setNewOrder(normalizedOrder);
 
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('restaurant:new_order', { detail: normalizedOrder }),
+        );
+      }
+
       handleIncomingOrderAlert(normalizedOrder, 'socket');
     });
     

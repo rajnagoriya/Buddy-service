@@ -56,7 +56,11 @@ export const useOrderManager = () => {
         // For multi-restaurant, find the next pending pickup location
         let resLoc = null;
         if (fullOrder.isMultiRestaurant && Array.isArray(fullOrder.pickups)) {
-          const nextPickup = fullOrder.pickups.find(p => !['picked_up', 'cancelled'].includes(p.status));
+          const nextPickup = fullOrder.pickups.find(
+            (p) =>
+              !p.permanentlyDropped &&
+              !['picked_up', 'cancelled'].includes(String(p.status || '')),
+          );
           if (nextPickup) {
             resLoc = getLoc(nextPickup, ['latitude', 'lat'], ['longitude', 'lng']);
           }

@@ -19,6 +19,7 @@ let server = null;
 let expireOffersInterval = null;
 let fssaiExpiryInterval = null;
 let scheduledAlertInterval = null;
+let stuckOrdersWatchdogInterval = null;
 
 const gracefulShutdown = async (signal) => {
     logger.info(`${signal} received, starting graceful shutdown`);
@@ -34,6 +35,7 @@ const gracefulShutdown = async (signal) => {
             if (expireOffersInterval) clearInterval(expireOffersInterval);
             if (fssaiExpiryInterval) clearInterval(fssaiExpiryInterval);
             if (scheduledAlertInterval) clearInterval(scheduledAlertInterval);
+            if (stuckOrdersWatchdogInterval) clearInterval(stuckOrdersWatchdogInterval);
             logger.info('Graceful shutdown complete');
             process.exit(0);
         } catch (err) {
@@ -143,6 +145,17 @@ const startServer = async () => {
         };
         runScheduledAlerts();
         scheduledAlertInterval = setInterval(runScheduledAlerts, 60 * 1000);
+
+        const runStuckOrdersWatchdog = async () => {
+            try {
+                const { recoverStuckOrders } = await import('./src/modules/food/orders/services/order.service.js');
+                await recoverStuckOrders();
+            } catch (err) {
+                logger.error(`Stuck orders watchdog error: ${err.message}`);
+            }
+        };
+        runStuckOrdersWatchdog();
+        stuckOrdersWatchdogInterval = setInterval(runStuckOrdersWatchdog, 30 * 1000);
 
         process.on('SIGINT', () => gracefulShutdown('SIGINT'));
         process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

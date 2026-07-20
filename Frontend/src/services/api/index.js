@@ -1407,7 +1407,20 @@ export const restaurantAPI = {
 
           // Normalize backend order fields to match existing restaurant UI expectations.
           // UI historically uses: order.status, order.address, order.total, order.paymentMethod
-          const normalizeStatus = (s) => {
+          const normalizeStatus = (s, order) => {
+            // Prefer this restaurant's own pickup status when present (multi-restaurant)
+            const pickupStatus = String(
+              order?.myPickupStatus
+              || order?.pickups?.[0]?.status
+              || "",
+            ).toLowerCase();
+            if (pickupStatus === "pending") return "confirmed"; // awaiting restaurant accept
+            if (pickupStatus === "accepted") return "confirmed";
+            if (pickupStatus === "preparing") return "preparing";
+            if (pickupStatus === "ready" || pickupStatus === "ready_for_handover") return "ready";
+            if (pickupStatus === "picked_up") return "out_for_delivery";
+            if (pickupStatus === "cancelled") return "cancelled";
+
             const v = String(s || "").toLowerCase();
             // Backend: created -> treat as confirmed/new in UI
             if (v === "created") return "confirmed";
@@ -1420,7 +1433,7 @@ export const restaurantAPI = {
           };
 
           const rows = rowsRaw.map((o) => {
-            const status = normalizeStatus(o.orderStatus || o.status);
+            const status = normalizeStatus(o.orderStatus || o.status, o);
             const address = o.deliveryAddress || o.address;
             const total = o.pricing?.total ?? o.total ?? 0;
             const paymentMethod = o.payment?.method || o.paymentMethod || null;

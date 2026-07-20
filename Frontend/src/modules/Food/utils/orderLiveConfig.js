@@ -1,4 +1,5 @@
 export const ORDER_FILTER_TABS = [
+  { id: "new", label: "New Orders" },
   { id: "all", label: "All" },
   { id: "preparing", label: "Preparing" },
   { id: "ready", label: "Ready" },
