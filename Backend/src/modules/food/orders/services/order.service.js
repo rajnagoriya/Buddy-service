@@ -67,6 +67,7 @@ import {
   isStatusAdvance,
   freeOrderDispatch,
   NO_DRIVER_AUTO_CANCEL_MS,
+  SHARE_TIMEOUT_MS,
 } from './order.helpers.js';
 import {
   assertMaxRestaurants,
@@ -2711,6 +2712,12 @@ export async function assignDeliveryPartnerAdmin(
     note: historyNote,
   });
 
+  // Capture any existing shared (second) partner BEFORE we overwrite dispatch, so we can
+  // notify them and decide whether the shared slot must stay open for the new primary.
+  const droppedSharedPartnerId =
+    order.dispatch?.sharedPartnerId?.toString?.() || null;
+  const wasShared = Boolean(order.dispatch?.isShared || droppedSharedPartnerId);
+
   order.dispatch.status = "assigned";
   order.dispatch.deliveryPartnerId = new mongoose.Types.ObjectId(
     deliveryPartnerId,
@@ -2719,7 +2726,11 @@ export async function assignDeliveryPartnerAdmin(
   // New driver has not accepted yet
   order.dispatch.acceptedAt = undefined;
   order.dispatch.sharedPartnerId = null;
-  order.dispatch.isShared = false;
+  // Re-open (don't silently discard) the shared slot for bulk/shared orders, and restart the
+  // share-timeout clock. Combined with the solo-complete fallback, this guarantees admin
+  // reassignment can never leave a bulk order permanently un-completable.
+  order.dispatch.isShared = wasShared;
+  order.dispatch.shareOpenedAt = wasShared ? assignedAt : null;
 
   pushStatusHistory(order, {
     byRole: "ADMIN",
@@ -2747,12 +2758,38 @@ export async function assignDeliveryPartnerAdmin(
           },
         );
       }
+      if (droppedSharedPartnerId && droppedSharedPartnerId !== String(deliveryPartnerId)) {
+        io.to(rooms.delivery(droppedSharedPartnerId)).emit(
+          "order_reassigned_elsewhere",
+          {
+            orderMongoId: order._id?.toString?.(),
+            orderId: order._id.toString(),
+            message:
+              "This shared order has been reassigned by admin. You are no longer on this delivery.",
+          },
+        );
+      }
       io.to(rooms.delivery(deliveryPartnerId)).emit("new_order_available", payload);
       io.to(rooms.delivery(deliveryPartnerId)).emit("new_order", payload);
     }
   } catch (err) {
     logger.warn(
       `assignDeliveryPartnerAdmin socket emit failed: ${err?.message || err}`,
+    );
+  }
+
+  if (droppedSharedPartnerId && droppedSharedPartnerId !== String(deliveryPartnerId)) {
+    await notifyOwnerSafely(
+      { ownerType: "DELIVERY_PARTNER", ownerId: droppedSharedPartnerId },
+      {
+        title: "Order reassigned",
+        body: `Order #${order.order_id || order._id} has been reassigned by admin. You are no longer on this delivery.`,
+        data: {
+          type: "order_reassigned_elsewhere",
+          orderId: String(order._id),
+          orderMongoId: String(order._id),
+        },
+      },
     );
   }
 
@@ -3432,6 +3469,7 @@ export async function shareOrderDelivery(orderId, deliveryPartnerId) {
 
   // Set sharing flags
   order.dispatch.isShared = true;
+  order.dispatch.shareOpenedAt = new Date();
   order.dispatch.sharedPartnerId = null; // Ensure it's null so another partner can join
 
   // Split the net rider earning 50/50
@@ -3478,27 +3516,55 @@ export async function shareOrderDelivery(orderId, deliveryPartnerId) {
  */
 export async function acceptSharedOrderDelivery(orderId, newPartnerId) {
   const identity = buildOrderIdentityFilter(orderId);
-  const order = await FoodOrder.findOne({
-    ...identity,
-    'dispatch.isShared': true,
-    'dispatch.sharedPartnerId': null
-  });
+  const sharedObjectId = new mongoose.Types.ObjectId(newPartnerId);
 
-  if (!order) throw new NotFoundError("Shared order not found or no longer available");
-  
-  if (String(order.dispatch.deliveryPartnerId) === String(newPartnerId)) {
-    throw new ValidationError("You already have this order assigned.");
+  // Atomic claim: the conditional filter (isShared + open slot + not the primary) guarantees
+  // only ONE partner can win an open shared slot even under simultaneous joins. Previously this
+  // was a read-then-save, which let two partners both "join" and silently overwrite each other.
+  const order = await FoodOrder.findOneAndUpdate(
+    {
+      ...identity,
+      'dispatch.isShared': true,
+      'dispatch.sharedPartnerId': null,
+      'dispatch.deliveryPartnerId': { $ne: sharedObjectId },
+    },
+    {
+      $set: {
+        'dispatch.sharedPartnerId': sharedObjectId,
+        'dispatch.isShared': false, // Closed for further joining
+      },
+    },
+    { new: true },
+  );
+
+  if (!order) {
+    const existing = await FoodOrder.findOne(identity)
+      .select('dispatch.isShared dispatch.sharedPartnerId dispatch.deliveryPartnerId')
+      .lean();
+    if (!existing) {
+      throw new NotFoundError('Shared order not found or no longer available');
+    }
+    if (String(existing.dispatch?.deliveryPartnerId || '') === String(newPartnerId)) {
+      throw new ValidationError('You already have this order assigned.');
+    }
+    if (String(existing.dispatch?.sharedPartnerId || '') === String(newPartnerId)) {
+      // Idempotent: this partner already joined (e.g. network retry). Return current state.
+      const joined = await FoodOrder.findOne(identity).populate([
+        { path: 'restaurantId' },
+        { path: 'userId' },
+        { path: 'dispatch.deliveryPartnerId', select: 'name fullName phone phoneNumber profileImage' },
+        { path: 'dispatch.sharedPartnerId', select: 'name fullName phone phoneNumber profileImage' },
+      ]);
+      return joined ? normalizeOrderForClient(joined) : null;
+    }
+    throw new ValidationError('This shared order has already been taken by another partner.');
   }
 
   const oldPartnerId = order.dispatch.deliveryPartnerId;
   const currentStatus = order.orderStatus;
 
-  // Assign the shared partner without replacing the primary partner
-  order.dispatch.sharedPartnerId = new mongoose.Types.ObjectId(newPartnerId);
-  order.dispatch.isShared = false; // Closed for further joining
-
-  // Maintain separate earnings (already split during 'share' call)
-  // Ensure the shared status is tracked in history
+  // Slot claimed atomically above; maintain separate earnings (already split during 'share'
+  // call) and record the join in history.
   pushStatusHistory(order, {
     byRole: "DELIVERY_PARTNER",
     byId: newPartnerId,

@@ -44,6 +44,7 @@ import {
   sanitizeOrderForExternal,
   isStatusAdvance,
   buildDeliverySocketPayload,
+  SHARE_TIMEOUT_MS,
 } from './order.helpers.js';
 
 function normalizeOtpValue(value) {
@@ -877,6 +878,7 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
       const totalEarning = Number(order.riderEarning || order.pricing?.deliveryFee || 0);
       const sharedSplit = Math.round(totalEarning / 2);
       order.dispatch.isShared = true;
+      order.dispatch.shareOpenedAt = new Date();
       order.sharedRiderEarning = sharedSplit;
       order.riderEarning = Math.max(0, totalEarning - sharedSplit);
       pushStatusHistory(order, {
@@ -1945,9 +1947,52 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
     (await FoodDeliveryBoySettings.findOne({ isActive: true }).sort({ createdAt: -1 }).lean()) ||
     (await FoodDeliveryBoySettings.findOne().sort({ createdAt: -1 }).lean());
   if (isShareRequired(order, boySettings || {}) && !isSharedDriverJoined(order)) {
-    throw new ValidationError(
-      'This is a bulk order and requires a second delivery partner. Share the order and wait for a partner to join before completing.',
-    );
+    // Solo-complete fallback: if the share slot has been open past SHARE_TIMEOUT_MS with no
+    // second partner joining, let the primary complete alone with the full earning restored.
+    // Guarantees a bulk order can never get permanently stuck at completion.
+    const shareOpenedAt = order.dispatch?.shareOpenedAt
+      ? new Date(order.dispatch.shareOpenedAt).getTime()
+      : null;
+    const shareTimedOut =
+      shareOpenedAt != null && Date.now() - shareOpenedAt >= SHARE_TIMEOUT_MS;
+
+    if (!shareTimedOut) {
+      throw new ValidationError(
+        'This is a bulk order and requires a second delivery partner. Share the order and wait for a partner to join before completing.',
+      );
+    }
+
+    const restoredEarning =
+      Number(order.riderEarning || 0) + Number(order.sharedRiderEarning || 0);
+    order.riderEarning = restoredEarning;
+    order.sharedRiderEarning = 0;
+    order.dispatch.isShared = false;
+    order.dispatch.shareOpenedAt = null;
+    pushStatusHistory(order, {
+      byRole: 'SYSTEM',
+      byId: deliveryPartnerId,
+      from: order.orderStatus,
+      to: order.orderStatus,
+      note: `No second partner joined within ${Math.round(
+        SHARE_TIMEOUT_MS / 60000,
+      )} min; primary completing solo with full earning ₹${restoredEarning}.`,
+    });
+    try {
+      await notifyOwnersSafely(
+        [{ ownerType: 'ADMIN', ownerId: 'GLOBAL' }],
+        {
+          title: 'Bulk order completed solo',
+          body: `Order #${order.order_id || order._id} had no second driver join in time; the primary partner is completing it alone.`,
+          data: {
+            type: 'bulk_solo_complete',
+            orderId: order._id.toString(),
+            orderMongoId: order._id?.toString?.() || '',
+          },
+        },
+      );
+    } catch (err) {
+      logger.warn(`Bulk solo-complete admin alert failed: ${err?.message || err}`);
+    }
   }
   
   // 2. Financial Context Resolution

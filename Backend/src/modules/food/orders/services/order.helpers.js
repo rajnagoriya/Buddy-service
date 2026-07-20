@@ -343,6 +343,13 @@ export const MAX_DISPATCH_ATTEMPTS = 10;
 /** Auto-cancel food orders with no accepted driver after this age. Testing: 1 min → production: 5 min. */
 export const NO_DRIVER_AUTO_CANCEL_MS = 1 * 60 * 1000;
 
+/**
+ * How long a bulk order waits for a second (shared) delivery partner to join before the
+ * primary partner is allowed to complete the delivery solo with the full earning restored.
+ * Prevents a ≥threshold-item order from getting permanently stuck when no 2nd driver joins.
+ */
+export const SHARE_TIMEOUT_MS = 5 * 60 * 1000;
+
 export function freeOrderDispatch(orderDoc) {
   if (!orderDoc) return;
   orderDoc.dispatch = orderDoc.dispatch || {};

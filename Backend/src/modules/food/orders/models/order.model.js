@@ -191,6 +191,8 @@ const dispatchSchema = new mongoose.Schema(
         }],
         isShared: { type: Boolean, default: false },
         sharedPartnerId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodDeliveryPartner', default: null },
+        /** When the second-driver (share) slot was opened; drives the solo-complete timeout fallback. */
+        shareOpenedAt: { type: Date, default: null },
         dispatchingAt: { type: Date }
     },
     { _id: false }
