@@ -25,12 +25,16 @@ export { haversineKm };
 export function resolveSlabAmounts(rule) {
   if (!rule) return { userCharge: 0, deliveryBoyFee: 0 };
   const legacyBase = Number(rule.basePayout);
+  const hasLegacy = Number.isFinite(legacyBase) && legacyBase >= 0;
+
+  // Prefer new fields; fall back to legacy basePayout when field is missing (undefined/null)
   const userCharge = Number(
-    rule.userCharge != null ? rule.userCharge : (Number.isFinite(legacyBase) ? legacyBase : 0),
+    rule.userCharge ?? (hasLegacy ? legacyBase : 0),
   );
   const deliveryBoyFee = Number(
-    rule.deliveryBoyFee != null ? rule.deliveryBoyFee : (Number.isFinite(legacyBase) ? legacyBase : 0),
+    rule.deliveryBoyFee ?? (hasLegacy ? legacyBase : 0),
   );
+
   return {
     userCharge: Number.isFinite(userCharge) && userCharge >= 0 ? userCharge : 0,
     deliveryBoyFee: Number.isFinite(deliveryBoyFee) && deliveryBoyFee >= 0 ? deliveryBoyFee : 0,
@@ -82,6 +86,24 @@ export function calculateDistanceSlabRiderFee(distanceKm, rules = []) {
   if (!matched) return 0;
   const { deliveryBoyFee } = resolveSlabAmounts(matched);
   return Math.round(deliveryBoyFee);
+}
+
+/** Resolve both customer + rider fixed fees for a distance. */
+export function resolveDistanceSlabQuote(distanceKm, rules = []) {
+  const matched = findMatchingDistanceSlab(distanceKm, rules);
+  if (!matched) {
+    return {
+      matched: null,
+      userCharge: 0,
+      deliveryBoyFee: 0,
+    };
+  }
+  const amounts = resolveSlabAmounts(matched);
+  return {
+    matched,
+    userCharge: Math.round(amounts.userCharge),
+    deliveryBoyFee: Math.round(amounts.deliveryBoyFee),
+  };
 }
 
 export function calculateRangeDeliveryFee(distanceKm, ranges = []) {
@@ -318,6 +340,9 @@ export function pushStatusHistory(order, { byRole, byId, from, to, note = "" }) 
 
 export const MAX_DISPATCH_ATTEMPTS = 10;
 
+/** Auto-cancel food orders with no accepted driver after this age. Testing: 1 min → production: 5 min. */
+export const NO_DRIVER_AUTO_CANCEL_MS = 1 * 60 * 1000;
+
 export function freeOrderDispatch(orderDoc) {
   if (!orderDoc) return;
   orderDoc.dispatch = orderDoc.dispatch || {};
@@ -468,6 +493,29 @@ export function resolveRestaurantEarnings(order, restaurantId) {
   };
 }
 
+export function mapPickupStatusToRestaurantOrderStatus(pickupStatus, fallbackOrderStatus = 'created') {
+  const pickup = String(pickupStatus || '').toLowerCase().trim();
+  switch (pickup) {
+    case 'pending':
+      return 'created';
+    case 'accepted':
+      return 'confirmed';
+    case 'preparing':
+      return 'preparing';
+    case 'ready':
+    case 'ready_for_handover':
+      return 'ready_for_pickup';
+    case 'picked_up':
+      return 'picked_up';
+    case 'cancelled':
+      return 'cancelled_by_restaurant';
+    default:
+      break;
+  }
+  const fallback = String(fallbackOrderStatus || 'created').toLowerCase().trim();
+  return fallback || 'created';
+}
+
 export function buildRestaurantScopedOrder(orderDoc, restaurantId) {
   const order = orderDoc?.toObject ? orderDoc.toObject() : orderDoc || {};
   const rid = String(restaurantId || '').trim();
@@ -512,6 +560,18 @@ export function buildRestaurantScopedOrder(orderDoc, restaurantId) {
     total: earnings.payout,
   };
 
+  // Multi-restaurant: each restaurant must see ITS pickup status, not aggregate orderStatus.
+  // Otherwise after restaurant A accepts, restaurant B incorrectly sees "preparing/accepted".
+  const ownPickup = filteredPickups[0] || null;
+  const hasMultiPickups = Array.isArray(order.pickups) && order.pickups.length > 1;
+  const scopedStatus = hasMultiPickups || ownPickup
+    ? mapPickupStatusToRestaurantOrderStatus(
+        ownPickup?.status,
+        // Before rider accept, restaurants shouldn't act; still show created/pending for this pickup
+        ownPickup ? 'created' : (order?.orderStatus || order?.status || 'created'),
+      )
+    : (order?.orderStatus || order?.status || '');
+
   const scoped = {
     ...order,
     items: filteredItems,
@@ -521,8 +581,11 @@ export function buildRestaurantScopedOrder(orderDoc, restaurantId) {
     restaurantEarnings: earnings,
     restaurantPayout: earnings.payout,
     // Explicit client fields for restaurant live panel / accept popup
-    status: order?.orderStatus || order?.status || '',
-    orderStatus: order?.orderStatus || order?.status || '',
+    status: scopedStatus,
+    orderStatus: scopedStatus,
+    // Keep aggregate for debugging / DP-aligned clients that need it
+    aggregateOrderStatus: order?.orderStatus || order?.status || '',
+    myPickupStatus: ownPickup?.status || null,
   };
 
   if (filteredPickups.length === 1 && filteredPickups[0]?.restaurantName) {
@@ -710,6 +773,8 @@ export function toRestaurantOrderResponse(orderDoc) {
     order_id: displayId,
     orderStatus: order.orderStatus || order.status || '',
     status: order.orderStatus || order.status || '',
+    aggregateOrderStatus: order.aggregateOrderStatus || undefined,
+    myPickupStatus: order.myPickupStatus || order.pickups?.[0]?.status || null,
     createdAt: order.createdAt,
     updatedAt: order.updatedAt,
     cancelledAt: order.cancelledAt || undefined,
@@ -871,9 +936,45 @@ export function buildDeliverySocketPayload(orderDoc, restaurantDoc = null) {
     userName: order?.customerName || order?.deliveryAddress?.fullName || order?.deliveryAddress?.name || order?.userId?.name || "",
     userPhone: order?.customerPhone || order?.deliveryAddress?.phone || order?.userId?.phone || "",
     note: order?.note || "",
-    riderEarning: order?.riderEarning || 0,
-    earnings: order?.riderEarning || order?.pricing?.deliveryFee || 0,
+    riderEarning: (() => {
+      const candidates = [
+        order?.riderEarning,
+        order?.pricing?.deliveryFeeBreakdown?.riderFee,
+        order?.pricing?.deliveryFeeBreakdown?.deliveryBoyFee,
+      ];
+      for (const value of candidates) {
+        const n = Number(value);
+        if (Number.isFinite(n) && n > 0) return n;
+      }
+      for (const value of candidates) {
+        const n = Number(value);
+        if (Number.isFinite(n) && n >= 0) return n;
+      }
+      return 0;
+    })(),
+    earnings: (() => {
+      const candidates = [
+        order?.riderEarning,
+        order?.pricing?.deliveryFeeBreakdown?.riderFee,
+        order?.pricing?.deliveryFeeBreakdown?.deliveryBoyFee,
+      ];
+      for (const value of candidates) {
+        const n = Number(value);
+        if (Number.isFinite(n) && n > 0) return n;
+      }
+      for (const value of candidates) {
+        const n = Number(value);
+        if (Number.isFinite(n) && n >= 0) return n;
+      }
+      return 0;
+    })(),
+    deliveryBoyFee: Number(
+      order?.pricing?.deliveryFeeBreakdown?.deliveryBoyFee
+      ?? order?.riderEarning
+      ?? 0,
+    ) || 0,
     deliveryFee: order?.pricing?.deliveryFee || 0,
+    deliveryFeeBreakdown: order?.pricing?.deliveryFeeBreakdown || null,
     deliveryFleet: order?.deliveryFleet,
     dispatch: order?.dispatch,
     pickups: order?.pickups || [],
@@ -891,7 +992,7 @@ export function canExposeOrderToRestaurant(orderLike) {
   return ["paid", "authorized", "captured", "settled"].includes(status);
 }
 
-export async function notifyRestaurantNewOrder(orderDoc, restaurantIdOverride = null) {
+export async function notifyRestaurantNewOrder(orderDoc, restaurantIdOverride = null, options = {}) {
   try {
     if (!orderDoc || !canExposeOrderToRestaurant(orderDoc)) return;
 
@@ -903,26 +1004,38 @@ export async function notifyRestaurantNewOrder(orderDoc, restaurantIdOverride = 
     ).trim();
     if (!targetRestaurantId) return;
 
+    const freshNotify = Boolean(options.freshNotify || options.resentToRestaurant);
+    const notifiedAt = freshNotify
+      ? new Date()
+      : orderDoc.dispatch?.acceptedAt ||
+        orderDoc.restaurantNotifiedAt ||
+        new Date();
+
+    if (freshNotify && typeof orderDoc?.markModified === 'function') {
+      orderDoc.restaurantNotifiedAt = notifiedAt;
+    }
+
     const scopedOrder = buildRestaurantScopedOrder(orderDoc, targetRestaurantId);
     const leanOrder = toRestaurantOrderResponse(scopedOrder);
     const io = getIO();
     if (io) {
+      const scopedStatus = leanOrder.orderStatus || leanOrder.status || 'created';
       const payload = {
         ...leanOrder,
         orderMongoId: orderDoc._id?.toString?.() || leanOrder.orderMongoId,
         orderId: orderDoc.order_id || orderDoc._id?.toString?.() || leanOrder.orderId,
-        status: orderDoc.orderStatus || leanOrder.status || 'created',
-        orderStatus: orderDoc.orderStatus || leanOrder.orderStatus || 'created',
-        // Restaurant accept timer must start when rider accepted / restaurant was notified,
-        // not when the customer originally placed the order.
-        restaurantNotifiedAt:
-          orderDoc.dispatch?.acceptedAt ||
-          orderDoc.restaurantNotifiedAt ||
-          new Date(),
+        // Always use THIS restaurant's pickup-scoped status (never aggregate)
+        status: scopedStatus,
+        orderStatus: scopedStatus,
+        // Fresh timer on DP resend; otherwise rider-accept time for first notify
+        restaurantNotifiedAt: notifiedAt,
+        resentToRestaurant: freshNotify,
         dispatch: leanOrder.dispatch,
+        isMultiRestaurant: Boolean(orderDoc.isMultiRestaurant),
+        myPickupStatus: scopedOrder.myPickupStatus || null,
       };
       logger.info(
-        `[RestaurantOrders] Emitting new_order to ${rooms.restaurant(targetRestaurantId)} for order ${orderDoc._id?.toString?.() || ''}`,
+        `[RestaurantOrders] Emitting new_order to ${rooms.restaurant(targetRestaurantId)} for order ${orderDoc._id?.toString?.() || ''} status=${scopedStatus}${freshNotify ? ' (resent)' : ''}`,
       );
       io.to(rooms.restaurant(targetRestaurantId)).emit("new_order", payload);
     }
@@ -930,10 +1043,10 @@ export async function notifyRestaurantNewOrder(orderDoc, restaurantIdOverride = 
     await notifyOwnersSafely(
       [{ ownerType: "RESTAURANT", ownerId: targetRestaurantId }],
       {
-        title: "New order received",
+        title: freshNotify ? "Order resent — please review" : "New order received",
         body: `Order #${orderDoc.order_id || orderDoc._id} is waiting for review.`,
         data: {
-          type: "new_order",
+          type: freshNotify ? "order_resent_to_restaurant" : "new_order",
           orderId: orderDoc._id.toString(),
           orderMongoId: orderDoc._id?.toString?.() || "",
           link: `/restaurant/orders/${orderDoc._id?.toString?.() || ""}`,

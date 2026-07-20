@@ -1870,11 +1870,11 @@ export async function getDeliveryCommissionRules() {
         name: r.name || '',
         minDistance: r.minDistance,
         maxDistance: r.maxDistance ?? null,
-        userCharge: r.userCharge != null ? r.userCharge : (r.basePayout ?? 0),
-        deliveryBoyFee: r.deliveryBoyFee != null ? r.deliveryBoyFee : (r.basePayout ?? 0),
+        userCharge: r.userCharge ?? r.basePayout ?? 0,
+        deliveryBoyFee: r.deliveryBoyFee ?? r.basePayout ?? 0,
         // Legacy aliases for older admin clients
         commissionPerKm: 0,
-        basePayout: r.userCharge != null ? r.userCharge : (r.basePayout ?? 0),
+        basePayout: r.userCharge ?? r.basePayout ?? 0,
         status: r.status !== false
     }));
     return { commissions };

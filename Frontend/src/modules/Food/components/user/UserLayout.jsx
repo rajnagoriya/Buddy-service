@@ -15,6 +15,7 @@ import BottomNavigation from "./BottomNavigation"
 import DesktopNavbar from "./DesktopNavbar"
 import FoodUserHeader from "./FoodUserHeader"
 import { useUserNotifications } from "../../hooks/useUserNotifications"
+import UserPartialRestaurantDropPopup from "./UserPartialRestaurantDropPopup"
 
 // Create SearchOverlay context with default value
 const SearchOverlayContext = createContext({
@@ -183,6 +184,7 @@ export default function UserLayout() {
                   </div>
                 )}
                 <LocationPrompt />
+                <UserPartialRestaurantDropPopup />
                 <main className={showBottomNav ? "md:pt-[8.5rem]" : ""}>
                   <Outlet />
                 </main>

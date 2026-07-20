@@ -33,6 +33,7 @@ import {
 } from './order-lifecycle.policy.js';
 import {
   buildOrderIdentityFilter,
+  buildRestaurantScopedOrder,
   emitDeliveryDropOtpToUser,
   enqueueOrderEvent,
   generateFourDigitDeliveryOtp,
@@ -420,7 +421,16 @@ export async function getCurrentTripDelivery(deliveryPartnerId) {
     ],
     'dispatch.status': 'accepted',
     orderStatus: {
-      $in: ['created', 'accepted', 'confirmed', 'preparing', 'ready_for_pickup', 'picked_up'],
+      $in: [
+        'created',
+        'accepted',
+        'confirmed',
+        'preparing',
+        'ready_for_pickup',
+        'reached_pickup',
+        'picked_up',
+        'reached_drop',
+      ],
     },
   })
     .populate({
@@ -573,14 +583,38 @@ export async function listOrdersAvailableDelivery(deliveryPartnerId, query) {
 
   const enriched = (docs || []).map((doc) => {
     const tx = txByOrderId.get(String(doc?._id)) || null;
-    if (!tx) return doc;
+    const pricing = tx?.pricing || doc.pricing;
+    const riderEarning = (() => {
+      const candidates = [
+        doc?.riderEarning,
+        pricing?.deliveryFeeBreakdown?.riderFee,
+        pricing?.deliveryFeeBreakdown?.deliveryBoyFee,
+      ];
+      for (const value of candidates) {
+        const n = Number(value);
+        if (Number.isFinite(n) && n > 0) return n;
+      }
+      for (const value of candidates) {
+        const n = Number(value);
+        if (Number.isFinite(n) && n >= 0) return n;
+      }
+      return 0;
+    })();
+    const base = tx
+      ? {
+          ...doc,
+          paymentMethod: tx.payment?.method || tx.paymentMethod || doc.paymentMethod,
+          payment: tx.payment || doc.payment,
+          pricing,
+          amounts: tx.amounts || doc.amounts,
+          transactionStatus: tx.status || doc.transactionStatus,
+        }
+      : { ...doc, pricing };
     return {
-      ...doc,
-      paymentMethod: tx.payment?.method || tx.paymentMethod || doc.paymentMethod,
-      payment: tx.payment || doc.payment,
-      pricing: tx.pricing || doc.pricing,
-      amounts: tx.amounts || doc.amounts,
-      transactionStatus: tx.status || doc.transactionStatus,
+      ...base,
+      riderEarning,
+      earnings: riderEarning,
+      deliveryBoyFee: Number(pricing?.deliveryFeeBreakdown?.deliveryBoyFee ?? riderEarning) || 0,
     };
   });
 
@@ -942,7 +976,7 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
         String(order.userId || '');
 
       if (io) {
-        const payload = {
+        const basePayload = {
           orderMongoId: order._id?.toString?.(),
           orderId: order.order_id || order._id.toString(),
           orderStatus: order.orderStatus,
@@ -953,16 +987,37 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
           deliveryState: order.deliveryState || null,
           isMultiRestaurant: Boolean(order.isMultiRestaurant),
         };
-        io.to(rooms.delivery(deliveryPartnerId)).emit('order_status_update', payload);
+        io.to(rooms.delivery(deliveryPartnerId)).emit('order_status_update', basePayload);
         const sharedId = order.dispatch?.sharedPartnerId;
         if (sharedId) {
-          io.to(rooms.delivery(sharedId)).emit('order_status_update', payload);
-        }
-        if (restaurantIdStr) {
-          io.to(rooms.restaurant(restaurantIdStr)).emit('order_status_update', payload);
+          io.to(rooms.delivery(sharedId)).emit('order_status_update', basePayload);
         }
         if (userIdStr) {
-          io.to(rooms.user(userIdStr)).emit('order_status_update', payload);
+          io.to(rooms.user(userIdStr)).emit('order_status_update', basePayload);
+        }
+
+        // Notify EVERY active pickup restaurant with THEIR scoped status (not aggregate)
+        const pickupRestaurantIdsForSocket = Array.isArray(order.pickups)
+          ? [...new Set(
+              order.pickups
+                .filter((p) => isActivePickup(p))
+                .map((p) => String(p?.restaurantId || ''))
+                .filter(Boolean),
+            )]
+          : [];
+        const restaurantTargets = pickupRestaurantIdsForSocket.length
+          ? pickupRestaurantIdsForSocket
+          : (restaurantIdStr ? [restaurantIdStr] : []);
+
+        for (const rid of restaurantTargets) {
+          const scoped = buildRestaurantScopedOrder(order, rid);
+          io.to(rooms.restaurant(rid)).emit('order_status_update', {
+            ...basePayload,
+            orderStatus: scoped.orderStatus,
+            status: scoped.status,
+            myPickupStatus: scoped.myPickupStatus,
+            restaurantId: rid,
+          });
         }
 
         // Broadcast order_claimed to ALL online delivery partners so every popup is dismissed
@@ -993,7 +1048,12 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
       );
 
       const pickupRestaurantIds = Array.isArray(order.pickups)
-        ? [...new Set(order.pickups.map((p) => String(p?.restaurantId || '')).filter(Boolean))]
+        ? [...new Set(
+            order.pickups
+              .filter((p) => isActivePickup(p))
+              .map((p) => String(p?.restaurantId || ''))
+              .filter(Boolean),
+          )]
         : [];
 
       if (pickupRestaurantIds.length > 0) {

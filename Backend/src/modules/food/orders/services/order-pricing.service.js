@@ -13,7 +13,7 @@ import {
 } from '../../admin/services/offer.service.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import {
-  calculateDistanceSlabFee,
+  resolveDistanceSlabQuote,
   resolveOrderDistanceKmAsync,
   applyDeliverySurcharges,
   resolveSpeedFeeModifier,
@@ -276,24 +276,36 @@ export async function calculateOrderPricing(userId, dto) {
   const isMultiRestaurant = restaurants.length > 1;
 
   let baseDeliveryFee = 0;
+  let baseRiderFee = 0;
   let deliveryFeeSource = 'none';
 
   if (Number.isFinite(freeThreshold) && freeThreshold > 0 && subtotal >= freeThreshold) {
     baseDeliveryFee = 0;
+    baseRiderFee = 0;
     deliveryFeeSource = 'free';
   } else {
     const rules = await FoodDeliveryCommissionRule.find({ status: true }).lean();
     if (rules?.length > 0) {
-      baseDeliveryFee = calculateDistanceSlabFee(distanceKm, rules);
+      const quote = resolveDistanceSlabQuote(distanceKm, rules);
+      baseDeliveryFee = quote.userCharge;
+      baseRiderFee = quote.deliveryBoyFee;
       deliveryFeeSource = 'distance';
     } else {
       // No active distance rules → delivery fee is 0 (no flat/range fallback)
       baseDeliveryFee = 0;
+      baseRiderFee = 0;
       deliveryFeeSource = 'none';
     }
   }
 
   const surchargeResult = applyDeliverySurcharges(baseDeliveryFee, {
+    isMultiRestaurant,
+    isSplitOrder,
+    deliveryBoySettings,
+  });
+
+  // Rider earning uses the same multi/split surcharges, but not customer speed modifier
+  const riderSurchargeResult = applyDeliverySurcharges(baseRiderFee, {
     isMultiRestaurant,
     isSplitOrder,
     deliveryBoySettings,
@@ -335,6 +347,10 @@ export async function calculateOrderPricing(userId, dto) {
     speedFeeModifier,
     baseFee: surchargeResult.baseFee,
     fee: deliveryFee,
+    userCharge: baseDeliveryFee,
+    deliveryBoyFee: baseRiderFee,
+    riderFee: riderSurchargeResult.fee,
+    riderAdditionalCharge: riderSurchargeResult.surcharge,
   };
 
   const gstRate = feeSettings.gstRate != null ? Number(feeSettings.gstRate) : 0;

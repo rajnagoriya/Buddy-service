@@ -149,12 +149,6 @@ export const useUserNotifications = () => {
         data.message ||
         `One restaurant rejected your order. ₹${Number(data.refundAmount || 0).toFixed(0)} has been refunded to your wallet.`;
 
-      toast.message(title, {
-        id: 'order-partial-restaurant-dropped',
-        description: message,
-        duration: 10000,
-      });
-
       window.dispatchEvent(
         new CustomEvent('orderPartialRestaurantDropped', {
           detail: {
