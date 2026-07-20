@@ -93,6 +93,8 @@ export default function MyBookings() {
         if (key === "checked-in") return "Checked-in"
         if (key === "completed") return "Completed"
         if (key === "cancelled") return "Cancelled"
+        if (key === "rejected") return "Rejected"
+        if (key === "no_show") return "No show"
         return String(status || "unknown")
     }
 
@@ -102,7 +104,7 @@ export default function MyBookings() {
         if (key === "accepted" || key === "confirmed") return "bg-green-100 text-green-700 font-bold"
         if (key === "checked-in") return "bg-[#F0FDF4] text-[#16A34A]"
         if (key === "completed") return "bg-blue-100 text-blue-700"
-        if (key === "cancelled") return "bg-red-100 text-red-700"
+        if (key === "cancelled" || key === "rejected" || key === "no_show") return "bg-red-100 text-red-700"
         return "bg-slate-100 text-slate-700"
     }
 
@@ -111,10 +113,12 @@ export default function MyBookings() {
             try {
                 const response = await diningAPI.getBookings()
                 if (response.data.success) {
-                    setBookings(response.data.data)
+                    const payload = response.data.data
+                    setBookings(Array.isArray(payload) ? payload : (payload?.bookings || []))
                 }
             } catch (error) {
                 debugError("Error fetching bookings:", error)
+                toast.error(error?.response?.data?.message || "Failed to load bookings")
             } finally {
                 setLoading(false)
             }
@@ -127,13 +131,34 @@ export default function MyBookings() {
             const response = await diningAPI.createReview(reviewData)
             if (response.data.success) {
                 toast.success("Review submitted! Thank you for your feedback.")
-                // Update booking list to mark it as reviewed if we had a reviewed flag
-                // For now just close the modal
+                const updated = response.data.data
+                setBookings((prev) =>
+                    prev.map((b) =>
+                        String(b._id) === String(reviewData.bookingId) ? { ...b, ...updated } : b
+                    )
+                )
                 setSelectedBooking(null)
             }
         } catch (error) {
             debugError("Error submitting review:", error)
             toast.error(error.response?.data?.message || "Failed to submit review")
+        }
+    }
+
+    const handleCancelBooking = async (bookingId) => {
+        try {
+            const response = await diningAPI.cancelBooking(bookingId)
+            if (response.data.success) {
+                toast.success("Booking cancelled")
+                const updated = response.data.data
+                setBookings((prev) =>
+                    prev.map((b) =>
+                        String(b._id) === String(bookingId) ? { ...b, ...updated } : b
+                    )
+                )
+            }
+        } catch (error) {
+            toast.error(error?.response?.data?.message || "Failed to cancel booking")
         }
     }
 
@@ -193,12 +218,20 @@ export default function MyBookings() {
                                     </div>
                                 </div>
 
-                                {booking.status === 'completed' && (
+                                {booking.status === 'completed' && !booking.review && (
                                     <button
                                         onClick={() => setSelectedBooking(booking)}
                                         className="mt-3 w-full py-2 bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 text-[11px] font-bold rounded-lg border border-red-100 dark:border-red-900/30 hover:bg-red-100 transition-colors"
                                     >
                                         RATE & REVIEW
+                                    </button>
+                                )}
+                                {['pending', 'accepted'].includes(String(booking.status || '').toLowerCase()) && (
+                                    <button
+                                        onClick={() => handleCancelBooking(booking._id)}
+                                        className="mt-3 w-full py-2 bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-200 text-[11px] font-bold rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 transition-colors"
+                                    >
+                                        CANCEL BOOKING
                                     </button>
                                 )}
                             </div>

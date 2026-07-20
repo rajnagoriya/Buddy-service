@@ -121,7 +121,7 @@ const userSchema = new mongoose.Schema(
     }
 );
 
-userSchema.index({ phone: 1 }, { unique: true });
+// phone is already unique via field definition above
 
 userSchema.pre("validate", function(next) {
     if (this.phone) {

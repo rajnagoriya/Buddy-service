@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from "react"
 import { useLocation, useNavigate, useParams } from "react-router-dom"
-import { ArrowLeft, ChevronDown } from "lucide-react"
+import { ArrowLeft } from "lucide-react"
 import { Button } from "@food/components/ui/button"
 import AnimatedPage from "@food/components/user/AnimatedPage"
-import { diningAPI, restaurantAPI } from "@food/api"
-import { fetchOutletTimingsCached } from "@food/utils/outletTimingsCache"
+import { diningAPI } from "@food/api"
 import useAppBackNavigation from "@food/hooks/useAppBackNavigation"
 import Loader from "@food/components/Loader"
 import { toast } from "sonner"
@@ -17,81 +16,6 @@ const buildDates = (count = 7) =>
     date.setDate(date.getDate() + index)
     return date
   })
-
-const formatTimeValue = (value) => {
-  if (!value) return null
-  if (/[ap]m/i.test(value)) return value.toUpperCase()
-  const date = new Date(`2000-01-01T${String(value).padStart(5, "0")}`)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true })
-}
-
-const parseTimeToMinutes = (value) => {
-  if (!value) return null
-  const raw = String(value).trim()
-
-  const hhmmMatch = raw.match(/^(\d{1,2}):(\d{2})$/)
-  if (hhmmMatch) {
-    return Number(hhmmMatch[1]) * 60 + Number(hhmmMatch[2])
-  }
-
-  const meridiemMatch = raw.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/i)
-  if (!meridiemMatch) return null
-
-  let hour = Number(meridiemMatch[1])
-  const minute = Number(meridiemMatch[2] || 0)
-  const meridiem = meridiemMatch[3].toUpperCase()
-
-  if (meridiem === "PM" && hour !== 12) hour += 12
-  if (meridiem === "AM" && hour === 12) hour = 0
-
-  return hour * 60 + minute
-}
-
-const getDayName = (date) => date.toLocaleDateString("en-US", { weekday: "long" })
-
-const buildSlots = (timing) => {
-  if (!timing || timing.isOpen === false) return []
-  const opening = parseTimeToMinutes(timing.openingTime)
-  let closing = parseTimeToMinutes(timing.closingTime)
-  if (opening === null || closing === null) return []
-
-  // Handle case where closing time is earlier than opening time (e.g., 2:00 AM next day)
-  if (closing <= opening) {
-    closing += 24 * 60
-  }
-
-  const slots = []
-  let cursor = opening
-
-  while (cursor <= closing) {
-    const hours = Math.floor((cursor % (24 * 60)) / 60)
-    const minutes = cursor % 60
-    slots.push(formatTimeValue(`${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`))
-    cursor += 30
-  }
-
-  return slots
-}
-
-const buildFallbackTiming = (restaurant) => {
-  const openingTime = String(
-    restaurant?.openingTime ||
-      restaurant?.diningSettings?.openingTime ||
-      "12:00",
-  ).trim()
-  const closingTime = String(
-    restaurant?.closingTime ||
-      restaurant?.diningSettings?.closingTime ||
-      "23:00",
-  ).trim()
-
-  return {
-    isOpen: true,
-    openingTime,
-    closingTime,
-  }
-}
 
 const getMealPeriod = (slot) => {
   if (!slot) return "all"
@@ -124,7 +48,6 @@ export default function TableBooking() {
 
   const [restaurant, setRestaurant] = useState(location.state?.restaurant || null)
   const [loading, setLoading] = useState(!location.state?.restaurant)
-  const [outletTimings, setOutletTimings] = useState({})
   const [selectedGuests, setSelectedGuests] = useState(location.state?.guestCount || 2)
   const [selectedDate, setSelectedDate] = useState(() => {
     const initial = location.state?.selectedDate ? new Date(location.state.selectedDate) : new Date()
@@ -132,16 +55,22 @@ export default function TableBooking() {
   })
   const [selectedSlot, setSelectedSlot] = useState(location.state?.selectedTime || null)
   const [selectedMealPeriod, setSelectedMealPeriod] = useState("lunch")
-  const [currentBookings, setCurrentBookings] = useState([])
-  const [currentTime, setCurrentTime] = useState(new Date())
+  const [selectedTableId, setSelectedTableId] = useState(null)
+  const [availableTables, setAvailableTables] = useState([])
+  const [apiSlots, setApiSlots] = useState([])
+  const [slotsLoading, setSlotsLoading] = useState(false)
+  const [advanceBookingDays, setAdvanceBookingDays] = useState(7)
+  const [maxCapacity, setMaxCapacity] = useState(
+    location.state?.restaurant?.diningSettings?.maxGuests || 10
+  )
 
-  // Real-time update for slots filtering
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(new Date())
-    }, 60000) // Update every minute
-    return () => clearInterval(timer)
-  }, [])
+  const restaurantId = restaurant?._id || restaurant?.id || null
+
+  const toDateKey = (value) => {
+    const date = value instanceof Date ? value : new Date(value)
+    if (Number.isNaN(date.getTime())) return ""
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
+  }
 
   const fetchRestaurant = async () => {
     try {
@@ -150,21 +79,7 @@ export default function TableBooking() {
       if (response?.data?.success) {
         const apiRestaurant = response?.data?.data?.restaurant || response?.data?.data
         setRestaurant(apiRestaurant || null)
-
-        const restaurantId = apiRestaurant?._id || apiRestaurant?.id || slug
-        
-        // Fetch Bookings for Availability check
-        try {
-            const bookingsRes = await diningAPI.getRestaurantBookings(apiRestaurant)
-            if (bookingsRes.data.success) {
-                setCurrentBookings(Array.isArray(bookingsRes.data.data) ? bookingsRes.data.data : [])
-            }
-        } catch (err) {
-            console.error("Error fetching bookings:", err)
-        }
-
-        const timingsResponse = await fetchOutletTimingsCached(restaurantId)
-        setOutletTimings(timingsResponse || {})
+        setMaxCapacity(apiRestaurant?.diningSettings?.maxGuests || 10)
       }
     } catch {
       setRestaurant(null)
@@ -175,71 +90,98 @@ export default function TableBooking() {
 
   useEffect(() => {
     if (location.state?.restaurant) {
-      const restaurantId = location.state.restaurant?._id || location.state.restaurant?.id || slug
-      fetchOutletTimingsCached(restaurantId)
-        .then((timings) => setOutletTimings(timings || {}))
-        .catch(() => setOutletTimings({}))
-      
-      // Still fetch bookings even if restaurant is in state
-      diningAPI.getRestaurantBookings(location.state.restaurant)
-        .then(res => {
-            if (res.data.success) setCurrentBookings(Array.isArray(res.data.data) ? res.data.data : [])
-        })
-        .catch(() => {})
-
+      setRestaurant(location.state.restaurant)
+      setMaxCapacity(location.state.restaurant?.diningSettings?.maxGuests || 10)
       setLoading(false)
       return
     }
-
     fetchRestaurant()
   }, [location.state?.restaurant, slug])
 
-  const occupiedSeats = useMemo(() => {
-    const now = new Date()
-    const THIRTY_MINUTES = 30 * 60 * 1000
+  useEffect(() => {
+    if (!restaurantId) return
 
-    return currentBookings
-        .filter(b => {
-            const isApproved = b.status === "approved"
-            const isPending = b.status === "pending"
-            
-            if (isApproved) return true
-            if (isPending) {
-                const createdAt = new Date(b.createdAt || b.date)
-                const ageMs = now - createdAt
-                return ageMs < THIRTY_MINUTES
-            }
-            return false
+    let cancelled = false
+    const loadSlots = async () => {
+      try {
+        setSlotsLoading(true)
+        const dateKey = toDateKey(selectedDate)
+        const response = await diningAPI.getAvailableSlots(restaurantId, {
+          date: dateKey,
+          guests: selectedGuests,
         })
-        .reduce((sum, b) => sum + (Number(b.guests) || 0), 0)
-  }, [currentBookings])
-
-  const maxCapacity = restaurant?.diningSettings?.maxGuests || 10
-  const remainingSeats = Math.max(0, maxCapacity - occupiedSeats)
-
-  const dates = useMemo(() => buildDates(7), [])
-  const selectedDayTiming = useMemo(() => {
-    const fromOutletTimings = outletTimings?.[getDayName(selectedDate)] || null
-    if (fromOutletTimings && fromOutletTimings.isOpen !== false) {
-      return fromOutletTimings
+        if (cancelled) return
+        const payload = response?.data?.data || {}
+        const slots = Array.isArray(payload?.slots)
+          ? payload.slots.map((s) => s.timeSlot || s)
+          : []
+        setApiSlots(slots)
+        if (payload?.settings?.maxGuests) {
+          setMaxCapacity(payload.settings.maxGuests)
+        }
+        if (payload?.settings?.advanceBookingDays) {
+          setAdvanceBookingDays(payload.settings.advanceBookingDays)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setApiSlots([])
+          toast.error(error?.response?.data?.message || "Unable to load available slots")
+        }
+      } finally {
+        if (!cancelled) setSlotsLoading(false)
+      }
     }
-    return buildFallbackTiming(restaurant)
-  }, [outletTimings, selectedDate, restaurant])
-  const allSlots = useMemo(() => buildSlots(selectedDayTiming), [selectedDayTiming])
 
-  const availableSlots = useMemo(() => {
-    const isToday = selectedDate.toDateString() === currentTime.toDateString()
-    if (!isToday) return allSlots
+    loadSlots()
+    return () => {
+      cancelled = true
+    }
+  }, [restaurantId, selectedDate, selectedGuests])
 
-    const currentMinutes = currentTime.getHours() * 60 + currentTime.getMinutes()
-    const buffer = 15 // Allow booking at least 15 minutes ahead
+  useEffect(() => {
+    if (!restaurantId || !selectedSlot) {
+      setAvailableTables([])
+      setSelectedTableId(null)
+      return
+    }
 
-    return allSlots.filter((slot) => {
-      const slotMinutes = parseTimeToMinutes(slot)
-      return slotMinutes > currentMinutes + buffer
-    })
-  }, [allSlots, selectedDate, currentTime])
+    let cancelled = false
+    const loadTables = async () => {
+      try {
+        const response = await diningAPI.getAvailableTables(restaurantId, {
+          date: toDateKey(selectedDate),
+          timeSlot: selectedSlot,
+          guests: selectedGuests,
+        })
+        if (cancelled) return
+        const tables = Array.isArray(response?.data?.data?.tables)
+          ? response.data.data.tables
+          : []
+        setAvailableTables(tables)
+        if (tables.length === 0) {
+          setSelectedTableId(null)
+          return
+        }
+        setSelectedTableId((prev) =>
+          tables.some((t) => String(t._id) === String(prev)) ? prev : tables[0]._id
+        )
+      } catch {
+        if (!cancelled) {
+          setAvailableTables([])
+          setSelectedTableId(null)
+        }
+      }
+    }
 
+    loadTables()
+    return () => {
+      cancelled = true
+    }
+  }, [restaurantId, selectedDate, selectedSlot, selectedGuests])
+
+  const dates = useMemo(() => buildDates(advanceBookingDays), [advanceBookingDays])
+
+  const availableSlots = apiSlots
   const filteredSlots = useMemo(
     () => availableSlots.filter((slot) => getMealPeriod(slot) === selectedMealPeriod),
     [availableSlots, selectedMealPeriod]
@@ -305,6 +247,7 @@ export default function TableBooking() {
       guests: selectedGuests,
       date: selectedDate,
       timeSlot: selectedSlot,
+      tableId: selectedTableId,
       discount: selectedSlot,
     }
 
@@ -347,32 +290,24 @@ export default function TableBooking() {
           <div className="flex items-center justify-between gap-3 mb-4">
             <span className="text-sm font-medium text-[#2f3545]">Select number of guests</span>
             <span className="text-xs font-bold text-[#16A34A] bg-[#fdfafc] px-2 py-1 rounded-lg">
-                {remainingSeats} left
+                Max {maxCapacity}
             </span>
           </div>
           
           <div className="grid grid-cols-5 gap-2">
             {Array.from({ length: maxCapacity }, (_, index) => {
               const count = index + 1
-              const isBooked = count <= occupiedSeats
-              const isTooLarge = count > remainingSeats && !isBooked
-
               return (
                 <button
                   key={count}
-                  disabled={isBooked || isTooLarge}
                   onClick={() => setSelectedGuests(count)}
                   className={`flex h-11 items-center justify-center rounded-xl border text-sm font-bold transition-all ${
                     selectedGuests === count
                       ? "border-[#ef8f98] bg-[#fffaf9] text-[#d64f63] shadow-sm"
-                      : isBooked
-                        ? "border-red-50 bg-red-50 text-red-200 cursor-not-allowed"
-                        : isTooLarge
-                          ? "border-gray-50 bg-gray-50 text-gray-200 cursor-not-allowed"
-                          : "border-[#ececf2] bg-white text-[#444b5f] hover:border-[#ef8f98]/30"
+                      : "border-[#ececf2] bg-white text-[#444b5f] hover:border-[#ef8f98]/30"
                   }`}
                 >
-                  {isBooked ? "X" : count}
+                  {count}
                 </button>
               )
             })}
@@ -433,7 +368,11 @@ export default function TableBooking() {
           </div>
 
           <div className="mt-4 grid grid-cols-3 gap-3">
-            {filteredSlots.length === 0 ? (
+            {slotsLoading ? (
+              <div className="col-span-3 rounded-[18px] border border-dashed border-[#e5e7ef] px-4 py-8 text-center text-sm text-[#7c8394]">
+                Loading available slots...
+              </div>
+            ) : filteredSlots.length === 0 ? (
               <div className="col-span-3 rounded-[18px] border border-dashed border-[#e5e7ef] px-4 py-8 text-center text-sm text-[#7c8394]">
                 No {selectedMealPeriod} slots available for the selected date.
               </div>
@@ -460,6 +399,36 @@ export default function TableBooking() {
             )}
           </div>
         </section>
+
+        {availableTables.length > 0 && (
+          <section className="rounded-[22px] bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
+            <h3 className="text-sm font-medium text-[#2f3545]">Select table</h3>
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              {availableTables.map((table) => {
+                const active = String(selectedTableId) === String(table._id)
+                return (
+                  <button
+                    key={table._id}
+                    onClick={() => setSelectedTableId(table._id)}
+                    className={`rounded-[16px] border px-3 py-4 text-left transition-colors ${
+                      active
+                        ? "border-[#ef8f98] bg-[#fffaf9]"
+                        : "border-[#ececf2] bg-white"
+                    }`}
+                  >
+                    <span className="block text-sm font-semibold text-[#334155]">
+                      {table.name}
+                      {table.tableNumber ? ` (#${table.tableNumber})` : ""}
+                    </span>
+                    <span className="mt-1 block text-xs text-[#7c8394]">
+                      {table.capacity} seater · {table.tableType || "standard"}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </section>
+        )}
 
         <section className="rounded-[18px] bg-white px-4 py-5 text-center shadow-[0_8px_24px_rgba(15,23,42,0.05)]">
           <p className="text-sm text-[#6f7687]">

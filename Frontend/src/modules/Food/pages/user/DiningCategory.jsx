@@ -110,7 +110,13 @@ export default function DiningCategory() {
         }
 
         if (restaurantsRes?.data?.success) {
-          setRestaurants(Array.isArray(restaurantsRes.data.data) ? restaurantsRes.data.data : [])
+          const payload = restaurantsRes.data.data
+          const list = Array.isArray(payload?.restaurants)
+            ? payload.restaurants
+            : Array.isArray(payload)
+              ? payload
+              : []
+          setRestaurants(list)
         } else {
           setRestaurants([])
         }

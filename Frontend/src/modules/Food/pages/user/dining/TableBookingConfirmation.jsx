@@ -27,7 +27,7 @@ export default function TableBookingConfirmation() {
         }
     }, [])
     const resolvedState = location.state || fallbackDraft || {}
-    const { restaurant, guests, date, timeSlot, discount } = resolvedState
+    const { restaurant, guests, date, timeSlot, discount, tableId } = resolvedState
 
     const [specialRequest, setSpecialRequest] = useState("")
     const [showRequestModal, setShowRequestModal] = useState(false)
@@ -90,6 +90,7 @@ export default function TableBookingConfirmation() {
                 guests,
                 date,
                 timeSlot,
+                tableId: tableId || null,
                 specialRequest
             })
 

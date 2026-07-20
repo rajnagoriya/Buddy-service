@@ -30,7 +30,8 @@ const foodCheckoutSessionSchema = new mongoose.Schema(
     amountDue: { type: Number, required: true, min: 0 },
     currency: { type: String, default: 'INR' },
     razorpay: {
-      orderId: { type: String, default: '', index: true },
+      // Indexed via schema.index below (sparse) — avoid duplicate index:true here.
+      orderId: { type: String, default: '' },
       paymentId: { type: String, default: '' },
       signature: { type: String, default: '' },
       amountPaise: { type: Number, default: 0 },

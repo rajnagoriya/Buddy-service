@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { ValidationError } from '../../../../core/auth/errors.js';
+import { buildPaginationMeta, buildPaginationOptions } from '../../../../utils/helpers.js';
 import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
 import { FoodDiningCategory } from '../models/diningCategory.model.js';
 import { FoodDiningRestaurant } from '../models/diningRestaurant.model.js';
@@ -337,7 +338,36 @@ export async function listDiningCategoriesPublic() {
     return categories.map(mapCategory);
 }
 
+function mapPublicDiningRestaurant(doc) {
+    return {
+        ...doc.restaurantId,
+        restaurant: doc.restaurantId,
+        categories: doc.categoryIds || [],
+        diningSettings: {
+            isEnabled: true,
+            maxGuests: Math.max(1, Number(doc.maxGuests) || 6),
+            pureVegRestaurant: doc.pureVegRestaurant === true || doc.restaurantId?.pureVegRestaurant === true,
+            diningType: doc.categoryIds?.[0]?.slug || doc.restaurantId?.diningSettings?.diningType || ''
+        }
+    };
+}
+
+/**
+ * Public dining restaurant list with pagination.
+ * Query: page, limit, city, zoneId, category
+ * @returns {{ restaurants: Array, pagination: object }}
+ */
 export async function listDiningRestaurantsPublic(query = {}) {
+    const { page, limit, skip } = buildPaginationOptions(query, {
+        defaultLimit: 12,
+        maxLimit: 50
+    });
+
+    const empty = {
+        restaurants: [],
+        pagination: buildPaginationMeta({ page, limit, total: 0 })
+    };
+
     const filter = { isEnabled: true };
     const categoryValue = String(query.category || '').trim();
     const cityValue = String(query.city || '').trim();
@@ -351,12 +381,11 @@ export async function listDiningRestaurantsPublic(query = {}) {
             ].filter(Boolean)
         }).lean();
         if (!category) {
-            return [];
+            return empty;
         }
         filter.categoryIds = category._id;
     }
 
-    const restaurantMatch = {};
     const restaurantAndConditions = [];
 
     if (cityValue) {
@@ -373,31 +402,38 @@ export async function listDiningRestaurantsPublic(query = {}) {
     }
 
     if (restaurantAndConditions.length > 0) {
-        restaurantMatch.$and = restaurantAndConditions;
+        const matchingRestaurants = await FoodRestaurant.find({ $and: restaurantAndConditions })
+            .select('_id')
+            .lean();
+        const restaurantIds = matchingRestaurants.map((doc) => doc._id);
+        if (restaurantIds.length === 0) {
+            return empty;
+        }
+        filter.restaurantId = { $in: restaurantIds };
     }
 
-    const diningDocs = await FoodDiningRestaurant.find(filter)
-        .populate({
-            path: 'restaurantId',
-            select: 'restaurantName restaurantNameNormalized ownerName ownerPhone profileImage coverImages menuImages cuisines location area city zoneId status rating diningSettings estimatedDeliveryTime estimatedDeliveryTimeMinutes featuredDish featuredPrice offer openingTime closingTime openDays isAcceptingOrders costForTwo',
-            match: restaurantMatch
-        })
-        .populate('categoryIds', 'name slug imageUrl')
-        .lean();
+    const [total, diningDocs] = await Promise.all([
+        FoodDiningRestaurant.countDocuments(filter),
+        FoodDiningRestaurant.find(filter)
+            .sort({ updatedAt: -1, _id: -1 })
+            .skip(skip)
+            .limit(limit)
+            .populate({
+                path: 'restaurantId',
+                select: 'restaurantName restaurantNameNormalized ownerName ownerPhone profileImage coverImages menuImages cuisines location area city zoneId status rating diningSettings estimatedDeliveryTime estimatedDeliveryTimeMinutes featuredDish featuredPrice offer openingTime closingTime openDays isAcceptingOrders costForTwo'
+            })
+            .populate('categoryIds', 'name slug imageUrl')
+            .lean()
+    ]);
 
-    return diningDocs
+    const restaurants = diningDocs
         .filter((doc) => doc.restaurantId)
-        .map((doc) => ({
-            ...doc.restaurantId,
-            restaurant: doc.restaurantId,
-            categories: doc.categoryIds || [],
-            diningSettings: {
-                isEnabled: true,
-                maxGuests: Math.max(1, Number(doc.maxGuests) || 6),
-                pureVegRestaurant: doc.pureVegRestaurant === true || doc.restaurantId?.pureVegRestaurant === true,
-                diningType: doc.categoryIds?.[0]?.slug || doc.restaurantId?.diningSettings?.diningType || ''
-            }
-        }));
+        .map(mapPublicDiningRestaurant);
+
+    return {
+        restaurants,
+        pagination: buildPaginationMeta({ page, limit, total })
+    };
 }
 
 // ==================== DINING SETTINGS REQUESTS ====================

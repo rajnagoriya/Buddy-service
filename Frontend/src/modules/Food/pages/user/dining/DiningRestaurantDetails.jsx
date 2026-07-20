@@ -1,6 +1,6 @@
-import { useEffect, useState, useMemo } from "react"
+import { useEffect, useState } from "react"
 import { useLocation, useNavigate, useParams } from "react-router-dom"
-import { restaurantAPI, diningAPI } from "@food/api"
+import { restaurantAPI } from "@food/api"
 import { useProfile } from "@food/context/ProfileContext"
 import { getMenuFromResponse } from "@food/utils/menuItems"
 import useAppBackNavigation from "@food/hooks/useAppBackNavigation"
@@ -97,7 +97,6 @@ export default function DiningRestaurantDetails() {
   const [isBookingSheetOpen, setIsBookingSheetOpen] = useState(false)
   const [activeTab, setActiveTab] = useState("offers")
   const [expandedMenuSections, setExpandedMenuSections] = useState(new Set([0]))
-  const [currentBookings, setCurrentBookings] = useState([])
 
   const fetchRestaurantData = async () => {
     try {
@@ -131,15 +130,6 @@ export default function DiningRestaurantDetails() {
 
       const restaurantId = resolvedRestaurant?._id || resolvedRestaurant?.id || slug
 
-      try {
-        const bookingsRes = await diningAPI.getRestaurantBookings(resolvedRestaurant)
-        if (bookingsRes.data.success) {
-          setCurrentBookings(Array.isArray(bookingsRes.data.data) ? bookingsRes.data.data : [])
-        }
-      } catch (err) {
-        debugError("Error fetching bookings:", err)
-      }
-
       const menuResponse = await restaurantAPI.getMenuByRestaurantId(restaurantId).catch(() => null)
       const resolvedMenu = menuResponse ? getMenuFromResponse(menuResponse) : null
       const sections = normalizeMenuSections(resolvedMenu?.sections)
@@ -157,26 +147,9 @@ export default function DiningRestaurantDetails() {
     fetchRestaurantData()
   }, [location.state?.restaurant, slug])
 
-  const occupiedSeats = useMemo(() => {
-    const now = new Date()
-    const THIRTY_MINUTES = 30 * 60 * 1000
-
-    return currentBookings
-      .filter((b) => {
-        const isApproved = b.status === "approved"
-        const isPending = b.status === "pending"
-        if (isApproved) return true
-        if (isPending) {
-          const createdAt = new Date(b.createdAt || b.date)
-          return now - createdAt < THIRTY_MINUTES
-        }
-        return false
-      })
-      .reduce((sum, b) => sum + (Number(b.guests) || 0), 0)
-  }, [currentBookings])
-
+  const occupiedSeats = 0
   const maxCapacity = restaurant?.diningSettings?.maxGuests || 6
-  const remainingSeats = Math.max(0, maxCapacity - occupiedSeats)
+  const remainingSeats = maxCapacity
 
   if (loading) return <DiningDetailSkeleton />
 

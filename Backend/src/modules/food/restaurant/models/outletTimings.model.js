@@ -16,8 +16,7 @@ const outletTimingsSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "FoodRestaurant",
       required: true,
-      unique: true,
-      index: true,
+      unique: true, // unique already creates the index
     },
     timings: {
       type: [dayTimingSchema],
