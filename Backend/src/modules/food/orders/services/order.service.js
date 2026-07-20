@@ -68,6 +68,8 @@ import {
   freeOrderDispatch,
   NO_DRIVER_AUTO_CANCEL_MS,
   SHARE_TIMEOUT_MS,
+  RESTAURANT_ACK_RESEND_MS,
+  RESTAURANT_ACK_TIMEOUT_MS,
 } from './order.helpers.js';
 import {
   assertMaxRestaurants,
@@ -77,6 +79,7 @@ import {
   computeDroppedRestaurantRefundAmount,
   getActivePickups,
   isActivePickup,
+  isShareRequired,
   MAX_PICKUP_RESEND_ATTEMPTS,
   shouldPermanentlyDropPickup,
   pushSettlementSnapshot,
@@ -1211,16 +1214,68 @@ export async function recoverStuckOrders() {
       { $unset: { 'dispatch.dispatchingAt': '' } }
     );
 
-    // 3. Stuck in 'created' (waiting for restaurant) after rider accepted for > 5m
-    const stuckWaitingForStore = await FoodOrder.find({
+    // 3. Driver-first escalation (F-1A): a rider accepted but NO restaurant has accepted yet
+    //    (orderStatus still 'created'). Tier 1 (> RESEND): re-notify the restaurant(s) + admin,
+    //    once. Tier 2 (> TIMEOUT): auto-reject → refund → release the driver so they're not
+    //    stranded on an order the restaurant silently ignores.
+    const awaitingRestaurantAck = await FoodOrder.find({
       orderStatus: 'created',
       'dispatch.status': 'accepted',
-      'dispatch.acceptedAt': { $lt: new Date(now - FIVE_MIN) }
+      'dispatch.acceptedAt': { $lt: new Date(now - RESTAURANT_ACK_RESEND_MS) },
     });
 
-    if (stuckWaitingForStore.length > 0) {
-      logger.warn(`Watchdog: Found ${stuckWaitingForStore.length} orders waiting too long for restaurant acceptance.`);
-      // Optional: Add notification to Store Owners here if they missed the socket event
+    for (const order of awaitingRestaurantAck) {
+      const acceptedMs = order.dispatch?.acceptedAt
+        ? new Date(order.dispatch.acceptedAt).getTime()
+        : null;
+      if (acceptedMs == null) continue;
+      const waited = now.getTime() - acceptedMs;
+
+      // Tier 2: timed out → cancel + refund + free driver (reuses the rejection-exhausted path).
+      if (waited >= RESTAURANT_ACK_TIMEOUT_MS) {
+        try {
+          await finalizeRestaurantRejectionExhausted(
+            order,
+            order.restaurantId,
+            'Restaurant did not respond in time. Order auto-cancelled, driver released, and refund initiated where applicable.',
+          );
+        } catch (err) {
+          logger.error(`Watchdog: restaurant-ack auto-cancel failed for ${order._id}: ${err.message}`);
+        }
+        continue;
+      }
+
+      // Tier 1: nudge the restaurant(s) once (throttled by dispatch.restaurantAckResendAt).
+      const lastResent = order.dispatch?.restaurantAckResendAt
+        ? new Date(order.dispatch.restaurantAckResendAt).getTime()
+        : null;
+      const alreadyResent =
+        lastResent != null && now.getTime() - lastResent < RESTAURANT_ACK_TIMEOUT_MS;
+      if (alreadyResent) continue;
+
+      try {
+        const activeRestaurantIds =
+          Array.isArray(order.pickups) && order.pickups.length > 0
+            ? [...new Set(
+                order.pickups
+                  .filter((p) => isActivePickup(p))
+                  .map((p) => String(p.restaurantId || ''))
+                  .filter(Boolean),
+              )]
+            : [String(order.restaurantId || '')].filter(Boolean);
+        for (const rid of activeRestaurantIds) {
+          await notifyRestaurantNewOrder(order, rid, { freshNotify: true });
+        }
+        await notifyOwnersSafely([{ ownerType: 'ADMIN', ownerId: 'GLOBAL' }], {
+          title: 'Restaurant not responding',
+          body: `Order #${order.order_id || order._id} has a driver waiting; the restaurant has not accepted yet.`,
+          data: { type: 'restaurant_ack_pending', orderId: order._id.toString() },
+        });
+        order.dispatch.restaurantAckResendAt = new Date();
+        await order.save();
+      } catch (err) {
+        logger.warn(`Watchdog: restaurant-ack nudge failed for ${order._id}: ${err.message}`);
+      }
     }
 
     // 4. Auto-cancel orders with no accepted driver (see NO_DRIVER_AUTO_CANCEL_MS)
@@ -3466,6 +3521,15 @@ export async function shareOrderDelivery(orderId, deliveryPartnerId) {
     throw new ValidationError('Order already has a shared partner');
   }
   assertCanShareSecondDriver(order);
+
+  // F-3D: only bulk orders (item count >= configured threshold) may request a second driver.
+  // Previously this was enforced in the driver UI only, so a direct API call could split any order.
+  const shareSettings =
+    (await FoodDeliveryBoySettings.findOne({ isActive: true }).sort({ createdAt: -1 }).lean()) ||
+    (await FoodDeliveryBoySettings.findOne().sort({ createdAt: -1 }).lean());
+  if (!isShareRequired(order, shareSettings || {})) {
+    throw new ValidationError('This order is not large enough to require a second delivery partner.');
+  }
 
   // Set sharing flags
   order.dispatch.isShared = true;

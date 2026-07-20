@@ -24,11 +24,13 @@ Interim safety for the current earnings-share model, before the Phase 6 rebuild.
 *Files:* `order.model.js`, `order.helpers.js`, `order-delivery.service.js`, `order.service.js`.
 *Test:* place a ≥20-item order, accept as driver, let share timeout elapse → primary can complete; two drivers race the shared slot → exactly one joins; admin reassigns primary on a shared order → shared partner notified, order not stuck.
 
-## Phase 2 — Driver-first operational holes · S–M
-- ⬜ **F-1A** Restaurant no-response escalation (resend → auto-reject → refund + driver release/reassign) in `recoverStuckOrders`.
-- ⬜ **F-1B** Backend geofence on reached-pickup / reached-drop (remove client-only + dev-bypass reliance).
-- ⬜ **F-1C** Pickup verification hardening (require bill photo or add pickup confirmation).
-- ⬜ **F-3D** Backend item-count re-check on `share` (close the ≤20 abuse bypass).
+## Phase 2 — Driver-first operational holes · S–M ✅
+- ✅ **F-1A** Restaurant no-response escalation in `recoverStuckOrders`: Tier 1 (> `RESTAURANT_ACK_RESEND_MS`, 2m) re-notifies restaurant(s) + admin once (throttled by `dispatch.restaurantAckResendAt`); Tier 2 (> `RESTAURANT_ACK_TIMEOUT_MS`, 5m) auto-rejects → refund → releases the driver.
+- ✅ **F-1B** Server-side geofence `assertRiderAtTarget` on reached-pickup (restaurant/active-pickup) and reached-drop (customer). Fail-OPEN on missing/stale (>10m) rider location; `*_GEOFENCE_METERS` = 1000m, tunable.
+- ✅ **F-1C** Pickup ready-state guard: single-restaurant pickup requires `orderStatus === 'ready_for_pickup'`; multi requires the current pickup `status === 'ready'` — closes the `isStatusAdvance` gap that let `confirmed→picked_up` slip through.
+- ✅ **F-3D** `shareOrderDelivery` now re-checks `isShareRequired` server-side (item count ≥ threshold), closing the UI-only abuse gate.
+
+*Note:* Tier-2 auto-cancel for a multi-restaurant no-response only pushes the cancellation to the primary restaurant (others never engaged); refine in Phase 3 if needed.
 
 ## Phase 3 — Flow 2 reject/resend correctness · S–M
 - ⬜ **F-2A** Make handler + constants + messages agree on **immediate drop + refund**; remove 3-strike copy and the dead resend endpoint; fix single-restaurant reject messaging.
@@ -60,4 +62,5 @@ Interim safety for the current earnings-share model, before the Phase 6 rebuild.
 ---
 
 ### Progress log
-- **Phase 1 — done (branch `resturant-bug`, uncommitted).** Files touched: `order.model.js` (`dispatch.shareOpenedAt`), `order.helpers.js` (`SHARE_TIMEOUT_MS`), `order-delivery.service.js` (auto-share timestamp + solo-complete fallback), `order.service.js` (atomic shared join, manual-share timestamp, admin-reassign shared handling). All four pass `node --check`. Manual device/runtime test still pending (no automated test harness in repo).
+- **Phase 1 — done & committed** on branch `phase1-two-driver-safety` (`b02d667`). Files: `order.model.js` (`dispatch.shareOpenedAt`), `order.helpers.js` (`SHARE_TIMEOUT_MS`), `order-delivery.service.js` (auto-share timestamp + solo-complete fallback), `order.service.js` (atomic shared join, manual-share timestamp, admin-reassign shared handling). `main` restored to `c6cdb87`.
+- **Phase 2 — done** on branch `phase2-driver-first-holes` (stacked on Phase 1). Files: `order.model.js` (`dispatch.restaurantAckResendAt`), `order.helpers.js` (ack + geofence constants), `order-delivery.service.js` (`assertRiderAtTarget` geofence + pickup ready-state guard), `order.service.js` (F-1A escalation in `recoverStuckOrders` + F-3D share eligibility). All pass `node --check`. Runtime/device test still pending (no automated test harness).

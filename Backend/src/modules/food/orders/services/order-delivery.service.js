@@ -45,7 +45,53 @@ import {
   isStatusAdvance,
   buildDeliverySocketPayload,
   SHARE_TIMEOUT_MS,
+  PICKUP_GEOFENCE_METERS,
+  DROP_GEOFENCE_METERS,
+  RIDER_LOCATION_STALE_MS,
 } from './order.helpers.js';
+import { haversineMeters } from '../../../../core/location/haversine.util.js';
+
+/**
+ * Server-side anti-spoof geofence for "reached pickup" / "reached drop".
+ *
+ * The rider's freshest location lives in Redis (hot path); the Mongo copy can lag ~30s, so this
+ * check FAILS OPEN whenever the location is missing or stale — legitimate riders are never
+ * blocked. It only rejects gross spoofing (marking arrived from far away) when we have a fresh
+ * fix. `targetCoords` is GeoJSON order `[lng, lat]`.
+ *
+ * @throws {ValidationError} when a fresh rider fix is clearly outside the geofence radius.
+ */
+async function assertRiderAtTarget(deliveryPartnerId, targetCoords, limitMeters, label) {
+  if (!Array.isArray(targetCoords) || targetCoords.length < 2) return; // no target → skip
+  const targetLng = Number(targetCoords[0]);
+  const targetLat = Number(targetCoords[1]);
+  if (!Number.isFinite(targetLat) || !Number.isFinite(targetLng)) return;
+
+  let partner = null;
+  try {
+    partner = await FoodDeliveryPartner.findById(deliveryPartnerId)
+      .select('lastLat lastLng lastLocationAt')
+      .lean();
+  } catch {
+    return; // fail-open on lookup error
+  }
+
+  const lat = Number(partner?.lastLat);
+  const lng = Number(partner?.lastLng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return; // no fix → fail-open
+
+  const fixAgeMs = partner?.lastLocationAt
+    ? Date.now() - new Date(partner.lastLocationAt).getTime()
+    : Infinity;
+  if (!(fixAgeMs <= RIDER_LOCATION_STALE_MS)) return; // stale → fail-open
+
+  const distanceMeters = haversineMeters(lat, lng, targetLat, targetLng);
+  if (Number.isFinite(distanceMeters) && distanceMeters > limitMeters) {
+    throw new ValidationError(
+      `You appear to be ${Math.round(distanceMeters)}m from the ${label}. Move closer to mark ${label} reached.`,
+    );
+  }
+}
 
 function normalizeOtpValue(value) {
   return String(value ?? '').replace(/\D/g, '').trim();
@@ -1270,6 +1316,20 @@ export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId) {
     throw new ValidationError('Order already delivered');
   }
 
+  // Anti-spoof geofence: rider must be near the pickup (current active restaurant) to mark reached.
+  let pickupCoords = null;
+  if (order.isMultiRestaurant && Array.isArray(order.pickups) && order.pickups.length > 0) {
+    const activePickup = order.pickups.find(
+      (p) => isActivePickup(p) && String(p.status || '') !== 'picked_up',
+    );
+    pickupCoords = activePickup?.location?.coordinates || null;
+  }
+  if (!pickupCoords) {
+    const rest = await FoodRestaurant.findById(order.restaurantId).select('location').lean();
+    pickupCoords = rest?.location?.coordinates || null;
+  }
+  await assertRiderAtTarget(deliveryPartnerId, pickupCoords, PICKUP_GEOFENCE_METERS, 'restaurant');
+
   const currentPhase = order.deliveryState?.currentPhase || '';
   const currentStatus = order.deliveryState?.status || '';
   if (currentPhase === 'at_pickup' || currentStatus === 'reached_pickup') {
@@ -1410,7 +1470,14 @@ export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImag
       (p) =>
         isActivePickup(p) && !['picked_up'].includes(String(p.status || '')),
     );
-    
+
+    // F-1C: a pickup can only be collected once that restaurant has marked its items ready.
+    if (currentPickup && String(currentPickup.status || '') !== 'ready') {
+      throw new ValidationError(
+        `Cannot pick up from ${currentPickup.restaurantName || 'this restaurant'} until it marks the food ready.`,
+      );
+    }
+
     if (currentPickup) {
       currentPickup.status = 'picked_up';
       currentPickup.pickedAt = new Date();
@@ -1459,7 +1526,13 @@ export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImag
       return order.toObject();
     }
   } else {
-    // Single restaurant flow (unchanged)
+    // Single restaurant flow.
+    // F-1C: pickup is only allowed once the restaurant has marked the order ready.
+    if (from !== 'ready_for_pickup') {
+      throw new ValidationError(
+        'You can only pick up the order after the restaurant marks it ready for pickup.',
+      );
+    }
     if (!isStatusAdvance(from, nextStatus)) {
         throw new ValidationError(`Order is already at status '${from}'. Cannot re-mark as '${nextStatus}'.`);
     }
@@ -1576,6 +1649,14 @@ export async function confirmReachedDropDelivery(orderId, deliveryPartnerId) {
     emitOrderUpdate(order, deliveryPartnerId);
     return sanitizeOrderForExternal(order);
   }
+
+  // Anti-spoof geofence: rider must be near the customer to request the drop OTP.
+  await assertRiderAtTarget(
+    deliveryPartnerId,
+    order.deliveryAddress?.location?.coordinates || null,
+    DROP_GEOFENCE_METERS,
+    'delivery location',
+  );
 
   const alreadyAtDrop =
     order.deliveryState?.currentPhase === 'at_drop' ||

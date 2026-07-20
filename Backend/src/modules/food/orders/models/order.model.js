@@ -193,6 +193,8 @@ const dispatchSchema = new mongoose.Schema(
         sharedPartnerId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodDeliveryPartner', default: null },
         /** When the second-driver (share) slot was opened; drives the solo-complete timeout fallback. */
         shareOpenedAt: { type: Date, default: null },
+        /** When the driver-first restaurant-acknowledgement nudge was last resent (escalation throttle). */
+        restaurantAckResendAt: { type: Date, default: null },
         dispatchingAt: { type: Date }
     },
     { _id: false }

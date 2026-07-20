@@ -350,6 +350,25 @@ export const NO_DRIVER_AUTO_CANCEL_MS = 1 * 60 * 1000;
  */
 export const SHARE_TIMEOUT_MS = 5 * 60 * 1000;
 
+/**
+ * Driver-first escalation: once a rider has accepted but NO restaurant has accepted yet
+ * (orderStatus still 'created'), re-notify the restaurant after RESEND, then auto-reject +
+ * refund + release the driver after TIMEOUT. Prevents a driver from being stranded on an
+ * order the restaurant silently ignores.
+ */
+export const RESTAURANT_ACK_RESEND_MS = 2 * 60 * 1000;
+export const RESTAURANT_ACK_TIMEOUT_MS = 5 * 60 * 1000;
+
+/**
+ * Server-side geofence for "reached pickup" / "reached drop". Fail-OPEN when the rider's
+ * last known location is missing or staler than RIDER_LOCATION_STALE_MS (Mongo location can
+ * lag the Redis hot path by ~30s), so legitimate riders are never blocked; only gross spoofing
+ * (marking arrived from far away) is rejected. Radii are intentionally generous.
+ */
+export const PICKUP_GEOFENCE_METERS = 1000;
+export const DROP_GEOFENCE_METERS = 1000;
+export const RIDER_LOCATION_STALE_MS = 10 * 60 * 1000;
+
 export function freeOrderDispatch(orderDoc) {
   if (!orderDoc) return;
   orderDoc.dispatch = orderDoc.dispatch || {};
