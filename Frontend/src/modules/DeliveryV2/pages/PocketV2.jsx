@@ -66,7 +66,27 @@ export const PocketV2 = () => {
   useEffect(() => {
     let cancelled = false;
 
-    const fetchData = async () => {
+    const fetchWallet = async () => {
+      try {
+        const walletRes = await deliveryAPI.getWallet();
+        if (cancelled) return;
+        const wallet = walletRes?.data?.data?.wallet || {};
+        setBalance(Number(wallet.pocketBalance) || 0);
+      } catch {
+        if (!cancelled) setBalance(0);
+      }
+    };
+
+    fetchWallet();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchPeriodData = async () => {
       try {
         setLoading(true);
         setTrips([]);
@@ -74,33 +94,30 @@ export const PocketV2 = () => {
         setHasMoreTrips(false);
         setTripsTotal(0);
 
-        const [profileRes, earningsRes, walletRes] = await Promise.all([
+        const [profileRes, earningsRes] = await Promise.all([
           deliveryAPI.getProfile().catch(() => null),
           deliveryAPI.getEarnings({ period }),
-          deliveryAPI.getWallet(),
         ]);
 
         if (cancelled) return;
 
         const profile = profileRes?.data?.data?.profile || {};
         const summary = earningsRes?.data?.data?.summary || {};
-        const wallet = walletRes?.data?.data?.wallet || {};
 
         const bankDetails = profile?.documents?.bankDetails;
         setBankDetailsFilled(!!bankDetails?.accountNumber);
-        setBalance(Number(wallet.pocketBalance) || 0);
         setEarnings(Number(summary.totalEarnings) || 0);
         setOrdersCount(Number(summary.totalOrders) || 0);
 
         await fetchTrips(1, { append: false, currentPeriod: period });
       } catch (err) {
-        if (!cancelled) toast.error('Failed to load wallet data');
+        if (!cancelled) toast.error('Failed to load earnings');
       } finally {
         if (!cancelled) setLoading(false);
       }
     };
 
-    fetchData();
+    fetchPeriodData();
     return () => {
       cancelled = true;
     };

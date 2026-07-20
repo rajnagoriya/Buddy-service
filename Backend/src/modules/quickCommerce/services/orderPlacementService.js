@@ -35,8 +35,13 @@ import * as logger from "./logger.js";
 const IDEMPOTENCY_RECORD_TTL_MS = 24 * 60 * 60 * 1000;
 
 function normalizePaymentMode(raw) {
-  const mode = String(raw || "COD").trim().toUpperCase();
-  return mode === "ONLINE" ? "ONLINE" : "COD";
+  const mode = String(raw || "ONLINE").trim().toUpperCase();
+  if (mode === "COD" || mode === "CASH") {
+    const err = new Error("Cash on Delivery is no longer available. Please pay online.");
+    err.statusCode = 400;
+    throw err;
+  }
+  return "ONLINE";
 }
 
 function normalizeAddress(address = {}) {

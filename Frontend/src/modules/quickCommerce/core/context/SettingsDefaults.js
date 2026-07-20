@@ -36,7 +36,7 @@ export const DEFAULT_SETTINGS = {
   fleetCommissionRatePerKm: 5,
   fixedDeliveryFee: 30,
   handlingFeeStrategy: "highest_category_fee",
-  codEnabled: true,
+  codEnabled: false,
   onlineEnabled: true,
   lowStockAlertsEnabled: true,
   productApproval: {

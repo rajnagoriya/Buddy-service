@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useMemo } from "react"
 import { useNavigate, useLocation } from "react-router-dom"
 import useRestaurantBackNavigation from "@food/hooks/useRestaurantBackNavigation"
 import { motion, AnimatePresence } from "framer-motion"
@@ -105,7 +105,11 @@ export default function FinanceDetailsPage() {
         onlineOrderingAds: 0,
         total: 0
       },
-      estimatedPayout: cycle.estimatedPayout || 0,
+      estimatedPayout:
+        financeData?.wallet?.availableBalance ??
+        financeData?.availableBalance ??
+        cycle.estimatedPayout ??
+        0,
       start: cycle.start?.day || "15",
       end: cycle.end?.day || "21",
       month: cycle.start?.month || "Dec",

@@ -3,6 +3,7 @@ import { FoodOrder } from '../../orders/models/order.model.js';
 import { FoodTransaction } from '../../orders/models/foodTransaction.model.js';
 import { FoodRestaurant } from '../models/restaurant.model.js';
 import { FoodRestaurantWithdrawal } from '../models/foodRestaurantWithdrawal.model.js';
+import { getBalance } from '../../../../core/payments/transaction.service.js';
 import { buildPaginationMeta, buildPaginationOptions } from '../../../../utils/helpers.js';
 
 function toTwoDigitYearString(dateObj) {
@@ -80,11 +81,14 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
 
     const nowWindow = getFixedCurrentCycleWindow(new Date());
 
-    // Current cycle: sum ledger payouts in the fixed window.
+    // Wallet balance: full ledger (not limited to settlement cycle window).
+    const ledger = await getBalance('restaurant', String(rid));
+
+    // Unsettled orders for the live earnings list (matches withdrawable balance).
     const currentTransactions = await FoodTransaction.find({
         restaurantId: rid,
         status: { $in: ['captured', 'authorized'] },
-        createdAt: { $gte: nowWindow.start, $lte: nowWindow.end }
+        'settlement.isRestaurantSettled': { $ne: true }
     })
         .populate('orderId', 'orderId order_id createdAt items pricing deliveryState orderStatus')
         .sort({ createdAt: -1 })
@@ -120,11 +124,6 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
 
     const currentCycleOrders = currentTransactions.map(mapTxToRestaurantOrder);
 
-    const currentCycleEstimatedPayout = currentCycleOrders.reduce(
-        (sum, o) => sum + (Number(o.payout) || 0),
-        0
-    );
-
     // Calculate global estimated payout (all unsettled transactions)
     const allUnsettledTransactions = await FoodTransaction.find({
         restaurantId: rid,
@@ -154,14 +153,19 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
         { $group: { _id: null, total: { $sum: '$amount' } } }
     ]);
     const totalEffectiveWithdrawals = Number(effectiveWithdrawalsAgg?.[0]?.total || 0);
-    const availableBalance = Math.max(0, globalEstimatedPayout - totalEffectiveWithdrawals);
+    const ledgerAvailable = Math.max(
+        0,
+        (Number(ledger.availableBalance) || 0) - totalEffectiveWithdrawals
+    );
+    const transactionAvailable = Math.max(0, globalEstimatedPayout - totalEffectiveWithdrawals);
+    const availableBalance = Math.max(ledgerAvailable, transactionAvailable);
 
     const currentCycle = {
         start: { ...nowWindow.startMeta },
         end: { ...nowWindow.endMeta },
-        totalEarnings: currentCycleEstimatedPayout, // We still show current cycle earnings label
+        totalEarnings: availableBalance,
         totalWithdrawn: totalEffectiveWithdrawals,
-        estimatedPayout: availableBalance, // This is what UI shows as "Estimated Payout" (Available Balance)
+        estimatedPayout: availableBalance,
         totalOrders: currentCycleOrders.length,
         payoutDate: null,
         orders: currentCycleOrders
@@ -220,6 +224,12 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
             restaurantId: restaurant?._id ? `REST${restaurant._id.toString().slice(-6).padStart(6, '0')}` : 'N/A',
             address
         },
+        wallet: {
+            balance: Number(ledger.balance) || 0,
+            lockedAmount: Number(ledger.lockedAmount) || 0,
+            availableBalance
+        },
+        availableBalance,
         currentCycle,
         invoiceSummary,
         pastCycles: pastCyclesResult

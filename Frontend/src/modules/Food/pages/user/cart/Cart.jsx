@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from "react"
 import { createPortal } from "react-dom"
 import { Link, useNavigate } from "react-router-dom"
-import { Plus, Minus, ArrowLeft, ChevronRight, Clock, MapPin, Phone, FileText, Utensils, Tag, Percent, Share2, ChevronUp, ChevronDown, X, Check, Settings, CreditCard, Wallet, Building2, Sparkles, Banknote, Zap, CheckCircle2, MessageCircle, Send, Mail, Copy, AlertCircle, Leaf, Bike, Truck } from "lucide-react"
+import { Plus, Minus, ArrowLeft, ChevronRight, Clock, MapPin, Phone, FileText, Utensils, Tag, Percent, Share2, ChevronUp, ChevronDown, X, Check, Settings, CreditCard, Wallet, Building2, Sparkles, Zap, CheckCircle2, MessageCircle, Send, Mail, Copy, AlertCircle, Leaf, Bike, Truck } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 import confetti from "canvas-confetti"
 
@@ -287,7 +287,7 @@ function Cart() {
   const [appliedCoupon, setAppliedCoupon] = useState(null)
   const [couponCode, setCouponCode] = useState("")
   const [couponErrorPopup, setCouponErrorPopup] = useState({ open: false, message: "" })
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState("cash")
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState("razorpay")
   const [showPaymentSheet, setShowPaymentSheet] = useState(false)
   const [walletBalance, setWalletBalance] = useState(0)
   const [isLoadingWallet, setIsLoadingWallet] = useState(false)
@@ -1431,9 +1431,7 @@ function Cart() {
   const selectedPaymentLabel =
     selectedPaymentMethod === "wallet"
       ? "Wallet"
-      : selectedPaymentMethod === "razorpay"
-        ? "Online Payment"
-        : "Cash on Delivery"
+      : "Online Payment"
 
   // Restaurant name from data or cart
   const restaurantName = isMultiRestaurantOrder
@@ -1811,7 +1809,7 @@ function Cart() {
         return
       }
 
-      // Single create-order call — server validates, prices, and either places COD or returns Razorpay checkout
+      // Single create-order call — server validates, prices, and places wallet/prepaid order
       const orderResponse = await orderAPI.createOrder(orderPayload)
 
       debugLog("? Order/checkout response:", orderResponse.data)
@@ -1823,14 +1821,6 @@ function Cart() {
         requiresPayment,
         paymentType,
       } = orderResponse.data.data || {}
-
-      // Cash flow: order placed without online payment
-      if (selectedPaymentMethod === "cash" || paymentType === "COD") {
-        toast.success("Order placed with Cash on Delivery")
-        finalizeSuccessfulOrder(order)
-        releasePlaceOrderLock()
-        return
-      }
 
       // Wallet flow: order placed with wallet payment (already processed in backend)
       if (selectedPaymentMethod === "wallet" || paymentType === "WALLET") {
@@ -3183,14 +3173,6 @@ function Cart() {
                       disabledText: 'Low Balance',
                       allowAddMoney: !isLoadingWallet && walletBalance < total,
                     },
-                    {
-                      id: 'cash',
-                      name: 'Cash on Delivery',
-                      description: 'Pay when order arrives',
-                      icon: <Banknote className="w-5 h-5" />,
-                      color: 'bg-orange-50 text-#15803D dark:bg-orange-900/40 dark:text-orange-400',
-                      selectedColor: 'bg-[#16A34A] text-white'
-                    }
                   ].map((option) => (
                     <button
                       key={option.id}

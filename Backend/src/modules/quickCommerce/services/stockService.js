@@ -28,7 +28,7 @@ export async function reserveStockForItems({
   sellerId,
   orderId,
   session,
-  paymentMode = "COD",
+  paymentMode = "ONLINE",
 }) {
   const stockType = String(paymentMode || "").toUpperCase() === "ONLINE" ? "Reservation" : "Sale";
   const lowStockAlerts = [];
