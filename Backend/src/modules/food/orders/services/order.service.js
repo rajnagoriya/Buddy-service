@@ -80,8 +80,6 @@ import {
   getActivePickups,
   isActivePickup,
   isShareRequired,
-  MAX_PICKUP_RESEND_ATTEMPTS,
-  shouldPermanentlyDropPickup,
   pushSettlementSnapshot,
 } from './order-lifecycle.policy.js';
 
@@ -946,7 +944,7 @@ async function finalizeRestaurantRejectionExhausted(order, restaurantId, note = 
   const assignedRiderId = order.dispatch?.deliveryPartnerId;
   const cancelNote =
     note ||
-    'Restaurant rejected the order 3 times. Order cancelled, driver released, and refund initiated where applicable.';
+    'Restaurant rejected the order. Order cancelled, driver released, and refund initiated where applicable.';
 
   order.orderStatus = 'cancelled_by_restaurant';
   freeOrderDispatch(order);
@@ -969,8 +967,8 @@ async function finalizeRestaurantRejectionExhausted(order, restaurantId, note = 
     order.payment?.status === 'refunded'
       ? ` Refund of ₹${order.pricing.total} is being processed.`
       : '';
-  const userMessage = `The restaurant is not accepting this order after 3 attempts.${refundDetail}`;
-  const riderMessage = `Restaurant rejected order #${order.order_id || order._id} after 3 attempts. You are now free to accept new orders.`;
+  const userMessage = `The restaurant is not accepting this order.${refundDetail}`;
+  const riderMessage = `Restaurant rejected order #${order.order_id || order._id}. You are now free to accept new orders.`;
 
   try {
     const io = getIO();
@@ -1761,8 +1759,7 @@ async function finalizeDroppedRestaurantPartialContinue(order, restaurantId, not
     return finalizeRestaurantRejectionExhausted(
       order,
       restaurantId,
-      note ||
-        `${restaurantName} rejected after ${MAX_PICKUP_RESEND_ATTEMPTS} attempts. No restaurants remaining.`,
+      note || `${restaurantName} rejected the order. No restaurants remaining.`,
     );
   }
 
@@ -1865,6 +1862,23 @@ async function finalizeDroppedRestaurantPartialContinue(order, restaurantId, not
   const from = order.orderStatus;
   if (nextStatus && nextStatus !== 'cancelled_by_restaurant') {
     order.orderStatus = nextStatus;
+  }
+
+  // F-2 #14: if dropping this restaurant leaves every remaining pickup already picked up, the
+  // driver is holding all the food — advance straight to the delivery phase so they aren't
+  // stranded waiting to "pick up" a restaurant that no longer exists.
+  const remainingActive = getActivePickups(order);
+  const allRemainingPicked =
+    remainingActive.length > 0 &&
+    remainingActive.every((p) => String(p.status || '') === 'picked_up');
+  if (allRemainingPicked) {
+    order.orderStatus = 'picked_up';
+    order.deliveryState = {
+      ...(order.deliveryState?.toObject?.() || order.deliveryState || {}),
+      currentPhase: 'en_route_to_delivery',
+      status: 'picked_up',
+      pickedUpAt: order.deliveryState?.pickedUpAt || new Date(),
+    };
   }
 
   pushStatusHistory(order, {
@@ -2026,8 +2040,16 @@ export async function updateOrderStatusRestaurant(
 
   if (isMulti) {
     if (isReject) {
+      // F-2 #14: a restaurant cannot reject once its own items are already picked up, or once
+      // the order has left the pickup phase (driver already collected everything and is delivering).
+      if (String(pickup.status || '') === 'picked_up') {
+        throw new ValidationError('These items have already been picked up and can no longer be rejected.');
+      }
+      if (['picked_up', 'reached_drop', 'delivered'].includes(order.orderStatus)) {
+        throw new ValidationError('The order is already out for delivery and can no longer be rejected.');
+      }
+
       pickup.status = 'cancelled';
-      pickup.rejectionAttempts = (Number(pickup.rejectionAttempts) || 0) + 1;
       order.restaurantRejectionCount = (order.restaurantRejectionCount || 0) + 1;
 
       const finalized = await finalizeDroppedRestaurantPartialContinue(
@@ -2059,6 +2081,10 @@ export async function updateOrderStatusRestaurant(
     }
   } else {
     if (isReject) {
+      // F-2 #14: block a rejection once the order has left the pickup phase.
+      if (['picked_up', 'reached_drop', 'delivered'].includes(order.orderStatus)) {
+        throw new ValidationError('The order is already out for delivery and can no longer be rejected.');
+      }
       const finalized = await finalizeRestaurantRejectionExhausted(
         order,
         restaurantId,
@@ -2100,13 +2126,10 @@ export async function updateOrderStatusRestaurant(
     title = "Food is ready! 🛍️";
     body = "Your order is ready and waiting to be picked up.";
   } else if (statusForMessage === "rejected_by_restaurant" || finalStatus === "rejected_by_restaurant") {
-    const attempt = isMulti
-      ? Number(pickup?.rejectionAttempts) || 0
-      : order.restaurantRejectionCount || 0;
-    title = `Order Rejected by Restaurant (${attempt}/${MAX_PICKUP_RESEND_ATTEMPTS}) ⚠️`;
+    title = 'Order Rejected by Restaurant ⚠️';
     body = isMulti
-      ? `One restaurant has rejected the order (attempt ${attempt}/${MAX_PICKUP_RESEND_ATTEMPTS}). Reason: ${note || "Not specified"}. Resend from the delivery partner app, or after ${MAX_PICKUP_RESEND_ATTEMPTS} attempts the order continues without that restaurant.`
-      : `The restaurant has rejected the order. Reason: ${note || "Not specified"}. You can try resending it up to 3 times.`;
+      ? `One restaurant rejected the order. Reason: ${note || "Not specified"}. It has been removed and your order continues with the remaining restaurant(s).`
+      : `The restaurant has rejected the order. Reason: ${note || "Not specified"}. Your order has been cancelled and a refund initiated where applicable.`;
   } else if (String(statusForMessage).includes("cancel") || String(finalStatus).includes("cancel")) {
     const isOnlinePaid = order.payment.method === "razorpay" && (order.payment.status === "paid" || order.payment.status === "refunded");
     const refundDetail = isOnlinePaid ? ` Your refund of ₹${order.pricing.total} is being processed and will be credited to your original payment method within 5-7 working days.` : "";
@@ -3343,121 +3366,11 @@ export async function getMultiOrderSettlementReport(query = {}) {
   };
 }
 
-/**
- * Resends the order to the restaurant (up to 3 rejection attempts per pickup).
- * Triggered by the delivery partner when a restaurant rejects an order they accepted.
- */
-export async function resendOrderToRestaurant(orderId, deliveryPartnerId, restaurantId = null) {
-  const identity = buildOrderIdentityFilter(orderId);
-  if (!identity) throw new ValidationError("Order id required");
-
-  const partnerId = new mongoose.Types.ObjectId(deliveryPartnerId);
-  const order = await FoodOrder.findOne({
-    ...identity,
-    $or: [
-      { 'dispatch.deliveryPartnerId': partnerId },
-      { 'dispatch.sharedPartnerId': partnerId },
-    ],
-  });
-
-  if (!order) throw new NotFoundError("Order not found or not assigned to you");
-
-  const from = order.orderStatus;
-  const resentAt = new Date();
-  order.restaurantNotifiedAt = resentAt;
-
-  const findResendablePickups = () => {
-    let list = (order.pickups || []).filter(
-      (p) =>
-        !p.permanentlyDropped &&
-        String(p.status || '') === 'cancelled' &&
-        (Number(p.rejectionAttempts) || 0) < MAX_PICKUP_RESEND_ATTEMPTS,
-    );
-    if (restaurantId) {
-      list = list.filter(
-        (p) => String(p.restaurantId || '') === String(restaurantId),
-      );
-    }
-    return list;
-  };
-
-  const cancelledPickups =
-    Array.isArray(order.pickups) && order.pickups.length > 0
-      ? findResendablePickups()
-      : [];
-
-  if (cancelledPickups.length > 0) {
-    for (const pickup of cancelledPickups) {
-      pickup.status = 'pending';
-    }
-    order.markModified('pickups');
-
-    const to = computeAggregateOrderStatus(order);
-    order.orderStatus = to;
-    pushStatusHistory(order, {
-      byRole: "DELIVERY_PARTNER",
-      byId: deliveryPartnerId,
-      from,
-      to,
-      note: `Resent to restaurant(s) by delivery partner. Attempts used: ${cancelledPickups.map((p) => `${p.restaurantName || p.restaurantId}:${p.rejectionAttempts}/${MAX_PICKUP_RESEND_ATTEMPTS}`).join(', ')}`,
-    });
-
-    await order.save();
-
-    for (const pickup of cancelledPickups) {
-      await notifyRestaurantNewOrder(order, pickup.restaurantId, {
-        freshNotify: true,
-        resentToRestaurant: true,
-      });
-    }
-
-    return normalizeOrderForClient(order);
-  }
-
-  if ((order.restaurantRejectionCount || 0) >= 3) {
-    throw new ValidationError("Order has reached maximum rejection limit (3 times) and is now dead.");
-  }
-
-  if (order.orderStatus !== 'rejected_by_restaurant') {
-    throw new ValidationError("Order can only be resent if it was rejected by the restaurant");
-  }
-
-  const to = 'created';
-  order.orderStatus = to;
-
-  if (Array.isArray(order.pickups) && order.pickups.length > 0) {
-    const targetRid = restaurantId
-      ? String(restaurantId)
-      : String(order.restaurantId || '');
-    for (const pickup of order.pickups) {
-      const pid = String(pickup?.restaurantId || '');
-      if (targetRid && pid && pid !== targetRid) continue;
-      if (!pickup.permanentlyDropped) {
-        pickup.status = 'pending';
-      }
-    }
-    order.markModified('pickups');
-  }
-
-  pushStatusHistory(order, {
-    byRole: "DELIVERY_PARTNER",
-    byId: deliveryPartnerId,
-    from,
-    to,
-    note: `Resent to restaurant by delivery partner (Attempt ${order.restaurantRejectionCount}/3)`
-  });
-
-  await order.save();
-
-  await notifyRestaurantNewOrder(order, restaurantId || null, {
-    freshNotify: true,
-    resentToRestaurant: true,
-  });
-
-  return normalizeOrderForClient(order);
-}
-
-
+// NOTE: resendOrderToRestaurant (the driver-initiated 3-strike "resend to restaurant" flow)
+// was removed in Phase 3. The reject policy is now immediate-drop: a restaurant rejection
+// permanently drops that restaurant (multi) or cancels the order (single) with refund — there
+// is nothing to resend. The legitimate "re-search for a driver" action lives in
+// resendDeliveryNotificationRestaurant and is unaffected.
 
 export async function reportOrderDelay(orderId, userId, role, reason) {
   const identity = buildOrderIdentityFilter(orderId);

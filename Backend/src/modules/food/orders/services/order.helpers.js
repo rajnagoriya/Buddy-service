@@ -426,7 +426,11 @@ export function normalizeOrderForClient(orderDoc) {
         order.statusHistory?.findLast((h) => h.to?.includes('cancel'))?.note || '',
       ).toLowerCase();
       if (cancelNote.includes('no delivery partner')) return 'driver_not_found';
-      if (cancelNote.includes('3 times') || cancelNote.includes('3 attempts')) return 'restaurant_rejected';
+      if (
+        cancelNote.includes('rejected the order') ||
+        cancelNote.includes('restaurant rejected') ||
+        cancelNote.includes('did not respond')
+      ) return 'restaurant_rejected';
       return null;
     })(),
     riderToRestaurantDistanceKm: showRiderToRestaurantDistance

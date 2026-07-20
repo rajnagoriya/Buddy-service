@@ -7,7 +7,6 @@ import { ValidationError } from '../../../../core/auth/errors.js';
 
 export const MAX_RESTAURANTS_PER_ORDER = 3;
 export const MAX_DRIVERS_PER_ORDER = 2;
-export const MAX_PICKUP_RESEND_ATTEMPTS = 3;
 
 /** Pickup statuses that still participate in the active multi-restaurant trip */
 const ACTIVE_PICKUP_STATUSES = new Set([
@@ -71,20 +70,6 @@ export function getActivePickups(order) {
   return pickups.filter(isActivePickup);
 }
 
-export function getPickupRejectionAttempts(pickup) {
-  return Math.max(0, Number(pickup?.rejectionAttempts) || 0);
-}
-
-export function canResendPickup(pickup) {
-  if (!pickup || pickup.permanentlyDropped) return false;
-  if (String(pickup.status || '') !== 'cancelled') return false;
-  return getPickupRejectionAttempts(pickup) < MAX_PICKUP_RESEND_ATTEMPTS;
-}
-
-export function shouldPermanentlyDropPickup(pickup) {
-  if (!pickup || pickup.permanentlyDropped) return false;
-  return getPickupRejectionAttempts(pickup) >= MAX_PICKUP_RESEND_ATTEMPTS;
-}
 
 /**
  * All remaining (active) restaurants have accepted (or progressed past accept).

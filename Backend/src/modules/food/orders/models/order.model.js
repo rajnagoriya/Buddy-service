@@ -277,9 +277,9 @@ const pickupSchema = new mongoose.Schema(
             default: undefined
         },
         items: [String], // Array of item names or IDs belonging to this pickup
-        /** Times this pickup was rejected while awaiting DP resend (max 3) */
+        /** Legacy strike counter (unused since Phase 3 immediate-drop policy); kept for back-compat. */
         rejectionAttempts: { type: Number, default: 0, min: 0 },
-        /** After 3 failed attempts — restaurant dropped; order continues without it */
+        /** Set on rejection — restaurant is dropped immediately; order continues without it (or cancels if none remain). */
         permanentlyDropped: { type: Boolean, default: false },
         pickedAt: { type: Date, default: null },
         droppedAt: { type: Date, default: null },

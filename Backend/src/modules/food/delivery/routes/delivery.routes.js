@@ -48,7 +48,6 @@ router.patch('/orders/:orderId/complete', authMiddleware, requireRoles('DELIVERY
 router.patch('/orders/:orderId/status', authMiddleware, requireRoles('DELIVERY_PARTNER', 'DRIVER'), orderController.updateOrderStatusDeliveryController);
 router.post('/orders/:orderId/collect/qr', authMiddleware, requireRoles('DELIVERY_PARTNER', 'DRIVER'), orderController.createCollectQrController);
 router.get('/orders/:orderId/payment-status', authMiddleware, requireRoles('DELIVERY_PARTNER', 'DRIVER'), orderController.getPaymentStatusController);
-router.post('/orders/:orderId/resend-to-restaurant', authMiddleware, requireRoles('DELIVERY_PARTNER', 'DRIVER'), orderController.resendOrderToRestaurantController);
 router.post('/orders/:orderId/share', authMiddleware, requireRoles('DELIVERY_PARTNER', 'DRIVER'), orderController.shareOrderDeliveryController);
 router.post('/orders/:orderId/accept-share', authMiddleware, requireRoles('DELIVERY_PARTNER', 'DRIVER'), orderController.acceptSharedOrderDeliveryController);
 router.patch('/orders/:orderId/confirm-split', authMiddleware, requireRoles('DELIVERY_PARTNER', 'DRIVER'), orderController.confirmSplitDeliveryController);

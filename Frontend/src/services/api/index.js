@@ -2157,14 +2157,6 @@ export const deliveryAPI = {
         contextModule: "delivery",
       },
     ),
-  resendOrderToRestaurant: (orderId, restaurantId) =>
-    apiClient.post(
-      `/food/delivery/orders/${String(orderId)}/resend-to-restaurant`,
-      restaurantId ? { restaurantId: String(restaurantId) } : {},
-      {
-        contextModule: "delivery",
-      },
-    ),
   rejectOrder: (orderId, body = {}) =>
     apiClient.patch(
       `/food/delivery/orders/${String(orderId)}/reject`,

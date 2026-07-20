@@ -32,9 +32,11 @@ Interim safety for the current earnings-share model, before the Phase 6 rebuild.
 
 *Note:* Tier-2 auto-cancel for a multi-restaurant no-response only pushes the cancellation to the primary restaurant (others never engaged); refine in Phase 3 if needed.
 
-## Phase 3 — Flow 2 reject/resend correctness · S–M
-- ⬜ **F-2A** Make handler + constants + messages agree on **immediate drop + refund**; remove 3-strike copy and the dead resend endpoint; fix single-restaurant reject messaging.
-- ⬜ Post-pickup restaurant-B rejection flow (return / partial-delivery).
+## Phase 3 — Flow 2 reject/resend correctness · S–M ✅
+- ✅ **F-2A** Reject policy is now consistently **immediate-drop**. Removed the dead 3-strike system end-to-end: `resendOrderToRestaurant` service + controller + route deleted; `MAX_PICKUP_RESEND_ATTEMPTS` + `canResendPickup` + `shouldPermanentlyDropPickup` + `getPickupRejectionAttempts` removed from policy; vestigial `pickup.rejectionAttempts` increment dropped; all "after 3 attempts / resend up to 3 times" copy replaced with immediate-drop messaging; orphaned frontend `RejectedOrderModal.jsx` + `deliveryAPI.resendOrderToRestaurant` deleted. Updated the `failureReason` classifier to key off the new note text.
+- ✅ **Post-pickup rejection flow** — a restaurant can no longer reject once its items are picked up or the order has left the pickup phase (`picked_up`/`reached_drop`/`delivered`). When dropping the last un-picked restaurant leaves everything else already picked up, the order auto-advances to the delivery phase instead of stranding the driver.
+
+*Kept:* `resendDeliveryNotificationRestaurant` (restaurant-initiated **driver** re-search) — unrelated, still live.
 
 ## Phase 4 — State-machine & real-time integrity · M
 - ⬜ Replace rank-only `isStatusAdvance` with an explicit adjacency transition table (block stage-skips at the guard).
@@ -64,3 +66,4 @@ Interim safety for the current earnings-share model, before the Phase 6 rebuild.
 ### Progress log
 - **Phase 1 — done & committed** on branch `phase1-two-driver-safety` (`b02d667`). Files: `order.model.js` (`dispatch.shareOpenedAt`), `order.helpers.js` (`SHARE_TIMEOUT_MS`), `order-delivery.service.js` (auto-share timestamp + solo-complete fallback), `order.service.js` (atomic shared join, manual-share timestamp, admin-reassign shared handling). `main` restored to `c6cdb87`.
 - **Phase 2 — done** on branch `phase2-driver-first-holes` (stacked on Phase 1). Files: `order.model.js` (`dispatch.restaurantAckResendAt`), `order.helpers.js` (ack + geofence constants), `order-delivery.service.js` (`assertRiderAtTarget` geofence + pickup ready-state guard), `order.service.js` (F-1A escalation in `recoverStuckOrders` + F-3D share eligibility). All pass `node --check`. Runtime/device test still pending (no automated test harness).
+- **Phase 3 — done** on branch `phase3-reject-policy` (stacked on Phase 2). Backend: `order.service.js` (removed `resendOrderToRestaurant`, immediate-drop messaging, post-pickup reject guards + auto-advance), `order-lifecycle.policy.js` (removed strike constant/helpers), `order.helpers.js` (`failureReason` classifier), `order.controller.js` + `delivery.routes.js` (removed resend endpoint), `order.model.js` (comment fixes). Frontend: deleted `RejectedOrderModal.jsx`, removed `resendOrderToRestaurant` API. All backend pass `node --check`; frontend api parses as ESM. Runtime test pending.
