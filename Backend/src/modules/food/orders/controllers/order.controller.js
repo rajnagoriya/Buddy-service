@@ -383,6 +383,18 @@ export async function assignDeliveryPartnerController(req, res, next) {
     }
 }
 
+export async function assignSecondDeliveryPartnerController(req, res, next) {
+    try {
+        const adminId = req.user?.userId;
+        const orderId = req.params.orderId;
+        const dto = validateAssignDeliveryDto(req.body);
+        const order = await orderService.assignSecondDeliveryPartnerAdmin(orderId, dto.deliveryPartnerId, adminId);
+        return sendResponse(res, 200, 'Second delivery partner assigned', { order });
+    } catch (err) {
+        next(err);
+    }
+}
+
 export async function cancelOrderAdminController(req, res, next) {
     try {
         const adminId = req.user?.userId;

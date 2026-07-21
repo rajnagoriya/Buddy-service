@@ -232,6 +232,7 @@ router.get('/orders/settlement-report', orderController.getMultiOrderSettlementR
 router.get('/orders/:orderId', orderController.getOrderByIdAdminController);
 router.patch('/orders/:orderId/cancel', orderController.cancelOrderAdminController);
 router.patch('/orders/:orderId/assign-delivery', orderController.assignDeliveryPartnerController);
+router.patch('/orders/:orderId/assign-second-delivery', orderController.assignSecondDeliveryPartnerController);
 router.delete('/orders/:orderId', orderController.deleteOrderAdminController);
 
 // ----- CMS Pages (About + legal) -----

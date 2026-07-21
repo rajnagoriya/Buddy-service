@@ -305,6 +305,167 @@ export function isOrderFullyLocked(order, settings = {}) {
   return true;
 }
 
+/* ------------------------------------------------------------------ *
+ * Flow 3 — dual-leg delivery
+ * Legs only exist once a second driver joins; single-driver orders keep
+ * using `deliveryState` and never populate `legs`.
+ * ------------------------------------------------------------------ */
+
+export function isDualLegActive(order) {
+  return Boolean(order?.isDualLeg) && Array.isArray(order?.legs) && order.legs.length > 1;
+}
+
+/** Legs still in play (a cancelled leg no longer blocks parent completion). */
+export function getActiveLegs(order) {
+  const legs = Array.isArray(order?.legs) ? order.legs : [];
+  return legs.filter((leg) => String(leg?.status || '') !== 'cancelled');
+}
+
+export function getLegForPartner(order, partnerId) {
+  const pid = String(partnerId || '');
+  if (!pid) return null;
+  const legs = Array.isArray(order?.legs) ? order.legs : [];
+  return legs.find((leg) => String(leg?.partnerId || '') === pid) || null;
+}
+
+/** Parent order may only be DELIVERED when every active leg is delivered. */
+export function areAllLegsDelivered(order) {
+  const active = getActiveLegs(order);
+  if (active.length === 0) return false;
+  return active.every((leg) => String(leg?.status || '') === 'delivered');
+}
+
+/**
+ * The next stop for a specific leg. Under a stop-level split each driver only sees the
+ * restaurants assigned to their own leg; item-level splits share the same single restaurant.
+ * Falls back to the order-wide next stop when the leg has no restaurant assignment.
+ */
+export function getNextPickupForLeg(order, leg) {
+  if (!leg) return getNextPickup(order);
+  const allowed = new Set((leg.restaurantIds || []).map((id) => String(id)));
+  if (allowed.size === 0) return getNextPickup(order);
+
+  const remaining = getActivePickups(order).filter(
+    (p) =>
+      String(p.status || '') !== 'picked_up' &&
+      allowed.has(String(p.restaurantId || '')),
+  );
+  if (remaining.length === 0) return null;
+
+  const bySequence = remaining
+    .slice()
+    .sort((a, b) => (Number(a.sequence) || 0) - (Number(b.sequence) || 0));
+  const head = bySequence[0];
+  if (String(head.status || '') === 'ready') return head;
+  return bySequence.find((p) => String(p.status || '') === 'ready') || head;
+}
+
+/** Progress summary for customer-facing two-driver tracking. */
+export function getLegProgress(order) {
+  const active = getActiveLegs(order);
+  return {
+    isDualLeg: isDualLegActive(order),
+    total: active.length,
+    delivered: active.filter((l) => String(l?.status || '') === 'delivered').length,
+    legs: active.map((leg) => ({
+      legIndex: leg.legIndex,
+      role: leg.role,
+      partnerId: leg.partnerId ? String(leg.partnerId) : '',
+      status: leg.status,
+      otpVerified: Boolean(leg.otpVerified),
+      restaurantIds: (leg.restaurantIds || []).map(String),
+    })),
+  };
+}
+
+/**
+ * Divide the order between two drivers.
+ *
+ * - 2+ active restaurants → **stop-level** split: whole restaurants are balanced across the
+ *   legs by item count, so each driver owns their own pickups.
+ * - single restaurant → **item-level** split: units are balanced across the legs, splitting a
+ *   line when needed (a single line of qty 20 still halves correctly).
+ *
+ * Returns `{ legs, splitMode }`; the caller persists them onto the order.
+ */
+export function buildDeliveryLegs(order, {
+  primaryPartnerId = null,
+  secondaryPartnerId = null,
+  primaryEarning = 0,
+  secondaryEarning = 0,
+  otpFactory = () => '',
+} = {}) {
+  const now = new Date();
+  const makeLeg = (legIndex, role, partnerId, earning) => ({
+    legIndex,
+    role,
+    partnerId: partnerId || null,
+    status: 'assigned',
+    restaurantIds: [],
+    itemSplits: [],
+    otp: otpFactory(),
+    otpVerified: false,
+    earning: Math.max(0, Number(earning) || 0),
+    assignedAt: now,
+  });
+
+  const legs = [
+    makeLeg(0, 'primary', primaryPartnerId, primaryEarning),
+    makeLeg(1, 'secondary', secondaryPartnerId, secondaryEarning),
+  ];
+
+  const activePickups = getActivePickups(order);
+
+  // Stop-level split across 2+ restaurants.
+  if (activePickups.length >= 2) {
+    const weighted = activePickups
+      .map((p) => ({
+        restaurantId: p.restaurantId,
+        weight: Array.isArray(p.items) ? p.items.length : 0,
+      }))
+      .sort((a, b) => b.weight - a.weight);
+
+    const load = [0, 0];
+    for (const stop of weighted) {
+      const target = load[0] <= load[1] ? 0 : 1;
+      legs[target].restaurantIds.push(stop.restaurantId);
+      load[target] += stop.weight;
+    }
+    return { legs, splitMode: 'stop' };
+  }
+
+  // Item-level split within a single restaurant (quantity-aware).
+  const items = Array.isArray(order?.items) ? order.items : [];
+  const totalQty = items.reduce((sum, it) => sum + (Number(it?.quantity) || 1), 0);
+  const firstLegTarget = Math.ceil(totalQty / 2);
+  let assigned = 0;
+
+  items.forEach((item, itemIndex) => {
+    const qty = Number(item?.quantity) || 1;
+    if (assigned >= firstLegTarget) {
+      legs[1].itemSplits.push({ itemIndex, quantity: qty });
+      return;
+    }
+    const takeForFirst = Math.min(qty, firstLegTarget - assigned);
+    if (takeForFirst > 0) {
+      legs[0].itemSplits.push({ itemIndex, quantity: takeForFirst });
+      assigned += takeForFirst;
+    }
+    const remainder = qty - takeForFirst;
+    if (remainder > 0) {
+      legs[1].itemSplits.push({ itemIndex, quantity: remainder });
+    }
+  });
+
+  const singleRestaurantId = activePickups[0]?.restaurantId || order?.restaurantId || null;
+  if (singleRestaurantId) {
+    legs.forEach((leg) => {
+      leg.restaurantIds = [singleRestaurantId];
+    });
+  }
+  return { legs, splitMode: 'item' };
+}
+
 /**
  * Cancel permission matrix.
  * @param {'USER'|'RESTAURANT'|'DELIVERY_PARTNER'|'ADMIN'|'SYSTEM'} role

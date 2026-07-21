@@ -52,13 +52,18 @@ Interim safety for the current earnings-share model, before the Phase 6 rebuild.
 
 *Deferred to Phase 5b:* the full multi-stop **list** UI in the driver app (ordered stop cards, per-stop ETA/waiting badges). The data contract (`sequence`, `prepMinutes`, `readyAt`, `pickupProgress`) is now served, and stop-selection already follows it.
 
-## Phase 6 — Flow 3 true dual-leg (the big one) · L
-- ⬜ Data model: per-driver `legs[]` (assigned/arrived/picked/delivering/delivered), item→driver split map, second OTP.
-- ⬜ Per-leg endpoints + "parent DELIVERED only when both legs done" guard.
-- ⬜ Item/stop split (stop-level for multi-restaurant, item-level within one restaurant).
-- ⬜ Customer two-driver tracking (two markers / two rows).
-- ⬜ Admin force-assign second driver.
-- ⬜ Restaurant labeled handover (pack two sets, hand correct bag).
+## Phase 6 — Flow 3 true dual-leg (the big one) · L ✅ (backend; customer/restaurant UI → 6b)
+**Split semantics used (D2 default, unconfirmed):** stop-level across 2+ restaurants, item-level
+(quantity-aware) within a single restaurant, **one OTP per leg**.
+
+- ✅ **Data model** — `legs[]` (legIndex, role, partnerId, status, restaurantIds, quantity-aware `itemSplits`, per-leg `otp`/`otpVerified`, earning, timestamps) + `isDualLeg` + `splitMode`. Legs are only populated when a second driver joins, so single-driver orders are completely unaffected.
+- ✅ **Split** — `buildDeliveryLegs` balances whole restaurants across legs by item count (stop mode), or balances units and splits a line when needed (item mode — a single line of qty 20 halves correctly).
+- ✅ **Per-leg execution** — reached-pickup, confirm-pickup, reached-drop, verify-OTP and complete are all leg-scoped via `getLegForPartner`; `getNextPickupForLeg` means each driver only sees their own stops. The old "only the primary partner can confirm pickup" block is lifted under dual-leg.
+- ✅ **Parent-completion guard** — a driver completes only THEIR leg; the parent is DELIVERED (and settled) only when `areAllLegsDelivered`. Item-split orders hold the parent at `ready_for_pickup` until both legs are collected.
+- ✅ **Second OTP** — each leg gets its own handover code, generated at its own drop arrival and verified independently. Leg OTPs are stripped from every external payload (`sanitizeOrderForExternal` exposes `hasOtp` only) and surfaced to the customer via `getDropOtpUser` / `/sync` (`legHandoverOtps`).
+- ✅ **Admin force-assign second driver** — new `assignSecondDeliveryPartnerAdmin` + `PATCH /admin/orders/:orderId/assign-second-delivery` (previously admin assign *wiped* the shared partner; there was no way to add one).
+- ⬜ **Customer two-driver tracking UI** (two markers / two rows) → 6b. `legProgress` is now served on every delivery payload and in `/sync`.
+- ⬜ **Restaurant labeled handover UI** (pack two labelled sets) → 6b. The split map is persisted per leg.
 
 ## Phase 7 — Cleanup & hardening · M
 - ⬜ Dedicated FCM ring channel / full-screen intent for driver offers.
@@ -71,5 +76,6 @@ Interim safety for the current earnings-share model, before the Phase 6 rebuild.
 - **Phase 1 — done & committed** on branch `phase1-two-driver-safety` (`b02d667`). Files: `order.model.js` (`dispatch.shareOpenedAt`), `order.helpers.js` (`SHARE_TIMEOUT_MS`), `order-delivery.service.js` (auto-share timestamp + solo-complete fallback), `order.service.js` (atomic shared join, manual-share timestamp, admin-reassign shared handling). `main` restored to `c6cdb87`.
 - **Phase 2 — done** on branch `phase2-driver-first-holes` (stacked on Phase 1). Files: `order.model.js` (`dispatch.restaurantAckResendAt`), `order.helpers.js` (ack + geofence constants), `order-delivery.service.js` (`assertRiderAtTarget` geofence + pickup ready-state guard), `order.service.js` (F-1A escalation in `recoverStuckOrders` + F-3D share eligibility). All pass `node --check`. Runtime/device test still pending (no automated test harness).
 - **Phase 3 — done** on branch `phase3-reject-policy` (stacked on Phase 2). Backend: `order.service.js` (removed `resendOrderToRestaurant`, immediate-drop messaging, post-pickup reject guards + auto-advance), `order-lifecycle.policy.js` (removed strike constant/helpers), `order.helpers.js` (`failureReason` classifier), `order.controller.js` + `delivery.routes.js` (removed resend endpoint), `order.model.js` (comment fixes). Frontend: deleted `RejectedOrderModal.jsx`, removed `resendOrderToRestaurant` API. All backend pass `node --check`; frontend api parses as ESM. Runtime test pending.
+- **Phase 6 — done** on branch `phase6-dual-leg` (stacked on Phase 5). `order.model.js` (legs/isDualLeg/splitMode), `order-lifecycle.policy.js` (leg helpers + split), `order-delivery.service.js` (leg-scoped pickup/drop/OTP/complete), `order.service.js` (leg creation on share-accept, admin second-driver assign, customer leg OTPs in `/sync`), `order.helpers.js` (strip leg OTPs), `order.controller.js` + `admin.routes.js` (new endpoint). All pass `node --check`; all 5 leg entry points gated by `isDualLegActive` so the single-driver path is untouched. Customer/restaurant UI → 6b. Runtime test pending.
 - **Phase 5 — done** on branch `phase5-multi-restaurant-orchestration` (stacked on Phase 4). `order.model.js` (pickup `sequence`/`prepMinutes`/`readyAt`), `order-lifecycle.policy.js` (ETA + sequencing + progress helpers), `order.service.js` (create-time prep/sequence/ETA, `readyAt`, progress in broadcast), `order-delivery.service.js` (sequence-aware stop, waiting state, progress on events, `pickup_leg_completed`), `useProximityCheck.js` (mirrors server stop rule). All pass `node --check`. Multi-stop list UI deferred to 5b. Runtime test pending.
 - **Phase 4 — done** on branch `phase4-state-machine-events` (stacked on Phase 3). New `foodOrderEvent.model.js` outbox. `order.model.js` (`eventSeq`), `order-lifecycle.policy.js` (transition table + validators), `order-delivery.service.js` (completeDelivery adjacency guard), `order.helpers.js` (`enqueueOrderEvent` → seq + outbox), `order.service.js` (seq-aware multi-driver `resyncState`), `config/socket.js` (resync forwards `sinceSeq`, emits recovery envelope). All pass `node --check`. Client-side dedup deferred to 4b. Runtime test pending.

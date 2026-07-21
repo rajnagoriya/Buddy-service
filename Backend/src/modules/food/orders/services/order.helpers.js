@@ -295,6 +295,14 @@ export function generateFourDigitDeliveryOtp() {
 export function sanitizeOrderForExternal(orderDoc) {
   const o = orderDoc?.toObject ? orderDoc.toObject() : { ...(orderDoc || {}) };
   delete o.deliveryOtp;
+  // Never leak per-leg handover OTPs — only the customer receives them (see
+  // emitDeliveryDropOtpToUser / getDropOtpUser). Expose presence, not the code.
+  if (Array.isArray(o.legs)) {
+    o.legs = o.legs.map((leg) => {
+      const { otp, ...rest } = leg || {};
+      return { ...rest, hasOtp: Boolean(otp) };
+    });
+  }
   const dv = o.deliveryVerification;
   if (dv && dv.dropOtp != null) {
     const d = dv.dropOtp;
