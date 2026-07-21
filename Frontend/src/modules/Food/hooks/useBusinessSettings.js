@@ -20,9 +20,9 @@ export function useBusinessSettings() {
     const cached = getCachedSettings();
     if (cached) {
       applySettings(cached);
-    } else {
-      loadBusinessSettings().then(applySettings);
     }
+    // Always refresh in background so logo/name stay current
+    loadBusinessSettings().then(applySettings);
 
     const handleSettingsUpdate = () => {
       applySettings(getCachedSettings());

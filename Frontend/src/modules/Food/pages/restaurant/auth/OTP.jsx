@@ -298,12 +298,15 @@ export default function RestaurantOTP() {
       subtitle={
         <>
           Enter the 4-digit code sent to{" "}
-          <span className="font-semibold text-primary-orange">{contactInfo}</span>
+          <span className="font-semibold text-[var(--rt-primary-strong,#27A344)]">
+            {contactInfo}
+          </span>
         </>
       }
       onBack={() => navigate("/food/restaurant/login")}
+      badge="Secure verification"
     >
-      <div className="mx-auto grid max-w-[15rem] grid-cols-4 gap-2 sm:max-w-[17rem] sm:gap-3">
+      <div className="mx-auto grid max-w-[16rem] grid-cols-4 gap-2.5 sm:max-w-[18rem] sm:gap-3">
         {otp.map((digit, index) => (
           <input
             key={index}
@@ -321,10 +324,10 @@ export default function RestaurantOTP() {
             onFocus={() => setFocusedIndex(index)}
             onBlur={() => setFocusedIndex(null)}
             aria-label={`OTP digit ${index + 1}`}
-            className={`h-11 w-11 rounded-xl border-2 bg-gray-50 text-center text-lg font-bold text-gray-900 outline-none transition-all sm:h-12 sm:w-12 sm:text-xl ${
+            className={`h-12 w-12 rounded-xl border bg-[var(--rt-surface-muted,#f4f6f9)] text-center text-lg font-bold text-gray-900 outline-none transition-all sm:h-[3.25rem] sm:w-[3.25rem] sm:text-xl ${
               focusedIndex === index
-                ? "border-primary-orange bg-white ring-2 ring-primary-orange/20"
-                : "border-gray-200 hover:border-gray-300"
+                ? "border-[var(--rt-primary-strong,#27A344)] bg-white ring-2 ring-[var(--rt-primary-soft,#E8F7EC)]"
+                : "border-[var(--rt-border,#e8edf2)] hover:border-gray-300"
             }`}
           />
         ))}
@@ -334,23 +337,26 @@ export default function RestaurantOTP() {
         type="button"
         onClick={() => handleVerify()}
         disabled={isLoading || !isOtpComplete}
-        className="mt-6 h-11 w-full rounded-xl bg-primary-orange text-sm font-semibold text-white shadow-md transition-colors hover:bg-primary-orange/90 disabled:opacity-50"
+        className="rt-btn-primary mt-6 h-12 w-full text-[15px] shadow-md disabled:opacity-50"
       >
-        {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify & Continue"}
+        {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify & continue"}
       </Button>
 
       <div className="mt-5 text-center">
         {resendTimer > 0 ? (
-          <p className="flex items-center justify-center gap-2 text-sm text-gray-500">
-            <Timer className="h-4 w-4 text-primary-orange" />
-            Resend code in <span className="font-semibold text-primary-orange">{resendTimer}s</span>
+          <p className="flex items-center justify-center gap-2 text-sm text-[var(--rt-muted,#6b7280)]">
+            <Timer className="h-4 w-4 text-[var(--rt-primary-strong,#27A344)]" />
+            Resend code in{" "}
+            <span className="font-semibold text-[var(--rt-primary-strong,#27A344)]">
+              {resendTimer}s
+            </span>
           </p>
         ) : (
           <button
             type="button"
             onClick={handleResend}
             disabled={isLoading}
-            className="inline-flex items-center gap-2 text-sm font-medium text-primary-orange hover:underline"
+            className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--rt-primary-strong,#27A344)] hover:underline"
           >
             <RefreshCw className="h-4 w-4" />
             Resend OTP

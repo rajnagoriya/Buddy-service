@@ -98,17 +98,18 @@ export default function RestaurantSignup() {
 
   return (
     <RestaurantAuthLayout
-      title="Register Restaurant"
-      subtitle="Enter your restaurant details to get started"
+      title="Register restaurant"
+      subtitle="Share your outlet name and mobile number to start onboarding."
       onBack={() => navigate("/food/restaurant/login")}
+      badge="New partner"
     >
       <form onSubmit={handleSubmit} className="w-full space-y-5">
-        <div className="space-y-1.5">
-          <Label htmlFor="name" className="text-sm font-medium text-gray-700">
+        <div className="space-y-2">
+          <Label htmlFor="name" className="text-sm font-semibold text-gray-800">
             Restaurant name
           </Label>
           <div className="relative">
-            <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-gray-400">
+            <span className="pointer-events-none absolute inset-y-0 left-3.5 flex items-center text-gray-400">
               <User className="h-4 w-4" />
             </span>
             <Input
@@ -118,7 +119,9 @@ export default function RestaurantSignup() {
               placeholder="Enter restaurant name"
               value={formData.name}
               onChange={handleChange}
-                className={`h-11 border-2 pl-9 shadow-none transition-colors placeholder:text-gray-400 focus-visible:border-primary-orange focus-visible:ring-2 focus-visible:ring-primary-orange/20 rounded-xl ${errors.name ? "border-red-500" : "border-gray-200"}`}
+              className={`h-12 rounded-xl border pl-10 text-[15px] shadow-none transition-colors placeholder:text-gray-400 focus-visible:border-[var(--rt-primary-strong,#27A344)] focus-visible:ring-2 focus-visible:ring-[var(--rt-primary-soft,#E8F7EC)] ${
+                errors.name ? "border-red-500" : "border-[var(--rt-border,#e8edf2)]"
+              }`}
               required
             />
           </div>
@@ -130,16 +133,16 @@ export default function RestaurantSignup() {
           ) : null}
         </div>
 
-        <div className="space-y-1.5">
-          <Label htmlFor="phone" className="text-sm font-medium text-gray-700">
-            Phone number
+        <div className="space-y-2">
+          <Label htmlFor="phone" className="text-sm font-semibold text-gray-800">
+            Mobile number
           </Label>
-          <div className="flex gap-2">
-            <div className="flex h-11 w-16 shrink-0 items-center justify-center rounded-md border border-gray-300 bg-gray-50 text-sm font-semibold text-gray-700">
+          <div className="flex gap-2.5">
+            <div className="flex h-12 w-[4.25rem] shrink-0 items-center justify-center rounded-xl border border-[var(--rt-border,#e8edf2)] bg-[var(--rt-surface-muted,#f4f6f9)] text-sm font-semibold text-gray-700">
               +91
             </div>
             <div className="relative min-w-0 flex-1">
-              <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-gray-400">
+              <span className="pointer-events-none absolute inset-y-0 left-3.5 flex items-center text-gray-400">
                 <Phone className="h-4 w-4" />
               </span>
               <Input
@@ -151,7 +154,9 @@ export default function RestaurantSignup() {
                 value={formData.phone}
                 onChange={handleChange}
                 maxLength={10}
-                className={`h-11 border-2 pl-9 shadow-none transition-colors placeholder:text-gray-400 focus-visible:border-primary-orange focus-visible:ring-2 focus-visible:ring-primary-orange/20 rounded-xl ${errors.phone ? "border-red-500" : "border-gray-200"}`}
+                className={`h-12 rounded-xl border pl-10 text-[15px] shadow-none transition-colors placeholder:text-gray-400 focus-visible:border-[var(--rt-primary-strong,#27A344)] focus-visible:ring-2 focus-visible:ring-[var(--rt-primary-soft,#E8F7EC)] ${
+                  errors.phone ? "border-red-500" : "border-[var(--rt-border,#e8edf2)]"
+                }`}
                 required
               />
             </div>
@@ -172,7 +177,7 @@ export default function RestaurantSignup() {
 
         <Button
           type="submit"
-          className="h-11 w-full rounded-xl bg-primary-orange text-sm font-semibold text-white shadow-md transition-colors hover:bg-primary-orange/90"
+          className="rt-btn-primary h-12 w-full text-[15px] shadow-md disabled:opacity-50"
           disabled={isLoading}
         >
           {isLoading ? (
@@ -186,12 +191,12 @@ export default function RestaurantSignup() {
         </Button>
       </form>
 
-      <div className="mt-6 text-center text-sm">
+      <div className="mt-6 border-t border-[var(--rt-border,#e8edf2)] pt-5 text-center text-sm">
         <span className="text-gray-600">Already have an account? </span>
         <button
           type="button"
           onClick={() => navigate("/food/restaurant/login")}
-          className="font-medium text-primary-orange hover:underline"
+          className="font-semibold text-[var(--rt-primary-strong,#27A344)] hover:underline"
         >
           Login
         </button>
