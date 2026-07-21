@@ -31,6 +31,7 @@ import {
     logOfferAction,
     COUPON_CATEGORY,
 } from '../../admin/services/offer.service.js';
+import { FoodDiningCategory } from '../../dining/models/diningCategory.model.js';
 import { FoodDiningRestaurant } from '../../dining/models/diningRestaurant.model.js';
 import {
     getDefaultOutletTimingsShape,
@@ -674,11 +675,23 @@ export const updateCurrentRestaurantDiningSettings = async (restaurantId, body =
         1,
         parseInt(body.maxGuests ?? currentDiningSettings.maxGuests ?? 6, 10) || 6
     );
-    const diningType =
-        String(body.diningType ?? currentDiningSettings.diningType ?? 'family-dining').trim() ||
-        'family-dining';
+    const normalizeDiningType = (value) => {
+        if (Array.isArray(value)) {
+            return [...new Set(value.map((item) => String(item || '').trim()).filter(Boolean))];
+        }
+        const raw = String(value ?? '').trim();
+        if (!raw) return [];
+        return [...new Set(raw.split(',').map((item) => item.trim()).filter(Boolean))];
+    };
+
+    const diningTypeList = normalizeDiningType(body.diningType ?? currentDiningSettings.diningType ?? 'family-dining');
+    const diningType = diningTypeList.length > 0 ? diningTypeList : ['family-dining'];
 
     const isEnabled = parseBoolean(body.isEnabled, currentDiningSettings.isEnabled);
+    const selectedCategories = await FoodDiningCategory.find({
+        slug: { $in: diningType }
+    }).select('_id slug').lean();
+    const categoryIds = selectedCategories.map((item) => item._id);
     
     // First, update the FoodDiningRestaurant collection to keep it synced
     await FoodDiningRestaurant.findOneAndUpdate(
@@ -687,6 +700,8 @@ export const updateCurrentRestaurantDiningSettings = async (restaurantId, body =
             $set: {
                 isEnabled,
                 maxGuests,
+                categoryIds,
+                primaryCategoryId: categoryIds[0] || null,
             }
         },
         { upsert: true }

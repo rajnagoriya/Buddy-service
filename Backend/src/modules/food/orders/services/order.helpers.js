@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { randomUUID } from 'crypto';
 import { logger } from '../../../../utils/logger.js';
 import {
   sendNotificationToOwner,
@@ -6,10 +7,49 @@ import {
 } from "../../../../core/notifications/firebase.service.js";
 import { getIO, rooms } from '../../../../config/socket.js';
 import { addOrderJob } from '../../../../queues/producers/order.producer.js';
+import { FoodOrderEvent } from '../models/foodOrderEvent.model.js';
 
-export function enqueueOrderEvent(action, payload = {}) {
+/**
+ * Record an order lifecycle milestone.
+ *
+ * Single chokepoint for every milestone: it (1) atomically allocates a per-order monotonic
+ * `seq`, (2) appends the event to the durable outbox (food_order_events) with a unique
+ * `eventId`, and (3) enqueues the BullMQ job (now carrying seq/eventId). The outbox is what
+ * `/sync` replays so a reconnecting client can detect gaps and recover missed milestones.
+ *
+ * Fire-and-forget: callers do not await it. All failures are swallowed/logged so a milestone
+ * record never blocks or breaks the primary state change (which has already been persisted).
+ */
+export async function enqueueOrderEvent(action, payload = {}) {
+  let eventId = null;
+  let seq = null;
   try {
-    void addOrderJob({ action, ...payload }).catch((err) => {
+    const rawOrderId = payload.orderMongoId || payload.orderId;
+    if (rawOrderId && mongoose.Types.ObjectId.isValid(String(rawOrderId))) {
+      eventId = randomUUID();
+      // Atomically allocate the next per-order sequence, then append to the outbox.
+      const updated = await mongoose
+        .model('FoodOrder')
+        .findByIdAndUpdate(rawOrderId, { $inc: { eventSeq: 1 } }, { new: true, select: 'eventSeq' })
+        .lean();
+      seq = updated?.eventSeq ?? null;
+      if (seq != null) {
+        await FoodOrderEvent.create({
+          orderId: rawOrderId,
+          seq,
+          eventId,
+          type: action,
+          payload,
+          at: new Date(),
+        });
+      }
+    }
+  } catch (err) {
+    logger.warn(`Order event outbox append failed: ${action} - ${err?.message || err}`);
+  }
+
+  try {
+    void addOrderJob({ action, eventId, seq, ...payload }).catch((err) => {
       logger.warn(`BullMQ enqueue order event failed: ${action} - ${err?.message || err}`);
     });
   } catch (err) {
@@ -255,6 +295,14 @@ export function generateFourDigitDeliveryOtp() {
 export function sanitizeOrderForExternal(orderDoc) {
   const o = orderDoc?.toObject ? orderDoc.toObject() : { ...(orderDoc || {}) };
   delete o.deliveryOtp;
+  // Never leak per-leg handover OTPs — only the customer receives them (see
+  // emitDeliveryDropOtpToUser / getDropOtpUser). Expose presence, not the code.
+  if (Array.isArray(o.legs)) {
+    o.legs = o.legs.map((leg) => {
+      const { otp, ...rest } = leg || {};
+      return { ...rest, hasOtp: Boolean(otp) };
+    });
+  }
   const dv = o.deliveryVerification;
   if (dv && dv.dropOtp != null) {
     const d = dv.dropOtp;
@@ -343,6 +391,32 @@ export const MAX_DISPATCH_ATTEMPTS = 10;
 /** Auto-cancel food orders with no accepted driver after this age. Testing: 1 min → production: 5 min. */
 export const NO_DRIVER_AUTO_CANCEL_MS = 1 * 60 * 1000;
 
+/**
+ * How long a bulk order waits for a second (shared) delivery partner to join before the
+ * primary partner is allowed to complete the delivery solo with the full earning restored.
+ * Prevents a ≥threshold-item order from getting permanently stuck when no 2nd driver joins.
+ */
+export const SHARE_TIMEOUT_MS = 5 * 60 * 1000;
+
+/**
+ * Driver-first escalation: once a rider has accepted but NO restaurant has accepted yet
+ * (orderStatus still 'created'), re-notify the restaurant after RESEND, then auto-reject +
+ * refund + release the driver after TIMEOUT. Prevents a driver from being stranded on an
+ * order the restaurant silently ignores.
+ */
+export const RESTAURANT_ACK_RESEND_MS = 2 * 60 * 1000;
+export const RESTAURANT_ACK_TIMEOUT_MS = 5 * 60 * 1000;
+
+/**
+ * Server-side geofence for "reached pickup" / "reached drop". Fail-OPEN when the rider's
+ * last known location is missing or staler than RIDER_LOCATION_STALE_MS (Mongo location can
+ * lag the Redis hot path by ~30s), so legitimate riders are never blocked; only gross spoofing
+ * (marking arrived from far away) is rejected. Radii are intentionally generous.
+ */
+export const PICKUP_GEOFENCE_METERS = 1000;
+export const DROP_GEOFENCE_METERS = 1000;
+export const RIDER_LOCATION_STALE_MS = 10 * 60 * 1000;
+
 export function freeOrderDispatch(orderDoc) {
   if (!orderDoc) return;
   orderDoc.dispatch = orderDoc.dispatch || {};
@@ -400,7 +474,11 @@ export function normalizeOrderForClient(orderDoc) {
         order.statusHistory?.findLast((h) => h.to?.includes('cancel'))?.note || '',
       ).toLowerCase();
       if (cancelNote.includes('no delivery partner')) return 'driver_not_found';
-      if (cancelNote.includes('3 times') || cancelNote.includes('3 attempts')) return 'restaurant_rejected';
+      if (
+        cancelNote.includes('rejected the order') ||
+        cancelNote.includes('restaurant rejected') ||
+        cancelNote.includes('did not respond')
+      ) return 'restaurant_rejected';
       return null;
     })(),
     riderToRestaurantDistanceKm: showRiderToRestaurantDistance

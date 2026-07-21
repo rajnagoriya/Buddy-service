@@ -4,10 +4,52 @@
  */
 
 import { ValidationError } from '../../../../core/auth/errors.js';
+import { haversineKm } from '../../../../core/location/haversine.util.js';
 
 export const MAX_RESTAURANTS_PER_ORDER = 3;
 export const MAX_DRIVERS_PER_ORDER = 2;
-export const MAX_PICKUP_RESEND_ATTEMPTS = 3;
+
+/**
+ * Canonical order-status adjacency map (the real state machine, not just monotonic rank).
+ * `from → [allowed next]`. Terminal states have no outgoing edges. Used by `canOrderTransition`
+ * to block bypassable jumps (e.g. ready_for_pickup → delivered, skipping pickup) that the older
+ * rank-only `isStatusAdvance` let through. Note: `reached_pickup` / `reached_drop` are tracked on
+ * `deliveryState`, not `orderStatus`, so they are not modelled here.
+ */
+export const ORDER_STATUS_TRANSITIONS = {
+  scheduled: ['created', 'cancelled_by_user', 'cancelled_by_restaurant', 'cancelled_by_admin'],
+  created: [
+    'confirmed', 'preparing', 'ready_for_pickup', 'picked_up',
+    'rejected_by_restaurant', 'cancelled_by_user', 'cancelled_by_restaurant', 'cancelled_by_admin',
+  ],
+  confirmed: [
+    'preparing', 'ready_for_pickup', 'picked_up',
+    'rejected_by_restaurant', 'cancelled_by_user', 'cancelled_by_restaurant', 'cancelled_by_admin',
+  ],
+  preparing: ['ready_for_pickup', 'picked_up', 'cancelled_by_restaurant', 'cancelled_by_admin'],
+  ready_for_pickup: ['picked_up', 'cancelled_by_restaurant', 'cancelled_by_admin'],
+  picked_up: ['delivered', 'cancelled_by_admin'],
+  delivered: [],
+  rejected_by_restaurant: ['created', 'confirmed', 'cancelled_by_restaurant', 'cancelled_by_admin'],
+  cancelled_by_user: [],
+  cancelled_by_restaurant: [],
+  cancelled_by_admin: [],
+};
+
+/** True if `to` is a valid successor of `from` per ORDER_STATUS_TRANSITIONS. */
+export function canOrderTransition(from, to) {
+  if (!from) return true; // start of flow
+  if (from === to) return false; // no self-loops (idempotency handled by callers)
+  const allowed = ORDER_STATUS_TRANSITIONS[from];
+  if (!allowed) return false;
+  return allowed.includes(to);
+}
+
+export function assertOrderTransition(from, to) {
+  if (!canOrderTransition(from, to)) {
+    throw new ValidationError(`Illegal order transition: '${from}' → '${to}'.`);
+  }
+}
 
 /** Pickup statuses that still participate in the active multi-restaurant trip */
 const ACTIVE_PICKUP_STATUSES = new Set([
@@ -71,20 +113,134 @@ export function getActivePickups(order) {
   return pickups.filter(isActivePickup);
 }
 
-export function getPickupRejectionAttempts(pickup) {
-  return Math.max(0, Number(pickup?.rejectionAttempts) || 0);
+/** Fallback kitchen prep when a menu item carries no preparationTime. */
+export const DEFAULT_PREP_MINUTES = 15;
+/** Assumed average road speed used to convert trip distance into ETA minutes. */
+export const AVG_SPEED_KMPH = 20;
+
+/** Parse a menu preparationTime ("15 mins" | "15" | 15 | null) into minutes; 0 when unknown. */
+export function parsePrepMinutes(value) {
+  if (value == null) return 0;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
+  }
+  const match = String(value).match(/(\d+)/);
+  if (!match) return 0;
+  const minutes = parseInt(match[1], 10);
+  return Number.isFinite(minutes) && minutes > 0 ? minutes : 0;
 }
 
-export function canResendPickup(pickup) {
-  if (!pickup || pickup.permanentlyDropped) return false;
-  if (String(pickup.status || '') !== 'cancelled') return false;
-  return getPickupRejectionAttempts(pickup) < MAX_PICKUP_RESEND_ATTEMPTS;
+/** A kitchen is only as fast as its slowest item. */
+export function computeRestaurantPrepMinutes(items = []) {
+  let max = 0;
+  for (const item of items || []) {
+    const minutes = parsePrepMinutes(item?.preparationTime);
+    if (minutes > max) max = minutes;
+  }
+  return max > 0 ? max : DEFAULT_PREP_MINUTES;
 }
 
-export function shouldPermanentlyDropPickup(pickup) {
-  if (!pickup || pickup.permanentlyDropped) return false;
-  return getPickupRejectionAttempts(pickup) >= MAX_PICKUP_RESEND_ATTEMPTS;
+/** Kitchens cook in parallel, so combined readiness = the slowest remaining kitchen. */
+export function computeCombinedPrepMinutes(order) {
+  const active = getActivePickups(order);
+  if (active.length === 0) return DEFAULT_PREP_MINUTES;
+  const max = active.reduce((acc, p) => Math.max(acc, Number(p.prepMinutes) || 0), 0);
+  return max > 0 ? max : DEFAULT_PREP_MINUTES;
 }
+
+/** Combined ETA (minutes) = slowest kitchen + travel time over the whole trip. */
+export function computeOrderEtaMinutes(order, distanceKm = 0) {
+  const prep = computeCombinedPrepMinutes(order);
+  const km = Math.max(0, Number(distanceKm) || 0);
+  const travel = Math.round((km / AVG_SPEED_KMPH) * 60);
+  return Math.max(1, prep + travel);
+}
+
+/**
+ * Assign visit order: farthest-from-customer first, nearest-to-customer last, so the final leg
+ * to the customer is the shortest. Deterministic and cheap — no routing API call.
+ * `customerCoords` is GeoJSON order [lng, lat]. Mutates + returns the list.
+ */
+export function assignPickupSequence(pickups = [], customerCoords = null) {
+  const list = Array.isArray(pickups) ? pickups : [];
+  const cLng = Number(Array.isArray(customerCoords) ? customerCoords[0] : NaN);
+  const cLat = Number(Array.isArray(customerCoords) ? customerCoords[1] : NaN);
+
+  if (Number.isFinite(cLat) && Number.isFinite(cLng) && list.length > 1) {
+    const distanceToCustomer = (pickup) => {
+      const coords = pickup?.location?.coordinates;
+      if (!Array.isArray(coords) || coords.length < 2) return 0;
+      const lng = Number(coords[0]);
+      const lat = Number(coords[1]);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return 0;
+      return haversineKm(cLat, cLng, lat, lng);
+    };
+    list.sort((a, b) => distanceToCustomer(b) - distanceToCustomer(a));
+  }
+
+  list.forEach((pickup, index) => {
+    pickup.sequence = index;
+  });
+  return list;
+}
+
+/**
+ * The stop the driver should head to next.
+ * Follows `sequence`, but if the next sequenced stop is not ready and another remaining stop
+ * already is, send them to the ready one first so they never idle at a cold kitchen.
+ */
+export function getNextPickup(order) {
+  const remaining = getActivePickups(order).filter(
+    (p) => String(p.status || '') !== 'picked_up',
+  );
+  if (remaining.length === 0) return null;
+
+  const bySequence = remaining
+    .slice()
+    .sort((a, b) => (Number(a.sequence) || 0) - (Number(b.sequence) || 0));
+
+  const head = bySequence[0];
+  if (String(head.status || '') === 'ready') return head;
+  return bySequence.find((p) => String(p.status || '') === 'ready') || head;
+}
+
+/**
+ * Customer/driver-facing multi-stop progress, e.g. "Picked up 1 of 2".
+ *
+ * Per-pickup `status` is only maintained for multi-restaurant orders — the single-restaurant
+ * path tracks readiness on `orderStatus` and never advances `pickups[0].status`. So single
+ * orders are derived from `orderStatus`, otherwise every single order would look "waiting".
+ */
+export function getPickupProgress(order) {
+  const active = getActivePickups(order);
+  const isMulti = Boolean(order?.isMultiRestaurant) && active.length > 1;
+
+  if (!isMulti) {
+    const status = String(order?.orderStatus || '');
+    const collected = ['picked_up', 'reached_drop', 'delivered'].includes(status);
+    return {
+      picked: collected ? 1 : 0,
+      total: 1,
+      nextRestaurantId: '',
+      nextRestaurantName: '',
+      isWaitingForFood: !collected && status !== 'ready_for_pickup',
+      label: '',
+    };
+  }
+
+  const total = active.length;
+  const picked = active.filter((p) => String(p.status || '') === 'picked_up').length;
+  const next = getNextPickup(order);
+  return {
+    picked,
+    total,
+    nextRestaurantId: next ? String(next.restaurantId || '') : '',
+    nextRestaurantName: next?.restaurantName || '',
+    isWaitingForFood: Boolean(next && String(next.status || '') !== 'ready'),
+    label: `Picked up ${picked} of ${total}`,
+  };
+}
+
 
 /**
  * All remaining (active) restaurants have accepted (or progressed past accept).
@@ -147,6 +303,167 @@ export function isOrderFullyLocked(order, settings = {}) {
   if (!isPrimaryDriverAccepted(order)) return false;
   if (isShareRequired(order, settings) && !isSharedDriverJoined(order)) return false;
   return true;
+}
+
+/* ------------------------------------------------------------------ *
+ * Flow 3 — dual-leg delivery
+ * Legs only exist once a second driver joins; single-driver orders keep
+ * using `deliveryState` and never populate `legs`.
+ * ------------------------------------------------------------------ */
+
+export function isDualLegActive(order) {
+  return Boolean(order?.isDualLeg) && Array.isArray(order?.legs) && order.legs.length > 1;
+}
+
+/** Legs still in play (a cancelled leg no longer blocks parent completion). */
+export function getActiveLegs(order) {
+  const legs = Array.isArray(order?.legs) ? order.legs : [];
+  return legs.filter((leg) => String(leg?.status || '') !== 'cancelled');
+}
+
+export function getLegForPartner(order, partnerId) {
+  const pid = String(partnerId || '');
+  if (!pid) return null;
+  const legs = Array.isArray(order?.legs) ? order.legs : [];
+  return legs.find((leg) => String(leg?.partnerId || '') === pid) || null;
+}
+
+/** Parent order may only be DELIVERED when every active leg is delivered. */
+export function areAllLegsDelivered(order) {
+  const active = getActiveLegs(order);
+  if (active.length === 0) return false;
+  return active.every((leg) => String(leg?.status || '') === 'delivered');
+}
+
+/**
+ * The next stop for a specific leg. Under a stop-level split each driver only sees the
+ * restaurants assigned to their own leg; item-level splits share the same single restaurant.
+ * Falls back to the order-wide next stop when the leg has no restaurant assignment.
+ */
+export function getNextPickupForLeg(order, leg) {
+  if (!leg) return getNextPickup(order);
+  const allowed = new Set((leg.restaurantIds || []).map((id) => String(id)));
+  if (allowed.size === 0) return getNextPickup(order);
+
+  const remaining = getActivePickups(order).filter(
+    (p) =>
+      String(p.status || '') !== 'picked_up' &&
+      allowed.has(String(p.restaurantId || '')),
+  );
+  if (remaining.length === 0) return null;
+
+  const bySequence = remaining
+    .slice()
+    .sort((a, b) => (Number(a.sequence) || 0) - (Number(b.sequence) || 0));
+  const head = bySequence[0];
+  if (String(head.status || '') === 'ready') return head;
+  return bySequence.find((p) => String(p.status || '') === 'ready') || head;
+}
+
+/** Progress summary for customer-facing two-driver tracking. */
+export function getLegProgress(order) {
+  const active = getActiveLegs(order);
+  return {
+    isDualLeg: isDualLegActive(order),
+    total: active.length,
+    delivered: active.filter((l) => String(l?.status || '') === 'delivered').length,
+    legs: active.map((leg) => ({
+      legIndex: leg.legIndex,
+      role: leg.role,
+      partnerId: leg.partnerId ? String(leg.partnerId) : '',
+      status: leg.status,
+      otpVerified: Boolean(leg.otpVerified),
+      restaurantIds: (leg.restaurantIds || []).map(String),
+    })),
+  };
+}
+
+/**
+ * Divide the order between two drivers.
+ *
+ * - 2+ active restaurants → **stop-level** split: whole restaurants are balanced across the
+ *   legs by item count, so each driver owns their own pickups.
+ * - single restaurant → **item-level** split: units are balanced across the legs, splitting a
+ *   line when needed (a single line of qty 20 still halves correctly).
+ *
+ * Returns `{ legs, splitMode }`; the caller persists them onto the order.
+ */
+export function buildDeliveryLegs(order, {
+  primaryPartnerId = null,
+  secondaryPartnerId = null,
+  primaryEarning = 0,
+  secondaryEarning = 0,
+  otpFactory = () => '',
+} = {}) {
+  const now = new Date();
+  const makeLeg = (legIndex, role, partnerId, earning) => ({
+    legIndex,
+    role,
+    partnerId: partnerId || null,
+    status: 'assigned',
+    restaurantIds: [],
+    itemSplits: [],
+    otp: otpFactory(),
+    otpVerified: false,
+    earning: Math.max(0, Number(earning) || 0),
+    assignedAt: now,
+  });
+
+  const legs = [
+    makeLeg(0, 'primary', primaryPartnerId, primaryEarning),
+    makeLeg(1, 'secondary', secondaryPartnerId, secondaryEarning),
+  ];
+
+  const activePickups = getActivePickups(order);
+
+  // Stop-level split across 2+ restaurants.
+  if (activePickups.length >= 2) {
+    const weighted = activePickups
+      .map((p) => ({
+        restaurantId: p.restaurantId,
+        weight: Array.isArray(p.items) ? p.items.length : 0,
+      }))
+      .sort((a, b) => b.weight - a.weight);
+
+    const load = [0, 0];
+    for (const stop of weighted) {
+      const target = load[0] <= load[1] ? 0 : 1;
+      legs[target].restaurantIds.push(stop.restaurantId);
+      load[target] += stop.weight;
+    }
+    return { legs, splitMode: 'stop' };
+  }
+
+  // Item-level split within a single restaurant (quantity-aware).
+  const items = Array.isArray(order?.items) ? order.items : [];
+  const totalQty = items.reduce((sum, it) => sum + (Number(it?.quantity) || 1), 0);
+  const firstLegTarget = Math.ceil(totalQty / 2);
+  let assigned = 0;
+
+  items.forEach((item, itemIndex) => {
+    const qty = Number(item?.quantity) || 1;
+    if (assigned >= firstLegTarget) {
+      legs[1].itemSplits.push({ itemIndex, quantity: qty });
+      return;
+    }
+    const takeForFirst = Math.min(qty, firstLegTarget - assigned);
+    if (takeForFirst > 0) {
+      legs[0].itemSplits.push({ itemIndex, quantity: takeForFirst });
+      assigned += takeForFirst;
+    }
+    const remainder = qty - takeForFirst;
+    if (remainder > 0) {
+      legs[1].itemSplits.push({ itemIndex, quantity: remainder });
+    }
+  });
+
+  const singleRestaurantId = activePickups[0]?.restaurantId || order?.restaurantId || null;
+  if (singleRestaurantId) {
+    legs.forEach((leg) => {
+      leg.restaurantIds = [singleRestaurantId];
+    });
+  }
+  return { legs, splitMode: 'item' };
 }
 
 /**

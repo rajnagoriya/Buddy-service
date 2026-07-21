@@ -69,32 +69,41 @@ export default function RestaurantLogin() {
 
   return (
     <RestaurantAuthLayout
-      title="Partner Login"
-      subtitle="Enter your registered mobile number to continue"
+      title="Partner login"
+      subtitle="Enter your registered mobile number"
       footer={
-        <p className="text-center text-xs text-gray-500">
+        <p className="text-center text-xs leading-relaxed text-[var(--rt-muted,#6b7280)]">
           By continuing, you agree to our{" "}
-          <Link to="/food/restaurant/terms" className="font-medium text-primary-orange hover:underline">
+          <Link
+            to="/food/restaurant/terms"
+            className="font-semibold text-[var(--rt-primary-strong,#27A344)] hover:underline"
+          >
             Terms
           </Link>{" "}
           and{" "}
-          <Link to="/food/restaurant/privacy" className="font-medium text-primary-orange hover:underline">
+          <Link
+            to="/food/restaurant/privacy"
+            className="font-semibold text-[var(--rt-primary-strong,#27A344)] hover:underline"
+          >
             Privacy Policy
           </Link>
         </p>
       }
     >
-      <form onSubmit={handleSendOTP} className="w-full space-y-5">
-        <div className="space-y-1.5">
-          <Label htmlFor="restaurant-login-phone" className="text-sm font-medium text-gray-700">
-            Phone number
+      <form onSubmit={handleSendOTP} className="w-full space-y-4">
+        <div className="space-y-2">
+          <Label
+            htmlFor="restaurant-login-phone"
+            className="text-sm font-semibold text-gray-800"
+          >
+            Mobile number
           </Label>
-          <div className="flex gap-2">
-            <div className="flex h-11 w-16 shrink-0 items-center justify-center rounded-xl border-2 border-gray-200 bg-gray-50 text-sm font-semibold text-gray-700">
+          <div className="flex gap-2.5">
+            <div className="flex h-12 w-[4.25rem] shrink-0 items-center justify-center rounded-xl border border-[var(--rt-border,#e8edf2)] bg-[var(--rt-surface-muted,#f4f6f9)] text-sm font-semibold text-gray-700">
               +91
             </div>
             <div className="relative min-w-0 flex-1">
-              <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-gray-400">
+              <span className="pointer-events-none absolute inset-y-0 left-3.5 flex items-center text-gray-400">
                 <Phone className="h-4 w-4" />
               </span>
               <Input
@@ -109,7 +118,7 @@ export default function RestaurantLogin() {
                 onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
                 maxLength={10}
                 placeholder="10-digit number"
-                className="h-11 rounded-xl border-2 border-gray-200 pl-9 shadow-none transition-colors placeholder:text-gray-400 focus-visible:border-primary-orange focus-visible:ring-2 focus-visible:ring-primary-orange/20"
+                className="h-12 rounded-xl border border-[var(--rt-border,#e8edf2)] bg-white pl-10 text-[15px] shadow-none placeholder:text-gray-400 focus-visible:border-[var(--rt-primary-strong,#27A344)] focus-visible:ring-2 focus-visible:ring-[var(--rt-primary-soft,#E8F7EC)]"
               />
             </div>
           </div>
@@ -118,7 +127,7 @@ export default function RestaurantLogin() {
         <Button
           type="submit"
           disabled={loading || phone.length < 10}
-          className="h-11 w-full rounded-xl bg-primary-orange text-sm font-semibold text-white shadow-md transition-colors hover:bg-primary-orange/90 disabled:opacity-50"
+          className="rt-btn-primary h-12 w-full text-[15px] shadow-md hover:brightness-105 disabled:opacity-50"
         >
           {loading ? (
             <>
@@ -131,12 +140,12 @@ export default function RestaurantLogin() {
         </Button>
       </form>
 
-      <div className="mt-6 text-center text-sm">
+      <div className="mt-5 border-t border-[var(--rt-border,#e8edf2)] pt-4 text-center text-sm">
         <span className="text-gray-600">New partner? </span>
         <button
           type="button"
           onClick={() => navigate("/food/restaurant/signup")}
-          className="font-medium text-primary-orange hover:underline"
+          className="font-semibold text-[var(--rt-primary-strong,#27A344)] hover:underline"
         >
           Register restaurant
         </button>

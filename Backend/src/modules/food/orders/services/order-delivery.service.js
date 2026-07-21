@@ -30,6 +30,15 @@ import {
   isShareRequired,
   isSharedDriverJoined,
   pushSettlementSnapshot,
+  canOrderTransition,
+  getNextPickup,
+  getPickupProgress,
+  isDualLegActive,
+  getLegForPartner,
+  getNextPickupForLeg,
+  getActiveLegs,
+  areAllLegsDelivered,
+  getLegProgress,
 } from './order-lifecycle.policy.js';
 import {
   buildOrderIdentityFilter,
@@ -44,7 +53,54 @@ import {
   sanitizeOrderForExternal,
   isStatusAdvance,
   buildDeliverySocketPayload,
+  SHARE_TIMEOUT_MS,
+  PICKUP_GEOFENCE_METERS,
+  DROP_GEOFENCE_METERS,
+  RIDER_LOCATION_STALE_MS,
 } from './order.helpers.js';
+import { haversineMeters } from '../../../../core/location/haversine.util.js';
+
+/**
+ * Server-side anti-spoof geofence for "reached pickup" / "reached drop".
+ *
+ * The rider's freshest location lives in Redis (hot path); the Mongo copy can lag ~30s, so this
+ * check FAILS OPEN whenever the location is missing or stale — legitimate riders are never
+ * blocked. It only rejects gross spoofing (marking arrived from far away) when we have a fresh
+ * fix. `targetCoords` is GeoJSON order `[lng, lat]`.
+ *
+ * @throws {ValidationError} when a fresh rider fix is clearly outside the geofence radius.
+ */
+async function assertRiderAtTarget(deliveryPartnerId, targetCoords, limitMeters, label) {
+  if (!Array.isArray(targetCoords) || targetCoords.length < 2) return; // no target → skip
+  const targetLng = Number(targetCoords[0]);
+  const targetLat = Number(targetCoords[1]);
+  if (!Number.isFinite(targetLat) || !Number.isFinite(targetLng)) return;
+
+  let partner = null;
+  try {
+    partner = await FoodDeliveryPartner.findById(deliveryPartnerId)
+      .select('lastLat lastLng lastLocationAt')
+      .lean();
+  } catch {
+    return; // fail-open on lookup error
+  }
+
+  const lat = Number(partner?.lastLat);
+  const lng = Number(partner?.lastLng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return; // no fix → fail-open
+
+  const fixAgeMs = partner?.lastLocationAt
+    ? Date.now() - new Date(partner.lastLocationAt).getTime()
+    : Infinity;
+  if (!(fixAgeMs <= RIDER_LOCATION_STALE_MS)) return; // stale → fail-open
+
+  const distanceMeters = haversineMeters(lat, lng, targetLat, targetLng);
+  if (Number.isFinite(distanceMeters) && distanceMeters > limitMeters) {
+    throw new ValidationError(
+      `You appear to be ${Math.round(distanceMeters)}m from the ${label}. Move closer to mark ${label} reached.`,
+    );
+  }
+}
 
 function normalizeOtpValue(value) {
   return String(value ?? '').replace(/\D/g, '').trim();
@@ -262,6 +318,8 @@ function emitOrderUpdate(order, deliveryPartnerId, options = {}) {
         deliveryState: order.deliveryState,
         deliveryVerification: dv,
         pickups: order.pickups || [],
+        pickupProgress: getPickupProgress(order),
+        legProgress: getLegProgress(order),
         dispatch: order.dispatch || null,
         isMultiRestaurant: Boolean(order.isMultiRestaurant),
       };
@@ -639,9 +697,6 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
     const qcOrder = await Order.findOne(identity).populate('customer');
     if (qcOrder) {
       const now = new Date();
-      console.log("[SELLER UNLOCK DEBUG] QC branch entered");
-      console.log("[SELLER UNLOCK DEBUG] ENABLE_UNIFIED_QC_DISPATCH value:", process.env.ENABLE_UNIFIED_QC_DISPATCH);
-      console.log("[SELLER UNLOCK DEBUG] sellerId resolved:", qcOrder.seller);
       qcOrder.dispatch = qcOrder.dispatch || {};
       qcOrder.dispatch.deliveryPartnerId = partnerId;
       qcOrder.dispatch.acceptedAt = now;
@@ -681,14 +736,11 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
 
           if (isUnified && qcOrder.seller) {
             const roomName = `seller:${qcOrder.seller.toString()}`;
-            console.log("[SELLER UNLOCK DEBUG] room string used:", roomName);
             const emitPayload = {
               orderId: qcOrder.orderId,
               workflowStatus: 'DELIVERY_ASSIGNED',
             };
-            console.log("[SELLER UNLOCK DEBUG] about to emit order:new", emitPayload);
             io.to(roomName).emit('order:new', emitPayload);
-            console.log("[SELLER UNLOCK DEBUG] emit executed");
           }
         }
       } catch (err) {
@@ -720,12 +772,16 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
   const partnerCapacity = await getPartnerCashCapacity(deliveryPartnerId);
   const hasAmountCapacity = Number(partnerCapacity.availableCashLimit || 0) >= orderAmount;
 
-  if (isCashOrder && !hasAmountCapacity && !canBypassCashLimit) {
-    throw new ValidationError('Cash limit is not enough for this order amount. Please deposit your amount to get orders.');
-  }
-
-  if (!partnerCapacity.hasCapacity && !canBypassCashLimit) {
-    throw new ValidationError('Cash limit reached. Please deposit your amount to get orders.');
+  // Cash-in-hand only gates CASH orders. COD is disabled at order creation, so gating prepaid /
+  // wallet orders on it merely punished riders holding historical cash with a nonsensical
+  // "Cash limit reached" error on an order that involves no cash at all.
+  if (isCashOrder && !canBypassCashLimit) {
+    if (!hasAmountCapacity) {
+      throw new ValidationError('Cash limit is not enough for this order amount. Please deposit your amount to get orders.');
+    }
+    if (!partnerCapacity.hasCapacity) {
+      throw new ValidationError('Cash limit reached. Please deposit your amount to get orders.');
+    }
   }
 
   const now = new Date();
@@ -877,6 +933,7 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
       const totalEarning = Number(order.riderEarning || order.pricing?.deliveryFee || 0);
       const sharedSplit = Math.round(totalEarning / 2);
       order.dispatch.isShared = true;
+      order.dispatch.shareOpenedAt = new Date();
       order.sharedRiderEarning = sharedSplit;
       order.riderEarning = Math.max(0, totalEarning - sharedSplit);
       pushStatusHistory(order, {
@@ -1207,16 +1264,11 @@ export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId) {
   if (!identity) throw new ValidationError('Order id required');
 
   let order = await FoodOrder.findOne(identity).select('+deliveryOtp');
-  console.log(`Food order found? ${!!order}`);
   let isQcOrder = false;
   if (!order) {
-    console.log("[QC COMPAT] FoodOrder not found, trying QC Order fallback");
-    console.log("QC fallback attempted? true");
     const Order = mongoose.model('Order');
     order = await Order.findOne(identity);
-    console.log(`QC order found? ${!!order}`);
     if (!order) throw new NotFoundError('Order not found');
-    console.log("[QC COMPAT] QC order found: true");
     isQcOrder = true;
   }
 
@@ -1268,6 +1320,21 @@ export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId) {
     throw new ValidationError('Order already delivered');
   }
 
+  // Anti-spoof geofence against the stop the driver is actually due at (sequence-aware, and
+  // scoped to this driver's own leg once the order is running dual-leg).
+  const callerLeg = isDualLegActive(order) ? getLegForPartner(order, deliveryPartnerId) : null;
+  const nextStop = callerLeg ? getNextPickupForLeg(order, callerLeg) : getNextPickup(order);
+  let pickupCoords = nextStop?.location?.coordinates || null;
+  if (!pickupCoords) {
+    const rest = await FoodRestaurant.findById(order.restaurantId).select('location').lean();
+    pickupCoords = rest?.location?.coordinates || null;
+  }
+  await assertRiderAtTarget(deliveryPartnerId, pickupCoords, PICKUP_GEOFENCE_METERS, 'restaurant');
+
+  // Waiting state: the driver arrived before the food was marked ready. Derived from the single
+  // source of truth so single- and multi-restaurant orders are both handled correctly.
+  const isWaitingForFood = getPickupProgress(order).isWaitingForFood;
+
   const currentPhase = order.deliveryState?.currentPhase || '';
   const currentStatus = order.deliveryState?.status || '';
   if (currentPhase === 'at_pickup' || currentStatus === 'reached_pickup') {
@@ -1278,15 +1345,22 @@ export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId) {
   order.deliveryState = {
     ...(order.deliveryState?.toObject?.() || order.deliveryState || {}),
     currentPhase: 'at_pickup',
-    status: 'reached_pickup',
+    status: isWaitingForFood ? 'waiting_for_food' : 'reached_pickup',
     reachedPickupAt: order.deliveryState?.reachedPickupAt || new Date(),
   };
+  if (callerLeg) {
+    callerLeg.status = 'at_pickup';
+    callerLeg.reachedPickupAt = callerLeg.reachedPickupAt || new Date();
+    order.markModified('legs');
+  }
   pushStatusHistory(order, {
     byRole: 'DELIVERY_PARTNER',
     byId: deliveryPartnerId,
     from,
     to: 'reached_pickup',
-    note: 'Reached pickup location',
+    note: isWaitingForFood
+      ? `Reached ${nextStop?.restaurantName || 'pickup'} — waiting for food to be ready`
+      : 'Reached pickup location',
   });
   await order.save();
 
@@ -1330,6 +1404,8 @@ export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId) {
     orderStatus: order.orderStatus,
     deliveryPhase: order.deliveryState?.currentPhase,
     deliveryStatus: order.deliveryState?.status,
+    isWaitingForFood,
+    pickupProgress: getPickupProgress(order),
   });
   return order.toObject();
 }
@@ -1339,11 +1415,9 @@ export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImag
   let order = await FoodOrder.findOne(identity).select('+deliveryOtp');
   let isQcOrder = false;
   if (!order) {
-    console.log("[QC COMPAT] FoodOrder not found, trying QC Order fallback");
     const Order = mongoose.model('Order');
     order = await Order.findOne(identity);
     if (!order) throw new NotFoundError('Order not found');
-    console.log("[QC COMPAT] QC order found: true");
     isQcOrder = true;
   }
 
@@ -1394,7 +1468,9 @@ export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImag
     throw new ForbiddenError('Not your order');
   }
 
-  if (isShared && !isPrimary) {
+  // Under dual-leg each driver collects their own leg; otherwise only the primary may confirm.
+  const pickupLeg = isDualLegActive(order) ? getLegForPartner(order, deliveryPartnerId) : null;
+  if (isShared && !isPrimary && !pickupLeg) {
     throw new ForbiddenError('Only the primary partner can confirm order pickup.');
   }
 
@@ -1404,15 +1480,29 @@ export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImag
   // Handle Multi-Restaurant Pickup Logic
   if (order.isMultiRestaurant && Array.isArray(order.pickups) && order.pickups.length > 0) {
     // 1. Find the current pending pickup (first active one that isn't picked_up)
-    const currentPickup = order.pickups.find(
-      (p) =>
-        isActivePickup(p) && !['picked_up'].includes(String(p.status || '')),
-    );
-    
+    // Sequence-aware, and scoped to this driver's own leg when running dual-leg.
+    const currentPickup = pickupLeg
+      ? getNextPickupForLeg(order, pickupLeg)
+      : getNextPickup(order);
+
+    // F-1C: a pickup can only be collected once that restaurant has marked its items ready.
+    if (currentPickup && String(currentPickup.status || '') !== 'ready') {
+      throw new ValidationError(
+        `Cannot pick up from ${currentPickup.restaurantName || 'this restaurant'} until it marks the food ready.`,
+      );
+    }
+
     if (currentPickup) {
       currentPickup.status = 'picked_up';
       currentPickup.pickedAt = new Date();
       if (billImageUrl) currentPickup.billImageUrl = billImageUrl;
+    }
+
+    // This driver's leg is collected once none of ITS stops remain.
+    if (pickupLeg && !getNextPickupForLeg(order, pickupLeg)) {
+      pickupLeg.status = 'picked_up';
+      pickupLeg.pickedAt = pickupLeg.pickedAt || new Date();
+      order.markModified('legs');
     }
 
     // 2. All non-dropped pickups must be picked_up before leaving for drop
@@ -1454,10 +1544,67 @@ export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImag
 
       await order.save();
       emitOrderUpdate(order, deliveryPartnerId);
+      // Intermediate leg is a real milestone ("picked up 1 of 2") — record it in the outbox
+      // so the customer gets progress and a reconnecting client can replay it.
+      enqueueOrderEvent('pickup_leg_completed', {
+        orderMongoId: order._id?.toString?.(),
+        orderId: order._id.toString(),
+        deliveryPartnerId,
+        restaurantId: String(currentPickup?.restaurantId || ''),
+        restaurantName: currentPickup?.restaurantName || '',
+        pickupProgress: getPickupProgress(order),
+      });
       return order.toObject();
     }
   } else {
-    // Single restaurant flow (unchanged)
+    // Single restaurant flow.
+    // F-1C: pickup is only allowed once the restaurant has marked the order ready.
+    if (from !== 'ready_for_pickup' && !pickupLeg) {
+      throw new ValidationError(
+        'You can only pick up the order after the restaurant marks it ready for pickup.',
+      );
+    }
+
+    // Item-split dual-leg: both drivers collect from the same restaurant, so hold the parent
+    // at ready_for_pickup until BOTH legs have been collected.
+    if (pickupLeg) {
+      if (from !== 'ready_for_pickup' && from !== 'picked_up') {
+        throw new ValidationError(
+          'You can only pick up the order after the restaurant marks it ready for pickup.',
+        );
+      }
+      pickupLeg.status = 'picked_up';
+      pickupLeg.pickedAt = pickupLeg.pickedAt || new Date();
+      if (billImageUrl) order.deliveryState = {
+        ...(order.deliveryState?.toObject?.() || order.deliveryState || {}),
+        lastPickupBillImageUrl: billImageUrl,
+      };
+      order.markModified('legs');
+
+      const allLegsCollected = getActiveLegs(order).every((leg) =>
+        ['picked_up', 'at_drop', 'delivered'].includes(String(leg?.status || '')),
+      );
+      if (!allLegsCollected) {
+        pushStatusHistory(order, {
+          byRole: 'DELIVERY_PARTNER',
+          byId: deliveryPartnerId,
+          from,
+          to: from,
+          note: `Leg ${pickupLeg.legIndex} collected. Waiting for the other partner to collect their items.`,
+        });
+        await order.save();
+        emitOrderUpdate(order, deliveryPartnerId);
+        enqueueOrderEvent('leg_picked_up', {
+          orderMongoId: order._id?.toString?.(),
+          orderId: order._id.toString(),
+          deliveryPartnerId,
+          legIndex: pickupLeg.legIndex,
+          legProgress: getLegProgress(order),
+        });
+        return order.toObject();
+      }
+    }
+
     if (!isStatusAdvance(from, nextStatus)) {
         throw new ValidationError(`Order is already at status '${from}'. Cannot re-mark as '${nextStatus}'.`);
     }
@@ -1486,6 +1633,7 @@ export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImag
     orderId: order._id.toString(),
     deliveryPartnerId,
     billImageUrl: billImageUrl || null,
+    pickupProgress: getPickupProgress(order),
   });
   return order.toObject();
 }
@@ -1497,11 +1645,9 @@ export async function confirmReachedDropDelivery(orderId, deliveryPartnerId) {
   let order = await FoodOrder.findOne(identity).select('+deliveryOtp');
   let isQcOrder = false;
   if (!order) {
-    console.log("[QC COMPAT] FoodOrder not found, trying QC Order fallback");
     const Order = mongoose.model('Order');
     order = await Order.findOne(identity);
     if (!order) throw new NotFoundError('Order not found');
-    console.log("[QC COMPAT] QC order found: true");
     isQcOrder = true;
   }
 
@@ -1572,6 +1718,45 @@ export async function confirmReachedDropDelivery(orderId, deliveryPartnerId) {
 
   if (order.deliveryVerification?.dropOtp?.verified) {
     emitOrderUpdate(order, deliveryPartnerId);
+    return sanitizeOrderForExternal(order);
+  }
+
+  // Anti-spoof geofence: rider must be near the customer to request the drop OTP.
+  await assertRiderAtTarget(
+    deliveryPartnerId,
+    order.deliveryAddress?.location?.coordinates || null,
+    DROP_GEOFENCE_METERS,
+    'delivery location',
+  );
+
+  // Dual-leg: each leg is verified independently with its OWN handover OTP.
+  const dropLeg = isDualLegActive(order) ? getLegForPartner(order, deliveryPartnerId) : null;
+  if (dropLeg) {
+    if (dropLeg.otpVerified) {
+      emitOrderUpdate(order, deliveryPartnerId, { sendMilestonePush: false });
+      return sanitizeOrderForExternal(order);
+    }
+    if (!dropLeg.otp) dropLeg.otp = generateFourDigitDeliveryOtp();
+    dropLeg.status = 'at_drop';
+    dropLeg.reachedDropAt = dropLeg.reachedDropAt || new Date();
+    order.markModified('legs');
+    order.deliveryState = {
+      ...(order.deliveryState?.toObject?.() || order.deliveryState || {}),
+      currentPhase: 'at_drop',
+      status: 'reached_drop',
+      reachedDropAt: order.deliveryState?.reachedDropAt || new Date(),
+    };
+    await order.save();
+
+    emitDeliveryDropOtpToUser(order, String(dropLeg.otp || '').trim());
+    emitOrderUpdate(order, deliveryPartnerId);
+    enqueueOrderEvent('leg_reached_drop', {
+      orderMongoId: order._id?.toString?.(),
+      orderId: order._id.toString(),
+      deliveryPartnerId,
+      legIndex: dropLeg.legIndex,
+      legProgress: getLegProgress(order),
+    });
     return sanitizeOrderForExternal(order);
   }
 
@@ -1686,11 +1871,9 @@ export async function verifyDropOtpDelivery(orderId, deliveryPartnerId, otp) {
   let order = await FoodOrder.findOne(identity).select('+deliveryOtp');
   let isQcOrder = false;
   if (!order) {
-    console.log("[QC COMPAT] FoodOrder not found, trying QC Order fallback");
     const Order = mongoose.model('Order');
     order = await Order.findOne(identity);
     if (!order) throw new NotFoundError('Order not found');
-    console.log("[QC COMPAT] QC order found: true");
     isQcOrder = true;
   }
 
@@ -1753,6 +1936,32 @@ export async function verifyDropOtpDelivery(orderId, deliveryPartnerId, otp) {
   const otpStr = normalizeOtpValue(otp);
   if (!otpStr) throw new ValidationError('OTP is required');
 
+  // Dual-leg: verify THIS driver's leg OTP; the other leg is unaffected.
+  const verifyLeg = isDualLegActive(order) ? getLegForPartner(order, deliveryPartnerId) : null;
+  if (verifyLeg) {
+    if (verifyLeg.otpVerified) {
+      return { order: sanitizeOrderForExternal(order) };
+    }
+    if (!isOtpMatch(verifyLeg.otp, otpStr)) {
+      throw new ValidationError(
+        'Invalid OTP. Ask the customer for the code shown in their app for this delivery.',
+      );
+    }
+    verifyLeg.otpVerified = true;
+    order.markModified('legs');
+    await order.save();
+
+    emitOrderUpdate(order, deliveryPartnerId, { sendMilestonePush: false });
+    enqueueOrderEvent('leg_drop_otp_verified', {
+      orderMongoId: order._id?.toString?.(),
+      orderId: order._id.toString(),
+      deliveryPartnerId,
+      legIndex: verifyLeg.legIndex,
+      legProgress: getLegProgress(order),
+    });
+    return { order: sanitizeOrderForExternal(order) };
+  }
+
   if (!order.deliveryVerification?.dropOtp?.required) {
     const hasSecretOtp = Boolean(normalizeOtpValue(order.deliveryOtp));
     if (!hasSecretOtp) {
@@ -1800,11 +2009,9 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
   let order = await FoodOrder.findOne(identity).select('+deliveryOtp');
   let isQcOrder = false;
   if (!order) {
-    console.log("[QC COMPAT] FoodOrder not found, trying QC Order fallback");
     const Order = mongoose.model('Order');
     order = await Order.findOne(identity);
     if (!order) throw new NotFoundError('Order not found');
-    console.log("[QC COMPAT] QC order found: true");
     isQcOrder = true;
   }
 
@@ -1905,6 +2112,67 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
 
   const { otp, ratings, paymentMethod: selectedPaymentMethod } = body;
 
+  // 0. Dual-leg: this driver completes THEIR leg only. The parent order can never be closed by
+  //    a single driver — it is DELIVERED only once every active leg is delivered.
+  const completeLeg = isDualLegActive(order) ? getLegForPartner(order, deliveryPartnerId) : null;
+  if (completeLeg) {
+    if (String(completeLeg.status || '') === 'delivered') {
+      return sanitizeOrderForExternal(order); // idempotent re-submit
+    }
+
+    if (!completeLeg.otpVerified) {
+      const providedOtp = normalizeOtpValue(otp);
+      if (!providedOtp) {
+        throw new ValidationError(
+          'Customer handover OTP is required. Verify the OTP for your delivery before completing.',
+        );
+      }
+      if (!isOtpMatch(completeLeg.otp, providedOtp)) {
+        throw new ValidationError('Invalid handover OTP provided.');
+      }
+      completeLeg.otpVerified = true;
+    }
+
+    completeLeg.status = 'delivered';
+    completeLeg.deliveredAt = new Date();
+    order.markModified('legs');
+
+    if (!areAllLegsDelivered(order)) {
+      // Other leg still out — record this one and stop short of settlement.
+      pushStatusHistory(order, {
+        byRole: 'DELIVERY_PARTNER',
+        byId: deliveryPartnerId,
+        from: order.orderStatus,
+        to: order.orderStatus,
+        note: `Leg ${completeLeg.legIndex} delivered. Waiting for the other partner to finish.`,
+      });
+      await order.save();
+      emitOrderUpdate(order, deliveryPartnerId);
+      enqueueOrderEvent('leg_delivered', {
+        orderMongoId: order._id?.toString?.(),
+        orderId: order._id.toString(),
+        deliveryPartnerId,
+        legIndex: completeLeg.legIndex,
+        legProgress: getLegProgress(order),
+      });
+      return sanitizeOrderForExternal(order);
+    }
+
+    // Final leg — satisfy the legacy single-driver gates below (per-leg OTPs already verified,
+    // and the legs themselves ARE the split) so settlement runs exactly once.
+    if (!order.deliveryVerification) order.deliveryVerification = {};
+    order.deliveryVerification.dropOtp = {
+      ...(order.deliveryVerification?.dropOtp || {}),
+      required: true,
+      verified: true,
+    };
+    order.markModified('deliveryVerification.dropOtp');
+    order.deliveryState = {
+      ...(order.deliveryState?.toObject?.() || order.deliveryState || {}),
+      isSplitConfirmed: true,
+    };
+  }
+
   // 1. Handover OTP Verification
   if (
     otp &&
@@ -1935,6 +2203,11 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
   if (!isStatusAdvance(from, nextStatus)) {
       throw new ValidationError(`Order is already at status '${from}'. Cannot re-mark as '${nextStatus}'.`);
   }
+  // 4A: adjacency guard — 'delivered' may only follow 'picked_up'. Closes the rank-only hole
+  // where ready_for_pickup → delivered (skipping pickup) was accepted because 80 > 40.
+  if (!canOrderTransition(from, nextStatus)) {
+    throw new ValidationError('Cannot complete delivery: the order must be picked up first.');
+  }
 
   // Blocking check for split confirmation on shared orders
   if (isShared && !order.deliveryState?.isSplitConfirmed) {
@@ -1945,9 +2218,52 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
     (await FoodDeliveryBoySettings.findOne({ isActive: true }).sort({ createdAt: -1 }).lean()) ||
     (await FoodDeliveryBoySettings.findOne().sort({ createdAt: -1 }).lean());
   if (isShareRequired(order, boySettings || {}) && !isSharedDriverJoined(order)) {
-    throw new ValidationError(
-      'This is a bulk order and requires a second delivery partner. Share the order and wait for a partner to join before completing.',
-    );
+    // Solo-complete fallback: if the share slot has been open past SHARE_TIMEOUT_MS with no
+    // second partner joining, let the primary complete alone with the full earning restored.
+    // Guarantees a bulk order can never get permanently stuck at completion.
+    const shareOpenedAt = order.dispatch?.shareOpenedAt
+      ? new Date(order.dispatch.shareOpenedAt).getTime()
+      : null;
+    const shareTimedOut =
+      shareOpenedAt != null && Date.now() - shareOpenedAt >= SHARE_TIMEOUT_MS;
+
+    if (!shareTimedOut) {
+      throw new ValidationError(
+        'This is a bulk order and requires a second delivery partner. Share the order and wait for a partner to join before completing.',
+      );
+    }
+
+    const restoredEarning =
+      Number(order.riderEarning || 0) + Number(order.sharedRiderEarning || 0);
+    order.riderEarning = restoredEarning;
+    order.sharedRiderEarning = 0;
+    order.dispatch.isShared = false;
+    order.dispatch.shareOpenedAt = null;
+    pushStatusHistory(order, {
+      byRole: 'SYSTEM',
+      byId: deliveryPartnerId,
+      from: order.orderStatus,
+      to: order.orderStatus,
+      note: `No second partner joined within ${Math.round(
+        SHARE_TIMEOUT_MS / 60000,
+      )} min; primary completing solo with full earning ₹${restoredEarning}.`,
+    });
+    try {
+      await notifyOwnersSafely(
+        [{ ownerType: 'ADMIN', ownerId: 'GLOBAL' }],
+        {
+          title: 'Bulk order completed solo',
+          body: `Order #${order.order_id || order._id} had no second driver join in time; the primary partner is completing it alone.`,
+          data: {
+            type: 'bulk_solo_complete',
+            orderId: order._id.toString(),
+            orderMongoId: order._id?.toString?.() || '',
+          },
+        },
+      );
+    } catch (err) {
+      logger.warn(`Bulk solo-complete admin alert failed: ${err?.message || err}`);
+    }
   }
   
   // 2. Financial Context Resolution
@@ -2069,11 +2385,9 @@ export async function updateOrderStatusDelivery(orderId, deliveryPartnerId, orde
   let order = await FoodOrder.findOne(identity).select('+deliveryOtp');
   let isQcOrder = false;
   if (!order) {
-    console.log("[QC COMPAT] FoodOrder not found, trying QC Order fallback");
     const Order = mongoose.model('Order');
     order = await Order.findOne(identity);
     if (!order) throw new NotFoundError('Order not found');
-    console.log("[QC COMPAT] QC order found: true");
     isQcOrder = true;
   }
 

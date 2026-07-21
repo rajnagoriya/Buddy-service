@@ -146,8 +146,8 @@ export default function UnifiedHeader({
                 <MapPin className={cn("h-4 w-4", textPrimary)} />
               </div>
               <div className="flex flex-col min-w-0">
-                <div className="flex items-center gap-0.5">
-                  <span className={cn("text-[13px] font-bold truncate", textPrimary)}>
+                <div className="flex items-center gap-0.5 min-w-0">
+                  <span className={cn("text-[13px] font-bold truncate max-w-[120px] sm:max-w-[180px]", textPrimary)}>
                     {location?.area || location?.city || "Indore"}
                   </span>
                   <ChevronDown className={cn("h-3 w-3 shrink-0", textOnMuted)} />

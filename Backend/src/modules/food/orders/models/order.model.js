@@ -191,6 +191,10 @@ const dispatchSchema = new mongoose.Schema(
         }],
         isShared: { type: Boolean, default: false },
         sharedPartnerId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodDeliveryPartner', default: null },
+        /** When the second-driver (share) slot was opened; drives the solo-complete timeout fallback. */
+        shareOpenedAt: { type: Date, default: null },
+        /** When the driver-first restaurant-acknowledgement nudge was last resent (escalation throttle). */
+        restaurantAckResendAt: { type: Date, default: null },
         dispatchingAt: { type: Date }
     },
     { _id: false }
@@ -273,13 +277,69 @@ const pickupSchema = new mongoose.Schema(
             default: undefined
         },
         items: [String], // Array of item names or IDs belonging to this pickup
-        /** Times this pickup was rejected while awaiting DP resend (max 3) */
+        /** Visit order for this stop (0-based). Lower = visited earlier; nearest-to-customer is last. */
+        sequence: { type: Number, default: 0 },
+        /** Estimated kitchen prep time (minutes) for this restaurant's items, from menu preparationTime. */
+        prepMinutes: { type: Number, default: 0, min: 0 },
+        /** Set when this restaurant marks its items ready — drives waiting-state + ready-time ordering. */
+        readyAt: { type: Date, default: null },
+        /** Legacy strike counter (unused since Phase 3 immediate-drop policy); kept for back-compat. */
         rejectionAttempts: { type: Number, default: 0, min: 0 },
-        /** After 3 failed attempts — restaurant dropped; order continues without it */
+        /** Set on rejection — restaurant is dropped immediately; order continues without it (or cancels if none remain). */
         permanentlyDropped: { type: Boolean, default: false },
         pickedAt: { type: Date, default: null },
         droppedAt: { type: Date, default: null },
         billImageUrl: { type: String, default: null },
+    },
+    { _id: false }
+);
+
+/**
+ * One independent delivery leg. Legs exist only once a second driver joins (Flow 3);
+ * single-driver orders keep using `deliveryState` and never populate this array.
+ * Each leg is picked up, driven and OTP-verified independently, and the parent order is only
+ * DELIVERED when every non-cancelled leg is delivered.
+ */
+const deliveryLegSchema = new mongoose.Schema(
+    {
+        legIndex: { type: Number, required: true },
+        role: { type: String, enum: ['primary', 'secondary'], required: true },
+        partnerId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodDeliveryPartner', default: null },
+        status: {
+            type: String,
+            enum: [
+                'assigned',
+                'en_route_to_pickup',
+                'at_pickup',
+                'picked_up',
+                'at_drop',
+                'delivered',
+                'cancelled',
+            ],
+            default: 'assigned'
+        },
+        /** Stop-level split (multi-restaurant): the restaurants this leg collects from. */
+        restaurantIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'FoodRestaurant' }],
+        /**
+         * Item-level split (single restaurant): which order.items lines and how many units of
+         * each this leg carries. Quantity-aware so a single line of qty 20 can still be halved.
+         */
+        itemSplits: [
+            {
+                itemIndex: { type: Number, required: true },
+                quantity: { type: Number, required: true, min: 1 },
+                _id: false,
+            },
+        ],
+        /** Per-leg handover OTP — every leg is verified independently at the drop. */
+        otp: { type: String, default: '' },
+        otpVerified: { type: Boolean, default: false },
+        earning: { type: Number, default: 0, min: 0 },
+        assignedAt: { type: Date, default: Date.now },
+        reachedPickupAt: { type: Date, default: null },
+        pickedAt: { type: Date, default: null },
+        reachedDropAt: { type: Date, default: null },
+        deliveredAt: { type: Date, default: null },
     },
     { _id: false }
 );
@@ -475,7 +535,14 @@ const orderSchema = new mongoose.Schema(
             reason: { type: String, default: '' },
             reportedBy: { type: String, enum: ['RESTAURANT', 'DELIVERY_PARTNER', 'SYSTEM'] },
             reportedAt: { type: Date }
-        }
+        },
+        /** Monotonic per-order event sequence counter; allocated via $inc for the event outbox. */
+        eventSeq: { type: Number, default: 0 },
+        /** True once a second driver joined and the order runs as two independent legs. */
+        isDualLeg: { type: Boolean, default: false },
+        /** How work was divided: per-restaurant stop, or per-item within a single restaurant. */
+        splitMode: { type: String, enum: ['none', 'stop', 'item'], default: 'none' },
+        legs: { type: [deliveryLegSchema], default: [] }
     },
 
     {

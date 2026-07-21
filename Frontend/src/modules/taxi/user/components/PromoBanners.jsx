@@ -44,7 +44,7 @@ const ImageCarousel = ({ images, className }) => {
 
   return (
     <div className={className}>
-      <img src={activeImage.src} alt={activeImage.alt} className="w-full object-contain drop-shadow-xl" />
+      <img src={activeImage.src} alt={activeImage.alt} className="h-full w-full object-contain drop-shadow-xl" />
     </div>
   );
 };
@@ -63,7 +63,7 @@ const PromoCard = ({ icon: Icon, iconClass, title, description, actionClass, pat
     <div className={`mt-3 inline-flex h-8 w-8 items-center justify-center rounded-full ${actionClass}`}>
       <ArrowRight size={15} strokeWidth={2.5} />
     </div>
-    <ImageCarousel images={images} className="absolute bottom-1 right-1 w-[74px] opacity-95 pointer-events-none" />
+    <ImageCarousel images={images} className="absolute -bottom-2 -right-2 w-24 h-24 opacity-95 pointer-events-none flex items-end justify-end" />
   </motion.div>
 );
 

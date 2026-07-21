@@ -1,6 +1,6 @@
-import OptimizedImage from "@food/components/OptimizedImage";
-import { motion } from "framer-motion";
-import { shimmerClassName } from "./diningUtils";
+import OptimizedImage from "@food/components/OptimizedImage"
+import { motion } from "framer-motion"
+import { shimmerClassName } from "./diningUtils"
 
 export default function DiningHeroBanner({
   banners = [],
@@ -12,12 +12,12 @@ export default function DiningHeroBanner({
   onDotClick,
 }) {
   return (
-    <div className="px-4 -mt-3 md:mt-0 md:px-6 lg:px-8">
+    <div className="px-4 md:px-4">
       <motion.div
-        initial={{ opacity: 0, y: 16 }}
+        initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.45 }}
-        className="relative h-[168px] overflow-hidden rounded-2xl shadow-[0_12px_32px_rgba(44,24,16,0.18)] sm:h-[200px] md:h-[240px] md:rounded-3xl lg:h-[280px]"
+        transition={{ duration: 0.4 }}
+        className="relative h-[160px] overflow-hidden rounded-2xl sm:h-[190px] md:h-[220px] lg:h-[260px]"
       >
         {banners.length > 0 ? (
           <div
@@ -40,15 +40,15 @@ export default function DiningHeroBanner({
                     priority={index === 0}
                     sizes="100vw"
                   />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/20 to-transparent" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/15 to-transparent" />
                   <div className="absolute inset-x-0 bottom-0 p-4 sm:p-5">
                     {banner.promoCode && (
-                      <span className="inline-block rounded-full bg-amber-400 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider text-[#2c1810]">
+                      <span className="inline-block rounded-md bg-amber-400 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-[#2c1810]">
                         {banner.promoCode}
                       </span>
                     )}
                     {banner.tagline && (
-                      <h2 className="mt-2 text-lg font-black leading-tight text-white sm:text-xl">
+                      <h2 className="mt-1.5 text-lg font-black leading-tight text-white sm:text-xl">
                         {banner.tagline}
                       </h2>
                     )}
@@ -64,8 +64,8 @@ export default function DiningHeroBanner({
                     type="button"
                     aria-label={`Banner ${index + 1}`}
                     onClick={(e) => {
-                      e.stopPropagation();
-                      onDotClick?.(index);
+                      e.stopPropagation()
+                      onDotClick?.(index)
                     }}
                     className={`h-1.5 rounded-full transition-all ${
                       currentIndex === index ? "w-5 bg-amber-400" : "w-1.5 bg-white/50"
@@ -77,22 +77,20 @@ export default function DiningHeroBanner({
           </div>
         ) : (
           <div
-            className={`relative h-full w-full bg-gradient-to-br from-amber-100 via-orange-50 to-amber-200 dark:from-amber-950/40 dark:via-[#1a1a1a] dark:to-amber-950/20 ${shimmerClassName}`}
+            className={`relative h-full w-full bg-gradient-to-br from-green-700 via-green-600 to-emerald-500 ${shimmerClassName}`}
           >
             <div className="absolute inset-0 flex flex-col justify-end p-5">
-              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-amber-700 dark:text-amber-400">
-                Dining
-              </p>
-              <h2 className="mt-1 text-xl font-black text-[#2c1810] dark:text-white sm:text-2xl">
+              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/70">Dining</p>
+              <h2 className="mt-1 text-xl font-black text-white sm:text-2xl">
                 {loading ? "Finding tables near you..." : "Book tables at top spots"}
               </h2>
-              <p className="mt-1 text-xs font-medium text-amber-900/70 dark:text-amber-200/60">
-                Exclusive pre-book offers on partner restaurants
+              <p className="mt-1 text-xs font-medium text-white/75">
+                Reserve ahead at restaurants near you
               </p>
             </div>
           </div>
         )}
       </motion.div>
     </div>
-  );
+  )
 }

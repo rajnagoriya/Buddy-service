@@ -225,6 +225,8 @@ router.patch('/dining/restaurants/:restaurantId', invDining, diningAdminControll
 router.get('/dining/requests', diningAdminController.listAllDiningRequests);
 router.patch('/dining/requests/:id/approve', invDining, diningAdminController.approveDiningRequest);
 router.patch('/dining/requests/:id/reject', invDining, diningAdminController.rejectDiningRequest);
+router.get('/dining/bookings', diningAdminController.listDiningBookings);
+router.get('/dining/bookings/analytics', diningAdminController.getDiningBookingAnalytics);
 
 // ----- Orders -----
 router.get('/orders', orderController.listOrdersAdminController);
@@ -232,6 +234,7 @@ router.get('/orders/settlement-report', orderController.getMultiOrderSettlementR
 router.get('/orders/:orderId', orderController.getOrderByIdAdminController);
 router.patch('/orders/:orderId/cancel', orderController.cancelOrderAdminController);
 router.patch('/orders/:orderId/assign-delivery', orderController.assignDeliveryPartnerController);
+router.patch('/orders/:orderId/assign-second-delivery', orderController.assignSecondDeliveryPartnerController);
 router.delete('/orders/:orderId', orderController.deleteOrderAdminController);
 
 // ----- CMS Pages (About + legal) -----
