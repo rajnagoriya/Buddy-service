@@ -22,6 +22,7 @@ import OrderDetailPage from '../pages/OrderDetailPage';
 import ProductDetailPage from '../pages/ProductDetailPage';
 import CheckoutPage from '../pages/CheckoutPage';
 import PaymentStatusPage from '../pages/PaymentStatusPage';
+const UnifiedProfile = lazy(() => import('@/shared/profile/UnifiedProfile'));
 import ScrollToTop from '../components/shared/ScrollToTop';
 import { WishlistProvider } from '../context/WishlistContext';
 import { CartProvider } from '../context/CartContext';
@@ -59,7 +60,7 @@ const CustomerRoutes = () => {
                             <Route path="checkout" element={<ProtectedRoute><CheckoutPage /></ProtectedRoute>} />
                             <Route path="payment-status" element={<ProtectedRoute><PaymentStatusPage /></ProtectedRoute>} />
                             {/* Unified profile — switch service via ?service=qc */}
-                            <Route path="profile" element={<Navigate to="/food/user/profile?service=qc" replace />} />
+                            <Route path="profile" element={<ProtectedRoute><UnifiedProfile /></ProtectedRoute>} />
                             {/* Legacy: <Route path="profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} /> */}
                             <Route path="profile/edit" element={<ProtectedRoute><EditProfilePage /></ProtectedRoute>} />
                         </Routes>
