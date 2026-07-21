@@ -225,6 +225,8 @@ router.patch('/dining/restaurants/:restaurantId', invDining, diningAdminControll
 router.get('/dining/requests', diningAdminController.listAllDiningRequests);
 router.patch('/dining/requests/:id/approve', invDining, diningAdminController.approveDiningRequest);
 router.patch('/dining/requests/:id/reject', invDining, diningAdminController.rejectDiningRequest);
+router.get('/dining/bookings', diningAdminController.listDiningBookings);
+router.get('/dining/bookings/analytics', diningAdminController.getDiningBookingAnalytics);
 
 // ----- Orders -----
 router.get('/orders', orderController.listOrdersAdminController);

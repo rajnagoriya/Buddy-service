@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import * as diningService from '../services/dining.service.js';
+import * as bookingService from '../services/diningBooking.service.js';
 
 export async function getDiningCategories(req, res, next) {
     try {
@@ -100,6 +101,24 @@ export async function rejectDiningRequest(req, res, next) {
         const { reason } = req.body || {};
         const request = await diningService.rejectDiningRequest(id, reason);
         res.status(200).json({ success: true, message: 'Dining request rejected successfully', data: request });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function listDiningBookings(req, res, next) {
+    try {
+        const data = await bookingService.listAdminBookings(req.query || {});
+        res.status(200).json({ success: true, message: 'Dining bookings fetched successfully', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function getDiningBookingAnalytics(req, res, next) {
+    try {
+        const data = await bookingService.getAdminBookingAnalytics(req.query || {});
+        res.status(200).json({ success: true, message: 'Dining booking analytics fetched successfully', data });
     } catch (error) {
         next(error);
     }

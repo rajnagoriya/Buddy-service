@@ -79,6 +79,7 @@ import {
     invalidateAfterRestaurantMenuMutation,
     invalidateAfterRestaurantCategoryMutation,
 } from '../../utils/foodCacheInvalidation.js';
+import diningRestaurantRoutes from '../../dining/routes/dining.routes.restaurant.js';
 
 const router = express.Router();
 
@@ -152,6 +153,7 @@ router.patch('/availability', authMiddleware, requireRestaurant, invProfile, upd
 router.patch('/dining-settings', authMiddleware, requireRestaurant, invProfile, updateCurrentRestaurantDiningSettingsController);
 router.post('/dining-settings/request', authMiddleware, requireRestaurant, createDiningRequestController);
 router.get('/dining-settings/pending', authMiddleware, requireRestaurant, getPendingDiningRequestController);
+router.use('/dining', authMiddleware, requireRestaurant, diningRestaurantRoutes);
 router.get('/outlet-timings', authMiddleware, requireRestaurant, getCurrentRestaurantOutletTimingsController);
 router.put('/outlet-timings', authMiddleware, requireRestaurant, invMenu, upsertCurrentRestaurantOutletTimingsController);
 router.get('/finance', authMiddleware, requireRestaurant, getRestaurantFinanceController);
