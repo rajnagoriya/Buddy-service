@@ -4,6 +4,7 @@
  */
 
 import { ValidationError } from '../../../../core/auth/errors.js';
+import { haversineKm } from '../../../../core/location/haversine.util.js';
 
 export const MAX_RESTAURANTS_PER_ORDER = 3;
 export const MAX_DRIVERS_PER_ORDER = 2;
@@ -110,6 +111,134 @@ export function isActivePickup(pickup) {
 export function getActivePickups(order) {
   const pickups = Array.isArray(order?.pickups) ? order.pickups : [];
   return pickups.filter(isActivePickup);
+}
+
+/** Fallback kitchen prep when a menu item carries no preparationTime. */
+export const DEFAULT_PREP_MINUTES = 15;
+/** Assumed average road speed used to convert trip distance into ETA minutes. */
+export const AVG_SPEED_KMPH = 20;
+
+/** Parse a menu preparationTime ("15 mins" | "15" | 15 | null) into minutes; 0 when unknown. */
+export function parsePrepMinutes(value) {
+  if (value == null) return 0;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
+  }
+  const match = String(value).match(/(\d+)/);
+  if (!match) return 0;
+  const minutes = parseInt(match[1], 10);
+  return Number.isFinite(minutes) && minutes > 0 ? minutes : 0;
+}
+
+/** A kitchen is only as fast as its slowest item. */
+export function computeRestaurantPrepMinutes(items = []) {
+  let max = 0;
+  for (const item of items || []) {
+    const minutes = parsePrepMinutes(item?.preparationTime);
+    if (minutes > max) max = minutes;
+  }
+  return max > 0 ? max : DEFAULT_PREP_MINUTES;
+}
+
+/** Kitchens cook in parallel, so combined readiness = the slowest remaining kitchen. */
+export function computeCombinedPrepMinutes(order) {
+  const active = getActivePickups(order);
+  if (active.length === 0) return DEFAULT_PREP_MINUTES;
+  const max = active.reduce((acc, p) => Math.max(acc, Number(p.prepMinutes) || 0), 0);
+  return max > 0 ? max : DEFAULT_PREP_MINUTES;
+}
+
+/** Combined ETA (minutes) = slowest kitchen + travel time over the whole trip. */
+export function computeOrderEtaMinutes(order, distanceKm = 0) {
+  const prep = computeCombinedPrepMinutes(order);
+  const km = Math.max(0, Number(distanceKm) || 0);
+  const travel = Math.round((km / AVG_SPEED_KMPH) * 60);
+  return Math.max(1, prep + travel);
+}
+
+/**
+ * Assign visit order: farthest-from-customer first, nearest-to-customer last, so the final leg
+ * to the customer is the shortest. Deterministic and cheap — no routing API call.
+ * `customerCoords` is GeoJSON order [lng, lat]. Mutates + returns the list.
+ */
+export function assignPickupSequence(pickups = [], customerCoords = null) {
+  const list = Array.isArray(pickups) ? pickups : [];
+  const cLng = Number(Array.isArray(customerCoords) ? customerCoords[0] : NaN);
+  const cLat = Number(Array.isArray(customerCoords) ? customerCoords[1] : NaN);
+
+  if (Number.isFinite(cLat) && Number.isFinite(cLng) && list.length > 1) {
+    const distanceToCustomer = (pickup) => {
+      const coords = pickup?.location?.coordinates;
+      if (!Array.isArray(coords) || coords.length < 2) return 0;
+      const lng = Number(coords[0]);
+      const lat = Number(coords[1]);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return 0;
+      return haversineKm(cLat, cLng, lat, lng);
+    };
+    list.sort((a, b) => distanceToCustomer(b) - distanceToCustomer(a));
+  }
+
+  list.forEach((pickup, index) => {
+    pickup.sequence = index;
+  });
+  return list;
+}
+
+/**
+ * The stop the driver should head to next.
+ * Follows `sequence`, but if the next sequenced stop is not ready and another remaining stop
+ * already is, send them to the ready one first so they never idle at a cold kitchen.
+ */
+export function getNextPickup(order) {
+  const remaining = getActivePickups(order).filter(
+    (p) => String(p.status || '') !== 'picked_up',
+  );
+  if (remaining.length === 0) return null;
+
+  const bySequence = remaining
+    .slice()
+    .sort((a, b) => (Number(a.sequence) || 0) - (Number(b.sequence) || 0));
+
+  const head = bySequence[0];
+  if (String(head.status || '') === 'ready') return head;
+  return bySequence.find((p) => String(p.status || '') === 'ready') || head;
+}
+
+/**
+ * Customer/driver-facing multi-stop progress, e.g. "Picked up 1 of 2".
+ *
+ * Per-pickup `status` is only maintained for multi-restaurant orders — the single-restaurant
+ * path tracks readiness on `orderStatus` and never advances `pickups[0].status`. So single
+ * orders are derived from `orderStatus`, otherwise every single order would look "waiting".
+ */
+export function getPickupProgress(order) {
+  const active = getActivePickups(order);
+  const isMulti = Boolean(order?.isMultiRestaurant) && active.length > 1;
+
+  if (!isMulti) {
+    const status = String(order?.orderStatus || '');
+    const collected = ['picked_up', 'reached_drop', 'delivered'].includes(status);
+    return {
+      picked: collected ? 1 : 0,
+      total: 1,
+      nextRestaurantId: '',
+      nextRestaurantName: '',
+      isWaitingForFood: !collected && status !== 'ready_for_pickup',
+      label: '',
+    };
+  }
+
+  const total = active.length;
+  const picked = active.filter((p) => String(p.status || '') === 'picked_up').length;
+  const next = getNextPickup(order);
+  return {
+    picked,
+    total,
+    nextRestaurantId: next ? String(next.restaurantId || '') : '',
+    nextRestaurantName: next?.restaurantName || '',
+    isWaitingForFood: Boolean(next && String(next.status || '') !== 'ready'),
+    label: `Picked up ${picked} of ${total}`,
+  };
 }
 
 

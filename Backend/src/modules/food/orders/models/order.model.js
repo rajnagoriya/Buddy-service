@@ -277,6 +277,12 @@ const pickupSchema = new mongoose.Schema(
             default: undefined
         },
         items: [String], // Array of item names or IDs belonging to this pickup
+        /** Visit order for this stop (0-based). Lower = visited earlier; nearest-to-customer is last. */
+        sequence: { type: Number, default: 0 },
+        /** Estimated kitchen prep time (minutes) for this restaurant's items, from menu preparationTime. */
+        prepMinutes: { type: Number, default: 0, min: 0 },
+        /** Set when this restaurant marks its items ready — drives waiting-state + ready-time ordering. */
+        readyAt: { type: Date, default: null },
         /** Legacy strike counter (unused since Phase 3 immediate-drop policy); kept for back-compat. */
         rejectionAttempts: { type: Number, default: 0, min: 0 },
         /** Set on rejection — restaurant is dropped immediately; order continues without it (or cancels if none remain). */

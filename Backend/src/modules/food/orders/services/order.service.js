@@ -82,6 +82,10 @@ import {
   isActivePickup,
   isShareRequired,
   pushSettlementSnapshot,
+  computeRestaurantPrepMinutes,
+  computeOrderEtaMinutes,
+  assignPickupSequence,
+  getPickupProgress,
 } from './order-lifecycle.policy.js';
 
 async function clearUserCartAfterOrder(userId) {
@@ -355,13 +359,24 @@ export async function createOrder(userId, dto, options = {}) {
     riderEarning = riderSurcharge.fee;
   }
 
-  const pickups = restaurants.map(r => ({
-    restaurantId: r._id,
-    restaurantName: r.name || r.restaurantName,
-    status: 'pending',
-    location: r.location,
-    items: pricedItems.filter(it => String(it.restaurantId) === String(r._id)).map(it => it.name)
-  }));
+  const pickups = restaurants.map(r => {
+    const restaurantItems = pricedItems.filter(
+      (it) => String(it.restaurantId) === String(r._id),
+    );
+    return {
+      restaurantId: r._id,
+      restaurantName: r.name || r.restaurantName,
+      status: 'pending',
+      location: r.location,
+      items: restaurantItems.map((it) => it.name),
+      // Kitchen prep for this stop = its slowest item (menu preparationTime).
+      prepMinutes: computeRestaurantPrepMinutes(restaurantItems),
+    };
+  });
+  // Visit order: farthest-from-customer first so the final leg to the customer is shortest.
+  assignPickupSequence(pickups, userLoc);
+  // Real combined ETA: slowest kitchen (they cook in parallel) + travel over the whole trip.
+  const computedEtaMinutes = computeOrderEtaMinutes({ pickups }, totalDistanceKm);
 
   // Calculate restaurant commission per restaurant (sum stored on pricing for compat)
   const restaurantGroups = Array.isArray(recalculated.pricing?.restaurantGroups)
@@ -477,7 +492,7 @@ export async function createOrder(userId, dto, options = {}) {
     deliveryFleet: dto.deliveryFleet || "standard",
     deliveryOption: dto.deliveryOption || "Standard Delivery",
     deliveryTime: dto.deliveryTime || "25–35 mins",
-    estimatedTime: dto.estimatedTime ?? 30,
+    estimatedTime: computedEtaMinutes || dto.estimatedTime || 30,
     dispatch: { modeAtCreation: dispatchMode, status: "unassigned" },
     statusHistory: [
       {
@@ -2091,6 +2106,7 @@ export async function updateOrderStatusRestaurant(
       pickup.status = 'preparing';
     } else if (orderStatus === 'ready_for_pickup' || orderStatus === 'ready') {
       pickup.status = 'ready';
+      pickup.readyAt = pickup.readyAt || new Date();
     } else if (orderStatus === 'picked_up') {
       pickup.status = 'picked_up';
     }
@@ -2184,6 +2200,7 @@ export async function updateOrderStatusRestaurant(
         title,
         message: body,
         pickups: order.pickups || [],
+        pickupProgress: getPickupProgress(order),
         dispatch: order.dispatch || null,
         deliveryState: order.deliveryState || null,
         isMultiRestaurant: Boolean(order.isMultiRestaurant),

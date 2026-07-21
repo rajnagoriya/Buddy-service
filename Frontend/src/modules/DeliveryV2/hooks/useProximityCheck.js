@@ -21,13 +21,24 @@ export const useProximityCheck = () => {
     // If heading to pickup or arrived at pickup, target is restaurant
     if (['PICKING_UP', 'REACHED_PICKUP'].includes(tripStatus)) {
       if (activeOrder.isMultiRestaurant && activeOrder.pickups?.length > 0) {
-        // Find first active pickup that isn't picked_up yet (skip dropped/cancelled restos)
-        const pendingPickup = activeOrder.pickups.find(
-          (p) =>
-            !p.permanentlyDropped &&
-            p.status !== 'cancelled' &&
-            !['picked_up', 'ready_for_handover'].includes(p.status),
-        );
+        // Remaining stops (skip dropped/cancelled/collected), in server-assigned visit order.
+        const remaining = activeOrder.pickups
+          .filter(
+            (p) =>
+              !p.permanentlyDropped &&
+              p.status !== 'cancelled' &&
+              !['picked_up', 'ready_for_handover'].includes(p.status),
+          )
+          .sort((a, b) => (Number(a.sequence) || 0) - (Number(b.sequence) || 0));
+
+        // Follow `sequence`, but if the next stop isn't ready and another already is,
+        // head to the ready one first — mirrors getNextPickup() on the server.
+        const head = remaining[0];
+        const pendingPickup =
+          head && head.status === 'ready'
+            ? head
+            : remaining.find((p) => p.status === 'ready') || head;
+
         if (pendingPickup && pendingPickup.location) {
           const loc = pendingPickup.location;
           return {

@@ -31,6 +31,8 @@ import {
   isSharedDriverJoined,
   pushSettlementSnapshot,
   canOrderTransition,
+  getNextPickup,
+  getPickupProgress,
 } from './order-lifecycle.policy.js';
 import {
   buildOrderIdentityFilter,
@@ -310,6 +312,7 @@ function emitOrderUpdate(order, deliveryPartnerId, options = {}) {
         deliveryState: order.deliveryState,
         deliveryVerification: dv,
         pickups: order.pickups || [],
+        pickupProgress: getPickupProgress(order),
         dispatch: order.dispatch || null,
         isMultiRestaurant: Boolean(order.isMultiRestaurant),
       };
@@ -1317,19 +1320,18 @@ export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId) {
     throw new ValidationError('Order already delivered');
   }
 
-  // Anti-spoof geofence: rider must be near the pickup (current active restaurant) to mark reached.
-  let pickupCoords = null;
-  if (order.isMultiRestaurant && Array.isArray(order.pickups) && order.pickups.length > 0) {
-    const activePickup = order.pickups.find(
-      (p) => isActivePickup(p) && String(p.status || '') !== 'picked_up',
-    );
-    pickupCoords = activePickup?.location?.coordinates || null;
-  }
+  // Anti-spoof geofence against the stop the driver is actually due at (sequence-aware).
+  const nextStop = getNextPickup(order);
+  let pickupCoords = nextStop?.location?.coordinates || null;
   if (!pickupCoords) {
     const rest = await FoodRestaurant.findById(order.restaurantId).select('location').lean();
     pickupCoords = rest?.location?.coordinates || null;
   }
   await assertRiderAtTarget(deliveryPartnerId, pickupCoords, PICKUP_GEOFENCE_METERS, 'restaurant');
+
+  // Waiting state: the driver arrived before the food was marked ready. Derived from the single
+  // source of truth so single- and multi-restaurant orders are both handled correctly.
+  const isWaitingForFood = getPickupProgress(order).isWaitingForFood;
 
   const currentPhase = order.deliveryState?.currentPhase || '';
   const currentStatus = order.deliveryState?.status || '';
@@ -1341,7 +1343,7 @@ export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId) {
   order.deliveryState = {
     ...(order.deliveryState?.toObject?.() || order.deliveryState || {}),
     currentPhase: 'at_pickup',
-    status: 'reached_pickup',
+    status: isWaitingForFood ? 'waiting_for_food' : 'reached_pickup',
     reachedPickupAt: order.deliveryState?.reachedPickupAt || new Date(),
   };
   pushStatusHistory(order, {
@@ -1349,7 +1351,9 @@ export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId) {
     byId: deliveryPartnerId,
     from,
     to: 'reached_pickup',
-    note: 'Reached pickup location',
+    note: isWaitingForFood
+      ? `Reached ${nextStop?.restaurantName || 'pickup'} — waiting for food to be ready`
+      : 'Reached pickup location',
   });
   await order.save();
 
@@ -1393,6 +1397,8 @@ export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId) {
     orderStatus: order.orderStatus,
     deliveryPhase: order.deliveryState?.currentPhase,
     deliveryStatus: order.deliveryState?.status,
+    isWaitingForFood,
+    pickupProgress: getPickupProgress(order),
   });
   return order.toObject();
 }
@@ -1467,10 +1473,8 @@ export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImag
   // Handle Multi-Restaurant Pickup Logic
   if (order.isMultiRestaurant && Array.isArray(order.pickups) && order.pickups.length > 0) {
     // 1. Find the current pending pickup (first active one that isn't picked_up)
-    const currentPickup = order.pickups.find(
-      (p) =>
-        isActivePickup(p) && !['picked_up'].includes(String(p.status || '')),
-    );
+    // Sequence-aware: the stop the driver is due at (falls back to any ready stop).
+    const currentPickup = getNextPickup(order);
 
     // F-1C: a pickup can only be collected once that restaurant has marked its items ready.
     if (currentPickup && String(currentPickup.status || '') !== 'ready') {
@@ -1524,6 +1528,16 @@ export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImag
 
       await order.save();
       emitOrderUpdate(order, deliveryPartnerId);
+      // Intermediate leg is a real milestone ("picked up 1 of 2") — record it in the outbox
+      // so the customer gets progress and a reconnecting client can replay it.
+      enqueueOrderEvent('pickup_leg_completed', {
+        orderMongoId: order._id?.toString?.(),
+        orderId: order._id.toString(),
+        deliveryPartnerId,
+        restaurantId: String(currentPickup?.restaurantId || ''),
+        restaurantName: currentPickup?.restaurantName || '',
+        pickupProgress: getPickupProgress(order),
+      });
       return order.toObject();
     }
   } else {
@@ -1562,6 +1576,7 @@ export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImag
     orderId: order._id.toString(),
     deliveryPartnerId,
     billImageUrl: billImageUrl || null,
+    pickupProgress: getPickupProgress(order),
   });
   return order.toObject();
 }
