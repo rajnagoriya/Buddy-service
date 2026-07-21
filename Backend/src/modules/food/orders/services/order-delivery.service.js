@@ -697,9 +697,6 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
     const qcOrder = await Order.findOne(identity).populate('customer');
     if (qcOrder) {
       const now = new Date();
-      console.log("[SELLER UNLOCK DEBUG] QC branch entered");
-      console.log("[SELLER UNLOCK DEBUG] ENABLE_UNIFIED_QC_DISPATCH value:", process.env.ENABLE_UNIFIED_QC_DISPATCH);
-      console.log("[SELLER UNLOCK DEBUG] sellerId resolved:", qcOrder.seller);
       qcOrder.dispatch = qcOrder.dispatch || {};
       qcOrder.dispatch.deliveryPartnerId = partnerId;
       qcOrder.dispatch.acceptedAt = now;
@@ -739,14 +736,11 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
 
           if (isUnified && qcOrder.seller) {
             const roomName = `seller:${qcOrder.seller.toString()}`;
-            console.log("[SELLER UNLOCK DEBUG] room string used:", roomName);
             const emitPayload = {
               orderId: qcOrder.orderId,
               workflowStatus: 'DELIVERY_ASSIGNED',
             };
-            console.log("[SELLER UNLOCK DEBUG] about to emit order:new", emitPayload);
             io.to(roomName).emit('order:new', emitPayload);
-            console.log("[SELLER UNLOCK DEBUG] emit executed");
           }
         }
       } catch (err) {
@@ -778,12 +772,16 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
   const partnerCapacity = await getPartnerCashCapacity(deliveryPartnerId);
   const hasAmountCapacity = Number(partnerCapacity.availableCashLimit || 0) >= orderAmount;
 
-  if (isCashOrder && !hasAmountCapacity && !canBypassCashLimit) {
-    throw new ValidationError('Cash limit is not enough for this order amount. Please deposit your amount to get orders.');
-  }
-
-  if (!partnerCapacity.hasCapacity && !canBypassCashLimit) {
-    throw new ValidationError('Cash limit reached. Please deposit your amount to get orders.');
+  // Cash-in-hand only gates CASH orders. COD is disabled at order creation, so gating prepaid /
+  // wallet orders on it merely punished riders holding historical cash with a nonsensical
+  // "Cash limit reached" error on an order that involves no cash at all.
+  if (isCashOrder && !canBypassCashLimit) {
+    if (!hasAmountCapacity) {
+      throw new ValidationError('Cash limit is not enough for this order amount. Please deposit your amount to get orders.');
+    }
+    if (!partnerCapacity.hasCapacity) {
+      throw new ValidationError('Cash limit reached. Please deposit your amount to get orders.');
+    }
   }
 
   const now = new Date();
@@ -1266,16 +1264,11 @@ export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId) {
   if (!identity) throw new ValidationError('Order id required');
 
   let order = await FoodOrder.findOne(identity).select('+deliveryOtp');
-  console.log(`Food order found? ${!!order}`);
   let isQcOrder = false;
   if (!order) {
-    console.log("[QC COMPAT] FoodOrder not found, trying QC Order fallback");
-    console.log("QC fallback attempted? true");
     const Order = mongoose.model('Order');
     order = await Order.findOne(identity);
-    console.log(`QC order found? ${!!order}`);
     if (!order) throw new NotFoundError('Order not found');
-    console.log("[QC COMPAT] QC order found: true");
     isQcOrder = true;
   }
 
@@ -1422,11 +1415,9 @@ export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImag
   let order = await FoodOrder.findOne(identity).select('+deliveryOtp');
   let isQcOrder = false;
   if (!order) {
-    console.log("[QC COMPAT] FoodOrder not found, trying QC Order fallback");
     const Order = mongoose.model('Order');
     order = await Order.findOne(identity);
     if (!order) throw new NotFoundError('Order not found');
-    console.log("[QC COMPAT] QC order found: true");
     isQcOrder = true;
   }
 
@@ -1654,11 +1645,9 @@ export async function confirmReachedDropDelivery(orderId, deliveryPartnerId) {
   let order = await FoodOrder.findOne(identity).select('+deliveryOtp');
   let isQcOrder = false;
   if (!order) {
-    console.log("[QC COMPAT] FoodOrder not found, trying QC Order fallback");
     const Order = mongoose.model('Order');
     order = await Order.findOne(identity);
     if (!order) throw new NotFoundError('Order not found');
-    console.log("[QC COMPAT] QC order found: true");
     isQcOrder = true;
   }
 
@@ -1882,11 +1871,9 @@ export async function verifyDropOtpDelivery(orderId, deliveryPartnerId, otp) {
   let order = await FoodOrder.findOne(identity).select('+deliveryOtp');
   let isQcOrder = false;
   if (!order) {
-    console.log("[QC COMPAT] FoodOrder not found, trying QC Order fallback");
     const Order = mongoose.model('Order');
     order = await Order.findOne(identity);
     if (!order) throw new NotFoundError('Order not found');
-    console.log("[QC COMPAT] QC order found: true");
     isQcOrder = true;
   }
 
@@ -2022,11 +2009,9 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
   let order = await FoodOrder.findOne(identity).select('+deliveryOtp');
   let isQcOrder = false;
   if (!order) {
-    console.log("[QC COMPAT] FoodOrder not found, trying QC Order fallback");
     const Order = mongoose.model('Order');
     order = await Order.findOne(identity);
     if (!order) throw new NotFoundError('Order not found');
-    console.log("[QC COMPAT] QC order found: true");
     isQcOrder = true;
   }
 
@@ -2400,11 +2385,9 @@ export async function updateOrderStatusDelivery(orderId, deliveryPartnerId, orde
   let order = await FoodOrder.findOne(identity).select('+deliveryOtp');
   let isQcOrder = false;
   if (!order) {
-    console.log("[QC COMPAT] FoodOrder not found, trying QC Order fallback");
     const Order = mongoose.model('Order');
     order = await Order.findOne(identity);
     if (!order) throw new NotFoundError('Order not found');
-    console.log("[QC COMPAT] QC order found: true");
     isQcOrder = true;
   }
 

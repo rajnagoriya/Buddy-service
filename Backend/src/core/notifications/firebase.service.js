@@ -22,6 +22,13 @@ const OWNER_TOKEN_FIELDS = {
     web: 'fcmTokens',
     mobile: 'fcmTokenMobile'
 };
+/**
+ * Dedicated notification channel for time-critical driver offers. The client must create an
+ * Android channel with this exact id (and a bundled `order_ring` sound) for the ring to apply;
+ * otherwise Android silently falls back to the default channel behaviour.
+ */
+const RING_CHANNEL_ID = 'order_ring';
+const RING_SOUND = 'order_ring';
 const OWNER_APP_PREFIXES = {
     USER: '👤 [User]',
     RESTAURANT: '🏪 [Shop]',
@@ -164,14 +171,40 @@ const buildMessagePayload = (payload = {}, token) => {
         message.data = data;
     }
 
+    // Time-critical offers (driver dispatch) ring on a dedicated max-priority channel so they
+    // cut through on a killed app. NOTE: a true full-screen "ringing" UI must be implemented by
+    // the client — the server can only set the channel/priority/sound fields below.
+    const isRing = Boolean(payload.ring);
+    if (isRing) {
+        message.data = { ...(message.data || {}), ring: 'true' };
+    }
+
     message.android = {
         priority: 'high',
+        ...(isRing ? { ttl: '60s' } : {}),
         notification: {
-            channel_id: 'default',
-            sound: 'default',
-            default_vibrate_timings: true,
-            default_light_settings: true
+            channel_id: isRing ? RING_CHANNEL_ID : 'default',
+            sound: isRing ? RING_SOUND : 'default',
+            default_light_settings: true,
+            ...(isRing
+                // vibrate_timings and default_vibrate_timings are mutually exclusive.
+                ? {
+                    vibrate_timings: ['0s', '0.8s', '0.4s', '0.8s'],
+                    notification_priority: 'PRIORITY_MAX',
+                    visibility: 'PUBLIC',
+                }
+                : { default_vibrate_timings: true }),
         }
+    };
+
+    message.apns = {
+        headers: { 'apns-priority': '10' },
+        payload: {
+            aps: {
+                sound: isRing ? `${RING_SOUND}.caf` : 'default',
+                ...(isRing ? { 'interruption-level': 'time-sensitive' } : {}),
+            },
+        },
     };
 
     message.webpush = {
@@ -181,7 +214,8 @@ const buildMessagePayload = (payload = {}, token) => {
         notification: {
             title: notification.title,
             body: notification.body,
-            icon: image || payload.icon || '/favicon.ico'
+            icon: image || payload.icon || '/favicon.ico',
+            ...(isRing ? { requireInteraction: true } : {}),
         }
     };
 

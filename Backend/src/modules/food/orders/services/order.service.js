@@ -2227,9 +2227,6 @@ export async function updateOrderStatusRestaurant(
   try {
     const io = getIO();
     if (io) {
-      console.log(
-        `[DEBUG] Emitting status update to restaurant ${restaurantId} and user ${order.userId}: ${orderStatus}`,
-      );
       const actingScoped = buildRestaurantScopedOrder(order, restaurantId);
       const payload = {
         orderMongoId: order._id?.toString?.(),
@@ -2252,7 +2249,6 @@ export async function updateOrderStatusRestaurant(
       const restRoom = rooms.restaurant(restaurantId);
       const userRoom = rooms.user(order.userId);
 
-      console.log(`[DEBUG] Emitting order_status_update to rooms: ${restRoom}, ${userRoom}`);
       io.to(restRoom).emit("order_status_update", payload);
       // User/DP keep aggregate status
       io.to(userRoom).emit("order_status_update", {
@@ -2289,7 +2285,6 @@ export async function updateOrderStatusRestaurant(
       };
       if (assignedRiderId) {
         const riderRoom = rooms.delivery(assignedRiderId);
-        console.log(`[DEBUG] Emitting order_status_update to rider room: ${riderRoom}`);
         io.to(riderRoom).emit("order_status_update", riderPayload);
       }
       if (sharedRiderId) {
@@ -2359,10 +2354,6 @@ export async function updateOrderStatusRestaurant(
         (String(from) !== "preparing" && String(from) !== "confirmed") &&
         order.dispatch?.status !== 'accepted'
       ) {
-        console.log(
-          `[DEBUG] Order ${order._id.toString()} status changed to '${orderStatus}'. Triggering central delivery dispatch.`,
-        );
-
         try {
           await tryAutoAssign(order._id);
           // Refresh local order state after assignment search
@@ -2374,18 +2365,14 @@ export async function updateOrderStatusRestaurant(
 
       // When ready for pickup -> ping assigned delivery partner.
       if (String(statusForMessage) === 'ready_for_pickup' && String(from) !== 'ready_for_pickup') {
-        console.log(`[DEBUG] Order ${order._id.toString()} changed to 'ready_for_pickup'.`);
         const assignedId = order.dispatch?.deliveryPartnerId?.toString?.() || order.dispatch?.deliveryPartnerId;
         if (assignedId) {
-          console.log(`[DEBUG] Notifying assigned partner ${assignedId} that order is ready.`);
           const restaurant = await FoodRestaurant.findById(restaurantId).select('restaurantName location addressLine1 area city state').lean();
           const payload = buildDeliverySocketPayload(order, restaurant);
           logger.info(
             `[DeliveryDispatch] Emitting order_ready to ${rooms.delivery(assignedId)} for order ${order._id.toString()}`,
           );
           io.to(rooms.delivery(assignedId)).emit('order_ready', payload);
-        } else {
-          console.log(`[DEBUG] Order ${order._id.toString()} is ready but no partner assigned.`);
         }
       }
     }

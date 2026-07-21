@@ -162,11 +162,13 @@ async function filterPartnersByCashLimit(partners = [], options = {}) {
     };
   }).filter(Boolean);
 
-  // Base block: riders with zero available limit should not receive fresh offers.
+  // Cash-in-hand only constrains CASH orders. COD is disabled at order creation, so applying
+  // this to prepaid/wallet orders would strand riders who merely hold historical cash.
+  if (requiredAmount <= 0) return withCapacity;
+
+  // Base block: riders with zero available limit should not receive fresh cash offers.
   const baseEligible = withCapacity.filter((p) => Number(p.availableCashLimit || 0) > 0);
   if (baseEligible.length === 0) return [];
-
-  if (requiredAmount <= 0) return baseEligible;
 
   const sufficient = baseEligible.filter(
     (p) => Number(p.availableCashLimit || 0) >= requiredAmount,
@@ -354,7 +356,6 @@ export async function tryAutoAssign(orderId, options = {}) {
   const attempt = options.attempt || 1;
   const lockTimeout = 90000; // 90 seconds lock interval
 
-  console.log("[QC UNIFIED DEBUG] tryAutoAssign entered", orderId);
 
   const dispatchableStatuses = new Set([
     'created',
@@ -406,7 +407,6 @@ export async function tryAutoAssign(orderId, options = {}) {
       qcQuery.orderId = orderId;
     }
 
-    console.log("[QC UNIFIED DEBUG] QC Find query:", JSON.stringify(qcQuery));
 
     order = await Order.findOneAndUpdate(
       qcQuery,
@@ -419,13 +419,6 @@ export async function tryAutoAssign(orderId, options = {}) {
     if (order) {
       isQc = true;
     }
-  }
-
-  console.log("[QC UNIFIED DEBUG] QC order found?", !!order, "isQc:", isQc);
-  if (order) {
-    console.log("[QC UNIFIED DEBUG] workflowStatus:", order.workflowStatus);
-    console.log("[QC UNIFIED DEBUG] dispatch.status:", order.dispatch?.status);
-    console.log("[QC UNIFIED DEBUG] seller coordinates:", order.seller?.location?.coordinates || order.seller?.location);
   }
 
   if (!order) {
@@ -462,11 +455,9 @@ export async function tryAutoAssign(orderId, options = {}) {
     const { normalizePickupForDispatch } = await import('../../../../shared/adapters/qc-dispatch.adapter.js');
     const pickupTarget = normalizePickupForDispatch(order, isQc ? 'quick' : 'food');
 
-    console.log("[QC UNIFIED DEBUG] Normalized pickup target coordinates:", pickupTarget?.location?.coordinates);
 
     const { partners } = await listNearbyOnlineDeliveryPartners(pickupTarget, searchOptions);
     
-    console.log("[QC UNIFIED DEBUG] Rider count found from listNearbyOnlineDeliveryPartners:", partners?.length, "Rider details:", JSON.stringify(partners));
 
     // TIERED ALERT LOGIC
     const isPhase2 = attempt >= 3;
@@ -574,6 +565,8 @@ export async function tryAutoAssign(orderId, options = {}) {
             {
               title: 'New order assigned!',
               body: `You have 60 seconds to accept Order #${order.order_id || order._id}.`,
+              // Time-critical offer: ring through on a killed app.
+              ring: true,
               data: { type: 'new_order', orderId: order._id.toString() },
             },
           );
