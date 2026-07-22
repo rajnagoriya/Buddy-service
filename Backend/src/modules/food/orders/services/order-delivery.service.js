@@ -1609,6 +1609,13 @@ export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImag
         throw new ValidationError(`Order is already at status '${from}'. Cannot re-mark as '${nextStatus}'.`);
     }
     order.orderStatus = nextStatus;
+    // Keep single-restaurant pickup row in sync so restaurant-scoped reads see the handover.
+    const soloPickup = (order.pickups || [])[0];
+    if (soloPickup) {
+      soloPickup.status = 'picked_up';
+      soloPickup.pickedAt = soloPickup.pickedAt || new Date();
+      if (billImageUrl) soloPickup.billImageUrl = billImageUrl;
+    }
     order.deliveryState = {
       ...(order.deliveryState?.toObject?.() || order.deliveryState || {}),
       currentPhase: 'en_route_to_delivery',

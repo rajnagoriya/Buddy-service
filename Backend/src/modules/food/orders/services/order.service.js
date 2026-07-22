@@ -63,6 +63,7 @@ import {
   pushStatusHistory,
   normalizeOrderForClient,
   applyAggregateRating,
+  derivePickupStatusFromOrderStatus,
   buildDeliverySocketPayload,
   notifyRestaurantNewOrder,
   isStatusAdvance,
@@ -2182,6 +2183,12 @@ export async function updateOrderStatusRestaurant(
       throw new ValidationError(`Current order status '${from}' is further ahead than '${finalStatus}'. Order cannot be moved backwards.`);
     }
     order.orderStatus = finalStatus;
+    // Keep the pickup row in sync for single-restaurant orders. Readers (restaurant panel,
+    // scoped sockets) prefer pickup status; leaving it 'pending' made accepted orders keep
+    // showing up as new ones in the restaurant panel.
+    if (pickup) {
+      pickup.status = derivePickupStatusFromOrderStatus(finalStatus);
+    }
   }
 
   const historyNote = isMulti

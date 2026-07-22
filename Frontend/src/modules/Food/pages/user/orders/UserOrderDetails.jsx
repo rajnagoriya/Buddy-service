@@ -20,6 +20,7 @@ import { toast } from "sonner"
 import { jsPDF } from "jspdf"
 import autoTable from "jspdf-autotable"
 import { getCompanyNameAsync } from "@food/utils/businessSettings"
+import { resolveEntityId } from "@food/utils/common"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -55,8 +56,12 @@ export default function UserOrderDetails() {
         setOrder(orderData)
 
         // If restaurantId is just a string (not populated), fetch restaurant details separately
-        const restaurantId = orderData.restaurantId
-        if (restaurantId && typeof restaurantId === 'string' && !orderData.restaurant) {
+        const restaurantIdValue = orderData.restaurantId
+        const restaurantId =
+          typeof restaurantIdValue === "string"
+            ? restaurantIdValue
+            : resolveEntityId(restaurantIdValue)
+        if (restaurantId && !orderData.restaurant) {
           try {
             const restaurantResponse = await restaurantAPI.getRestaurantById(restaurantId)
             if (restaurantResponse?.data?.success && restaurantResponse.data.data?.restaurant) {
@@ -316,11 +321,14 @@ export default function UserOrderDetails() {
   }
 
   const handleReorder = (currentOrder) => {
-    const restaurantTarget =
-      restaurantObj.slug ||
+    const restaurantId = resolveEntityId(
       restaurantObj._id ||
-      restaurantObj.restaurantId ||
-      (typeof currentOrder?.restaurantId === "string" ? currentOrder.restaurantId : currentOrder?.restaurantId?._id)
+        restaurantObj.restaurantId ||
+        currentOrder?.restaurantId ||
+        items?.[0]?.restaurantId ||
+        currentOrder?.pickups?.[0]?.restaurantId,
+    )
+    const restaurantTarget = restaurantObj.slug || restaurantId
 
     if (!restaurantTarget || !items.length) {
       toast.error("Order items or restaurant information not available")
@@ -329,16 +337,17 @@ export default function UserOrderDetails() {
 
     const reorderItems = items
       .map((item, index) => {
-        const itemId = item.id || item.itemId || item._id
+        const itemId = resolveEntityId(item.itemId || item.id || item._id)
         if (!itemId) return null
 
         return {
           id: itemId,
+          itemId,
           name: item.name || item.foodName || "Item",
           price: Number(item.price) || 0,
           image: item.image || "",
           restaurant: restaurantName,
-          restaurantId: restaurantObj._id || restaurantObj.restaurantId || currentOrder?.restaurantId,
+          restaurantId: resolveEntityId(item.restaurantId) || restaurantId,
           description: item.description || "",
           isVeg: item.isVeg === true || item.foodType === 'Veg',
           quantity: Math.max(1, Number(item.quantity || item.qty) || 1),
