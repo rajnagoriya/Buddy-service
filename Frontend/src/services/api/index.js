@@ -9,6 +9,7 @@ import {
   invalidateRestaurantSessionCache,
   restaurantSessionCache,
 } from "../../modules/Food/utils/restaurantSessionCache.js";
+import { resolveEntityId } from "../../modules/Food/utils/common.js";
 
 // Unified BuddyIdentity helpers (single login + driver onboarding/mode).
 export {
@@ -1661,9 +1662,9 @@ export const invalidateUserCartCache = () => {
 };
 
 const getPublicRestaurantDetailOnce = (id, config = {}) => {
-  const safeId = String(id || "").trim();
+  const safeId = resolveEntityId(id) || String(id || "").trim();
   const { noCache, params, ...axiosConfig } = config || {};
-  if (!safeId) {
+  if (!safeId || safeId === "[object Object]") {
     return Promise.resolve({
       data: { success: false, data: null },
       status: 200,
@@ -1755,9 +1756,9 @@ const getPublicRestaurantsOnce = (params = {}, config = {}) => {
 };
 
 const getPublicRestaurantMenuOnce = (id, config = {}) => {
-  const safeId = String(id || "").trim();
+  const safeId = resolveEntityId(id) || String(id || "").trim();
   const { noCache, params, ...axiosConfig } = config || {};
-  if (!safeId) {
+  if (!safeId || safeId === "[object Object]") {
     return Promise.resolve({
       data: { success: false, data: null },
       status: 200,

@@ -36,6 +36,19 @@ const OWNER_APP_PREFIXES = {
     ADMIN: '🛡️ [Admin]'
 };
 
+/**
+ * Unified identity JWT uses role=DRIVER; food push targets use DELIVERY_PARTNER.
+ * Map aliases so /fcm-tokens/save works for both token shapes.
+ */
+export const normalizeFcmOwnerType = (ownerType) => {
+    const normalized = String(ownerType || '').trim().toUpperCase();
+    if (normalized === 'USER') return 'USER';
+    if (normalized === 'RESTAURANT') return 'RESTAURANT';
+    if (normalized === 'ADMIN') return 'ADMIN';
+    if (normalized === 'DELIVERY_PARTNER' || normalized === 'DRIVER') return 'DELIVERY_PARTNER';
+    return null;
+};
+
 let cachedAccessToken = null;
 let cachedAccessTokenExpiryMs = 0;
 let cachedServiceAccount = null;
@@ -241,7 +254,10 @@ const shouldRemoveTokenFromError = (errorJson, response) => {
     return status === 404 || message.includes('UNREGISTERED') || message.includes('INVALID_ARGUMENT');
 };
 
-const getOwnerModel = (ownerType) => OWNER_MODELS[String(ownerType || '').toUpperCase()] || null;
+const getOwnerModel = (ownerType) => {
+    const normalized = normalizeFcmOwnerType(ownerType);
+    return normalized ? OWNER_MODELS[normalized] || null : null;
+};
 
 const getTokenFieldForPlatform = (platform) => OWNER_TOKEN_FIELDS[platform === 'mobile' ? 'mobile' : 'web'];
 
@@ -277,15 +293,16 @@ export const listOwnerTokens = async ({ ownerType, ownerId, platform }) => {
 
 export const upsertFirebaseDeviceToken = async ({ ownerType, ownerId, token, platform = 'web' }) => {
     const normalizedToken = sanitizeString(token);
-    console.log(`[FCM-DEBUG] upsertFirebaseDeviceToken: ownerType=${ownerType}, ownerId=${ownerId}, platform=${platform}, tokenPreview=${normalizedToken?.slice(0, 10)}...`);
+    const normalizedOwnerType = normalizeFcmOwnerType(ownerType);
+    console.log(`[FCM-DEBUG] upsertFirebaseDeviceToken: ownerType=${ownerType}→${normalizedOwnerType}, ownerId=${ownerId}, platform=${platform}, tokenPreview=${normalizedToken?.slice(0, 10)}...`);
 
-    if (!ownerType || !ownerId || !normalizedToken) {
+    if (!normalizedOwnerType || !ownerId || !normalizedToken) {
         console.error('[FCM-DEBUG] upsert - Missing required fields');
         throw new Error('ownerType, ownerId, and token are required.');
     }
 
     const normalizedPlatform = platform === 'mobile' ? 'mobile' : 'web';
-    const model = getOwnerModel(ownerType);
+    const model = getOwnerModel(normalizedOwnerType);
     if (!model) {
         console.error(`[FCM-DEBUG] upsert - Unsupported owner type: ${ownerType}`);
         throw new Error(`Unsupported owner type: ${ownerType}`);
@@ -306,7 +323,7 @@ export const upsertFirebaseDeviceToken = async ({ ownerType, ownerId, token, pla
 
     await doc.save();
     console.log(`[FCM-DEBUG] upsert - Token list updated. New count: ${tokens.length}`);
-    return { success: true };
+    return { success: true, ownerType: normalizedOwnerType };
 };
 
 export const removeFirebaseDeviceToken = async ({ ownerType, ownerId, token, platform }) => {

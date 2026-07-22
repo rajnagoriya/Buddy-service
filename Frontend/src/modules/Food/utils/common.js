@@ -137,3 +137,27 @@ export const slugify = (value) =>
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "");
+
+/**
+ * Extract a stable string id from a raw id, ObjectId, or populated document.
+ * Prevents "[object Object]" from leaking into URLs and API payloads (e.g. reorder).
+ */
+export const resolveEntityId = (value) => {
+  if (value == null || value === "") return "";
+  if (typeof value === "string" || typeof value === "number") {
+    const s = String(value).trim();
+    return s === "[object Object]" ? "" : s;
+  }
+  if (typeof value === "object") {
+    const nested =
+      value._id ?? value.id ?? value.restaurantId ?? value.itemId ?? null;
+    if (nested != null && nested !== value) {
+      return resolveEntityId(nested);
+    }
+    if (typeof value.toString === "function") {
+      const s = String(value.toString()).trim();
+      if (s && s !== "[object Object]") return s;
+    }
+  }
+  return "";
+};
