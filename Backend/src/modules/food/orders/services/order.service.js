@@ -3355,8 +3355,8 @@ export async function cancelOrderAdmin(orderId, adminId, reason = '') {
 
   order.orderStatus = 'cancelled_by_admin';
   freeOrderDispatch(order);
+  // currentPhase enum is delivery workflow only (no 'cancelled'); mark status instead
   if (order.deliveryState) {
-    order.deliveryState.currentPhase = 'cancelled';
     order.deliveryState.status = 'cancelled';
   }
   pushStatusHistory(order, {
