@@ -36,14 +36,14 @@ const mapOptions = {
   streetViewControl: false,
   clickableIcons: false,
   styles: [
-    { elementType: 'geometry', stylers: [{ color: '#eef2ff' }] },
-    { elementType: 'labels.text.fill', stylers: [{ color: '#334155' }] },
+    { elementType: 'geometry', stylers: [{ color: '#f9fafb' }] },
+    { elementType: 'labels.text.fill', stylers: [{ color: '#4b5563' }] },
     { elementType: 'labels.text.stroke', stylers: [{ color: '#ffffff' }] },
     { featureType: 'poi', stylers: [{ visibility: 'off' }] },
     { featureType: 'transit', stylers: [{ visibility: 'off' }] },
     { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#ffffff' }] },
-    { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#c7d2fe' }] },
-    { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#bfdbfe' }] }
+    { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#e0e7ff' }] },
+    { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#dbeafe' }] }
   ]
 };
 
@@ -149,36 +149,36 @@ const ZoneCard = ({ zone, selected, onSelect }) => (
   <button
     type="button"
     onClick={() => onSelect(zone)}
-    className={`w-full p-4 rounded-2xl border text-left transition-all ${
+    className={`w-full p-3.5 rounded-xl border text-left transition-all ${
       selected
-        ? 'border-blue-200 bg-blue-50 shadow-sm'
-        : 'border-gray-100 bg-white hover:border-gray-200 hover:shadow-sm'
+        ? 'border-indigo-200 bg-indigo-50/60 shadow-sm'
+        : 'border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm'
     }`}
   >
-    <div className="flex items-center justify-between mb-3">
+    <div className="flex items-center justify-between mb-2.5">
       <div className="flex items-center gap-2">
         <span
-          className="w-2.5 h-2.5 rounded-full"
+          className="w-2.5 h-2.5 rounded-full shrink-0"
           style={{ backgroundColor: zone.palette.marker }}
         />
-        <span className="text-[13px] font-black text-gray-900 tracking-tight">{zone.name}</span>
+        <span className="text-xs font-semibold text-gray-900 truncate">{zone.name}</span>
       </div>
-      <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-white text-gray-500 border border-gray-100">
+      <span className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-gray-100 text-gray-600 border border-gray-200">
         {zone.type}
       </span>
     </div>
 
-    <div className="flex items-center justify-between">
+    <div className="flex items-center justify-between text-xs">
       <div>
-        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Surge</p>
-        <div className="flex items-center gap-1.5">
-          <TrendingUp size={14} className="text-primary" />
-          <span className="text-[15px] font-black text-gray-900">{zone.surge}x</span>
+        <span className="text-gray-500 block mb-0.5 font-medium">Surge</span>
+        <div className="flex items-center gap-1 font-semibold text-gray-900">
+          <TrendingUp size={13} className="text-indigo-600" />
+          <span>{zone.surge}x</span>
         </div>
       </div>
       <div className="text-right">
-        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Status</p>
-        <span className={zone.status === 'Active' ? 'text-emerald-600 text-[12px] font-black' : 'text-gray-400 text-[12px] font-black'}>
+        <span className="text-gray-500 block mb-0.5 font-medium">Status</span>
+        <span className={zone.status === 'Active' ? 'text-emerald-600 font-semibold' : 'text-gray-400 font-medium'}>
           {zone.status}
         </span>
       </div>
@@ -289,13 +289,13 @@ const GeoFencing = () => {
     if (loadError) {
       return (
         <div className="h-full w-full flex items-center justify-center bg-gray-50 p-8">
-          <div className="max-w-md rounded-3xl border border-rose-100 bg-white p-8 shadow-sm">
-            <div className="w-14 h-14 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mb-4">
-              <AlertTriangle size={24} />
+          <div className="max-w-md rounded-2xl border border-rose-200 bg-white p-6 shadow-sm text-center">
+            <div className="w-12 h-12 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto mb-3">
+              <AlertTriangle size={22} />
             </div>
-            <h3 className="text-xl font-black text-gray-900 tracking-tight">Google Maps failed to load</h3>
-            <p className="mt-2 text-sm text-gray-500">
-              Check the browser key, allowed referrers, and whether the Maps JavaScript API is enabled.
+            <h3 className="text-sm font-bold text-gray-900">Google Maps Failed to Load</h3>
+            <p className="mt-1.5 text-xs text-gray-500 leading-relaxed">
+              Check the API key, allowed referrers, and whether the Maps JavaScript API is enabled.
             </p>
           </div>
         </div>
@@ -367,30 +367,29 @@ const GeoFencing = () => {
     }
 
     return (
-      <div className="h-full w-full bg-[radial-gradient(circle_at_top,#dbeafe,transparent_35%),linear-gradient(135deg,#eff6ff_0%,#f8fafc_55%,#eef2ff_100%)] flex items-center justify-center p-10">
-        <div className="max-w-xl bg-white/95 border border-gray-100 rounded-[32px] p-8 shadow-xl">
-          <div className="w-16 h-16 rounded-3xl bg-blue-50 text-blue-600 flex items-center justify-center mb-5">
-            <MapIcon size={28} />
+      <div className="h-full w-full bg-gray-50/80 flex items-center justify-center p-8">
+        <div className="max-w-md bg-white border border-gray-200 rounded-xl p-6 shadow-sm text-center">
+          <div className="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto mb-4">
+            <MapIcon size={24} />
           </div>
-          <h3 className="text-2xl font-black text-gray-900 tracking-tight">Google Maps is ready to plug in</h3>
-          <p className="mt-3 text-sm leading-6 text-gray-500">
-            This page now uses the Google Maps loader and your admin zones API. Add a real browser key in
-            [frontend/.env](/z:/projects/appzeto-taxi/frontend/.env) to render the live map on `/admin/geo/gods-eye`.
+          <h3 className="text-sm font-bold text-gray-900">Google Maps API Ready</h3>
+          <p className="mt-1.5 text-xs leading-relaxed text-gray-500">
+            Set a valid `VITE_GOOGLE_MAPS_API_KEY` in frontend environment variables to render the live interactive map.
           </p>
-          <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="rounded-2xl bg-slate-50 p-4 border border-slate-100">
-              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Zones Loaded</p>
-              <p className="text-2xl font-black text-gray-900">{zones.length}</p>
+          <div className="mt-5 grid grid-cols-3 gap-2.5 text-left">
+            <div className="rounded-lg bg-gray-50 p-2.5 border border-gray-200">
+              <span className="block text-[11px] font-medium text-gray-500">Zones</span>
+              <span className="text-sm font-bold text-gray-900 mt-0.5 block">{zones.length}</span>
             </div>
-            <div className="rounded-2xl bg-slate-50 p-4 border border-slate-100">
-              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Selected</p>
-              <p className="text-sm font-black text-gray-900">{selectedZone?.name || 'None'}</p>
+            <div className="rounded-lg bg-gray-50 p-2.5 border border-gray-200">
+              <span className="block text-[11px] font-medium text-gray-500">Selected</span>
+              <span className="text-xs font-bold text-gray-900 truncate mt-0.5 block">{selectedZone?.name || 'None'}</span>
             </div>
-            <div className="rounded-2xl bg-slate-50 p-4 border border-slate-100">
-              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Map Center</p>
-              <p className="text-sm font-black text-gray-900">
-                {mapCenter.lat.toFixed(3)}, {mapCenter.lng.toFixed(3)}
-              </p>
+            <div className="rounded-lg bg-gray-50 p-2.5 border border-gray-200">
+              <span className="block text-[11px] font-medium text-gray-500">Center</span>
+              <span className="text-[11px] font-medium text-gray-700 mt-0.5 block font-mono">
+                {mapCenter.lat.toFixed(2)}, {mapCenter.lng.toFixed(2)}
+              </span>
             </div>
           </div>
         </div>
@@ -400,61 +399,58 @@ const GeoFencing = () => {
 
   if (currentView === 'gods-eye') {
     return (
-      <div className="grid grid-cols-1 xl:grid-cols-[320px,minmax(0,1fr),300px] gap-6 min-h-[calc(100vh-120px)] animate-in fade-in slide-in-from-bottom-4 duration-500">
-        <aside className="rounded-[32px] border border-cyan-100 bg-[linear-gradient(180deg,#ecfeff_0%,#ffffff_100%)] shadow-sm p-5 flex flex-col overflow-hidden">
-          <div className="space-y-1 mb-5">
-            <p className="text-[11px] font-black text-cyan-700 uppercase tracking-[0.25em]">Geo Deck</p>
-            <h1 className="text-3xl font-black text-slate-950 tracking-tight">God&apos;s Eye</h1>
-            <p className="text-[12px] font-bold text-slate-500">Dedicated live map for zone intelligence and fleet spread.</p>
+      <div className="grid grid-cols-1 xl:grid-cols-[300px,minmax(0,1fr),280px] gap-6 min-h-[calc(100vh-120px)] bg-gray-50/50 p-6">
+        <aside className="rounded-xl border border-gray-200 bg-white shadow-sm p-5 flex flex-col overflow-hidden">
+          <div className="space-y-1 mb-5 border-b border-gray-100 pb-4">
+            <span className="text-xs font-medium text-indigo-600">Geo Deck</span>
+            <h1 className="text-lg font-bold text-gray-900">God&apos;s Eye</h1>
+            <p className="text-xs text-gray-500 leading-relaxed">Live map for zone monitoring and fleet spread.</p>
           </div>
 
           <div className="grid grid-cols-2 gap-3 mb-5">
-            <div className="bg-white rounded-2xl border border-cyan-100 p-4 shadow-sm">
-              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Online Fleet</p>
+            <div className="bg-gray-50 rounded-lg border border-gray-200 p-3.5">
+              <span className="block text-xs font-medium text-gray-500 mb-1">Online Fleet</span>
               <div className="flex items-center gap-2">
-                <Users size={15} className="text-emerald-500" />
-                <span className="text-2xl font-black text-gray-900">{onlineCount}</span>
+                <Users size={14} className="text-emerald-600" />
+                <span className="text-lg font-bold text-gray-900">{onlineCount}</span>
               </div>
             </div>
-            <div className="bg-white rounded-2xl border border-cyan-100 p-4 shadow-sm">
-              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Active Zones</p>
-              <span className="text-2xl font-black text-gray-900">{activeZoneCount}</span>
+            <div className="bg-gray-50 rounded-lg border border-gray-200 p-3.5">
+              <span className="block text-xs font-medium text-gray-500 mb-1">Active Zones</span>
+              <span className="text-lg font-bold text-gray-900">{activeZoneCount}</span>
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl border border-cyan-100 p-4 shadow-sm flex items-center justify-between mb-5">
+          <div className="bg-gray-50 rounded-lg border border-gray-200 p-3.5 flex items-center justify-between mb-5">
             <div>
-              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Avg Surge</p>
-              <span className="text-[22px] font-black text-primary">{averageSurge}x</span>
+              <span className="block text-xs font-medium text-gray-500 mb-0.5">Avg Surge</span>
+              <span className="text-lg font-bold text-indigo-600">{averageSurge}x</span>
             </div>
             <button
               type="button"
               onClick={fetchZones}
-              className="h-11 w-11 rounded-xl bg-cyan-50 text-cyan-700 hover:bg-cyan-100 transition-all flex items-center justify-center"
+              className="h-8 w-8 rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-gray-100 transition-colors flex items-center justify-center shadow-sm"
               aria-label="Refresh zones"
             >
-              <RefreshCw size={18} />
+              <RefreshCw size={14} />
             </button>
           </div>
 
-          <div className="bg-white p-2 rounded-2xl border border-cyan-100 flex items-center shadow-sm mb-5">
-            <Search size={16} className="text-gray-300 ml-3" />
+          <div className="bg-gray-50 p-1.5 rounded-lg border border-gray-200 flex items-center mb-4">
+            <Search size={14} className="text-gray-400 ml-2.5" />
             <input
               type="text"
               value={searchValue}
               onChange={(event) => setSearchValue(event.target.value)}
               placeholder="Search zone..."
-              className="w-full bg-transparent border-none text-[12px] font-bold px-3 py-2 focus:ring-0 placeholder:text-gray-300"
+              className="w-full bg-transparent border-none text-xs px-2.5 py-1.5 focus:ring-0 outline-none text-gray-700 placeholder:text-gray-400"
             />
-            <div className="bg-gray-50 p-2 rounded-xl text-gray-400 mr-1">
-              <MapPin size={14} />
-            </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto no-scrollbar space-y-3 pr-1">
+          <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
             {loading ? (
-              <div className="bg-white border border-cyan-100 rounded-2xl p-6 text-center text-[12px] font-bold text-gray-400 uppercase tracking-widest">
-                Syncing map data...
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-6 text-center text-xs font-medium text-gray-500">
+                Loading zones...
               </div>
             ) : filteredZones.length > 0 ? (
               filteredZones.map((zone) => (
@@ -463,123 +459,113 @@ const GeoFencing = () => {
                   zone={zone}
                   selected={zone.id === selectedZoneId}
                   onSelect={(nextZone) => setSelectedZoneId(nextZone.id)}
-                  compact
                 />
               ))
             ) : (
-              <div className="bg-white border border-cyan-100 rounded-2xl p-6 text-center">
-                <p className="text-[12px] font-bold text-gray-400 uppercase tracking-widest">No zones available</p>
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-6 text-center">
+                <p className="text-xs font-medium text-gray-500">No zones available</p>
               </div>
             )}
           </div>
         </aside>
 
-        <section className="rounded-[36px] overflow-hidden border border-slate-200 bg-[#082f49] shadow-[0_30px_80px_rgba(8,47,73,0.12)] relative min-h-[calc(100vh-120px)]">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.25),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(59,130,246,0.18),transparent_28%)] pointer-events-none z-0" />
-
-          <div className="absolute top-0 left-0 right-0 z-10 p-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div className="max-w-xl">
-              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 text-cyan-100 border border-white/10 backdrop-blur-md">
-                <Crosshair size={14} />
-                <span className="text-[10px] font-black uppercase tracking-[0.25em]">Live Operations Grid</span>
+        <section className="rounded-xl overflow-hidden border border-gray-200 bg-white shadow-sm relative min-h-[calc(100vh-120px)] flex flex-col">
+          <div className="p-4 border-b border-gray-200 bg-gray-50/80 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between z-10">
+            <div>
+              <div className="flex items-center gap-2">
+                <Crosshair size={15} className="text-indigo-600" />
+                <h2 className="text-sm font-bold text-gray-900">City-Wide Zone Intelligence</h2>
               </div>
-              <h2 className="mt-4 text-4xl font-black text-white tracking-tight leading-none">City-wide zone intelligence</h2>
-              <p className="mt-3 text-sm leading-6 text-cyan-50/80 max-w-lg">
-                Dedicated God&apos;s Eye map for monitoring zone boundaries, fleet spread and surge pockets from a single command screen.
+              <p className="text-xs text-gray-500 mt-0.5">
+                Monitor zone boundaries, fleet distribution, and surge pockets across locations.
               </p>
             </div>
 
-            <div className="w-full max-w-sm">
+            <div className="w-full sm:w-72">
               {HAS_VALID_GOOGLE_MAPS_KEY && isLoaded ? (
                 <Autocomplete onLoad={setAutocomplete} onPlaceChanged={handlePlaceChanged}>
                   <div className="relative">
-                    <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 z-10" />
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 z-10" />
                     <input
                       type="text"
-                      placeholder="Search city or locality"
-                      className="w-full rounded-2xl border border-white/10 bg-white/90 backdrop-blur-md py-3.5 pl-11 pr-4 text-[13px] font-semibold text-gray-700 shadow-lg focus:border-cyan-400 focus:ring-4 focus:ring-cyan-400/10 outline-none"
+                      placeholder="Search city or locality..."
+                      className="w-full rounded-lg border border-gray-200 bg-white py-1.5 pl-9 pr-3 text-xs text-gray-700 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
                     />
                   </div>
                 </Autocomplete>
               ) : (
-                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-[12px] font-semibold text-amber-800 shadow-sm">
-                  Set `VITE_GOOGLE_MAPS_API_KEY` in [frontend/.env](/z:/projects/appzeto-taxi/frontend/.env) to load the live map here.
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800">
+                  Set VITE_GOOGLE_MAPS_API_KEY in .env
                 </div>
               )}
             </div>
           </div>
 
-          <div className="absolute inset-[112px_18px_18px_18px] z-10 rounded-[30px] overflow-hidden border border-white/10 shadow-2xl bg-white">
+          <div className="flex-1 relative">
             {renderMapCanvas()}
-          </div>
 
-          <div className="absolute left-10 bottom-10 z-20 flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={() => fitZoneBounds(selectedZone)}
-              className="bg-white/95 backdrop-blur-md px-4 py-3 rounded-2xl border border-white shadow-lg text-[12px] font-black uppercase tracking-widest text-gray-700 flex items-center gap-2"
-            >
-              <LocateFixed size={15} />
-              Focus Zone
-            </button>
-            <div className="bg-white/95 backdrop-blur-md px-4 py-3 rounded-2xl border border-white shadow-lg text-[12px] font-black uppercase tracking-widest text-gray-700 flex items-center gap-2">
-              <Layers size={15} className="text-cyan-600" />
-              Fleet + zone overlay
+            <div className="absolute left-4 bottom-4 z-20 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => fitZoneBounds(selectedZone)}
+                className="bg-white px-3 py-2 rounded-lg border border-gray-200 shadow-sm text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-1.5"
+              >
+                <LocateFixed size={14} className="text-gray-500" />
+                Focus Zone
+              </button>
+              <div className="bg-white px-3 py-2 rounded-lg border border-gray-200 shadow-sm text-xs font-medium text-gray-700 flex items-center gap-1.5">
+                <Layers size={14} className="text-indigo-600" />
+                Fleet + zone overlay
+              </div>
             </div>
           </div>
         </section>
 
-        <aside className="rounded-[32px] border border-slate-200 bg-white shadow-sm p-5 flex flex-col">
-          <div className="flex items-center justify-between mb-5">
+        <aside className="rounded-xl border border-gray-200 bg-white shadow-sm p-5 flex flex-col">
+          <div className="flex items-center justify-between mb-4 border-b border-gray-100 pb-3">
             <div>
-              <p className="text-[11px] font-black text-gray-400 uppercase tracking-[0.25em]">Live Focus</p>
-              <h3 className="text-2xl font-black text-slate-950 tracking-tight mt-2">{selectedZone?.name || 'No zone selected'}</h3>
+              <span className="text-xs font-medium text-gray-500">Live Focus</span>
+              <h3 className="text-sm font-bold text-gray-900 mt-0.5">{selectedZone?.name || 'No zone selected'}</h3>
             </div>
-            <div className="w-12 h-12 rounded-2xl bg-slate-50 text-slate-700 flex items-center justify-center">
-              <Layers size={20} />
+            <div className="w-8 h-8 rounded-lg bg-gray-100 text-gray-600 flex items-center justify-center">
+              <Layers size={16} />
             </div>
           </div>
 
           <div className="space-y-3 mb-5">
-            <div className="rounded-2xl bg-slate-50 border border-slate-100 p-4">
-              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Selected Zone</p>
-              <p className="text-lg font-black text-slate-900">{selectedZone?.name || 'None'}</p>
+            <div className="rounded-lg bg-gray-50 border border-gray-200 p-3">
+              <span className="block text-xs font-medium text-gray-500 mb-1">Selected Zone</span>
+              <span className="text-sm font-bold text-gray-900">{selectedZone?.name || 'None'}</span>
             </div>
-            <div className="rounded-2xl bg-slate-50 border border-slate-100 p-4">
-              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Current Surge</p>
-              <p className="text-lg font-black text-primary">{selectedZone?.surge || averageSurge}x</p>
+            <div className="rounded-lg bg-gray-50 border border-gray-200 p-3">
+              <span className="block text-xs font-medium text-gray-500 mb-1">Current Surge</span>
+              <span className="text-sm font-bold text-indigo-600">{selectedZone?.surge || averageSurge}x</span>
             </div>
-            <div className="rounded-2xl bg-slate-50 border border-slate-100 p-4">
-              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Map Center</p>
-              <p className="text-sm font-black text-slate-900">
+            <div className="rounded-lg bg-gray-50 border border-gray-200 p-3">
+              <span className="block text-xs font-medium text-gray-500 mb-1">Map Center</span>
+              <span className="text-xs font-medium text-gray-700 font-mono">
                 {mapCenter.lat.toFixed(3)}, {mapCenter.lng.toFixed(3)}
-              </p>
+              </span>
             </div>
           </div>
 
-          <div className="rounded-[28px] bg-[#0f172a] text-white p-5 mb-5">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center text-cyan-300">
-                <ShieldAlert size={18} />
-              </div>
-              <div>
-                <p className="text-[10px] font-black text-cyan-100/70 uppercase tracking-widest">Ops Note</p>
-                <p className="text-sm font-black text-white">Monitor overlap before pricing changes</p>
-              </div>
+          <div className="rounded-lg bg-indigo-50 border border-indigo-100 p-4 mb-5">
+            <div className="flex items-center gap-2 mb-1.5 text-indigo-900 font-semibold text-xs">
+              <ShieldAlert size={14} className="text-indigo-600" />
+              <span>Ops Note</span>
             </div>
-            <p className="text-xs leading-6 text-slate-300">
-              This dedicated screen is tuned for map monitoring first. Keep zone boundaries clean and verify surge changes against live fleet spread.
+            <p className="text-xs text-indigo-700 leading-relaxed">
+              Monitor zone overlap and verify surge pricing updates against live driver coverage.
             </p>
           </div>
 
-          <div className="flex-1 overflow-y-auto no-scrollbar space-y-3">
+          <div className="flex-1 overflow-y-auto space-y-2.5">
             {filteredZones.slice(0, 5).map((zone) => (
               <ZoneCard
                 key={`focus-${zone.id}`}
                 zone={zone}
                 selected={zone.id === selectedZoneId}
                 onSelect={(nextZone) => setSelectedZoneId(nextZone.id)}
-                compact
               />
             ))}
           </div>
@@ -589,16 +575,16 @@ const GeoFencing = () => {
   }
 
   return (
-    <div className="flex h-[calc(100vh-120px)] gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="w-80 shrink-0 flex flex-col space-y-5 overflow-y-auto no-scrollbar pb-10">
+    <div className="flex h-[calc(100vh-120px)] gap-6 bg-gray-50/50 p-6">
+      <div className="w-80 shrink-0 flex flex-col space-y-5 overflow-y-auto pb-6">
         <div className="space-y-1">
-          <h1 className="text-2xl font-bold tracking-tight text-gray-900">Geo Operations</h1>
-          <p className="text-gray-400 font-bold text-[11px] mt-1 uppercase tracking-widest leading-none">
-            Live spatial view for zones, demand and fleet coverage
+          <h1 className="text-lg font-bold text-gray-900">Geo Operations</h1>
+          <p className="text-gray-500 font-medium text-xs leading-relaxed">
+            Live spatial view for zones, demand, and fleet coverage.
           </p>
         </div>
 
-        <div className="bg-white rounded-2xl border border-gray-100 p-2 shadow-sm">
+        <div className="bg-white rounded-xl border border-gray-200 p-1.5 shadow-sm">
           <div className="grid grid-cols-3 gap-1">
             {GEO_NAV_ITEMS.map((item) => {
               const isActive = location.pathname === item.path;
@@ -606,8 +592,8 @@ const GeoFencing = () => {
                 <Link
                   key={item.path}
                   to={item.path}
-                  className={`px-3 py-3 rounded-xl text-center text-[11px] font-black uppercase tracking-widest transition-all ${
-                    isActive ? 'bg-[#0F172A] text-white shadow-lg' : 'text-gray-500 hover:bg-gray-50'
+                  className={`px-2.5 py-2 rounded-lg text-center text-xs font-medium transition-all ${
+                    isActive ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-50'
                   }`}
                 >
                   {item.label}
@@ -618,58 +604,55 @@ const GeoFencing = () => {
         </div>
 
         <div className="grid grid-cols-2 gap-3">
-          <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
-            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Online Fleet</p>
+          <div className="bg-white rounded-xl border border-gray-200 p-3.5 shadow-sm">
+            <span className="block text-xs font-medium text-gray-500 mb-1">Online Fleet</span>
             <div className="flex items-center gap-2">
-              <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="text-2xl font-black text-gray-900">{onlineCount}</span>
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-lg font-bold text-gray-900">{onlineCount}</span>
             </div>
           </div>
-          <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
-            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Active Zones</p>
-            <span className="text-2xl font-black text-gray-900">{activeZoneCount}</span>
+          <div className="bg-white rounded-xl border border-gray-200 p-3.5 shadow-sm">
+            <span className="block text-xs font-medium text-gray-500 mb-1">Active Zones</span>
+            <span className="text-lg font-bold text-gray-900">{activeZoneCount}</span>
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm flex items-center justify-between">
+        <div className="bg-white rounded-xl border border-gray-200 p-3.5 shadow-sm flex items-center justify-between">
           <div>
-            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Avg Surge</p>
-            <span className="text-[22px] font-black text-primary">{averageSurge}x</span>
+            <span className="block text-xs font-medium text-gray-500 mb-0.5">Avg Surge</span>
+            <span className="text-lg font-bold text-indigo-600">{averageSurge}x</span>
           </div>
           <button
             type="button"
             onClick={fetchZones}
-            className="h-11 w-11 rounded-xl bg-gray-50 text-gray-500 hover:bg-gray-100 transition-all flex items-center justify-center"
+            className="h-8 w-8 rounded-lg bg-gray-50 text-gray-600 hover:bg-gray-100 transition-colors flex items-center justify-center border border-gray-200"
             aria-label="Refresh zones"
           >
-            <RefreshCw size={18} />
+            <RefreshCw size={14} />
           </button>
         </div>
 
-        <div className="bg-white p-2 rounded-2xl border border-gray-100 flex items-center shadow-sm">
-          <Search size={16} className="text-gray-300 ml-3" />
+        <div className="bg-white p-1.5 rounded-xl border border-gray-200 flex items-center shadow-sm">
+          <Search size={14} className="text-gray-400 ml-2.5" />
           <input
             type="text"
             value={searchValue}
             onChange={(event) => setSearchValue(event.target.value)}
             placeholder="Search zone..."
-            className="w-full bg-transparent border-none text-[12px] font-bold px-3 py-2 focus:ring-0 placeholder:text-gray-300"
+            className="w-full bg-transparent border-none text-xs px-2.5 py-1.5 focus:ring-0 placeholder:text-gray-400 outline-none text-gray-700"
           />
-          <div className="bg-gray-50 p-2 rounded-xl text-gray-400 mr-1">
-            <MapPin size={14} />
-          </div>
         </div>
 
-        <div className="flex-1 space-y-3">
+        <div className="flex-1 space-y-2.5">
           <div className="flex items-center justify-between px-1">
-            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
+            <span className="text-xs font-medium text-gray-500">
               Zone Watchlist ({filteredZones.length})
             </span>
           </div>
 
           {loading ? (
-            <div className="bg-white border border-gray-100 rounded-2xl p-6 text-center text-[12px] font-bold text-gray-400 uppercase tracking-widest">
-              Syncing map data...
+            <div className="bg-white border border-gray-200 rounded-xl p-6 text-center text-xs font-medium text-gray-500">
+              Loading map data...
             </div>
           ) : filteredZones.length > 0 ? (
             filteredZones.map((zone) => (
@@ -681,65 +664,65 @@ const GeoFencing = () => {
               />
             ))
           ) : (
-            <div className="bg-white border border-gray-100 rounded-2xl p-6 text-center">
-              <p className="text-[12px] font-bold text-gray-400 uppercase tracking-widest">No zones match your search</p>
+            <div className="bg-white border border-gray-200 rounded-xl p-6 text-center">
+              <p className="text-xs font-medium text-gray-500">No zones match your search</p>
             </div>
           )}
         </div>
       </div>
 
-      <div className="flex-1 bg-white rounded-[32px] border border-gray-100 shadow-sm overflow-hidden relative">
-        <div className="absolute top-5 left-5 right-5 z-10 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="bg-white/95 backdrop-blur-md rounded-2xl px-5 py-4 border border-white shadow-lg">
-            <div className="flex items-center gap-3">
-              <div className="w-11 h-11 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center">
-                {currentView === 'peak-zone' ? <TrendingUp size={20} /> : currentView === 'heatmap' ? <Layers size={20} /> : <Navigation size={20} />}
-              </div>
-              <div>
-                <p className="text-[11px] font-black text-gray-400 uppercase tracking-widest">
-                  {currentView === 'gods-eye' ? 'God\'s Eye View' : currentView === 'heatmap' ? 'Heat Map View' : 'Peak Zone View'}
-                </p>
-                <h2 className="text-lg font-black text-gray-900 tracking-tight">
-                  {selectedZone?.name || 'Live geo coverage'}
-                </h2>
-              </div>
+      <div className="flex-1 bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden relative flex flex-col">
+        <div className="p-4 border-b border-gray-200 bg-gray-50/80 flex flex-col gap-3 md:flex-row md:items-center md:justify-between z-10">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
+              {currentView === 'peak-zone' ? <TrendingUp size={18} /> : currentView === 'heatmap' ? <Layers size={18} /> : <Navigation size={18} />}
+            </div>
+            <div>
+              <span className="block text-xs font-medium text-gray-500">
+                {currentView === 'gods-eye' ? 'God\'s Eye View' : currentView === 'heatmap' ? 'Heat Map View' : 'Peak Zone View'}
+              </span>
+              <h2 className="text-sm font-bold text-gray-900 mt-0.5">
+                {selectedZone?.name || 'Live geo coverage'}
+              </h2>
             </div>
           </div>
 
-          <div className="w-full md:w-[340px]">
+          <div className="w-full md:w-72">
             {HAS_VALID_GOOGLE_MAPS_KEY && isLoaded ? (
               <Autocomplete onLoad={setAutocomplete} onPlaceChanged={handlePlaceChanged}>
                 <div className="relative">
-                  <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 z-10" />
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 z-10" />
                   <input
                     type="text"
-                    placeholder="Search city or locality"
-                    className="w-full rounded-2xl border border-gray-200 bg-white/95 backdrop-blur-md py-3.5 pl-11 pr-4 text-[13px] font-semibold text-gray-700 shadow-lg focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none"
+                    placeholder="Search city or locality..."
+                    className="w-full rounded-lg border border-gray-200 bg-white py-1.5 pl-9 pr-3 text-xs text-gray-700 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
                   />
                 </div>
               </Autocomplete>
             ) : (
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-[12px] font-semibold text-amber-800 shadow-sm">
-                Set `VITE_GOOGLE_MAPS_API_KEY` in [frontend/.env](/z:/projects/appzeto-taxi/frontend/.env) to load the live map here.
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 shadow-sm">
+                Set VITE_GOOGLE_MAPS_API_KEY in .env
               </div>
             )}
           </div>
         </div>
 
-        {renderMapCanvas()}
+        <div className="flex-1 relative">
+          {renderMapCanvas()}
 
-        <div className="absolute left-5 bottom-5 z-10 flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={() => fitZoneBounds(selectedZone)}
-            className="bg-white/95 backdrop-blur-md px-4 py-3 rounded-2xl border border-white shadow-lg text-[12px] font-black uppercase tracking-widest text-gray-700 flex items-center gap-2"
-          >
-            <LocateFixed size={15} />
-            Focus Zone
-          </button>
-          <div className="bg-white/95 backdrop-blur-md px-4 py-3 rounded-2xl border border-white shadow-lg text-[12px] font-black uppercase tracking-widest text-gray-700 flex items-center gap-2">
-            {currentView === 'peak-zone' ? <ShieldAlert size={15} className="text-rose-500" /> : <Layers size={15} className="text-blue-500" />}
-            {currentView === 'gods-eye' ? 'Fleet + zone overlay' : currentView === 'heatmap' ? 'Demand intensity overlay' : 'Peak pricing overlay'}
+          <div className="absolute left-4 bottom-4 z-10 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => fitZoneBounds(selectedZone)}
+              className="bg-white px-3 py-2 rounded-lg border border-gray-200 shadow-sm text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-1.5"
+            >
+              <LocateFixed size={14} className="text-gray-500" />
+              Focus Zone
+            </button>
+            <div className="bg-white px-3 py-2 rounded-lg border border-gray-200 shadow-sm text-xs font-medium text-gray-700 flex items-center gap-1.5">
+              {currentView === 'peak-zone' ? <TrendingUp size={14} className="text-indigo-600" /> : <Layers size={14} className="text-indigo-600" />}
+              {currentView === 'gods-eye' ? 'Fleet + zone overlay' : currentView === 'heatmap' ? 'Demand intensity overlay' : 'Peak pricing overlay'}
+            </div>
           </div>
         </div>
       </div>

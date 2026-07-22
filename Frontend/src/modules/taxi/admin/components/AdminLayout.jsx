@@ -1598,7 +1598,7 @@ const AdminLayout = () => {
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-3">
               <div className="h-4 w-1 rounded-full bg-slate-900" />
-              <h2 className="text-[17px] font-bold tracking-tight text-slate-900">{pageTitle}</h2>
+              <h2 className="text-[17px] font-semibold tracking-tight text-slate-900">{pageTitle}</h2>
             </div>
           </div>
 

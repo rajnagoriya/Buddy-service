@@ -39,6 +39,27 @@ const PendingDrivers = () => {
   const [page, setPage] = useState(1);
   const [paginator, setPaginator] = useState(null);
 
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+  const [filters, setFilters] = useState({
+    serviceLocation: '',
+    transportType: '',
+  });
+  const [serviceLocationsList, setServiceLocationsList] = useState([]);
+
+  useEffect(() => {
+    const loadLocations = async () => {
+      try {
+        const res = await adminService.getServiceLocations();
+        if (res?.data) {
+          setServiceLocationsList(Array.isArray(res.data) ? res.data : res.data.results || []);
+        }
+      } catch (e) {
+        // ignore
+      }
+    };
+    loadLocations();
+  }, []);
+
   const openActionMenu = (driverId, anchorEl) => {
     const rect = anchorEl.getBoundingClientRect();
     const viewportPadding = 12;
@@ -133,13 +154,15 @@ const PendingDrivers = () => {
     );
   };
 
-  const fetchPendingDrivers = async ({ nextPage = page, nextLimit = itemsPerPage, nextSearch = searchTerm } = {}) => {
+  const fetchPendingDrivers = async ({ nextPage = page, nextLimit = itemsPerPage, nextSearch = searchTerm, nextFilters = filters } = {}) => {
     setIsLoading(true);
     setError('');
     try {
       const responseData = await adminService.getDrivers(nextPage, nextLimit, {
         approve: false,
         search: String(nextSearch || '').trim(),
+        ...(nextFilters.serviceLocation ? { serviceLocation: nextFilters.serviceLocation } : {}),
+        ...(nextFilters.transportType ? { transportType: nextFilters.transportType } : {}),
       });
       const driversList = responseData.data?.results || [];
       
@@ -170,21 +193,35 @@ const PendingDrivers = () => {
 
 
   useEffect(() => {
-    fetchPendingDrivers({ nextPage: 1, nextLimit: itemsPerPage, nextSearch: searchTerm });
+    fetchPendingDrivers({ nextPage: 1, nextLimit: itemsPerPage, nextSearch: searchTerm, nextFilters: filters });
     setPage(1);
   }, [itemsPerPage]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
-      fetchPendingDrivers({ nextPage: 1, nextLimit: itemsPerPage, nextSearch: searchTerm });
+      fetchPendingDrivers({ nextPage: 1, nextLimit: itemsPerPage, nextSearch: searchTerm, nextFilters: filters });
       setPage(1);
     }, 250);
     return () => window.clearTimeout(timeoutId);
   }, [searchTerm]);
 
   useEffect(() => {
-    fetchPendingDrivers({ nextPage: page, nextLimit: itemsPerPage, nextSearch: searchTerm });
+    fetchPendingDrivers({ nextPage: page, nextLimit: itemsPerPage, nextSearch: searchTerm, nextFilters: filters });
   }, [page]);
+
+  const handleFilterChange = (key, value) => {
+    const updated = { ...filters, [key]: value };
+    setFilters(updated);
+    fetchPendingDrivers({ nextPage: 1, nextLimit: itemsPerPage, nextSearch: searchTerm, nextFilters: updated });
+    setPage(1);
+  };
+
+  const resetFilters = () => {
+    const empty = { serviceLocation: '', transportType: '' };
+    setFilters(empty);
+    fetchPendingDrivers({ nextPage: 1, nextLimit: itemsPerPage, nextSearch: searchTerm, nextFilters: empty });
+    setPage(1);
+  };
 
   useEffect(() => {
     if (!activeMenu) return undefined;
@@ -261,9 +298,15 @@ const PendingDrivers = () => {
             </label>
             <input
               className={inputClass}
-              placeholder="Search by name, phone, or location"
+              placeholder="Search by name, driver code, phone, or location"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  fetchPendingDrivers({ nextPage: 1, nextLimit: itemsPerPage, nextSearch: searchTerm, nextFilters: filters });
+                  setPage(1);
+                }
+              }}
             />
           </div>
           <div className="flex items-center gap-2">
@@ -278,10 +321,74 @@ const PendingDrivers = () => {
               <option value={50}>50</option>
             </select>
           </div>
-          <button className="flex items-center gap-2 px-4 py-2 text-sm text-white bg-orange-500 rounded-lg hover:bg-orange-600 transition-colors">
+          <button
+            onClick={() => setIsFiltersOpen(!isFiltersOpen)}
+            className={`flex items-center gap-2 px-4 py-2 text-sm text-white rounded-lg transition-colors font-medium shadow-sm ${
+              filters.serviceLocation || filters.transportType || isFiltersOpen
+                ? 'bg-orange-600 ring-2 ring-orange-300'
+                : 'bg-orange-500 hover:bg-orange-600'
+            }`}
+          >
             <Filter size={16} /> Filters
+            {(filters.serviceLocation || filters.transportType) && (
+              <span className="w-2 h-2 rounded-full bg-white animate-pulse"></span>
+            )}
           </button>
         </div>
+
+        {isFiltersOpen && (
+          <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap items-center justify-between gap-4 transition-all">
+            <div className="flex flex-wrap items-center gap-4 text-xs font-medium text-gray-700">
+              <div className="flex items-center gap-2">
+                <span className="text-gray-500">Service Location:</span>
+                <select
+                  value={filters.serviceLocation}
+                  onChange={(e) => handleFilterChange('serviceLocation', e.target.value)}
+                  className="border border-gray-200 rounded-lg px-3 py-1.5 bg-white text-xs text-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+                >
+                  <option value="">All Locations</option>
+                  {serviceLocationsList.map((loc) => (
+                    <option key={loc._id || loc.id} value={loc._id || loc.id}>
+                      {loc.service_location_name || loc.name || loc.city}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-gray-500">Transport Type:</span>
+                <select
+                  value={filters.transportType}
+                  onChange={(e) => handleFilterChange('transportType', e.target.value)}
+                  className="border border-gray-200 rounded-lg px-3 py-1.5 bg-white text-xs text-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+                >
+                  <option value="">All Transport Types</option>
+                  <option value="taxi">Taxi / Cab</option>
+                  <option value="bike">Bike / Moto</option>
+                  <option value="auto">Auto Rickshaw</option>
+                  <option value="delivery">Delivery / Goods</option>
+                  <option value="rental">Rental</option>
+                  <option value="bus">Bus</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {(filters.serviceLocation || filters.transportType) && (
+                <button
+                  onClick={resetFilters}
+                  className="px-3 py-1.5 text-xs font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-lg transition-colors border border-rose-100"
+                >
+                  Reset Filters
+                </button>
+              )}
+              <button
+                onClick={() => setIsFiltersOpen(false)}
+                className="px-3 py-1.5 text-xs font-semibold text-gray-600 bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-visible">

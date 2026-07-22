@@ -38,13 +38,38 @@ const DriverList = ({ mode = 'approved' }) => {
   const [page, setPage] = useState(1);
   const [paginator, setPaginator] = useState(null);
 
-  const fetchDrivers = async ({ nextPage = page, nextLimit = itemsPerPage, nextSearch = searchTerm } = {}) => {
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+  const [filters, setFilters] = useState({
+    serviceLocation: '',
+    transportType: '',
+    status: '',
+  });
+  const [serviceLocationsList, setServiceLocationsList] = useState([]);
+
+  useEffect(() => {
+    const loadLocations = async () => {
+      try {
+        const res = await adminService.getServiceLocations();
+        if (res?.data) {
+          setServiceLocationsList(Array.isArray(res.data) ? res.data : res.data.results || []);
+        }
+      } catch (e) {
+        // ignore
+      }
+    };
+    loadLocations();
+  }, []);
+
+  const fetchDrivers = async ({ nextPage = page, nextLimit = itemsPerPage, nextSearch = searchTerm, nextFilters = filters } = {}) => {
     setIsLoading(true);
     setError('');
     try {
       const responseData = await adminService.getDrivers(nextPage, nextLimit, {
         ...(mode === 'active' ? { isOnline: true } : { approve: true }),
         search: String(nextSearch || '').trim(),
+        ...(nextFilters.serviceLocation ? { serviceLocation: nextFilters.serviceLocation } : {}),
+        ...(nextFilters.transportType ? { transportType: nextFilters.transportType } : {}),
+        ...(nextFilters.status ? { status: nextFilters.status } : {}),
       });
       const driversList = responseData.data?.results || [];
       if (responseData.success) {
@@ -81,21 +106,35 @@ const DriverList = ({ mode = 'approved' }) => {
   };
 
   useEffect(() => {
-    fetchDrivers({ nextPage: 1, nextLimit: itemsPerPage, nextSearch: searchTerm });
+    fetchDrivers({ nextPage: 1, nextLimit: itemsPerPage, nextSearch: searchTerm, nextFilters: filters });
     setPage(1);
   }, [itemsPerPage]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
-      fetchDrivers({ nextPage: 1, nextLimit: itemsPerPage, nextSearch: searchTerm });
+      fetchDrivers({ nextPage: 1, nextLimit: itemsPerPage, nextSearch: searchTerm, nextFilters: filters });
       setPage(1);
     }, 250);
     return () => window.clearTimeout(timeoutId);
   }, [searchTerm]);
 
   useEffect(() => {
-    fetchDrivers({ nextPage: page, nextLimit: itemsPerPage, nextSearch: searchTerm });
+    fetchDrivers({ nextPage: page, nextLimit: itemsPerPage, nextSearch: searchTerm, nextFilters: filters });
   }, [page]);
+
+  const handleFilterChange = (key, value) => {
+    const updated = { ...filters, [key]: value };
+    setFilters(updated);
+    fetchDrivers({ nextPage: 1, nextLimit: itemsPerPage, nextSearch: searchTerm, nextFilters: updated });
+    setPage(1);
+  };
+
+  const resetFilters = () => {
+    const empty = { serviceLocation: '', transportType: '', status: '' };
+    setFilters(empty);
+    fetchDrivers({ nextPage: 1, nextLimit: itemsPerPage, nextSearch: searchTerm, nextFilters: empty });
+    setPage(1);
+  };
 
   const closeMenu = () => {
     setActiveMenu(null);
@@ -261,11 +300,28 @@ const DriverList = ({ mode = 'approved' }) => {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <button className="w-10 h-10 rounded-full border border-gray-200 bg-white text-gray-400 flex items-center justify-center shadow-sm">
+            <button
+              onClick={() => {
+                fetchDrivers({ nextPage: 1, nextLimit: itemsPerPage, nextSearch: searchTerm, nextFilters: filters });
+                setPage(1);
+              }}
+              className="w-10 h-10 rounded-full border border-gray-200 bg-white text-gray-400 hover:text-indigo-600 hover:border-indigo-200 flex items-center justify-center shadow-sm transition-colors"
+              title="Search now"
+            >
               <Search size={16} />
             </button>
-            <button className="bg-orange-500 text-white px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 shadow-sm uppercase tracking-wide">
+            <button
+              onClick={() => setIsFiltersOpen(!isFiltersOpen)}
+              className={`px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 shadow-sm uppercase tracking-wide transition-colors ${
+                filters.serviceLocation || filters.transportType || filters.status || isFiltersOpen
+                  ? 'bg-orange-600 text-white ring-2 ring-orange-300'
+                  : 'bg-orange-500 hover:bg-orange-600 text-white'
+              }`}
+            >
               <Filter size={14} /> Filters
+              {(filters.serviceLocation || filters.transportType || filters.status) && (
+                <span className="w-2 h-2 rounded-full bg-white animate-pulse"></span>
+              )}
             </button>
             <div className="relative">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -274,11 +330,86 @@ const DriverList = ({ mode = 'approved' }) => {
                 placeholder="Search drivers..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    fetchDrivers({ nextPage: 1, nextLimit: itemsPerPage, nextSearch: searchTerm, nextFilters: filters });
+                    setPage(1);
+                  }
+                }}
                 className="pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg w-56 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
               />
             </div>
           </div>
         </div>
+
+        {isFiltersOpen && (
+          <div className="bg-gray-50/70 p-4 border-b border-gray-200 flex flex-wrap items-center justify-between gap-4 transition-all">
+            <div className="flex flex-wrap items-center gap-4 text-xs font-medium text-gray-700">
+              <div className="flex items-center gap-2">
+                <span className="text-gray-500">Service Location:</span>
+                <select
+                  value={filters.serviceLocation}
+                  onChange={(e) => handleFilterChange('serviceLocation', e.target.value)}
+                  className="border border-gray-200 rounded-lg px-3 py-1.5 bg-white text-xs text-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+                >
+                  <option value="">All Locations</option>
+                  {serviceLocationsList.map((loc) => (
+                    <option key={loc._id || loc.id} value={loc._id || loc.id}>
+                      {loc.service_location_name || loc.name || loc.city}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-gray-500">Transport Type:</span>
+                <select
+                  value={filters.transportType}
+                  onChange={(e) => handleFilterChange('transportType', e.target.value)}
+                  className="border border-gray-200 rounded-lg px-3 py-1.5 bg-white text-xs text-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+                >
+                  <option value="">All Transport Types</option>
+                  <option value="taxi">Taxi / Cab</option>
+                  <option value="bike">Bike / Moto</option>
+                  <option value="auto">Auto Rickshaw</option>
+                  <option value="delivery">Delivery / Goods</option>
+                  <option value="rental">Rental</option>
+                  <option value="bus">Bus</option>
+                </select>
+              </div>
+              {mode !== 'active' && (
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-500">Status:</span>
+                  <select
+                    value={filters.status}
+                    onChange={(e) => handleFilterChange('status', e.target.value)}
+                    className="border border-gray-200 rounded-lg px-3 py-1.5 bg-white text-xs text-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+                  >
+                    <option value="">All Status</option>
+                    <option value="Approved">Approved</option>
+                    <option value="Online">Online</option>
+                    <option value="Offline">Offline</option>
+                  </select>
+                </div>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {(filters.serviceLocation || filters.transportType || filters.status) && (
+                <button
+                  onClick={resetFilters}
+                  className="px-3 py-1.5 text-xs font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-lg transition-colors border border-rose-100"
+                >
+                  Reset Filters
+                </button>
+              )}
+              <button
+                onClick={() => setIsFiltersOpen(false)}
+                className="px-3 py-1.5 text-xs font-semibold text-gray-600 bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Table */}
         <div className="overflow-x-auto">

@@ -4023,7 +4023,7 @@ export const adjustUserWallet = async (id, payload = {}) => {
   return { balance: Number(nextBalance.toFixed(2)) };
 };
 
-export const listDrivers = async ({ page = 1, limit = 50, status, search, approve, isOnline } = {}, currentAdmin = null) => {
+export const listDrivers = async ({ page = 1, limit = 50, status, search, approve, isOnline, serviceLocation, transportType } = {}, currentAdmin = null) => {
   const safePage = Number(page) || 1;
   const safeLimit = Number(limit) || 50;
   const start = (safePage - 1) * safeLimit;
@@ -4034,26 +4034,78 @@ export const listDrivers = async ({ page = 1, limit = 50, status, search, approv
     Object.assign(query, buildServiceLocationScopeQuery(currentAdmin));
   }
 
-  if (status) {
-    query.status = status;
+  if (status && status !== 'All' && status !== '') {
+    const statusLower = String(status).trim().toLowerCase();
+    if (statusLower === 'approved') {
+      query.approve = true;
+    } else if (statusLower === 'pending' || statusLower === 'unapproved') {
+      query.approve = false;
+    } else if (statusLower === 'online') {
+      query.isOnline = true;
+    } else if (statusLower === 'offline') {
+      query.isOnline = false;
+    } else {
+      query.status = status;
+    }
   }
 
-  if (approve !== undefined) {
+  if (approve !== undefined && approve !== '') {
     query.approve = approve === 'true' || approve === true || approve === 1;
   }
 
-  if (isOnline !== undefined) {
+  if (isOnline !== undefined && isOnline !== '') {
     query.isOnline = isOnline === 'true' || isOnline === true || isOnline === 1;
   }
 
-  if (search) {
-    const regex = new RegExp(String(search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-    query.$or = [
+  if (serviceLocation && String(serviceLocation).trim() && serviceLocation !== 'All') {
+    const locStr = String(serviceLocation).trim();
+    if (mongoose.Types.ObjectId.isValid(locStr)) {
+      query.service_location_id = locStr;
+    } else {
+      const locRegex = new RegExp(locStr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      query.$and = query.$and || [];
+      query.$and.push({
+        $or: [
+          { service_location_name: locRegex },
+          { city: locRegex }
+        ]
+      });
+    }
+  }
+
+  if (transportType && String(transportType).trim() && transportType !== 'All') {
+    const ttRegex = new RegExp(String(transportType).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    query.$and = query.$and || [];
+    query.$and.push({
+      $or: [
+        { transport_type: ttRegex },
+        { register_for: ttRegex },
+        { vehicle_type: ttRegex }
+      ]
+    });
+  }
+
+  if (search && String(search).trim()) {
+    const cleanSearch = String(search).trim();
+    const regex = new RegExp(cleanSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    const searchOr = [
       { name: regex },
       { phone: regex },
+      { mobile: regex },
       { email: regex },
-      { vehicleNumber: regex }
+      { driver_code: regex },
+      { referralCode: regex },
+      { vehicleNumber: regex },
+      { service_location_name: regex },
+      { city: regex },
+      { transport_type: regex },
+      { register_for: regex }
     ];
+    if (mongoose.Types.ObjectId.isValid(cleanSearch)) {
+      searchOr.push({ _id: cleanSearch });
+    }
+    query.$and = query.$and || [];
+    query.$and.push({ $or: searchOr });
   }
 
   const total = await Driver.countDocuments(query);

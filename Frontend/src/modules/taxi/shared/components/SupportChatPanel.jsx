@@ -665,11 +665,11 @@ const SupportChatPanel = ({
             <MessageCircle size={20} />
           </div>
           <div className="min-w-0">
-            <h2 className="truncate text-[18px] font-black tracking-tight text-slate-900">{title}</h2>
+            <h2 className="truncate text-[18px] font-semibold tracking-tight text-slate-900">{title}</h2>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Desk Terminal</span>
+              <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Desk Terminal</span>
               <span className="w-1 h-1 rounded-full bg-slate-300" />
-              <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600">{subtitle}</p>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-indigo-600">{subtitle}</p>
             </div>
           </div>
         </div>
@@ -678,7 +678,7 @@ const SupportChatPanel = ({
         }`}>
           <div className="flex items-center gap-2.5">
             <div className={`h-2 w-2 shrink-0 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
-            <span className="whitespace-normal text-[10px] font-black uppercase tracking-[0.18em] sm:text-[11px] sm:tracking-widest">
+            <span className="whitespace-normal text-[10px] font-semibold uppercase tracking-[0.18em] sm:text-[11px] sm:tracking-widest">
             {isConnected ? 'Connection: Live' : 'Connection: Offline'}
             </span>
           </div>

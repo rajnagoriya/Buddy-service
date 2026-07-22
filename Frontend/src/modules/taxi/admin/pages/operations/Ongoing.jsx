@@ -33,6 +33,13 @@ const Ongoing = () => {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState('');
 
+  // Filter state
+  const [showFilters, setShowFilters] = React.useState(false);
+  const [transportFilter, setTransportFilter] = React.useState('');
+  const [paymentFilter, setPaymentFilter] = React.useState('');
+  const [dateFrom, setDateFrom] = React.useState('');
+  const [dateTo, setDateTo] = React.useState('');
+
   const loadRows = React.useCallback(async () => {
     setLoading(true);
     setError('');
@@ -54,6 +61,30 @@ const Ongoing = () => {
   React.useEffect(() => {
     loadRows();
   }, [loadRows]);
+
+  const filteredRows = React.useMemo(() => {
+    return rows.filter((row) => {
+      if (transportFilter && String(row.transportType || '').toLowerCase() !== transportFilter.toLowerCase()) {
+        return false;
+      }
+      if (paymentFilter && String(row.paymentOption || '').toUpperCase() !== paymentFilter.toUpperCase()) {
+        return false;
+      }
+      if (dateFrom || dateTo) {
+        const rowDate = row.date ? new Date(row.date) : null;
+        if (rowDate && !Number.isNaN(rowDate.getTime())) {
+          if (dateFrom && rowDate < new Date(`${dateFrom}T00:00:00`)) return false;
+          if (dateTo) {
+            const end = new Date(`${dateTo}T23:59:59.999`);
+            if (rowDate > end) return false;
+          }
+        }
+      }
+      return true;
+    });
+  }, [rows, transportFilter, paymentFilter, dateFrom, dateTo]);
+
+  const activeFiltersCount = [transportFilter, paymentFilter, dateFrom, dateTo].filter(Boolean).length;
 
   const handleDelete = async (ride) => {
     const confirmed = window.confirm(`Delete ride ${ride.requestId}? This will remove it for both rider and driver.`);
@@ -96,7 +127,7 @@ const Ongoing = () => {
               <span>entries</span>
             </div>
 
-            <div className="flex flex-1 justify-center items-center gap-8">
+            <div className="flex flex-1 justify-center items-center gap-8 flex-wrap">
               {TAB_SET.map((tab) => (
                 <button
                   key={tab}
@@ -114,14 +145,105 @@ const Ongoing = () => {
             </div>
 
             <div className="flex items-center gap-3">
-              <button className="w-10 h-10 border border-slate-200 rounded-full flex items-center justify-center text-slate-400 hover:bg-gray-50">
-                <Search size={18} />
-              </button>
-              <button className="flex items-center gap-2 px-5 py-2.5 bg-[#f46b45] text-white rounded-lg text-[13px] font-bold shadow-sm">
-                <Filter size={16} /> Filters
+              <div className="relative">
+                <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search ongoing requests"
+                  className="h-10 w-52 rounded-full border border-slate-200 bg-white pl-9 pr-4 text-[13px] outline-none focus:border-slate-300"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowFilters((prev) => !prev)}
+                className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-[13px] font-bold shadow-sm transition-all ${
+                  showFilters || activeFiltersCount > 0
+                    ? 'bg-slate-900 text-white'
+                    : 'bg-[#f46b45] hover:bg-[#e05b38] text-white'
+                }`}
+              >
+                <Filter size={16} />
+                <span>Filters</span>
+                {activeFiltersCount > 0 && (
+                  <span className="ml-0.5 px-1.5 py-0.5 bg-white text-slate-900 text-[10px] rounded-full font-black">
+                    {activeFiltersCount}
+                  </span>
+                )}
               </button>
             </div>
           </div>
+
+          {showFilters && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              className="border-b border-slate-100 bg-slate-50/70 px-6 py-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4 items-end"
+            >
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1.5">Transport Type</label>
+                <select
+                  value={transportFilter}
+                  onChange={(e) => setTransportFilter(e.target.value)}
+                  className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-[13px] text-slate-700 outline-none focus:border-indigo-500 font-medium"
+                >
+                  <option value="">All Transport Types</option>
+                  <option value="taxi">Taxi</option>
+                  <option value="parcel">Parcel</option>
+                  <option value="intercity">Intercity</option>
+                  <option value="pooling">Pooling</option>
+                  <option value="rental">Rental</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1.5">Payment Option</label>
+                <select
+                  value={paymentFilter}
+                  onChange={(e) => setPaymentFilter(e.target.value)}
+                  className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-[13px] text-slate-700 outline-none focus:border-indigo-500 font-medium"
+                >
+                  <option value="">All Payment Options</option>
+                  <option value="CASH">Cash</option>
+                  <option value="CARD">Card</option>
+                  <option value="WALLET">Wallet</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1.5">From Date</label>
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-[13px] text-slate-700 outline-none focus:border-indigo-500 font-medium"
+                />
+              </div>
+              <div className="flex gap-2.5 items-end">
+                <div className="flex-1">
+                  <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1.5">To Date</label>
+                  <input
+                    type="date"
+                    value={dateTo}
+                    onChange={(e) => setDateTo(e.target.value)}
+                    className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-[13px] text-slate-700 outline-none focus:border-indigo-500 font-medium"
+                  />
+                </div>
+                {activeFiltersCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTransportFilter('');
+                      setPaymentFilter('');
+                      setDateFrom('');
+                      setDateTo('');
+                    }}
+                    className="h-9 px-4 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-bold transition-colors shrink-0"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+            </motion.div>
+          )}
 
           <div className="overflow-x-auto">
             <table className="w-full text-left border-separate border-spacing-0">
@@ -141,8 +263,8 @@ const Ongoing = () => {
                       <Loader2 className="animate-spin text-slate-300 mx-auto" size={32} />
                     </td>
                   </tr>
-                ) : rows.length > 0 ? (
-                  rows.map((row) => (
+                ) : filteredRows.length > 0 ? (
+                  filteredRows.map((row) => (
                     <tr key={row.id} className="hover:bg-slate-50/30">
                       <td className="px-6 py-5 text-[14px] text-slate-600 font-medium">{row.requestId}</td>
                       <td className="px-6 py-5 text-[14px] text-slate-600 font-medium">{formatDate(row.date)}</td>
@@ -174,7 +296,7 @@ const Ongoing = () => {
                 ) : (
                   <tr>
                     <td colSpan={8} className="py-20 text-center text-[14px] font-medium text-slate-400">
-                      No Ongoing Requests Found.
+                      {rows.length > 0 ? 'No ongoing requests match your selected filters.' : 'No Ongoing Requests Found.'}
                     </td>
                   </tr>
                 )}
