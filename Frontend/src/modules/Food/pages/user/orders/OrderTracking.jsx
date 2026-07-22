@@ -41,6 +41,7 @@ import { orderAPI, restaurantAPI } from "@food/api"
 import { useCompanyName } from "@food/hooks/useCompanyName"
 import { useUserNotifications } from "@food/hooks/useUserNotifications"
 import { RESTAURANT_PIN_SVG, CUSTOMER_PIN_SVG, RIDER_BIKE_SVG } from "@food/constants/mapIcons"
+import { resolveEntityId } from "@food/utils/common"
 
 // Fallback definitions in case imports fail at runtime or are shadowed
 const DEFAULT_CUSTOMER_PIN = `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="#10B981"><path d="M12 2C8.13 2 5 5.13 5 9c0 4.17 4.42 9.92 6.24 12.11.4.48 1.08.48 1.52 0C14.58 18.92 19 13.17 19 9c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5S10.62 6.5 12 6.5 14.5 7.62 14.5 9 13.38 11.5 12 11.5z"/><circle cx="12" cy="9" r="3" fill="#FFFFFF"/></svg>`;
@@ -697,18 +698,19 @@ export default function OrderTracking() {
       toast.error('No items available to reorder')
       return
     }
-    const restaurantTarget =
-      order.restaurantSlug ||
-      order.restaurantId?._id ||
+    const restaurantId = resolveEntityId(
       order.restaurantId ||
-      order.items?.[0]?.restaurantId
+        order.items?.[0]?.restaurantId ||
+        order.pickups?.[0]?.restaurantId,
+    )
+    const restaurantTarget = order.restaurantSlug || restaurantId
     if (!restaurantTarget) {
       toast.error('Restaurant information not available')
       return
     }
     const reorderItems = order.items
       .map((item, index) => {
-        const itemId = item.itemId || item.id || item._id
+        const itemId = resolveEntityId(item.itemId || item.id || item._id)
         if (!itemId) return null
         return {
           id: itemId,
@@ -717,7 +719,7 @@ export default function OrderTracking() {
           price: Number(item.price) || 0,
           image: item.image || '',
           restaurant: order.restaurant || order.restaurantName || 'Restaurant',
-          restaurantId: item.restaurantId || order.restaurantId,
+          restaurantId: resolveEntityId(item.restaurantId) || restaurantId,
           variantId: item.variantId,
           variantName: item.variantName,
           variantPrice: item.variantPrice,

@@ -5,6 +5,7 @@ import { orderAPI } from "@food/api"
 import { useCart } from "@food/context/CartContext"
 import { toast } from "sonner"
 import { getCompanyNameAsync } from "@food/utils/businessSettings"
+import { resolveEntityId } from "@food/utils/common"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -292,6 +293,7 @@ export default function Orders() {
                 image: item.image || null,
                 description: item.description || null,
                 isVeg: item.isVeg === true || item.foodType === 'Veg' || item.category === 'veg' || item.type === 'veg',
+                restaurantId: resolveEntityId(item.restaurantId) || resolveEntityId(order.restaurantId),
                 _id: item._id || item.id,
                 id: item.id || item._id
               })),
@@ -303,8 +305,8 @@ export default function Orders() {
               payment: order.payment || {},
               paymentMethod: order.payment?.method || order.paymentMethod,
               restaurant: order.restaurantId?.restaurantName || order.restaurantId?.name || order.restaurantName || 'Restaurant',
-              restaurantId: order.restaurantId?._id || order.restaurantId,
-              restaurantSlug: order.restaurantId?.slug || null,
+              restaurantId: resolveEntityId(order.restaurantId),
+              restaurantSlug: order.restaurantId?.slug || order.restaurantSlug || null,
               restaurantImage: order.restaurantId?.profileImage?.url || order.restaurantId?.profileImage || null,
               restaurantLocation: order.restaurantId?.location?.area || order.restaurantId?.location?.city || order.address?.city || order.deliveryAddress?.city || '',
               restaurantRating,
@@ -411,7 +413,12 @@ export default function Orders() {
 
   // Handle reorder
   const handleReorder = (order) => {
-    const restaurantTarget = order.restaurantSlug || order.restaurantId
+    const restaurantId = resolveEntityId(
+      order.restaurantId ||
+        order.items?.[0]?.restaurantId ||
+        order.pickups?.[0]?.restaurantId,
+    )
+    const restaurantTarget = order.restaurantSlug || restaurantId
 
     if (!restaurantTarget || !order.items?.length) {
       toast.info('Order items or restaurant information not available')
@@ -420,16 +427,20 @@ export default function Orders() {
 
     const reorderItems = order.items
       .map((item, index) => {
-        const itemId = item.id || item.itemId || item._id
+        const itemId = resolveEntityId(item.itemId || item.id || item._id)
         if (!itemId) return null
+
+        const itemRestaurantId =
+          resolveEntityId(item.restaurantId) || restaurantId
 
         return {
           id: itemId,
+          itemId,
           name: item.name || item.foodName || "Item",
           price: Number(item.price) || 0,
           image: item.image || "",
           restaurant: order.restaurant || "Restaurant",
-          restaurantId: order.restaurantId,
+          restaurantId: itemRestaurantId,
           description: item.description || "",
           isVeg: item.isVeg !== false,
           quantity: Math.max(1, Number(item.quantity) || 1),
@@ -542,7 +553,8 @@ export default function Orders() {
     const location =
       order.restaurantLocation ||
       `${order.address?.city || ""}, ${order.address?.state || ""}`.trim()
-    const restaurantPath = order.restaurantSlug || order.restaurantId
+    const restaurantPath =
+      order.restaurantSlug || resolveEntityId(order.restaurantId)
     const shareUrl = restaurantPath
       ? `${window.location.origin}/food/user/restaurants/${restaurantPath}`
       : `${window.location.origin}/food/user/orders/${order.id}`
@@ -783,8 +795,8 @@ Order again from this restaurant in the ${companyName} app.`
                           {order.deliveryPartnerPhone && ` | ${order.deliveryPartnerPhone}`}
                         </p>
                       )}
-                      {order.restaurantId && (
-                        <Link to={`/user/restaurants/${order.restaurantId}`}>
+                      {resolveEntityId(order.restaurantId) && (
+                        <Link to={`/user/restaurants/${resolveEntityId(order.restaurantId)}`}>
                           <button className="text-xs text-[#16A34A] font-medium flex items-center mt-1 hover:text-[#15803D]">
                             View menu <span className="ml-0.5">&gt;</span>
                           </button>

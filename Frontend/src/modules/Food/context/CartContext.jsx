@@ -9,6 +9,7 @@ import {
   validateChainRestaurantRadius,
   CHAIN_RADIUS_VALIDATION_MESSAGE,
 } from "@food/utils/restaurantRadius"
+import { resolveEntityId } from "@food/utils/common"
 
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
@@ -78,12 +79,13 @@ const normalizeCartData = (rawCart) => {
             ? item.restaurant.name
             : ""
 
-      const normalizedRestaurantId =
+      const normalizedRestaurantId = resolveEntityId(
         item.restaurantId ||
-        item.restaurant_id ||
-        item.restaurant?._id ||
-        item.restaurant?.restaurantId ||
-        null
+          item.restaurant_id ||
+          item.restaurant?._id ||
+          item.restaurant?.restaurantId ||
+          null,
+      ) || null
 
       const normalizedImage =
         item.image ||

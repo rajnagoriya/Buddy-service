@@ -594,6 +594,21 @@ export function mapPickupStatusToRestaurantOrderStatus(pickupStatus, fallbackOrd
   return fallback || 'created';
 }
 
+/**
+ * Reverse of mapPickupStatusToRestaurantOrderStatus: derive the pickup-level status implied by
+ * the overall orderStatus. Used for single-restaurant orders, where the write path historically
+ * only advanced `orderStatus` and left `pickups[0].status` at 'pending' forever.
+ */
+export function derivePickupStatusFromOrderStatus(orderStatus) {
+  const v = String(orderStatus || '').toLowerCase().trim();
+  if (v === 'confirmed') return 'accepted';
+  if (v === 'preparing') return 'preparing';
+  if (v === 'ready_for_pickup' || v === 'reached_pickup') return 'ready';
+  if (['picked_up', 'reached_drop', 'delivered', 'completed'].includes(v)) return 'picked_up';
+  if (v.includes('cancel') || v.includes('reject')) return 'cancelled';
+  return 'pending'; // created / scheduled / unknown
+}
+
 export function buildRestaurantScopedOrder(orderDoc, restaurantId) {
   const order = orderDoc?.toObject ? orderDoc.toObject() : orderDoc || {};
   const rid = String(restaurantId || '').trim();
@@ -642,18 +657,33 @@ export function buildRestaurantScopedOrder(orderDoc, restaurantId) {
   // Otherwise after restaurant A accepts, restaurant B incorrectly sees "preparing/accepted".
   const ownPickup = filteredPickups[0] || null;
   const hasMultiPickups = Array.isArray(order.pickups) && order.pickups.length > 1;
-  const scopedStatus = hasMultiPickups || ownPickup
-    ? mapPickupStatusToRestaurantOrderStatus(
-        ownPickup?.status,
-        // Before rider accept, restaurants shouldn't act; still show created/pending for this pickup
-        ownPickup ? 'created' : (order?.orderStatus || order?.status || 'created'),
-      )
-    : (order?.orderStatus || order?.status || '');
+  const isMultiRestaurant = Boolean(order.isMultiRestaurant) || hasMultiPickups;
+
+  let scopedStatus;
+  let myPickupStatus;
+  if (isMultiRestaurant) {
+    scopedStatus = mapPickupStatusToRestaurantOrderStatus(
+      ownPickup?.status,
+      // Before rider accept, restaurants shouldn't act; still show created/pending for this pickup
+      ownPickup ? 'created' : (order?.orderStatus || order?.status || 'created'),
+    );
+    myPickupStatus = ownPickup?.status || null;
+  } else {
+    // Single-restaurant: `orderStatus` is the source of truth. The pickup row may be stale
+    // ('pending' forever on legacy orders), so derive the pickup-level view from orderStatus
+    // rather than the other way around. Otherwise an accepted order keeps looking like a new one.
+    scopedStatus = order?.orderStatus || order?.status || 'created';
+    myPickupStatus = derivePickupStatusFromOrderStatus(scopedStatus);
+  }
+
+  const responsePickups = !isMultiRestaurant
+    ? filteredPickups.map((p) => ({ ...p, status: myPickupStatus }))
+    : filteredPickups;
 
   const scoped = {
     ...order,
     items: filteredItems,
-    pickups: filteredPickups,
+    pickups: responsePickups,
     restaurantId: rid,
     pricing: restaurantPricing,
     restaurantEarnings: earnings,
@@ -663,7 +693,7 @@ export function buildRestaurantScopedOrder(orderDoc, restaurantId) {
     orderStatus: scopedStatus,
     // Keep aggregate for debugging / DP-aligned clients that need it
     aggregateOrderStatus: order?.orderStatus || order?.status || '',
-    myPickupStatus: ownPickup?.status || null,
+    myPickupStatus,
   };
 
   if (filteredPickups.length === 1 && filteredPickups[0]?.restaurantName) {

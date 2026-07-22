@@ -26,7 +26,7 @@ import { API_BASE_URL } from "@food/api/config"
 import { initRazorpayPayment } from "@food/utils/razorpay"
 import { toast } from "sonner"
 import { getCompanyNameAsync } from "@food/utils/businessSettings"
-import { calculateDistance } from "@food/utils/common"
+import { calculateDistance, resolveEntityId } from "@food/utils/common"
 import { useCompanyName } from "@food/hooks/useCompanyName"
 import { getRestaurantAvailabilityStatus } from "@food/utils/restaurantAvailability"
 import useAppBackNavigation from "@food/hooks/useAppBackNavigation"
@@ -767,7 +767,11 @@ function Cart() {
       // Strategy 1: Try using restaurantId from cart if available
       if (cart[0]?.restaurantId) {
         try {
-          const cartRestaurantId = cart[0].restaurantId;
+          const cartRestaurantId = resolveEntityId(cart[0].restaurantId);
+          if (!cartRestaurantId) {
+            setLoadingRestaurant(false)
+            return
+          }
           const cartRestaurantName = cart[0].restaurant;
 
           debugLog("?? Fetching restaurant data by restaurantId from cart:", cartRestaurantId)
@@ -1071,9 +1075,13 @@ function Cart() {
         variantId: String(item.variantId || ""),
         quantity: Number(item.quantity) || 1,
         price: Number(item.price) || 0,
-        restaurantId: String(item.restaurantId || item.restaurant?._id || item.restaurant || ""),
+        restaurantId: resolveEntityId(
+          item.restaurantId || item.restaurant?._id || item.restaurant,
+        ),
       })),
-      restaurantId: String(restaurantData?.restaurantId || restaurantData?._id || restaurantId || ""),
+      restaurantId: resolveEntityId(
+        restaurantData?.restaurantId || restaurantData?._id || restaurantId,
+      ),
       couponCode: String(couponCode || appliedCoupon?.code || "").trim().toUpperCase(),
       deliveryOption: String(deliveryOption || ""),
       addressId: String(defaultAddress?._id || defaultAddress?.id || ""),
@@ -1128,10 +1136,15 @@ function Cart() {
           image: item.image || item.imageUrl,
           description: item.description,
           isVeg: item.isVeg !== false,
-          restaurantId: item.restaurantId || item.restaurant?._id || item.restaurant
+          restaurantId: resolveEntityId(
+            item.restaurantId || item.restaurant?._id || item.restaurant,
+          ) || undefined,
         }))
 
-        const resolvedRestaurantId = restaurantData?.restaurantId || restaurantData?._id || restaurantId || undefined
+        const resolvedRestaurantId =
+          resolveEntityId(
+            restaurantData?.restaurantId || restaurantData?._id || restaurantId,
+          ) || undefined
 
         const selectedSpeed = configuredSpeedOptions.find((opt) => opt.id === deliveryOption)
           || configuredSpeedOptions.find((opt) => opt.isDefault)
@@ -1723,11 +1736,12 @@ function Cart() {
     }
 
     const finalRestaurantId =
-      restaurantData?.restaurantId ||
-      restaurantData?._id ||
-      cart[0]?.restaurantId ||
-      restaurantId ||
-      null
+      resolveEntityId(
+        restaurantData?.restaurantId ||
+          restaurantData?._id ||
+          cart[0]?.restaurantId ||
+          restaurantId,
+      ) || null
     const finalRestaurantName = restaurantData?.name || cart[0]?.restaurant || null
 
     if (!finalRestaurantId) {
@@ -1735,7 +1749,9 @@ function Cart() {
       return
     }
 
-    const invalidItems = cart.filter((item) => !item.restaurantId && !item.restaurant)
+    const invalidItems = cart.filter(
+      (item) => !resolveEntityId(item.restaurantId || item.restaurant),
+    )
     if (invalidItems.length > 0) {
       toast.error("Some items are missing restaurant information. Please refresh and try again.")
       return
@@ -1763,7 +1779,9 @@ function Cart() {
         description: item.description || "",
         isVeg: item.isVeg === true || item.foodType === "Veg",
         preparationTime: item.preparationTime,
-        restaurantId: item.restaurantId || item.restaurant?._id || item.restaurant,
+        restaurantId: resolveEntityId(
+          item.restaurantId || item.restaurant?._id || item.restaurant,
+        ),
       }))
 
       const orderPayload = {

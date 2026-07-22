@@ -207,9 +207,9 @@ export function getNextPickup(order) {
 /**
  * Customer/driver-facing multi-stop progress, e.g. "Picked up 1 of 2".
  *
- * Per-pickup `status` is only maintained for multi-restaurant orders — the single-restaurant
- * path tracks readiness on `orderStatus` and never advances `pickups[0].status`. So single
- * orders are derived from `orderStatus`, otherwise every single order would look "waiting".
+ * For single-restaurant orders `orderStatus` is the source of truth: the write paths now mirror
+ * it onto `pickups[0].status`, but legacy orders may still carry a stale 'pending' pickup. So
+ * single orders are derived from `orderStatus`, otherwise they could look "waiting" forever.
  */
 export function getPickupProgress(order) {
   const active = getActivePickups(order);
