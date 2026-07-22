@@ -4,7 +4,8 @@ import { sendError } from '../../utils/response.js';
 import {
     removeFirebaseDeviceToken,
     sendTestNotification,
-    upsertFirebaseDeviceToken
+    upsertFirebaseDeviceToken,
+    normalizeFcmOwnerType
 } from './firebase.service.js';
 import { FoodUser } from '../users/user.model.js';
 import { FoodRestaurant } from '../../modules/food/restaurant/models/restaurant.model.js';
@@ -12,7 +13,7 @@ import { FoodRestaurant } from '../../modules/food/restaurant/models/restaurant.
 const router = express.Router();
 
 const getOwnerContext = (req) => ({
-    ownerType: req.user?.role,
+    ownerType: normalizeFcmOwnerType(req.user?.role) || req.user?.role,
     ownerId: req.user?.userId
 });
 
