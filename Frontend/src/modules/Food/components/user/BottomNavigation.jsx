@@ -1,6 +1,7 @@
 import { Link, useLocation } from "react-router-dom"
 import { Tag, User, Truck, UtensilsCrossed } from "lucide-react"
 import useLandingSettings from "@food/hooks/useLandingSettings"
+import { ENABLE_DINING } from "@/shared/featureFlags"
 
 export default function BottomNavigation() {
   const location = useLocation()
@@ -8,7 +9,7 @@ export default function BottomNavigation() {
   const { under250PriceLimit } = useLandingSettings()
 
   // Check active routes - support both /user/* and /* paths
-  const isDining = pathname === "/food/dining" || pathname.startsWith("/food/user/dining")
+  const isDining = ENABLE_DINING && (pathname === "/food/dining" || pathname.startsWith("/food/user/dining"))
   const isUnder250 = pathname === "/food/under-250" || pathname.startsWith("/food/user/under-250")
   const isProfile = pathname.startsWith("/food/profile") || pathname.startsWith("/food/user/profile")
   const isDelivery =
@@ -44,19 +45,21 @@ export default function BottomNavigation() {
           </span>
         </Link>
 
-        {/* Dining Tab */}
-        <Link
-          to="/food/user/dining"
-          className={`flex-1 flex flex-col items-center gap-1 py-2.5 rounded-full transition-all duration-300 relative ${isDining
-              ? "bg-secondary text-primary shadow-sm"
-              : "text-muted-foreground hover:bg-muted/60"
-            }`}
-        >
-          <UtensilsCrossed className={`h-4.5 w-4.5 ${isDining ? "text-primary" : "text-muted-foreground"}`} strokeWidth={isDining ? 2.5 : 2} />
-          <span className={`text-[10px] sm:text-xs font-semibold ${isDining ? "text-primary" : "text-muted-foreground"}`}>
-            Dining
-          </span>
-        </Link>
+        {/* Dining Tab — temporarily hidden via ENABLE_DINING */}
+        {ENABLE_DINING ? (
+          <Link
+            to="/food/user/dining"
+            className={`flex-1 flex flex-col items-center gap-1 py-2.5 rounded-full transition-all duration-300 relative ${isDining
+                ? "bg-secondary text-primary shadow-sm"
+                : "text-muted-foreground hover:bg-muted/60"
+              }`}
+          >
+            <UtensilsCrossed className={`h-4.5 w-4.5 ${isDining ? "text-primary" : "text-muted-foreground"}`} strokeWidth={isDining ? 2.5 : 2} />
+            <span className={`text-[10px] sm:text-xs font-semibold ${isDining ? "text-primary" : "text-muted-foreground"}`}>
+              Dining
+            </span>
+          </Link>
+        ) : null}
 
         {/* Under 250 Tab */}
         <Link

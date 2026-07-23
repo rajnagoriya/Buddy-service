@@ -26,6 +26,7 @@ import {
   Share2,
   Star,
 } from "lucide-react";
+import { ENABLE_DINING } from "@/shared/featureFlags";
 
 /** @typedef {'link' | 'action'} MenuItemType */
 
@@ -53,7 +54,9 @@ export const PROFILE_SERVICES = [
         items: [
           { type: "link", icon: Building2, label: "All Orders", sub: "Food & Grocery", path: "/food/user/orders" },
           { type: "link", icon: History, label: "My Rides", sub: "Taxi rides & parcels", path: "/taxi/user/activity" },
-          { type: "link", icon: Utensils, label: "Dining Bookings", sub: "View table reservations", path: "/food/user/profile/dining-bookings" },
+          ...(ENABLE_DINING
+            ? [{ type: "link", icon: Utensils, label: "Dining Bookings", sub: "View table reservations", path: "/food/user/profile/dining-bookings" }]
+            : []),
           { type: "link", icon: BusFront, label: "Bus Tickets", sub: "Manage bus bookings", path: "/taxi/user/profile/bus-bookings" },
         ],
       },

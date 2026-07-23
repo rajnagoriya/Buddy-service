@@ -4,6 +4,7 @@ import { Suspense, lazy } from "react"
 import Loader from "@food/components/Loader"
 import ProtectedRoute from "@food/components/ProtectedRoute"
 import Cart from "@food/pages/user/cart/Cart"
+import { ENABLE_DINING } from "@/shared/featureFlags"
 
 // Lazy Loading Pages
 
@@ -110,26 +111,35 @@ export default function UserRouter() {
         <Route element={<UserLayout />}>
           {/* Home & Discovery */}
           <Route path="" element={<Home />} />
-          <Route path="dining" element={<Dining />} />
-          <Route path="dining/:category" element={<DiningCategory />} />
-          <Route path="dining/explore/upto50" element={<DiningExplore50 />} />
-          <Route path="dining/explore/near-rated" element={<DiningExploreNear />} />
-          <Route path="dining/coffee" element={<Coffee />} />
-          <Route path="dining/:diningType/:slug" element={<DiningRestaurantDetails />} />
-          <Route path="dining/book/:slug" element={<TableBooking />} />
-          <Route path="dining/book-confirmation" element={<TableBookingConfirmation />} />
-          <Route path="dining/book-success" element={<TableBookingSuccess />} />
-          <Route path="dining/modification-policy" element={<TableModificationPolicy />} />
-          <Route path="dining/cancellation-policy" element={<TableCancellationPolicy />} />
-          <Route path="dining/edit-user" element={<TableEditUserPage />} />
-          <Route
-            path="bookings"
-            element={
-              <ProtectedRoute requiredRole="user" loginPath="/user/auth/login">
-                <MyBookings />
-              </ProtectedRoute>
-            }
-          />
+          {ENABLE_DINING ? (
+            <>
+              <Route path="dining" element={<Dining />} />
+              <Route path="dining/:category" element={<DiningCategory />} />
+              <Route path="dining/explore/upto50" element={<DiningExplore50 />} />
+              <Route path="dining/explore/near-rated" element={<DiningExploreNear />} />
+              <Route path="dining/coffee" element={<Coffee />} />
+              <Route path="dining/:diningType/:slug" element={<DiningRestaurantDetails />} />
+              <Route path="dining/book/:slug" element={<TableBooking />} />
+              <Route path="dining/book-confirmation" element={<TableBookingConfirmation />} />
+              <Route path="dining/book-success" element={<TableBookingSuccess />} />
+              <Route path="dining/modification-policy" element={<TableModificationPolicy />} />
+              <Route path="dining/cancellation-policy" element={<TableCancellationPolicy />} />
+              <Route path="dining/edit-user" element={<TableEditUserPage />} />
+              <Route
+                path="bookings"
+                element={
+                  <ProtectedRoute requiredRole="user" loginPath="/user/auth/login">
+                    <MyBookings />
+                  </ProtectedRoute>
+                }
+              />
+            </>
+          ) : (
+            <>
+              <Route path="dining/*" element={<Navigate to="/food/user" replace />} />
+              <Route path="bookings" element={<Navigate to="/food/user" replace />} />
+            </>
+          )}
           <Route path="under-250" element={<Under250 />} />
           <Route path="categories" element={<Categories />} />
           <Route path="category/:category" element={<CategoryPage />} />
@@ -301,9 +311,13 @@ export default function UserRouter() {
           <Route
             path="profile/dining-bookings"
             element={
-              <ProtectedRoute requiredRole="user" loginPath="/user/auth/login">
-                <MyBookings />
-              </ProtectedRoute>
+              ENABLE_DINING ? (
+                <ProtectedRoute requiredRole="user" loginPath="/user/auth/login">
+                  <MyBookings />
+                </ProtectedRoute>
+              ) : (
+                <Navigate to="/food/user/profile" replace />
+              )
             }
           />
 

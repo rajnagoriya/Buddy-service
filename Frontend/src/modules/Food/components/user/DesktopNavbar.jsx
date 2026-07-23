@@ -12,6 +12,7 @@ import { FaLocationDot } from "react-icons/fa6"
 import { AnimatePresence, motion } from "framer-motion"
 import BusinessLogo from "@food/components/BusinessLogo"
 import useLandingSettings from "@food/hooks/useLandingSettings"
+import { ENABLE_DINING } from "@/shared/featureFlags"
 import "@food/styles/landing.css"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
@@ -72,7 +73,7 @@ export default function DesktopNavbar({ showLogo = true }) {
     }
 
     // Check active routes - support both /user/* and /* paths
-    const isDining = location.pathname === "/food/user/dining" || location.pathname === "/food/dining"
+    const isDining = ENABLE_DINING && (location.pathname === "/food/user/dining" || location.pathname === "/food/dining")
     const isUnder250 = location.pathname === "/food/user/under-250" || location.pathname === "/food/under-250"
     const isProfile = location.pathname.startsWith("/food/user/profile") || location.pathname.startsWith("/food/profile")
     const isDelivery = !isDining && !isUnder250 && !isProfile && (location.pathname === "/food/user" || location.pathname === "/food" || (location.pathname.startsWith("/food/user") && !location.pathname.includes("/dining") && !location.pathname.includes("/under-250") && !location.pathname.includes("/profile")))
@@ -305,22 +306,24 @@ export default function DesktopNavbar({ showLogo = true }) {
                                 )}
                             </Link>
 
-                            {/* Dining Tab */}
-                            <Link
-                                to="/food/user/dining"
-                                className={`food-landing-nav-tab flex flex-col items-center gap-1 px-2 py-1 relative ${isDining ? "food-landing-nav-tab--active" : ""}`}
-                            >
-                                <span>Dining</span>
-                                {isDining && (
-                                    <motion.div
-                                        layoutId="navIndicator"
-                                        className="absolute -bottom-3 left-0 right-0 h-0.5 bg-primary rounded-full"
-                                        initial={{ opacity: 0 }}
-                                        animate={{ opacity: 1 }}
-                                        transition={{ duration: 0.3 }}
-                                    />
-                                )}
-                            </Link>
+                            {/* Dining Tab — temporarily hidden via ENABLE_DINING */}
+                            {ENABLE_DINING ? (
+                                <Link
+                                    to="/food/user/dining"
+                                    className={`food-landing-nav-tab flex flex-col items-center gap-1 px-2 py-1 relative ${isDining ? "food-landing-nav-tab--active" : ""}`}
+                                >
+                                    <span>Dining</span>
+                                    {isDining && (
+                                        <motion.div
+                                            layoutId="navIndicator"
+                                            className="absolute -bottom-3 left-0 right-0 h-0.5 bg-primary rounded-full"
+                                            initial={{ opacity: 0 }}
+                                            animate={{ opacity: 1 }}
+                                            transition={{ duration: 0.3 }}
+                                        />
+                                    )}
+                                </Link>
+                            ) : null}
 
                             {/* Profile Tab */}
                             <Link

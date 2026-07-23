@@ -33,6 +33,7 @@ import {
   Heart,
   Package,
 } from "lucide-react";
+import { ENABLE_DINING } from "@/shared/featureFlags";
 
 
 import AnimatedPage from "@food/components/user/AnimatedPage";
@@ -828,7 +829,8 @@ export default function Profile() {
           </Link>
         </div>
 
-        {/* Dining Section */}
+        {/* Dining Section — temporarily hidden via ENABLE_DINING */}
+        {ENABLE_DINING ? (
         <div className="mb-3">
           <div className="flex items-center gap-2 mb-2 px-1">
             <div className="w-1 h-4 bg-[#16A34A] rounded"></div>
@@ -866,6 +868,7 @@ export default function Profile() {
             </motion.div>
           </Link>
         </div>
+        ) : null}
         {/* Quick Commerce Summary Section */}
         <div className="mb-4">
           <div className="flex items-center gap-2 mb-2 px-1">

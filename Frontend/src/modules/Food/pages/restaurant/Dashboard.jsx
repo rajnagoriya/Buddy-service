@@ -18,6 +18,7 @@ import RestaurantPanelHeader from "@food/components/restaurant/panel/RestaurantP
 import PanelCard from "@food/components/restaurant/panel/PanelCard"
 import useRestaurantDashboardData from "@food/hooks/useRestaurantDashboardData"
 import { RESTAURANT_BASE } from "@food/utils/restaurantNavConfig"
+import { ENABLE_DINING } from "@/shared/featureFlags"
 
 const formatCurrency = (value) =>
   new Intl.NumberFormat("en-IN", {
@@ -214,13 +215,15 @@ export default function Dashboard() {
                   subtitle="Payouts, invoices and bank details"
                   onClick={() => navigate(`${RESTAURANT_BASE}/hub-finance`)}
                 />
-                <QuickTile
-                  icon={Calendar}
-                  title="Reservations"
-                  subtitle="Table bookings and dining queue"
-                  badge={upcomingReservations > 0 ? String(upcomingReservations) : null}
-                  onClick={() => navigate(`${RESTAURANT_BASE}/reservations`)}
-                />
+                {ENABLE_DINING ? (
+                  <QuickTile
+                    icon={Calendar}
+                    title="Reservations"
+                    subtitle="Table bookings and dining queue"
+                    badge={upcomingReservations > 0 ? String(upcomingReservations) : null}
+                    onClick={() => navigate(`${RESTAURANT_BASE}/reservations`)}
+                  />
+                ) : null}
                 <QuickTile
                   icon={Power}
                   title="Online status"
@@ -260,10 +263,17 @@ export default function Dashboard() {
                     <p className="text-gray-500">Live queue</p>
                     <p className="text-xl font-bold text-gray-900">{liveOrders}</p>
                   </div>
-                  <div className="rounded-2xl bg-[var(--rt-surface-muted)] px-3 py-3">
-                    <p className="text-gray-500">Reservations</p>
-                    <p className="text-xl font-bold text-gray-900">{upcomingReservations}</p>
-                  </div>
+                  {ENABLE_DINING ? (
+                    <div className="rounded-2xl bg-[var(--rt-surface-muted)] px-3 py-3">
+                      <p className="text-gray-500">Reservations</p>
+                      <p className="text-xl font-bold text-gray-900">{upcomingReservations}</p>
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl bg-[var(--rt-surface-muted)] px-3 py-3">
+                      <p className="text-gray-500">Complaints</p>
+                      <p className="text-xl font-bold text-gray-900">{openComplaints}</p>
+                    </div>
+                  )}
                   <div className="rounded-2xl bg-[var(--rt-surface-muted)] px-3 py-3">
                     <p className="text-gray-500">Preparing</p>
                     <p className="text-xl font-bold text-gray-900">{preparingCount}</p>

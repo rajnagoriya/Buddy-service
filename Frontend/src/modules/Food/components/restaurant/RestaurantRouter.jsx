@@ -5,6 +5,7 @@ import { RestaurantSessionProvider } from "@food/context/RestaurantSessionContex
 import RestaurantAccessGuard from "./RestaurantAccessGuard"
 import Loader from "@food/components/Loader"
 import RestaurantPanelLayout from "./RestaurantPanelLayout"
+import { ENABLE_DINING } from "@/shared/featureFlags"
 import "./restaurantTheme.css"
 
 // Lazy Loading Components
@@ -122,8 +123,8 @@ export default function RestaurantRouter() {
             <Route path="download-report" element={<DownloadReport />} />
             <Route path="manage-outlets" element={<ManageOutlets />} />
             <Route path="update-bank-details" element={<UpdateBankDetails />} />
-            <Route path="reservations" element={<DiningReservations />} />
-            <Route path="dining-reservations" element={<Navigate to="../reservations" replace />} />
+            <Route path="reservations" element={ENABLE_DINING ? <DiningReservations /> : <Navigate to=".." replace />} />
+            <Route path="dining-reservations" element={<Navigate to={ENABLE_DINING ? "../reservations" : ".."} replace />} />
             <Route path="Share-Feedback" element={<Navigate to="../share-feedback" replace />} />
             <Route path="zone-setup" element={<ZoneSetup />} />
           </Route>

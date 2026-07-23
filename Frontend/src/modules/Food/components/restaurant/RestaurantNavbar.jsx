@@ -7,6 +7,7 @@ import { getCachedSettings, loadBusinessSettings } from "@food/utils/businessSet
 import useNotificationInbox from "@food/hooks/useNotificationInbox"
 import { useRestaurantNotifications } from "@food/hooks/useRestaurantNotifications"
 import { Utensils } from "lucide-react"
+import { ENABLE_DINING } from "@/shared/featureFlags"
 
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
@@ -498,8 +499,8 @@ export default function RestaurantNavbar({
         </button>
       </div>
       
-      {/* Real-time Dining Booking Popup */}
-      {newReservation && (
+      {/* Real-time Dining Booking Popup — temporarily hidden via ENABLE_DINING */}
+      {ENABLE_DINING && newReservation && (
         <div className="fixed top-20 left-4 right-4 z-[100] animate-in slide-in-from-top duration-300">
           <div className="bg-white rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-[#16A34A]/10 overflow-hidden">
             <div className="p-4 flex items-center gap-4">
