@@ -891,6 +891,8 @@ export default function TaxiApp() {
               <Route path="price-management/pending-service-stores" element={<AdminPendingServiceStores />} />
               <Route path="price-management/pending-service-staff" element={<AdminPendingServiceStaff />} />
               <Route path="price-management/zones" element={<AdminZoneManagement />} />
+              <Route path="price-management/zones/create" element={<AdminZoneManagement mode="create" />} />
+              <Route path="price-management/zones/edit/:id" element={<AdminZoneManagement mode="edit" />} />
               <Route path="price-management/airport" element={<AdminAirportManagement />} />
               <Route path="price-management/set-prices" element={<AdminSetPrices />} />
               <Route path="price-management/set-package-prices" element={<AdminSetPackagePrices />} />

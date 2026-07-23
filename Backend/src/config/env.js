@@ -58,6 +58,7 @@ export const config = {
     cloudinaryCloudName: process.env.CLOUDINARY_CLOUD_NAME,
     cloudinaryApiKey: process.env.CLOUDINARY_API_KEY,
     cloudinaryApiSecret: process.env.CLOUDINARY_API_SECRET,
+    cloudinaryFolder: process.env.CLOUDINARY_FOLDER || 'uploads',
 
     googleMapsApiKey:
         process.env.GOOGLE_MAPS_API_KEY

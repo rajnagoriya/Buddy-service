@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useTaxiTransportTypes } from '../../../../shared/hooks/useTaxiTransportTypes';
+import { adminService } from '../../services/adminService';
 
 const serviceCategoryOptions = [
   { value: 'taxi', label: 'Taxi' },
@@ -119,41 +120,30 @@ const EditDriver = () => {
     const fetchInitialData = async () => {
       setIsFetching(true);
       try {
-        const locRes = await fetch(globalThis.__LEGACY_BACKEND_ORIGIN__ + '/api/v1/admin/service-locations', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const locData = await locRes.json();
-        if (locData.success || locData.data) {
-          const results = locData.data?.results || locData.data || locData.results || [];
+        const [locRes, zoneRes, countRes, driverRes] = await Promise.all([
+          adminService.getServiceLocations().catch(() => null),
+          adminService.getZones().catch(() => null),
+          adminService.getCountries().catch(() => null),
+          adminService.getDriver(id).catch(() => null),
+        ]);
+
+        if (locRes && (locRes.success || locRes.data)) {
+          const results = locRes.data?.results || locRes.data || locRes.results || [];
           setLocations(Array.isArray(results) ? results : []);
         }
 
-        const zoneRes = await fetch(globalThis.__LEGACY_BACKEND_ORIGIN__ + '/api/v1/admin/zones', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const zoneData = await zoneRes.json();
-        if (zoneData.success || zoneData.data) {
-          const results = zoneData.data?.results || zoneData.data || zoneData.results || [];
+        if (zoneRes && (zoneRes.success || zoneRes.data)) {
+          const results = zoneRes.data?.results || zoneRes.data || zoneRes.results || [];
           setZones(Array.isArray(results) ? results : []);
         }
 
-        const countRes = await fetch(globalThis.__LEGACY_BACKEND_ORIGIN__ + '/api/v1/countries', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const countData = await countRes.json();
-        if (countData.success || countData.data) {
-          const results = countData.data?.results || countData.data || countData.results || [];
+        if (countRes && (countRes.success || countRes.data)) {
+          const results = countRes.data?.results || countRes.data || countRes.results || [];
           setCountries(Array.isArray(results) ? results : []);
         }
 
-        // Fetching driver details
-        const response = await fetch(`${globalThis.__LEGACY_BACKEND_ORIGIN__}/api/v1/admin/drivers/${id}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const data = await response.json();
-        
-        if (response.ok && data.success) {
-          const d = data.data;
+        if (driverRes && driverRes.success) {
+          const d = driverRes.data;
           const onboarding = d.onboarding || {};
           const onboardingPersonal = onboarding.personal || {};
           const onboardingVehicle = onboarding.vehicle || {};
@@ -223,10 +213,9 @@ const EditDriver = () => {
       if (!formData.area || !formData.transportType) return;
       try {
         const typeFilter = formData.transportType.toLowerCase() === 'delivery' ? 'delivery' : 'taxi';
-        const res = await fetch(`${globalThis.__LEGACY_BACKEND_ORIGIN__}/api/v1/types/${formData.area}?transport_type=${typeFilter}`);
-        const data = await res.json();
-        if (data.success) {
-          setVehicleTypes(Array.isArray(data.data) ? data.data : (data.data?.results || []));
+        const res = await adminService.getLocationVehicleTypes(formData.area, typeFilter).catch(() => null);
+        if (res && res.success) {
+          setVehicleTypes(Array.isArray(res.data) ? res.data : (res.data?.results || []));
         }
       } catch (e) {
         console.error("Vehicle types error:", e);
@@ -368,24 +357,16 @@ const EditDriver = () => {
         },
       };
 
-      const response = await fetch(`${globalThis.__LEGACY_BACKEND_ORIGIN__}/api/v1/admin/drivers/${id}`, {
-        method: 'PATCH',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(payload)
-      });
+      const response = await adminService.updateDriverStatus(id, payload);
 
-      const data = await response.json();
-      if (response.ok && data.success) {
+      if (response && response.success) {
         setSuccess(true);
         setTimeout(() => navigate(backRoute), 2000);
       } else {
-        setError(data.message || 'Failed to update driver.');
+        setError(response?.message || 'Failed to update driver.');
       }
     } catch (err) {
-      setError('Network error occurred.');
+      setError(err?.message || 'Network error occurred.');
     } finally {
       setIsLoading(false);
     }
@@ -471,24 +452,26 @@ const EditDriver = () => {
                 </select>
               </div>
 
-               <div className="space-y-3">
-                 <label className="text-gray-400 flex items-center gap-2">
-                   <Globe size={14} className="text-indigo-400" /> Country *
-                 </label>
-                 <select 
-                   name="country"
-                   required
-                   value={formData.country}
-                   onChange={handleChange}
-                   style={{ color: '#000000' }}
-                   className="w-full bg-gray-50 border border-gray-100 rounded-2xl px-6 py-4 text-[14px] font-bold text-gray-950 focus:bg-white focus:border-indigo-200 focus:ring-4 focus:ring-indigo-50/50 outline-none transition-all shadow-inner"
-                 >
-                   <option value="" className="bg-white text-gray-950 font-bold">Select Country</option>
-                   {countries.map(c => (
-                     <option key={c._id} value={c._id} className="bg-white text-gray-950 font-bold">{c.name}</option>
-                   ))}
-                 </select>
-               </div>
+              <div>
+                <label className={labelClass}>
+                  <MapPin size={12} className="inline mr-1 text-gray-400" />
+                  Service Location *
+                </label>
+                <select 
+                  name="area"
+                  required
+                  value={formData.area}
+                  onChange={handleChange}
+                  className={inputClass}
+                >
+                  <option value="">Select Service Location</option>
+                  {locations.map((loc) => (
+                    <option key={loc._id || loc.id} value={loc._id || loc.id}>
+                      {loc.name || loc.city || 'Unnamed Location'}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div>
                 <label className={labelClass}>
                   <Globe size={12} className="inline mr-1 text-gray-400" />

@@ -17,7 +17,7 @@ export const uploadImage = asyncHandler(async (req, res) => {
 
     const uploadResult = await uploadDataUrlToCloudinary({
         dataUrl: image,
-        folder: `${env.cloudinary.folder}/${folder}`,
+        folder: `${env.cloudinaryFolder}/${folder}`,
         publicIdPrefix: `content-${folder}`
     });
 
