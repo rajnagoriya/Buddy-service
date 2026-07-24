@@ -2485,6 +2485,12 @@ const DRIVER_LIST_SELECT = [
   'status',
   'createdAt',
   'updatedAt',
+  'profile_picture',
+  'vehicleMake',
+  'vehicleModel',
+  'vehicleImage',
+  'gender',
+  'serviceCategories'
 ].join(' ');
 
 const serializeDriverListItem = (driver) => ({
@@ -2529,6 +2535,12 @@ const serializeDriverListItem = (driver) => ({
   approve: Boolean(driver.approve),
   status: driver.status || (driver.approve ? 'approved' : 'pending'),
   active: driver.approve !== false && String(driver.status || '').toLowerCase() !== 'inactive',
+  profile_picture: driver.profile_picture || '',
+  gender: driver.gender || '',
+  vehicle_make: driver.vehicleMake || '',
+  vehicle_model: driver.vehicleModel || '',
+  vehicle_image: driver.vehicleImage || '',
+  service_categories: Array.isArray(driver.serviceCategories) ? driver.serviceCategories : [],
   createdAt: driver.createdAt,
   updatedAt: driver.updatedAt,
 });
