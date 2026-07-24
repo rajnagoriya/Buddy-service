@@ -340,14 +340,22 @@ export default function UserOrderDetails() {
         const itemId = resolveEntityId(item.itemId || item.id || item._id)
         if (!itemId) return null
 
+        const unitPrice =
+          Number(item.variantPrice) > 0
+            ? Number(item.variantPrice)
+            : Number(item.price) || 0
+
         return {
           id: itemId,
           itemId,
           name: item.name || item.foodName || "Item",
-          price: Number(item.price) || 0,
+          price: unitPrice,
           image: item.image || "",
           restaurant: restaurantName,
           restaurantId: resolveEntityId(item.restaurantId) || restaurantId,
+          variantId: item.variantId || item.variant?._id || item.variant?.id || "",
+          variantName: item.variantName || item.variant?.name || "",
+          variantPrice: unitPrice,
           description: item.description || "",
           isVeg: item.isVeg === true || item.foodType === 'Veg',
           quantity: Math.max(1, Number(item.quantity || item.qty) || 1),

@@ -789,6 +789,29 @@ export const adminAPI = {
       params,
       contextModule: "admin",
     }),
+  getAdminRevenue: (params = {}) =>
+    apiClient.get("/food/admin/revenue", {
+      params,
+      contextModule: "admin",
+    }),
+  getAdminRevenueOrder: (orderId) =>
+    apiClient.get(`/food/admin/revenue/${encodeURIComponent(String(orderId || ""))}`, {
+      contextModule: "admin",
+    }),
+  getDeliverySalaryEarnings: (params = {}) =>
+    apiClient.get("/food/admin/delivery/salary-earnings", {
+      params,
+      contextModule: "admin",
+    }),
+  getDeliverySalaryPayments: (id, params = {}) =>
+    apiClient.get(`/food/admin/delivery/${String(id)}/salary-payments`, {
+      params,
+      contextModule: "admin",
+    }),
+  markDeliverySalaryPaid: (body) =>
+    apiClient.post("/food/admin/delivery/salary-payments", body ?? {}, {
+      contextModule: "admin",
+    }),
   addDeliveryPartnerBonus: (deliveryPartnerId, amount, reference = "") =>
     apiClient.post(
       "/food/admin/delivery/bonus",

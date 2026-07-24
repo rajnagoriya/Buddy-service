@@ -180,6 +180,7 @@ export const adminSidebarMenu = [
     label: "REPORT MANAGEMENT",
     items: [
       { type: "link", label: "Transaction Report", path: "/admin/food/transaction-report", icon: "FileText" },
+      { type: "link", label: "Admin Revenue", path: "/admin/food/admin-revenue", icon: "IndianRupee" },
       { type: "link", label: "Order Report", path: "/admin/food/order-report/regular", icon: "FileText" },
       { type: "link", label: "Tax Report", path: "/admin/food/tax-report", icon: "Receipt" },
       {

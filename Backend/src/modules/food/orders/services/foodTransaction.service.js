@@ -101,20 +101,48 @@ export async function createInitialTransaction(order) {
   const platformSubsidy = Number(order.pricing?.platformSubsidy || 0) || 0;
   const couponCreatedBy = order.pricing?.couponCreatedBy || null;
   const isRestaurantCoupon = couponCreatedBy === 'restaurant';
+  const speedShareRestaurant = Math.max(
+    0,
+    Number(order.pricing?.deliveryFeeBreakdown?.speedShareRestaurant) || 0,
+  );
 
-  let restaurantNet = Number(((order.pricing?.subtotal || 0) + (order.pricing?.packagingFee || 0) - restaurantCommission).toFixed(2));
-  if (isRestaurantCoupon && discount > 0) {
-    restaurantNet = Math.max(0, Number((restaurantNet - discount).toFixed(2)));
+  // Prefer frozen restaurantSettlement totals when present
+  const settlements = Array.isArray(order.restaurantSettlement) ? order.restaurantSettlement : [];
+  let restaurantNet;
+  if (settlements.length > 0) {
+    restaurantNet = Number(
+      settlements
+        .reduce((s, row) => s + (Number(row.restaurantPayout) || 0), 0)
+        .toFixed(2),
+    );
+  } else {
+    restaurantNet = Number(
+      (
+        (order.pricing?.subtotal || 0) +
+        (order.pricing?.packagingFee || 0) +
+        speedShareRestaurant -
+        restaurantCommission
+      ).toFixed(2),
+    );
+    if (isRestaurantCoupon && discount > 0) {
+      restaurantNet = Math.max(0, Number((restaurantNet - discount).toFixed(2)));
+    }
   }
 
-  const platformNetProfit = Number((
-    (order.pricing?.platformFee || 0) +
-    (order.pricing?.deliveryFee || 0) +
-    restaurantCommission -
-    riderShare -
-    (isRestaurantCoupon ? 0 : discount) -
-    platformSubsidy
-  ).toFixed(2));
+  const platformNetProfit = Number(
+    (
+      order.platformProfit ??
+      (
+        (order.pricing?.platformFee || 0) +
+        (order.pricing?.deliveryFee || 0) +
+        restaurantCommission -
+        riderShare -
+        speedShareRestaurant -
+        (isRestaurantCoupon ? 0 : discount) -
+        platformSubsidy
+      )
+    ).toFixed(2),
+  );
 
   const transaction = new FoodTransaction({
     orderId: order._id,

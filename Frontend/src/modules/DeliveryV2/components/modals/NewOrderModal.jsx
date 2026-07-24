@@ -126,7 +126,12 @@ export const NewOrderModal = ({ order, onAccept, onReject, onMinimize, riderProf
   if (!order) return null;
 
   const isShared = order.isShared || order.dispatch?.isShared;
+  const isSalaryPartner =
+    order.earningDisplayMode === 'salary' ||
+    order.employmentType === 'salary' ||
+    riderProfile?.employmentType === 'salary';
   const earnings = (() => {
+    if (isSalaryPartner) return 0;
     const candidates = [
       order.riderEarning,
       order.earnings,
@@ -248,16 +253,24 @@ export const NewOrderModal = ({ order, onAccept, onReject, onMinimize, riderProf
             </p>
             <h2
               className={`text-xl sm:text-3xl font-bold tracking-tight tabular-nums break-all [overflow-wrap:anywhere] ${
-                isShared ? 'text-amber-400' : 'text-[#16A34A]'
+                isSalaryPartner
+                  ? 'text-white text-lg sm:text-2xl'
+                  : isShared
+                    ? 'text-amber-400'
+                    : 'text-[#16A34A]'
               }`}
             >
-              ₹{Number(earnings || 0).toFixed(2)}
+              {isSalaryPartner ? 'You are on salary' : `₹${Number(earnings || 0).toFixed(2)}`}
             </h2>
-            {isShared && (
+            {isSalaryPartner ? (
+              <span className="block mt-0.5 text-[10px] text-white/50 font-medium leading-snug break-words">
+                This order has no per-order payout
+              </span>
+            ) : isShared ? (
               <span className="block mt-0.5 text-[10px] text-white/40 font-medium leading-snug break-words">
                 (50% of ₹{Number(totalOriginalEarning).toFixed(2)} Total)
               </span>
-            )}
+            ) : null}
           </div>
           <div className="shrink-0 bg-white/10 border border-white/10 rounded-2xl px-3 sm:px-5 py-2 sm:py-2.5 text-white font-bold text-base sm:text-xl shadow-inner tabular-nums leading-none">
             {timeLeft}s

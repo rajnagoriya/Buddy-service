@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useCallback } from "react"
 import { useNavigate } from "react-router-dom"
-import { Search, ChevronLeft, ChevronRight, Eye, User, Star, ArrowUpDown, Settings, FileText, FileSpreadsheet, Loader2, Check, Columns, ExternalLink, Calendar, MapPin, CreditCard, Mail, Phone, Bike, FileCheck, Save, Trash2, MoreVertical, History } from "lucide-react"
+import { Search, ChevronLeft, ChevronRight, Eye, User, Star, ArrowUpDown, Settings, FileText, FileSpreadsheet, Loader2, Check, Columns, ExternalLink, Calendar, MapPin, CreditCard, Mail, Phone, Bike, FileCheck, Save, Trash2, MoreVertical, History, DollarSign } from "lucide-react"
 import { adminAPI } from "@food/api"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
@@ -64,8 +64,6 @@ export default function DeliverymanList() {
     zone: true,
     totalOrders: true,
     pocketBalance: true,
-    cashInHand: true,
-    remainingCashLimit: true,
     availabilityStatus: true,
     actions: true,
   })
@@ -220,13 +218,14 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
   const [employmentForm, setEmploymentForm] = useState({
     employmentType: "per_order",
     salaryDuration: "weekly",
+    salaryAmount: "",
   })
 
   const handleOpenEmploymentEdit = async (deliveryman) => {
     try {
       setEmploymentLoading(true)
       setEmploymentDetails(null)
-      setEmploymentForm({ employmentType: "per_order", salaryDuration: "weekly" })
+      setEmploymentForm({ employmentType: "per_order", salaryDuration: "weekly", salaryAmount: "" })
       setIsEmploymentOpen(true)
       const response = await adminAPI.getDeliveryPartnerById(deliveryman._id)
       if (response.data?.success) {
@@ -235,6 +234,10 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
         setEmploymentForm({
           employmentType: delivery.employmentType || "per_order",
           salaryDuration: delivery.salaryDuration || "weekly",
+          salaryAmount:
+            delivery.salaryAmount != null && delivery.salaryAmount !== ""
+              ? String(delivery.salaryAmount)
+              : "",
         })
       } else {
         toast.error("Failed to load employment details")
@@ -258,18 +261,29 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
     (
       employmentForm.employmentType !== (employmentDetails.employmentType || "per_order") ||
       (employmentForm.employmentType === "salary" &&
-        employmentForm.salaryDuration !== (employmentDetails.salaryDuration || "weekly"))
+        (employmentForm.salaryDuration !== (employmentDetails.salaryDuration || "weekly") ||
+          Number(employmentForm.salaryAmount || 0) !== Number(employmentDetails.salaryAmount || 0)))
     )
   )
 
   const handleEmploymentSave = async () => {
     if (!employmentDetails || !employmentDetails._id || !hasEmploymentChanges) return
+    if (employmentForm.employmentType === "salary") {
+      const amount = Number(employmentForm.salaryAmount)
+      if (!Number.isFinite(amount) || amount <= 0) {
+        toast.error("Please enter a valid salary amount")
+        return
+      }
+    }
     try {
       setEmploymentUpdating(true)
       const data = {
         employmentType: employmentForm.employmentType,
         ...(employmentForm.employmentType === "salary"
-          ? { salaryDuration: employmentForm.salaryDuration }
+          ? {
+              salaryDuration: employmentForm.salaryDuration,
+              salaryAmount: Number(employmentForm.salaryAmount),
+            }
           : {}),
       }
       const res = await adminAPI.updateDeliveryPartner(employmentDetails._id, data)
@@ -279,6 +293,11 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
           prev.map((dm) =>
             dm._id === employmentDetails._id ? { ...dm, ...data } : dm
           )
+        )
+        setViewDetails((prev) =>
+          prev && String(prev._id) === String(employmentDetails._id)
+            ? { ...prev, ...data }
+            : prev
         )
         toast.success("Employment settings updated successfully")
         setIsEmploymentOpen(false)
@@ -319,8 +338,6 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
       zone: true,
       totalOrders: true,
       pocketBalance: true,
-      cashInHand: true,
-      remainingCashLimit: true,
       availabilityStatus: true,
       actions: true,
     })
@@ -333,8 +350,6 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
     zone: "Zone",
     totalOrders: "Total Orders",
     pocketBalance: "Pocket Balance",
-    cashInHand: "Cash In Hand",
-    remainingCashLimit: "Remaining Cash Limit",
     availabilityStatus: "Availability Status",
     actions: "Actions",
   }
@@ -538,22 +553,6 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
                         </div>
                       </th>
                     )}
-                    {visibleColumns.cashInHand && (
-                      <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
-                        <div className="flex items-center gap-2">
-                          <span>Cash In Hand</span>
-                          <ArrowUpDown className="w-3 h-3 text-slate-400 cursor-pointer hover:text-slate-600" />
-                        </div>
-                      </th>
-                    )}
-                    {visibleColumns.remainingCashLimit && (
-                      <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
-                        <div className="flex items-center gap-2">
-                          <span>Remaining Cash Limit</span>
-                          <ArrowUpDown className="w-3 h-3 text-slate-400 cursor-pointer hover:text-slate-600" />
-                        </div>
-                      </th>
-                    )}
                     {visibleColumns.availabilityStatus && (
                       <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
                         <div className="flex items-center gap-2">
@@ -641,16 +640,6 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
                             <span className="text-sm text-slate-700">{formatCurrency(dm.pocketBalance)}</span>
                           </td>
                         )}
-                        {visibleColumns.cashInHand && (
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className="text-sm text-slate-700">{formatCurrency(dm.cashInHand)}</span>
-                          </td>
-                        )}
-                        {visibleColumns.remainingCashLimit && (
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className="text-sm text-slate-700">{formatCurrency(dm.remainingCashLimit)}</span>
-                          </td>
-                        )}
                         {visibleColumns.availabilityStatus && (
                           <td className="px-6 py-4">
                             <div className="flex flex-col">
@@ -683,6 +672,19 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
                                   >
                                     <History className="w-4 h-4 text-emerald-600" />
                                     <span>Order History</span>
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      const id = dm?._id || dm?.id
+                                      if (!id) return
+                                      navigate(
+                                        `/admin/food/delivery-partners/earnings?deliveryPartnerId=${encodeURIComponent(String(id))}`,
+                                      )
+                                    }}
+                                    className="cursor-pointer flex items-center gap-2"
+                                  >
+                                    <DollarSign className="w-4 h-4 text-green-600" />
+                                    <span>Earnings</span>
                                   </DropdownMenuItem>
                                   <DropdownMenuItem
                                     onClick={() => handleOpenEmploymentEdit(dm)}
@@ -953,21 +955,31 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
                   </h3>
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                     <div>
+                      <label className="text-xs font-semibold text-slate-500 uppercase">Employment</label>
+                      <p className="text-sm font-medium text-slate-900 mt-1 capitalize">
+                        {(viewDetails.employmentType || "per_order").replace(/_/g, " ")}
+                      </p>
+                    </div>
+                    {viewDetails.employmentType === "salary" && (
+                      <>
+                        <div>
+                          <label className="text-xs font-semibold text-slate-500 uppercase">Salary Duration</label>
+                          <p className="text-sm font-medium text-slate-900 mt-1 capitalize">
+                            {viewDetails.salaryDuration || "weekly"}
+                          </p>
+                        </div>
+                        <div>
+                          <label className="text-xs font-semibold text-slate-500 uppercase">Fixed Salary</label>
+                          <p className="text-sm font-medium text-emerald-700 mt-1">
+                            {formatCurrency(viewDetails.salaryAmount || 0)}
+                          </p>
+                        </div>
+                      </>
+                    )}
+                    <div>
                       <label className="text-xs font-semibold text-slate-500 uppercase">Pocket Balance</label>
                       <p className="text-sm font-medium text-slate-900 mt-1">
                         {formatCurrency(viewDetails.pocketBalance || viewDetails.walletSummary?.pocketBalance)}
-                      </p>
-                    </div>
-                    <div>
-                      <label className="text-xs font-semibold text-slate-500 uppercase">Cash In Hand</label>
-                      <p className="text-sm font-medium text-slate-900 mt-1">
-                        {formatCurrency(viewDetails.cashInHand || viewDetails.walletSummary?.cashCollected)}
-                      </p>
-                    </div>
-                    <div>
-                      <label className="text-xs font-semibold text-slate-500 uppercase">Remaining Cash Limit</label>
-                      <p className="text-sm font-medium text-slate-900 mt-1">
-                        {formatCurrency(viewDetails.remainingCashLimit || viewDetails.walletSummary?.remainingCashLimit)}
                       </p>
                     </div>
                     <div>
@@ -1212,33 +1224,50 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
                     disabled={employmentUpdating}
                     className="mt-2 block w-full text-sm rounded-md border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                   >
-                    <option value="per_order">Per Order (Commission)</option>
-                    <option value="salary">Salary Base</option>
-                    <option value="seller_base">Seller Base (Fixed)</option>
+                    <option value="per_order">Per Order</option>
+                    <option value="salary">Salary</option>
                   </select>
                   <p className="text-xs text-slate-500 mt-2">
-                    {employmentForm.employmentType === 'salary' ? 'Partner receives a fixed salary based on slab.' :
-                     employmentForm.employmentType === 'seller_base' ? 'Partner is managed on a fixed base pay model by the seller/platform.' :
-                     'Partner earns per delivery based on distance rules.'}
+                    {employmentForm.employmentType === 'salary'
+                      ? 'Partner receives a fixed salary set by admin (no per-order payout).'
+                      : 'Partner earns per delivery based on distance rules.'}
                   </p>
                 </div>
 
                 {employmentForm.employmentType === 'salary' && (
-                  <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
-                    <label className="text-xs font-semibold text-slate-500 uppercase">Salary Duration</label>
-                    <select
-                      value={employmentForm.salaryDuration}
-                      onChange={(e) => handleEmploymentFormChange("salaryDuration", e.target.value)}
-                      disabled={employmentUpdating}
-                      className="mt-2 block w-full text-sm rounded-md border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                    >
-                      <option value="weekly">Weekly Slab</option>
-                      <option value="monthly">Monthly Slab</option>
-                    </select>
-                    <p className="text-xs text-slate-500 mt-2">
-                      Choose the payout cycle. Slabs are defined in global settings.
-                    </p>
-                  </div>
+                  <>
+                    <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
+                      <label className="text-xs font-semibold text-slate-500 uppercase">Salary Duration</label>
+                      <select
+                        value={employmentForm.salaryDuration}
+                        onChange={(e) => handleEmploymentFormChange("salaryDuration", e.target.value)}
+                        disabled={employmentUpdating}
+                        className="mt-2 block w-full text-sm rounded-md border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                      >
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly">Monthly</option>
+                      </select>
+                      <p className="text-xs text-slate-500 mt-2">
+                        Payout cycle used when marking salary as paid.
+                      </p>
+                    </div>
+                    <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
+                      <label className="text-xs font-semibold text-slate-500 uppercase">Fixed Salary Amount (₹)</label>
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={employmentForm.salaryAmount}
+                        onChange={(e) => handleEmploymentFormChange("salaryAmount", e.target.value)}
+                        disabled={employmentUpdating}
+                        placeholder="e.g. 15000"
+                        className="mt-2 block w-full text-sm rounded-md border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 px-3 py-2"
+                      />
+                      <p className="text-xs text-slate-500 mt-2">
+                        Admin-set fixed salary for this partner.
+                      </p>
+                    </div>
+                  </>
                 )}
               </div>
             ) : null}

@@ -123,9 +123,9 @@ export async function writeDeliveryLocation({
 }
 
 /**
- * Write order tracking data to Firebase at orders/{orderId}/tracking.
- * Used by the delivery app to publish rider location; user tracking page reads from the same path.
- * Payload should include: lat, lng, heading (or bearing), and optionally speed, polyline, route_coordinates.
+ * Write order tracking data to Firebase at active_orders/{orderId}.
+ * When deliveryPartnerId is present, also write under riders/{partnerId}
+ * so dual-driver orders can show both locations without clobbering.
  */
 export async function writeOrderTracking(orderId, payload = {}) {
   if (!orderId) return false;
@@ -140,6 +140,16 @@ export async function writeOrderTracking(orderId, payload = {}) {
   if (payload.timestamp != null) {
     toWrite.timestamp = toFiniteNumber(payload.timestamp) || Date.now();
   }
-  await update(ref(firebaseRealtimeDb, getOrderTrackingPath(orderId)), toWrite);
+  // Don't nest the full riders map into the root update payload.
+  delete toWrite.riders;
+  delete toWrite.deliveryPartnerId;
+
+  const orderPath = getOrderTrackingPath(orderId);
+  await update(ref(firebaseRealtimeDb, orderPath), toWrite);
+
+  const partnerId = sanitizeRealtimeKey(payload.deliveryPartnerId);
+  if (partnerId) {
+    await update(ref(firebaseRealtimeDb, `${orderPath}/riders/${partnerId}`), toWrite);
+  }
   return true;
 }

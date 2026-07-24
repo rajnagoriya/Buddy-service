@@ -17,6 +17,8 @@ import {
   resolveOrderDistanceKmAsync,
   applyDeliverySurcharges,
   resolveSpeedFeeModifier,
+  resolveSpeedOption,
+  splitSpeedFeeShares,
 } from './order.helpers.js';
 import { FoodDeliveryBoySettings } from '../../admin/models/deliveryBoySettings.model.js';
 import { validateRestaurantChainForItems } from './restaurant-chain-radius.service.js';
@@ -80,21 +82,33 @@ export async function validateAndHydrateCartItems(items = []) {
     let variantName = line.variantName || undefined;
     let variantId = line.variantId ? String(line.variantId) : undefined;
 
-    if (variantId && Array.isArray(doc.variants) && doc.variants.length > 0) {
-      const variant =
-        doc.variants.find((v) => String(v._id) === variantId) ||
-        doc.variants.find(
-          (v) =>
-            String(v.name || '')
-              .trim()
-              .toLowerCase() === String(variantName || '').trim().toLowerCase(),
-        );
-      if (!variant) {
+    if (Array.isArray(doc.variants) && doc.variants.length > 0) {
+      const normalizeName = (value) =>
+        String(value || '')
+          .trim()
+          .toLowerCase();
+      const linePrice = Number(line.variantPrice ?? line.price);
+
+      let variant =
+        (variantId && doc.variants.find((v) => String(v._id) === variantId)) ||
+        (variantName &&
+          doc.variants.find((v) => normalizeName(v.name) === normalizeName(variantName))) ||
+        null;
+
+      // Reorder / legacy carts may send line price without a variantId — match by price.
+      if (!variant && Number.isFinite(linePrice) && linePrice > 0) {
+        variant = doc.variants.find((v) => Number(v.price) === linePrice) || null;
+      }
+
+      if (!variant && (variantId || variantName)) {
         throw new ValidationError(`Selected option for "${doc.name}" is no longer available`);
       }
-      unitPrice = Number(variant.price) || 0;
-      variantName = variant.name;
-      variantId = String(variant._id);
+
+      if (variant) {
+        unitPrice = Number(variant.price) || 0;
+        variantName = variant.name;
+        variantId = String(variant._id);
+      }
     }
 
     const qty = Math.max(1, Number(line.quantity) || 1);
@@ -278,39 +292,33 @@ export async function calculateOrderPricing(userId, dto) {
   let baseDeliveryFee = 0;
   let baseRiderFee = 0;
   let deliveryFeeSource = 'none';
+  const isFreeByThreshold =
+    Number.isFinite(freeThreshold) && freeThreshold > 0 && subtotal >= freeThreshold;
+  const defaultDeliveryFee = Math.max(0, Number(feeSettings.deliveryFee) || 0);
 
-  if (Number.isFinite(freeThreshold) && freeThreshold > 0 && subtotal >= freeThreshold) {
-    baseDeliveryFee = 0;
-    baseRiderFee = 0;
-    deliveryFeeSource = 'free';
-  } else {
+  // Base: distance slab userCharge / deliveryBoyFee, else Default Delivery Fee.
+  // Free delivery (threshold/coupon) only waives customer charge; rider still paid per slab.
+  {
     const rules = await FoodDeliveryCommissionRule.find({ status: true }).lean();
     if (rules?.length > 0) {
       const quote = resolveDistanceSlabQuote(distanceKm, rules);
-      baseDeliveryFee = quote.userCharge;
-      baseRiderFee = quote.deliveryBoyFee;
-      deliveryFeeSource = 'distance';
+      if (quote.matched) {
+        baseDeliveryFee = quote.userCharge;
+        baseRiderFee = quote.deliveryBoyFee;
+        deliveryFeeSource = isFreeByThreshold ? 'free' : 'distance';
+      } else {
+        baseDeliveryFee = defaultDeliveryFee;
+        baseRiderFee = defaultDeliveryFee;
+        deliveryFeeSource = isFreeByThreshold ? 'free' : 'default';
+      }
     } else {
-      // No active distance rules → delivery fee is 0 (no flat/range fallback)
-      baseDeliveryFee = 0;
-      baseRiderFee = 0;
-      deliveryFeeSource = 'none';
+      baseDeliveryFee = defaultDeliveryFee;
+      baseRiderFee = defaultDeliveryFee;
+      deliveryFeeSource = isFreeByThreshold ? 'free' : 'default';
     }
   }
 
-  const surchargeResult = applyDeliverySurcharges(baseDeliveryFee, {
-    isMultiRestaurant,
-    isSplitOrder,
-    deliveryBoySettings,
-  });
-
-  // Rider earning uses the same multi/split surcharges, but not customer speed modifier
-  const riderSurchargeResult = applyDeliverySurcharges(baseRiderFee, {
-    isMultiRestaurant,
-    isSplitOrder,
-    deliveryBoySettings,
-  });
-
+  // Order: base → Delivery Speed Options → multi-resto / split surcharges
   const speedOptions = Array.isArray(deliveryBoySettings?.deliverySpeedOptions)
     ? deliveryBoySettings.deliverySpeedOptions.filter((o) => o && o.isEnabled !== false)
     : [];
@@ -327,30 +335,78 @@ export async function calculateOrderPricing(userId, dto) {
     }
   }
 
-  const speedFeeModifier = speedOptions.length > 0
-    ? resolveSpeedFeeModifier(
+  const matchedSpeedOption = speedOptions.length > 0
+    ? resolveSpeedOption(
       deliveryBoySettings,
       dto.deliverySpeedOptionId,
       dto.deliveryOption,
     )
-    : 0;
+    : null;
+  const speedFeeModifier = matchedSpeedOption
+    ? Number(matchedSpeedOption.feeModifier) || 0
+    : (speedOptions.length > 0
+      ? resolveSpeedFeeModifier(
+        deliveryBoySettings,
+        dto.deliverySpeedOptionId,
+        dto.deliveryOption,
+      )
+      : 0);
 
-  const deliveryFee = Math.max(0, surchargeResult.fee + speedFeeModifier);
+  const speedShares = splitSpeedFeeShares(speedFeeModifier, {
+    driverShareAmount: matchedSpeedOption?.driverShareAmount,
+  });
+  // Signed speed modifier: positive adds, negative subtracts (final fee floored at 0)
+  const speedAdjustment = Number(speedFeeModifier) || 0;
+
+  // Customer: base → speed → multi-resto (+ split doubles distance/default base only)
+  const multiCharge = isMultiRestaurant
+    ? Math.max(0, Number(deliveryBoySettings?.multiOrderAdditionalCharge) || 0)
+    : 0;
+  const splitExtraCustomer = isSplitOrder ? baseDeliveryFee : 0;
+  const customerSurcharge = multiCharge + splitExtraCustomer;
+  const deliveryFee = Math.max(
+    0,
+    baseDeliveryFee + speedAdjustment + customerSurcharge,
+  );
+
+  // Rider: slab/default + same multi/split; speed driver share on top (unchanged by free delivery)
+  const riderSurchargeResult = applyDeliverySurcharges(baseRiderFee, {
+    isMultiRestaurant,
+    isSplitOrder,
+    deliveryBoySettings,
+  });
+  const riderFee = Number(
+    (riderSurchargeResult.fee + speedShares.speedShareDriver).toFixed(2),
+  );
+  const deliveryMarginBase = Math.max(
+    0,
+    Number(
+      (baseDeliveryFee + customerSurcharge - riderSurchargeResult.fee).toFixed(2),
+    ),
+  );
+
   const deliveryFeeBreakdown = {
     source: deliveryFeeSource,
     distanceKm,
     isMultiRestaurant,
     isSplitOrder,
     totalItems: totalItemCount,
-    multiplier: surchargeResult.multiplier,
-    additionalCharge: surchargeResult.surcharge,
+    multiplier: isSplitOrder ? 2 : 1,
+    additionalCharge: customerSurcharge,
     speedFeeModifier,
-    baseFee: surchargeResult.baseFee,
+    speedDriverShareConfigured: Math.max(0, Number(matchedSpeedOption?.driverShareAmount) || 0),
+    speedShareAdmin: speedShares.speedShareAdmin,
+    speedShareRestaurant: 0,
+    speedShareDriver: speedShares.speedShareDriver,
+    adminBearsNegativeSpeed: speedShares.adminBearsNegative,
+    baseFee: baseDeliveryFee,
     fee: deliveryFee,
     userCharge: baseDeliveryFee,
     deliveryBoyFee: baseRiderFee,
-    riderFee: riderSurchargeResult.fee,
+    riderBaseFee: riderSurchargeResult.fee,
+    riderFee,
     riderAdditionalCharge: riderSurchargeResult.surcharge,
+    deliveryMarginBase,
   };
 
   const gstRate = feeSettings.gstRate != null ? Number(feeSettings.gstRate) : 0;
@@ -368,6 +424,13 @@ export async function calculateOrderPricing(userId, dto) {
   const codeRaw = dto.couponCode
     ? String(dto.couponCode).trim().toUpperCase()
     : '';
+
+  // Free-delivery threshold: customer pays ₹0 delivery; admin bears the waived fee
+  // (same accounting as a free-delivery coupon). Rider fee stays in breakdown.
+  if (isFreeByThreshold && deliveryFee > 0) {
+    deliveryDiscount = deliveryFee;
+    platformSubsidy = deliveryFee;
+  }
 
   if (codeRaw) {
     const now = new Date();
@@ -389,14 +452,17 @@ export async function calculateOrderPricing(userId, dto) {
       if (eligibility.eligible) {
         const computed = computeOfferDiscount(offer, { subtotal, deliveryFee });
         discount = computed.discount;
-        deliveryDiscount = computed.deliveryDiscount;
-        platformSubsidy = computed.platformSubsidy;
+        // Threshold free-delivery already waived the customer fee; don't double-count subsidy.
+        if (!isFreeByThreshold) {
+          deliveryDiscount = computed.deliveryDiscount;
+          platformSubsidy = computed.platformSubsidy;
+        }
         couponCategory = computed.couponCategory;
         appliedCoupon = {
           code: codeRaw,
           discount,
-          deliveryDiscount,
-          platformSubsidy,
+          deliveryDiscount: isFreeByThreshold ? 0 : computed.deliveryDiscount,
+          platformSubsidy: isFreeByThreshold ? 0 : computed.platformSubsidy,
           couponCategory,
           createdBy: getCreatedByType(offer),
           offerId: offer._id,

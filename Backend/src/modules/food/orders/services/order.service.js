@@ -62,12 +62,14 @@ import {
   toGeoPoint,
   pushStatusHistory,
   normalizeOrderForClient,
+  toUserOrderResponse,
   applyAggregateRating,
   derivePickupStatusFromOrderStatus,
   buildDeliverySocketPayload,
   notifyRestaurantNewOrder,
   isStatusAdvance,
   freeOrderDispatch,
+  resolveSpeedOption,
   NO_DRIVER_AUTO_CANCEL_MS,
   SHARE_TIMEOUT_MS,
   RESTAURANT_ACK_RESEND_MS,
@@ -379,8 +381,37 @@ export async function createOrder(userId, dto, options = {}) {
   });
   // Visit order: farthest-from-customer first so the final leg to the customer is shortest.
   assignPickupSequence(pickups, userLoc);
-  // Real combined ETA: slowest kitchen (they cook in parallel) + travel over the whole trip.
+  // Fallback ETA from kitchen prep + travel (used only when no Delivery Speed Option is selected).
   const computedEtaMinutes = computeOrderEtaMinutes({ pickups }, totalDistanceKm);
+
+  // Prefer the customer's selected Delivery Speed Option time for user-facing ETA.
+  const matchedSpeedOption = resolveSpeedOption(
+    deliveryBoySettings,
+    dto.deliverySpeedOptionId,
+    dto.deliveryOption,
+  );
+  const speedEtaMinutes = matchedSpeedOption
+    ? Math.max(1, Number(matchedSpeedOption.estimatedTime) || 0)
+    : 0;
+  const speedTimeLabel = matchedSpeedOption
+    ? String(matchedSpeedOption.time || '').trim()
+    : '';
+  const speedOptionName = matchedSpeedOption
+    ? String(matchedSpeedOption.name || '').trim()
+    : '';
+  const orderEstimatedMinutes =
+    speedEtaMinutes ||
+    Math.max(1, Number(dto.estimatedTime) || 0) ||
+    computedEtaMinutes ||
+    30;
+  const orderDeliveryTimeLabel =
+    speedTimeLabel ||
+    String(dto.deliveryTime || '').trim() ||
+    `${orderEstimatedMinutes} mins`;
+  const orderDeliveryOptionName =
+    speedOptionName ||
+    String(dto.deliveryOption || '').trim() ||
+    'Standard Delivery';
 
   // Calculate restaurant commission per restaurant (sum stored on pricing for compat)
   const restaurantGroups = Array.isArray(recalculated.pricing?.restaurantGroups)
@@ -394,6 +425,18 @@ export async function createOrder(userId, dto, options = {}) {
         packagingFee: 0,
       }));
 
+  const breakdown = normalizedPricing.deliveryFeeBreakdown || {};
+  // Speed fee is shared only between admin and driver (restaurant share removed).
+  const speedShareRestaurantTotal = 0;
+  const speedShareDriver = Math.max(0, Number(breakdown.speedShareDriver) || 0);
+  const speedShareAdmin = Number(breakdown.speedShareAdmin) || 0;
+
+  const isRestaurantCoupon = normalizedPricing.couponCreatedBy === 'restaurant';
+  const isAdminCoupon = normalizedPricing.couponCreatedBy === 'admin';
+  const foodDiscount = Number(normalizedPricing.discount) || 0;
+  // Restaurant coupon: primary restaurant bears the full food discount
+  const primaryRestaurantId = String(mainRestaurant._id);
+
   const restaurantSettlement = [];
   let totalRestaurantCommission = 0;
   for (const group of restaurantGroups) {
@@ -404,9 +447,16 @@ export async function createOrder(userId, dto, options = {}) {
       restaurantId: group.restaurantId,
     });
     const commission = Number(commissionAmount) || 0;
-    // GST on commission (18% marketplace services GST; informational for settlement reports)
     const commissionGST = Number((commission * 0.18).toFixed(2));
-    const restaurantPayout = Math.max(0, Number((foodAmount + packaging - commission).toFixed(2)));
+    const speedShare = 0;
+    const couponDiscount =
+      isRestaurantCoupon && foodDiscount > 0 && String(group.restaurantId) === primaryRestaurantId
+        ? foodDiscount
+        : 0;
+    const restaurantPayout = Math.max(
+      0,
+      Number((foodAmount + packaging + speedShare - commission - couponDiscount).toFixed(2)),
+    );
     totalRestaurantCommission += commission;
     restaurantSettlement.push({
       restaurantId: group.restaurantId,
@@ -415,6 +465,8 @@ export async function createOrder(userId, dto, options = {}) {
       packagingFee: packaging,
       commission,
       commissionGST,
+      speedShare,
+      couponDiscount,
       restaurantPayout,
     });
   }
@@ -425,13 +477,27 @@ export async function createOrder(userId, dto, options = {}) {
     0,
     normalizedPricing.deliveryFee - Number(normalizedPricing.deliveryDiscount || 0),
   );
-  const deliveryMargin = Math.max(0, Number((customerDeliveryFeePaid - riderEarning).toFixed(2)));
+  const deliveryMarginBase = Math.max(
+    0,
+    Number(
+      (
+        Number(breakdown.deliveryMarginBase) ||
+        Math.max(0, (Number(breakdown.baseFee) || 0) - (Number(breakdown.riderBaseFee) || 0))
+      ).toFixed(2),
+    ),
+  );
+  // Invoice delivery margin for platform = slab gap + admin's speed third (or negative speed bear)
+  const deliveryMargin = Math.max(
+    0,
+    Number((deliveryMarginBase + Math.max(0, speedShareAdmin)).toFixed(2)),
+  );
 
+  const tipAmount = Number(dto.tip || 0) || 0;
   const driverSettlement = {
     deliveryFee: customerDeliveryFeePaid,
-    tip: Number(dto.tip || 0) || 0,
+    tip: tipAmount,
     incentive: 0,
-    driverPayout: Math.max(0, Number((riderEarning + Number(dto.tip || 0)).toFixed(2))),
+    driverPayout: Math.max(0, Number((riderEarning + tipAmount).toFixed(2))),
   };
 
   const platformRevenue = {
@@ -440,14 +506,109 @@ export async function createOrder(userId, dto, options = {}) {
     deliveryMargin,
   };
 
-  const platformProfit = Math.max(
-    0,
-    normalizedPricing.platformFee +
-    normalizedPricing.deliveryFee +
-    normalizedPricing.restaurantCommission -
-    riderEarning -
-    Number(normalizedPricing.platformSubsidy || 0),
+  const adminCouponDiscount = isAdminCoupon ? foodDiscount : 0;
+  const platformSubsidy = Number(normalizedPricing.platformSubsidy) || 0;
+  const negativeSpeedBear = speedShareAdmin < 0 ? Math.abs(speedShareAdmin) : 0;
+
+  // Customer delivery fee (gross) funds rider + resto speed share; remainder stays with platform.
+  const platformProfit = Number(
+    (
+      Number(normalizedPricing.platformFee) +
+      Number(normalizedPricing.deliveryFee) +
+      totalRestaurantCommission -
+      riderEarning -
+      speedShareRestaurantTotal -
+      adminCouponDiscount -
+      platformSubsidy
+    ).toFixed(2),
   );
+
+  const costBearers = [];
+  if (platformSubsidy > 0) {
+    costBearers.push({
+      type: 'free_delivery',
+      amount: platformSubsidy,
+      bearer: 'admin',
+      note: 'Customer delivery waived; driver still receives Delivery Boy Fee',
+    });
+  }
+  if (adminCouponDiscount > 0) {
+    costBearers.push({
+      type: 'admin_coupon',
+      amount: adminCouponDiscount,
+      bearer: 'admin',
+      note: 'Admin coupon; restaurant and driver payouts unchanged',
+    });
+  }
+  if (isRestaurantCoupon && foodDiscount > 0) {
+    costBearers.push({
+      type: 'restaurant_coupon',
+      amount: foodDiscount,
+      bearer: 'restaurant',
+      note: 'Restaurant coupon deducted from restaurant payout',
+    });
+  }
+  if (negativeSpeedBear > 0) {
+    costBearers.push({
+      type: 'negative_speed',
+      amount: negativeSpeedBear,
+      bearer: 'admin',
+      note: 'Negative Cart Delivery Speed fee borne by admin',
+    });
+  }
+
+  const settlementBreakdown = {
+    customer: {
+      paid: Number(normalizedPricing.total) || 0,
+      foodSubtotal: Number(normalizedPricing.foodSubtotal || normalizedPricing.subtotal) || 0,
+      packagingFee: Number(normalizedPricing.packagingFee) || 0,
+      deliveryFee: Number(normalizedPricing.deliveryFee) || 0,
+      deliveryPaid: customerDeliveryFeePaid,
+      deliveryDiscount: Number(normalizedPricing.deliveryDiscount) || 0,
+      platformFee: Number(normalizedPricing.platformFee) || 0,
+      tax: Number(normalizedPricing.tax) || 0,
+      discount: foodDiscount,
+      couponCode: normalizedPricing.couponCode || null,
+      couponCreatedBy: normalizedPricing.couponCreatedBy || null,
+    },
+    restaurants: restaurantSettlement.map((s) => ({
+      restaurantId: s.restaurantId,
+      restaurantName: s.restaurantName,
+      foodAmount: s.foodAmount,
+      packagingFee: s.packagingFee,
+      commission: s.commission,
+      speedShare: s.speedShare,
+      couponDiscount: s.couponDiscount,
+      payout: s.restaurantPayout,
+    })),
+    driver: {
+      employmentType: 'per_order',
+      deliveryBoyFee: Number(breakdown.deliveryBoyFee) || 0,
+      riderBaseFee: Number(breakdown.riderBaseFee) || riderEarning,
+      speedShare: speedShareDriver,
+      tip: tipAmount,
+      payout: Math.max(0, Number((riderEarning + tipAmount).toFixed(2))),
+      note: 'Per-order earning from Delivery Boy Fee (+ speed share).',
+    },
+    platform: {
+      platformFee: Number(normalizedPricing.platformFee) || 0,
+      restaurantCommission: totalRestaurantCommission || 0,
+      deliveryMarginBase,
+      speedShare: Math.max(0, speedShareAdmin),
+      adminCouponDiscount,
+      freeDeliverySubsidy: platformSubsidy,
+      negativeSpeedBear,
+      netProfit: platformProfit,
+    },
+    speed: {
+      feeModifier: Number(breakdown.speedFeeModifier) || 0,
+      admin: speedShareAdmin,
+      restaurant: 0,
+      driver: speedShareDriver,
+      driverShareConfigured: Number(breakdown.speedDriverShareConfigured) || 0,
+    },
+    costBearers,
+  };
 
   const payment = verifiedPrepaid
     ? {
@@ -485,6 +646,7 @@ export async function createOrder(userId, dto, options = {}) {
     restaurantSettlement,
     driverSettlement,
     platformRevenue,
+    settlementBreakdown,
     payment,
     orderStatus: isScheduledOrder ? "scheduled" : "created",
     restaurantNote: dto.restaurantNote || "",
@@ -494,9 +656,9 @@ export async function createOrder(userId, dto, options = {}) {
     riderEarning,
     platformProfit,
     deliveryFleet: dto.deliveryFleet || "standard",
-    deliveryOption: dto.deliveryOption || "Standard Delivery",
-    deliveryTime: dto.deliveryTime || "25–35 mins",
-    estimatedTime: computedEtaMinutes || dto.estimatedTime || 30,
+    deliveryOption: orderDeliveryOptionName,
+    deliveryTime: orderDeliveryTimeLabel,
+    estimatedTime: orderEstimatedMinutes,
     dispatch: { modeAtCreation: dispatchMode, status: "unassigned" },
     statusHistory: [
       {
@@ -1094,6 +1256,7 @@ export async function getOrderById(
       "restaurantName ownerPhone profileImage area city location rating totalRatings primaryContactNumber",
     )
     .populate("dispatch.deliveryPartnerId", "name fullName phone phoneNumber rating totalRatings profileImage avatar")
+    .populate("dispatch.sharedPartnerId", "name fullName phone phoneNumber rating totalRatings profileImage avatar")
     .populate("userId", "name fullName phone email")
     .select("+deliveryOtp")
     .lean();
@@ -1152,19 +1315,39 @@ export async function getOrderById(
   if (userId) {
     const drop = order.deliveryVerification?.dropOtp || {};
     const secret = String(order.deliveryOtp || "").trim();
-    const out = normalizeOrderForClient(order);
-    delete out.deliveryOtp;
-    out.deliveryVerification = {
-      ...(order.deliveryVerification || {}),
-      dropOtp: {
-        required: Boolean(drop.required),
-        verified: Boolean(drop.verified),
+    const extras = {
+      deliveryVerification: {
+        dropOtp: {
+          required: Boolean(drop.required),
+          verified: Boolean(drop.verified),
+        },
       },
     };
     if (!drop.verified && secret) {
-      out.handoverOtp = secret;
+      extras.handoverOtp = secret;
     }
-    return out;
+    // Dual-driver: expose both partners + per-leg OTPs (only when that leg is at drop).
+    if (isDualLegActive(order)) {
+      extras.isDualLeg = true;
+      extras.legProgress = getLegProgress(order);
+      extras.legHandoverOtps = (order.legs || [])
+        .filter(
+          (leg) =>
+            String(leg?.status || '') === 'at_drop' &&
+            !leg?.otpVerified &&
+            String(leg?.otp || '').trim(),
+        )
+        .map((leg) => ({
+          legIndex: leg.legIndex,
+          role: leg.role,
+          partnerId: leg.partnerId ? String(leg.partnerId) : null,
+          otp: String(leg.otp).trim(),
+        }));
+      if (extras.legHandoverOtps.length && !extras.handoverOtp) {
+        extras.handoverOtp = extras.legHandoverOtps[0].otp;
+      }
+    }
+    return toUserOrderResponse(order, extras);
   }
 
   return sanitizeOrderForExternal(order);
@@ -1191,6 +1374,7 @@ export async function getDropOtpUser(orderId, userId) {
       .map((leg) => ({
         legIndex: leg.legIndex,
         role: leg.role,
+        partnerId: leg.partnerId ? String(leg.partnerId) : null,
         otp: String(leg.otp).trim(),
       }));
 
@@ -2210,7 +2394,12 @@ export async function updateOrderStatusRestaurant(
 
   if (statusForMessage === "confirmed") {
     title = "Order Accepted! 🧑‍🍳";
-    body = "The restaurant has accepted your order and is starting to prepare it.";
+    const etaLabel =
+      String(order.deliveryTime || '').trim() ||
+      (Number(order.estimatedTime) > 0 ? `${Number(order.estimatedTime)} mins` : '');
+    body = etaLabel
+      ? `The restaurant has accepted your order. Estimated delivery: ${etaLabel}.`
+      : "The restaurant has accepted your order and is starting to prepare it.";
   } else if (statusForMessage === "preparing") {
     title = "Food is being prepared! 🍳";
     body = "Your food is currently being prepared by the restaurant.";
@@ -3029,7 +3218,7 @@ export async function assignSecondDeliveryPartnerAdmin(orderId, deliveryPartnerI
 
   // Split the rider earning 50/50 if the share slot was never opened.
   if (!order.dispatch?.isShared && !Number(order.sharedRiderEarning)) {
-    const totalEarning = Number(order.riderEarning || order.pricing?.deliveryFee || 0);
+    const totalEarning = Number(order.riderEarning || 0);
     const sharedSplit = Math.round(totalEarning / 2);
     order.sharedRiderEarning = sharedSplit;
     order.riderEarning = Math.max(0, totalEarning - sharedSplit);
@@ -3634,13 +3823,17 @@ export async function shareOrderDelivery(orderId, deliveryPartnerId) {
   }
   assertCanShareSecondDriver(order);
 
-  // F-3D: only bulk orders (item count >= configured threshold) may request a second driver.
-  // Previously this was enforced in the driver UI only, so a direct API call could split any order.
+  // Only bulk orders (item count >= configured threshold) may request a second driver.
+  // Primary opens this manually via "Find new driver" after assessing load at pickup.
   const shareSettings =
     (await FoodDeliveryBoySettings.findOne({ isActive: true }).sort({ createdAt: -1 }).lean()) ||
     (await FoodDeliveryBoySettings.findOne().sort({ createdAt: -1 }).lean());
   if (!isShareRequired(order, shareSettings || {})) {
-    throw new ValidationError('This order is not large enough to require a second delivery partner.');
+    throw new ValidationError('This order is not large enough to request a second delivery partner.');
+  }
+
+  if (order.dispatch?.isShared) {
+    throw new ValidationError('A second-driver search is already open for this order.');
   }
 
   // Set sharing flags
@@ -3648,9 +3841,8 @@ export async function shareOrderDelivery(orderId, deliveryPartnerId) {
   order.dispatch.shareOpenedAt = new Date();
   order.dispatch.sharedPartnerId = null; // Ensure it's null so another partner can join
 
-  // Split the net rider earning 50/50
-  // Fallback to delivery fee if rider earning is not pre-calculated
-  const totalEarning = Number(order.riderEarning || order.pricing?.deliveryFee || 0);
+  // Split the net rider earning 50/50 (restored to primary if nobody joins in time)
+  const totalEarning = Number(order.riderEarning || 0);
   const sharedSplit = Math.round(totalEarning / 2);
   order.sharedRiderEarning = sharedSplit;
   order.riderEarning = Math.max(0, totalEarning - sharedSplit);
@@ -3660,7 +3852,7 @@ export async function shareOrderDelivery(orderId, deliveryPartnerId) {
     byId: deliveryPartnerId,
     from: currentStatus,
     to: currentStatus,
-    note: "Order marked as shared with other partners"
+    note: "Primary requested a second delivery partner (Find new driver)"
   });
 
   pushSettlementSnapshot(
@@ -3677,7 +3869,8 @@ export async function shareOrderDelivery(orderId, deliveryPartnerId) {
       const payload = buildDeliverySocketPayload(order, order.restaurantId);
       io.to('all_delivery').emit('shareable_order_available', {
         ...payload,
-        sharedFrom: deliveryPartnerId
+        sharedFrom: deliveryPartnerId,
+        shareRequired: false,
       });
     }
   } catch (err) {
@@ -3787,14 +3980,26 @@ export async function acceptSharedOrderDelivery(orderId, newPartnerId) {
     logger.error(`Failed to sync shared partner to transaction: ${err.message}`);
   }
 
-  // Notify both partners and user
+  // Notify both partners and user (with populated partner contact info)
+  try {
+    await order.populate([
+      { path: 'dispatch.deliveryPartnerId', select: 'name fullName phone phoneNumber profileImage' },
+      { path: 'dispatch.sharedPartnerId', select: 'name fullName phone phoneNumber profileImage' },
+    ]);
+  } catch (popErr) {
+    logger.warn(`Shared-order populate failed: ${popErr?.message || popErr}`);
+  }
+
   try {
     const io = getIO();
     if (io) {
       const payload = {
         orderId: order._id.toString(),
         orderStatus: order.orderStatus,
-        dispatch: order.dispatch
+        isDualLeg: Boolean(order.isDualLeg),
+        splitMode: order.splitMode || null,
+        legs: order.legs || [],
+        dispatch: order.dispatch,
       };
       io.to(rooms.delivery(oldPartnerId)).emit('order_shared_accepted', payload);
       io.to(rooms.delivery(newPartnerId)).emit('order_shared_accepted', payload);

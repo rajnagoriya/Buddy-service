@@ -27,6 +27,7 @@ const applyPartnerImageUpload = async (partner, field, file, folder) => {
     };
 };
 import { FoodDeliveryWithdrawal } from '../models/foodDeliveryWithdrawal.model.js';
+import { resolveRiderPayoutAmount } from '../../orders/services/order.helpers.js';
 
 const uploadPartnerImage = async (file, folder) => {
     const asset = await uploadFoodImage(file, folder);
@@ -452,12 +453,21 @@ export const getDeliveryPartnerWallet = async (deliveryPartnerId) => {
                         $sum: { 
                             $cond: [
                                 { $eq: ["$dispatch.deliveryPartnerId", partnerId] },
-                                { 
-                                    $cond: [
-                                        { $gt: [{ $ifNull: ["$riderEarning", 0] }, 0] },
+                                {
+                                    $ifNull: [
                                         "$riderEarning",
-                                        { $ifNull: ["$pricing.deliveryFee", 0] }
-                                    ]
+                                        {
+                                            $ifNull: [
+                                                "$pricing.deliveryFeeBreakdown.riderFee",
+                                                {
+                                                    $ifNull: [
+                                                        "$settlementBreakdown.driver.payout",
+                                                        { $ifNull: ["$pricing.deliveryFeeBreakdown.deliveryBoyFee", 0] },
+                                                    ],
+                                                },
+                                            ],
+                                        },
+                                    ],
                                 },
                                 { $ifNull: ["$sharedRiderEarning", 0] }
                             ]
@@ -683,12 +693,21 @@ export const getDeliveryPartnerEarnings = async (deliveryPartnerId, query = {}) 
                         $sum: { 
                             $cond: [
                                 { $eq: ["$dispatch.deliveryPartnerId", partnerId] },
-                                { 
-                                    $cond: [
-                                        { $gt: [{ $ifNull: ["$riderEarning", 0] }, 0] },
+                                {
+                                    $ifNull: [
                                         "$riderEarning",
-                                        { $ifNull: ["$pricing.deliveryFee", 0] }
-                                    ]
+                                        {
+                                            $ifNull: [
+                                                "$pricing.deliveryFeeBreakdown.riderFee",
+                                                {
+                                                    $ifNull: [
+                                                        "$settlementBreakdown.driver.payout",
+                                                        { $ifNull: ["$pricing.deliveryFeeBreakdown.deliveryBoyFee", 0] },
+                                                    ],
+                                                },
+                                            ],
+                                        },
+                                    ],
                                 },
                                 { $ifNull: ["$sharedRiderEarning", 0] }
                             ]
@@ -791,28 +810,25 @@ const toTripDto = (order, deliveryPartnerId) => {
     const paymentMethod = order?.payment?.method || order?.paymentMethod || '';
     const pricingTotal = Number(order?.pricing?.total) || Number(order?.totalAmount) || 0;
 
-    const totalEarningForFallback = Number(order?.riderEarning || order?.deliveryEarning || order?.pricing?.deliveryFee || 0);
-    const earningAmount = String(order?.dispatch?.sharedPartnerId) === String(deliveryPartnerId)
-        ? (Number(order?.sharedRiderEarning) || (totalEarningForFallback / 2))
-        : (order?.dispatch?.sharedPartnerId 
-            ? (Number(order?.riderEarning) || (totalEarningForFallback / 2))
-            : totalEarningForFallback);
+    const totalEarningForFallback = resolveRiderPayoutAmount(order, { partnerId: deliveryPartnerId });
+    const isSharedPartner = String(order?.dispatch?.sharedPartnerId) === String(deliveryPartnerId);
+    const earningAmount = totalEarningForFallback;
 
     const codAmount = paymentMethod === 'cash' ? Number(order?.payment?.amountDue) || 0 : 0;
     const codCollectedAmount = paymentMethod === 'cash' && order?.payment?.status === 'paid' ? codAmount : 0;
 
-    const isSharedPartner = String(order?.dispatch?.sharedPartnerId) === String(deliveryPartnerId);
     const otherPartner = isSharedPartner ? order?.dispatch?.deliveryPartnerId : order?.dispatch?.sharedPartnerId;
 
-    // Split info for history
-    const totalForSplit = Number(order?.riderEarning || order?.pricing?.deliveryFee || 0);
+    // Split info for history — never use customer deliveryFee
+    const primaryPayout = resolveRiderPayoutAmount(order);
+    const sharedPayout = Math.max(0, Number(order?.sharedRiderEarning) || 0);
     const splitInfo = order?.dispatch?.sharedPartnerId ? {
         isShared: true,
         otherPartner,
         primaryPartner: order?.dispatch?.deliveryPartnerId,
         sharedPartner: order?.dispatch?.sharedPartnerId,
-        primaryEarning: Number(order?.riderEarning || (totalForSplit / 2)),
-        sharedEarning: Number(order?.sharedRiderEarning || (totalForSplit / 2))
+        primaryEarning: primaryPayout,
+        sharedEarning: sharedPayout
     } : null;
 
     return {

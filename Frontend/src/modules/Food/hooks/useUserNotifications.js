@@ -205,7 +205,12 @@ export const useUserNotifications = () => {
             orderMongoId: payload?.orderMongoId,
             orderId,
             otp,
-            message
+            message,
+            legIndex: payload?.legIndex,
+            role: payload?.role,
+            partnerId: payload?.partnerId,
+            isDualLeg: Boolean(payload?.isDualLeg),
+            legOtps: Array.isArray(payload?.legOtps) ? payload.legOtps : undefined,
           }
         })
       );

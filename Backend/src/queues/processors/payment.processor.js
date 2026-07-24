@@ -2,6 +2,7 @@ import { logger } from '../../utils/logger.js';
 import { creditWallet } from '../../core/payments/wallet.service.js';
 import { createPayment, markPaymentSuccess } from '../../core/payments/payment.service.js';
 import { initiateRefund } from '../../core/payments/refund.service.js';
+import { resolveRiderPayoutAmount } from '../../modules/food/orders/services/order.helpers.js';
 
 /**
  * Post-delivery financial settlement processor.
@@ -9,7 +10,7 @@ import { initiateRefund } from '../../core/payments/refund.service.js';
  *
  * Splits the order total into:
  * 1. Restaurant commission credit
- * 2. Delivery partner earning credit
+ * 2. Delivery partner earning credit (same source as admin: order.riderEarning)
  * 3. Platform profit credit (admin wallet)
  *
  * Also handles refunds on order cancellation.
@@ -46,20 +47,89 @@ export const processPaymentJob = async (job) => {
 };
 
 /**
+ * Load frozen settlement amounts from the order (single source of truth with admin).
+ */
+async function loadOrderSettlement(data = {}) {
+    const orderMongoId = data.orderMongoId || data.orderId;
+    if (!orderMongoId) return null;
+
+    const { FoodOrder } = await import('../../modules/food/orders/models/order.model.js');
+    const mongoose = await import('mongoose');
+    const identity = mongoose.default.Types.ObjectId.isValid(String(orderMongoId))
+        ? { _id: new mongoose.default.Types.ObjectId(String(orderMongoId)) }
+        : { $or: [{ order_id: String(orderMongoId) }, { orderId: String(orderMongoId) }] };
+
+    return FoodOrder.findOne(identity)
+        .select(
+            'order_id orderId restaurantId dispatch riderEarning sharedRiderEarning platformProfit pricing settlementBreakdown restaurantSettlement payment',
+        )
+        .lean();
+}
+
+/**
  * After delivery is completed and payment is confirmed:
- * Split money to all parties.
+ * Split money using frozen order fields (same amounts admin revenue uses).
  */
 async function handleDeliveryCompleted(data) {
-    const {
-        orderMongoId, orderId,
-        restaurantId, deliveryPartnerId,
-        riderEarning = 0, platformProfit = 0,
-        commissionAmount = 0,
-        total = 0, paymentMethod
-    } = data;
+    const order = await loadOrderSettlement(data);
 
-    // 1. Credit restaurant wallet with their commission (payout)
-    if (restaurantId && commissionAmount > 0) {
+    const orderMongoId = order?._id?.toString?.() || data.orderMongoId;
+    const orderId = order?.order_id || order?.orderId || data.orderId;
+    const restaurantId =
+        order?.restaurantId?._id?.toString?.() ||
+        order?.restaurantId?.toString?.() ||
+        data.restaurantId;
+    const deliveryPartnerId =
+        order?.dispatch?.deliveryPartnerId?._id?.toString?.() ||
+        order?.dispatch?.deliveryPartnerId?.toString?.() ||
+        data.deliveryPartnerId;
+    const sharedPartnerId =
+        order?.dispatch?.sharedPartnerId?._id?.toString?.() ||
+        order?.dispatch?.sharedPartnerId?.toString?.() ||
+        null;
+
+    const primaryRiderEarning = order
+        ? resolveRiderPayoutAmount(order)
+        : Math.max(0, Number(data.riderEarning) || 0);
+    const sharedRiderEarning = Math.max(0, Number(order?.sharedRiderEarning) || 0);
+    const platformProfit = Math.max(
+        0,
+        Number(
+            order?.platformProfit ??
+            order?.settlementBreakdown?.platform?.netProfit ??
+            data.platformProfit,
+        ) || 0,
+    );
+
+    const settlements = Array.isArray(order?.restaurantSettlement) ? order.restaurantSettlement : [];
+    const commissionAmount = settlements.length
+        ? settlements.reduce((sum, s) => sum + (Number(s.restaurantPayout) || 0), 0)
+        : Math.max(0, Number(data.commissionAmount) || 0);
+
+    const paymentMethod = order?.payment?.method || data.paymentMethod || data.payMethod;
+
+    // 1. Credit restaurant wallet(s)
+    if (settlements.length > 0) {
+        for (const s of settlements) {
+            const rid = s.restaurantId?._id?.toString?.() || s.restaurantId?.toString?.();
+            const payout = Number(s.restaurantPayout) || 0;
+            if (!rid || payout <= 0) continue;
+            try {
+                await creditWallet({
+                    entityType: 'restaurant',
+                    entityId: rid,
+                    amount: payout,
+                    description: `Order ${orderId} - restaurant payout`,
+                    category: 'commission',
+                    orderId: orderMongoId,
+                    metadata: { orderId, paymentMethod },
+                });
+                logger.info(`[PaymentProcessor] Restaurant ${rid} credited ${payout} for order ${orderId}`);
+            } catch (err) {
+                logger.error(`[PaymentProcessor] Failed to credit restaurant ${rid}: ${err.message}`);
+            }
+        }
+    } else if (restaurantId && commissionAmount > 0) {
         try {
             await creditWallet({
                 entityType: 'restaurant',
@@ -76,30 +146,34 @@ async function handleDeliveryCompleted(data) {
         }
     }
 
-    // 2. Credit delivery partner wallet with their earning
-    if (deliveryPartnerId && riderEarning > 0) {
+    // 2. Credit delivery partner(s) — same amount as admin (order.riderEarning)
+    const partnerCredits = [
+        { id: deliveryPartnerId, amount: primaryRiderEarning, role: 'primary' },
+        { id: sharedPartnerId, amount: sharedRiderEarning, role: 'shared' },
+    ].filter((p) => p.id && p.amount > 0);
+
+    for (const partner of partnerCredits) {
         try {
             await creditWallet({
                 entityType: 'deliveryBoy',
-                entityId: deliveryPartnerId,
-                amount: riderEarning,
-                description: `Order ${orderId} - delivery earning`,
+                entityId: partner.id,
+                amount: partner.amount,
+                description: `Order ${orderId} - delivery earning (${partner.role})`,
                 category: 'delivery_earning',
                 orderId: orderMongoId,
-                metadata: { orderId, paymentMethod }
+                metadata: { orderId, paymentMethod, role: partner.role }
             });
 
-            // Increment delivery count
             const { FoodDeliveryWallet } = await import('../../modules/food/delivery/models/deliveryWallet.model.js');
             const mongoose = await import('mongoose');
             await FoodDeliveryWallet.updateOne(
-                { deliveryPartnerId: new mongoose.default.Types.ObjectId(deliveryPartnerId) },
-                { $inc: { totalDeliveries: 1 } }
+                { deliveryPartnerId: new mongoose.default.Types.ObjectId(partner.id) },
+                { $inc: { totalDeliveries: 1, totalEarnings: partner.amount } }
             );
 
-            logger.info(`[PaymentProcessor] Delivery partner ${deliveryPartnerId} credited ${riderEarning} for order ${orderId}`);
+            logger.info(`[PaymentProcessor] Delivery partner ${partner.id} credited ${partner.amount} for order ${orderId}`);
         } catch (err) {
-            logger.error(`[PaymentProcessor] Failed to credit delivery partner: ${err.message}`);
+            logger.error(`[PaymentProcessor] Failed to credit delivery partner ${partner.id}: ${err.message}`);
         }
     }
 
@@ -113,7 +187,12 @@ async function handleDeliveryCompleted(data) {
                 description: `Order ${orderId} - platform profit`,
                 category: 'platform_fee',
                 orderId: orderMongoId,
-                metadata: { orderId, paymentMethod, riderEarning }
+                metadata: {
+                    orderId,
+                    paymentMethod,
+                    riderEarning: primaryRiderEarning,
+                    sharedRiderEarning,
+                }
             });
             logger.info(`[PaymentProcessor] Platform credited ${platformProfit} for order ${orderId}`);
         } catch (err) {

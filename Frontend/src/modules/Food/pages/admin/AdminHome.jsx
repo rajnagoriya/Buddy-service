@@ -23,7 +23,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
-import { Activity, ArrowUpRight, ShoppingBag, CreditCard, Truck, Receipt, DollarSign, Store, UserCheck, Package, UserCircle, Clock, CheckCircle, Plus, XCircle } from "lucide-react"
+import { Activity, ArrowUpRight, ShoppingBag, CreditCard, Truck, Receipt, DollarSign, Store, UserCheck, Package, UserCircle, Clock, CheckCircle, Plus, XCircle, Wallet } from "lucide-react"
 import { adminAPI } from "@food/api"
 const debugLog = () => {}
 const debugError = () => {}
@@ -157,6 +157,8 @@ export default function AdminHome() {
   }))
 
   const deliveryProfit = dashboardData?.deliveryProfit || 0
+  const platformSubsidyTotal = dashboardData?.platformSubsidy?.total || 0
+  const riderPayoutTotal = dashboardData?.riderPayout?.total || 0
   const periodLabel = selectedPeriod === "overall" ? "Overall" : 
                     selectedPeriod === "today" ? "Today's" : 
                     `This ${selectedPeriod}'s`
@@ -259,6 +261,14 @@ export default function AdminHome() {
               icon={<Truck className="h-5 w-5 text-blue-600" />}
               accent="bg-blue-200/40"
               path="/admin/food/transaction-report"
+            />
+            <MetricCard
+              title="Admin-borne delivery"
+              value={formatCurrency(platformSubsidyTotal)}
+              helper={`Free delivery from pocket · riders paid ${formatCurrency(riderPayoutTotal)}`}
+              icon={<Wallet className="h-5 w-5 text-rose-600" />}
+              accent="bg-rose-200/40"
+              path="/admin/food/orders"
             />
             <MetricCard
               title="GST"

@@ -70,6 +70,10 @@ const restaurantSettlementSchema = new mongoose.Schema(
         packagingFee: { type: Number, default: 0, min: 0 },
         commission: { type: Number, default: 0, min: 0 },
         commissionGST: { type: Number, default: 0, min: 0 },
+        /** Restaurant share of positive Cart Delivery Speed fee */
+        speedShare: { type: Number, default: 0, min: 0 },
+        /** Restaurant-funded coupon discount applied to this payout */
+        couponDiscount: { type: Number, default: 0, min: 0 },
         restaurantPayout: { type: Number, default: 0, min: 0 },
     },
     { _id: false }
@@ -425,6 +429,14 @@ const orderSchema = new mongoose.Schema(
         },
         platformRevenue: {
             type: platformRevenueSchema,
+            default: undefined,
+        },
+        /**
+         * Full who-got-what ledger for admin invoice:
+         * customer / restaurants / driver / platform / speed / costBearers
+         */
+        settlementBreakdown: {
+            type: mongoose.Schema.Types.Mixed,
             default: undefined,
         },
         /**

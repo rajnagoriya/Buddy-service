@@ -245,8 +245,9 @@ export default function DistanceRulesSection() {
           <div className="text-sm text-slate-700">
             <p className="font-semibold text-green-900 mb-1">Fixed amount per distance slab</p>
             <p className="text-slate-600">
-              Each slab has a fixed <strong>user charge</strong> and <strong>delivery boy fee</strong> (no per-km rate).
-              Example: 0–2 km → user ₹30 / driver ₹25; 2–4 km → user ₹40 / driver ₹35.
+              <strong>User Charge</strong> = amount charged to the customer.
+              <strong> Delivery Boy Fee</strong> = amount earned by a per-order partner.
+              Platform keeps the gap (User Charge − Delivery Boy Fee). If no slab matches, Default Delivery Fee is used for both.
               Multi-restaurant distance = user → A → B → C. Multi-order extra charge (if set) is added on top.
             </p>
           </div>
@@ -355,12 +356,14 @@ export default function DistanceRulesSection() {
             </div>
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-2">User Charge (₹) *</label>
-              <input type="number" step="0.01" min="0" value={formData.userCharge} onChange={(e) => setFormData({ ...formData, userCharge: e.target.value })} className={`w-full px-4 py-2.5 border rounded-lg text-sm focus:ring-2 focus:ring-green-500 outline-none ${formErrors.userCharge ? "border-red-500" : "border-slate-200"}`} placeholder="Fixed amount charged to customer" />
+              <input type="number" step="0.01" min="0" value={formData.userCharge} onChange={(e) => setFormData({ ...formData, userCharge: e.target.value })} className={`w-full px-4 py-2.5 border rounded-lg text-sm focus:ring-2 focus:ring-green-500 outline-none ${formErrors.userCharge ? "border-red-500" : "border-slate-200"}`} placeholder="Charged to customer" />
+              <p className="text-xs text-slate-500 mt-1">Customer delivery charge for this slab</p>
               {formErrors.userCharge && <p className="text-xs text-red-500 mt-1">{formErrors.userCharge}</p>}
             </div>
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-2">Delivery Boy Fee (₹) *</label>
-              <input type="number" step="0.01" min="0" value={formData.deliveryBoyFee} onChange={(e) => setFormData({ ...formData, deliveryBoyFee: e.target.value })} className={`w-full px-4 py-2.5 border rounded-lg text-sm focus:ring-2 focus:ring-green-500 outline-none ${formErrors.deliveryBoyFee ? "border-red-500" : "border-slate-200"}`} placeholder="Fixed amount paid to delivery partner" />
+              <input type="number" step="0.01" min="0" value={formData.deliveryBoyFee} onChange={(e) => setFormData({ ...formData, deliveryBoyFee: e.target.value })} className={`w-full px-4 py-2.5 border rounded-lg text-sm focus:ring-2 focus:ring-green-500 outline-none ${formErrors.deliveryBoyFee ? "border-red-500" : "border-slate-200"}`} placeholder="Paid to delivery partner" />
+              <p className="text-xs text-slate-500 mt-1">Per-order driver earning for this slab</p>
               {formErrors.deliveryBoyFee && <p className="text-xs text-red-500 mt-1">{formErrors.deliveryBoyFee}</p>}
             </div>
           </div>

@@ -815,6 +815,51 @@ export async function getDeliveryEarnings(req, res, next) {
     }
 }
 
+export async function getAdminRevenue(req, res, next) {
+    try {
+        const data = await adminService.getAdminRevenue(req.query || {});
+        res.status(200).json({ success: true, message: 'Admin revenue fetched successfully', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function getAdminRevenueOrder(req, res, next) {
+    try {
+        const data = await adminService.getAdminRevenueOrder(req.params.orderId);
+        res.status(200).json({ success: true, message: 'Admin revenue order detail fetched successfully', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function getDeliverySalaryEarnings(req, res, next) {
+    try {
+        const data = await adminService.getDeliverySalaryEarnings(req.query || {});
+        res.status(200).json({ success: true, message: 'Delivery salary earnings fetched successfully', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function getDeliverySalaryPayments(req, res, next) {
+    try {
+        const data = await adminService.getDeliverySalaryPayments(req.params.id, req.query || {});
+        res.status(200).json({ success: true, message: 'Salary payments fetched successfully', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function markDeliverySalaryPaid(req, res, next) {
+    try {
+        const data = await adminService.markDeliverySalaryPaid(req.body || {}, req.user);
+        res.status(201).json({ success: true, message: 'Salary marked as paid', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
 // ----- Earning Addon (admin) -----
 export async function getEarningAddons(req, res, next) {
     try {

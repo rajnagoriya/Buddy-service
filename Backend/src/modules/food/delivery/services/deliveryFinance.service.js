@@ -9,6 +9,7 @@ import { getDeliveryCashLimitSettings } from '../../admin/services/admin.service
 import { getBalance } from '../../../../core/payments/transaction.service.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { createRazorpayOrder, getRazorpayKeyId, isRazorpayConfigured, verifyPaymentSignature } from '../../orders/helpers/razorpay.helper.js';
+import { resolveRiderPayoutAmount } from '../../orders/services/order.helpers.js';
 
 /**
  * Enhanced wallet fetch for delivery partners.
@@ -54,12 +55,21 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
                         $sum: { 
                             $cond: [
                                 { $eq: ["$dispatch.deliveryPartnerId", partnerId] },
-                                { 
-                                    $cond: [
-                                        { $gt: [{ $ifNull: ["$riderEarning", 0] }, 0] },
-                                        "$riderEarning",
-                                        { $ifNull: ["$pricing.deliveryFee", 0] }
-                                    ]
+                                {
+                                  $ifNull: [
+                                    "$riderEarning",
+                                    {
+                                      $ifNull: [
+                                        "$pricing.deliveryFeeBreakdown.riderFee",
+                                        {
+                                          $ifNull: [
+                                            "$settlementBreakdown.driver.payout",
+                                            { $ifNull: ["$pricing.deliveryFeeBreakdown.deliveryBoyFee", 0] },
+                                          ],
+                                        },
+                                      ],
+                                    },
+                                  ],
                                 },
                                 { $ifNull: ["$sharedRiderEarning", 0] }
                             ]
@@ -224,7 +234,7 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
             orderStatus: 'delivered' 
         })
             .sort({ createdAt: -1 })
-            .select('orderId riderEarning sharedRiderEarning dispatch pricing payment orderStatus createdAt')
+            .select('orderId riderEarning sharedRiderEarning dispatch pricing settlementBreakdown payment orderStatus createdAt')
             .limit(20)
             .lean(),
         FoodDeliveryWithdrawal.find({ deliveryPartnerId: partnerId })
@@ -239,9 +249,7 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
 
     const transactions = [
         ...(ordersTx || []).map(o => {
-            const earning = String(o.dispatch?.deliveryPartnerId || '') === String(partnerId) 
-                ? (o.riderEarning || o.pricing?.deliveryFee || 0)
-                : (o.sharedRiderEarning || 0);
+            const earning = resolveRiderPayoutAmount(o, { partnerId });
             
             const collectedAmount = o.payment?.method === 'cash' || o.paymentMethod === 'cash'
                 ? (o.amountToCollect || o.payment?.amountDue || o.pricing?.total || 0)

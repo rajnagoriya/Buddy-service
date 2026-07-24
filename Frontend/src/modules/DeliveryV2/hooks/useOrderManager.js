@@ -188,12 +188,36 @@ export const useOrderManager = () => {
             customerLocation: activeOrder?.customerLocation,
           });
 
-          // If order is still not fully 'picked_up', it means there are more pickups
+          // Dual-leg: each driver can finish their own pickup even if the other
+          // partner has not collected yet (parent may still be ready_for_pickup).
+          const getRiderId = () => {
+            try {
+              const stored = localStorage.getItem('delivery_user');
+              if (stored) {
+                const user = JSON.parse(stored);
+                const id = user?._id || user?.id || user?.partnerId;
+                if (id) return String(id);
+              }
+            } catch {}
+            return null;
+          };
+          const riderId = getRiderId();
+          const myLeg = riderId && Array.isArray(updatedOrder.legs)
+            ? updatedOrder.legs.find((leg) => String(leg?.partnerId || '') === riderId)
+            : null;
+          const myLegCollected = Boolean(
+            myLeg && ['picked_up', 'at_drop', 'delivered'].includes(String(myLeg.status || '')),
+          );
+
           const isFullyPicked = updatedOrder.orderStatus === 'picked_up' || updatedOrder.status === 'picked_up';
-          
-          if (isFullyPicked) {
+
+          if (isFullyPicked || myLegCollected) {
             updateTripStatus('PICKED_UP');
-            toast.success('All items collected! Heading to Drop-off');
+            toast.success(
+              myLegCollected && !isFullyPicked
+                ? 'Your items collected! Heading to Drop-off'
+                : 'All items collected! Heading to Drop-off',
+            );
           } else {
             // Revert to PICKING_UP to target the NEXT restaurant in the pickups array
             updateTripStatus('PICKING_UP');
@@ -245,12 +269,30 @@ export const useOrderManager = () => {
     }
     try {
       let finalOrder = activeOrder;
-      
-      // 1. Verify OTP ONLY if not already verified in the system
-      const isAlreadyVerified = activeOrder?.deliveryVerification?.dropOtp?.verified;
-      
+
+      const getRiderId = () => {
+        try {
+          const stored = localStorage.getItem('delivery_user');
+          if (stored) {
+            const user = JSON.parse(stored);
+            return String(user?._id || user?.id || user?.partnerId || '');
+          }
+        } catch {}
+        return '';
+      };
+      const riderId = getRiderId();
+      const myLeg = riderId && Array.isArray(activeOrder?.legs)
+        ? activeOrder.legs.find((leg) => String(leg?.partnerId || '') === riderId)
+        : null;
+      const isDualLeg = Boolean(activeOrder?.isDualLeg) && Array.isArray(activeOrder?.legs) && activeOrder.legs.length > 1;
+
+      // Dual-leg: each driver must verify THEIR own OTP — never skip via order-level flag.
+      const isAlreadyVerified = isDualLeg
+        ? Boolean(myLeg?.otpVerified)
+        : Boolean(activeOrder?.deliveryVerification?.dropOtp?.verified);
+
       if (!isAlreadyVerified) {
-        if (!otp) {
+        if (!otp || otp === 'VERIFIED') {
           toast.error('Handover code is required');
           throw new Error('Missing OTP');
         }
@@ -262,30 +304,37 @@ export const useOrderManager = () => {
           throw new Error('Invalid OTP');
         }
       }
-      
-      // 2. Mark as complete
+
       try {
-        const completeRes = await deliveryAPI.completeDelivery(orderId, { 
-          otp: otp || 'VERIFIED', // Pass 'VERIFIED' fallback if already verified 
+        const completeRes = await deliveryAPI.completeDelivery(orderId, {
+          otp: otp && otp !== 'VERIFIED' ? otp : undefined,
           rating: 5,
-          paymentMethod: paymentMethodOverride 
+          paymentMethod: paymentMethodOverride,
         });
         if (completeRes.data?.success && completeRes.data?.data?.order) {
           finalOrder = completeRes.data.data.order;
         }
       } catch (completeErr) {
-        console.warn('Complete call failed, but proceeding since OTP is verified.', completeErr);
+        const msg =
+          completeErr?.response?.data?.error ||
+          completeErr?.response?.data?.message ||
+          completeErr?.message;
+        toast.error(msg || 'Could not complete delivery');
+        throw completeErr;
       }
-      
+
       if (finalOrder) setActiveOrder(finalOrder);
       updateTripStatus('COMPLETED');
     } catch (error) {
       console.error('Completion Error:', error);
-      toast.error(
-        error?.response?.data?.error ||
-          error?.response?.data?.message ||
-          'Verification failed',
-      );
+      if (!error?.response) {
+        toast.error(
+          error?.response?.data?.error ||
+            error?.response?.data?.message ||
+            error?.message ||
+            'Verification failed',
+        );
+      }
       throw error;
     }
   };

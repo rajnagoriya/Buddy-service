@@ -263,13 +263,19 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
 
               // C. FIREBASE REALTIME DB (Persistent Route for Customer Map)
               if (payload.orderId) {
+                let partnerId = null;
+                try {
+                  const u = JSON.parse(localStorage.getItem('delivery_user') || '{}');
+                  partnerId = u?._id || u?.id || u?.partnerId || null;
+                } catch {}
                 writeOrderTracking(payload.orderId, { 
                   lat, 
                   lng, 
                   heading, 
                   polyline: activePolyline,
                   status: tripStatus,
-                  eta: eta // Publish live ETA to Firebase
+                  eta: eta,
+                  deliveryPartnerId: partnerId,
                 }).catch(() => {});
               }
             }
@@ -621,13 +627,19 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
         if (payload.orderId) emitLocation(payload);
 
         if (payload.orderId) {
+          let partnerId = null;
+          try {
+            const u = JSON.parse(localStorage.getItem('delivery_user') || '{}');
+            partnerId = u?._id || u?.id || u?.partnerId || null;
+          } catch {}
           writeOrderTracking(payload.orderId, {
             lat,
             lng,
             heading: heading || 0,
             polyline: activePolyline,
             status: tripStatus,
-            eta: eta
+            eta: eta,
+            deliveryPartnerId: partnerId,
           }).catch(() => {});
         }
       }
@@ -1413,7 +1425,13 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                     onClose={() => setShowVerification(false)}
                   />
                 )}
-                {tripStatus === 'COMPLETED' && activeOrder && <OrderSummaryModal order={activeOrder} onDone={resetTrip} />}
+                {tripStatus === 'COMPLETED' && activeOrder && (
+                  <OrderSummaryModal
+                    order={activeOrder}
+                    riderProfile={riderProfile}
+                    onDone={resetTrip}
+                  />
+                )}
               </div>
             </motion.div>
           )}

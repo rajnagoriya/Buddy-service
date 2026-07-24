@@ -1006,14 +1006,19 @@ function Cart() {
     fetchAddons()
   }, [restaurantData, cart.length, loadingRestaurant])
 
-  // Fetch available coupons from backend (admin + restaurant)
+  // Fetch available coupons once when cart first becomes ready (not on qty changes).
+  const couponsFetchedRef = useRef(false)
   useEffect(() => {
-    const fetchCouponsForCartItems = async () => {
-      if (cart.length === 0 || !restaurantId) {
-        setAvailableCoupons([])
-        return
-      }
+    if (cart.length === 0 || !restaurantId) {
+      setAvailableCoupons([])
+      couponsFetchedRef.current = false
+      return undefined
+    }
 
+    if (couponsFetchedRef.current) return undefined
+
+    let cancelled = false
+    const fetchCouponsForCartItems = async () => {
       const cartRestaurantIds = [...new Set(
         cart.map((item) => String(item.restaurantId || item.restaurant || "")).filter(Boolean)
       )]
@@ -1021,8 +1026,9 @@ function Cart() {
 
       try {
         setLoadingCoupons(true)
-        debugLog(`[CART-COUPONS] Loading offers for cart`)
+        debugLog(`[CART-COUPONS] Loading offers for cart (once)`)
         const response = await restaurantAPI.getCouponsByItemIdPublic(cartRestaurantIds)
+        if (cancelled) return
         const list = response?.data?.data?.coupons || []
         const coupons = list
           .filter((o) => o.showInCart !== false)
@@ -1037,16 +1043,23 @@ function Cart() {
           })
           .map(mapOfferToCartCoupon)
         setAvailableCoupons(coupons)
+        couponsFetchedRef.current = true
       } catch (error) {
+        if (cancelled) return
         debugError("[CART-COUPONS] Failed to load offers:", error)
         setAvailableCoupons([])
       } finally {
-        setLoadingCoupons(false)
+        if (!cancelled) setLoadingCoupons(false)
       }
     }
 
     fetchCouponsForCartItems()
-  }, [cart, restaurantId])
+    return () => {
+      cancelled = true
+    }
+    // Only when cart becomes non-empty / restaurant is known — not on quantity updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [restaurantId, cart.length > 0])
 
   useEffect(() => {
     if (!appliedCoupon || loadingCoupons) return
@@ -1104,6 +1117,7 @@ function Cart() {
   useEffect(() => {
     if (!pricingRequestKey) {
       setPricing(null)
+      setLoadingPricing(false)
       lastPricingKeyRef.current = ""
       return undefined
     }
@@ -1114,12 +1128,15 @@ function Cart() {
 
     // Same inputs as last successful/in-flight request — skip duplicate calculate
     if (pricingRequestKey === lastPricingKeyRef.current && pricing != null) {
+      setLoadingPricing(false)
       return undefined
     }
 
     let cancelled = false
     const requestId = ++pricingRequestIdRef.current
     const keyForRequest = pricingRequestKey
+    // Disable place order as soon as cart inputs change (before debounce fires)
+    setLoadingPricing(true)
 
     const timer = setTimeout(async () => {
       if (placeOrderInFlightRef.current) return
@@ -1708,6 +1725,11 @@ function Cart() {
 
   const handlePlaceOrder = async () => {
     if (placeOrderInFlightRef.current || isPlacingOrder) {
+      return
+    }
+
+    if (loadingPricing || pricing == null) {
+      toast.error("Please wait while we calculate your bill")
       return
     }
 
@@ -2889,10 +2911,13 @@ function Cart() {
         selectedPaymentLabel={selectedPaymentLabel}
         walletBalance={walletBalance}
         isPlacingOrder={isPlacingOrder}
+        isCalculatingPricing={loadingPricing || (hasSavedAddress && cart.length > 0 && pricing == null)}
         hasSavedAddress={hasSavedAddress}
         disabled={
           isPlacingOrder ||
           isValidating ||
+          loadingPricing ||
+          (hasSavedAddress && cart.length > 0 && pricing == null) ||
           hasClosedRestaurants ||
           (selectedPaymentMethod === "wallet" && walletBalance < total)
         }

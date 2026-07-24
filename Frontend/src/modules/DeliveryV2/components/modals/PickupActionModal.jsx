@@ -127,26 +127,26 @@ export const PickupActionModal = ({
     cameraInputRef.current?.click()
   }
 
-  const handleShareOrder = async () => {
+  const handleFindNewDriver = async () => {
     try {
       setIsSharing(true);
       const res = await deliveryAPI.shareOrder(order._id || order.orderId);
       if (res?.data?.success) {
-        toast.success("Order shared! Waiting for another partner to join.");
-        // Update the active order in the global store to reflect the shared status immediately
+        toast.success("Looking for another driver…");
         const { activeOrder, setActiveOrder } = useDeliveryStore.getState();
         if (activeOrder && (activeOrder._id === order._id || activeOrder.orderId === order.orderId)) {
            setActiveOrder({
               ...activeOrder,
               dispatch: {
                  ...activeOrder.dispatch,
-                 isShared: true
+                 isShared: true,
+                 shareOpenedAt: new Date().toISOString(),
               }
            });
         }
       }
     } catch (err) {
-      toast.error(err?.response?.data?.message || "Failed to share order");
+      toast.error(err?.response?.data?.message || "Failed to find a new driver");
     } finally {
       setIsSharing(false);
     }
@@ -175,17 +175,36 @@ export const PickupActionModal = ({
 
   const isPrimaryRider = Boolean(currentRiderId) && String(primaryId || '') === String(currentRiderId);
   const isSharedRider = Boolean(currentRiderId) && String(secondaryId || '') === String(currentRiderId);
-  const isSharedOrder = Boolean(order.dispatch?.isShared || secondaryId);
+  // Partner actually joined (not just "searching")
+  const partnerJoined = Boolean(secondaryId);
+  const isSearchingPartner = Boolean(order.dispatch?.isShared) && !partnerJoined;
+  // This modal only opens for the assigned driver's active trip — each driver
+  // completes pickup independently. Backend still validates ownership.
+  const canActOnPickup = true;
 
-  // effectiveIsPrimary: primary if matched, OR if not a shared order (solo rider).
-  // Do NOT treat as primary just because IDs are unknown — that breaks bill/cash restriction.
-  const effectiveIsPrimary = isPrimaryRider || !isSharedOrder;
+  const asPartner = (ref) => {
+    if (!ref) return null;
+    if (typeof ref === 'object') return ref;
+    return { _id: ref };
+  };
 
-  const otherPartner = effectiveIsPrimary ? order.dispatch?.sharedPartnerId : order.dispatch?.deliveryPartnerId;
+  // Contact only after the second driver has accepted — resolve the *other* driver
+  const otherPartner = (() => {
+    if (!partnerJoined) return null;
+    const primary = asPartner(order.dispatch?.deliveryPartnerId);
+    const secondary = asPartner(order.dispatch?.sharedPartnerId);
+    if (isSharedRider) return primary;
+    if (isPrimaryRider) return secondary;
+    // ID mismatch fallback: show the partner that is not the current rider
+    if (currentRiderId && String(primary?._id || primary) === String(currentRiderId)) return secondary;
+    if (currentRiderId && String(secondary?._id || secondary) === String(currentRiderId)) return primary;
+    return secondary || primary;
+  })();
 
   const handleCallPartner = () => {
     const phone = otherPartner?.phoneNumber || otherPartner?.phone;
     if (phone) window.open(`tel:${phone}`);
+    else toast.error('Partner phone number not available');
   };
 
   const isAtPickup = status === 'REACHED_PICKUP';
@@ -396,7 +415,7 @@ export const PickupActionModal = ({
           ) : (
             <div className="space-y-4">
               <div className="flex justify-center items-center gap-3 w-full">
-                 {!billImageUploaded && !isUploadingBill && (effectiveIsPrimary || !isSharedOrder) && (
+                 {!billImageUploaded && !isUploadingBill && canActOnPickup && (
                    <>
                       <button
                         onClick={handleTakeCameraPhoto}
@@ -413,18 +432,6 @@ export const PickupActionModal = ({
                         <span>Gallery</span>
                       </button>
                    </>
-                 )}
-
-                 {!effectiveIsPrimary && isSharedRider && isSharedOrder && (
-                   <div className="w-full bg-indigo-50 border border-indigo-100 rounded-2xl p-6 flex flex-col items-center text-center gap-3">
-                     <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600">
-                       <Clock className="w-6 h-6 animate-pulse" />
-                     </div>
-                     <div>
-                       <p className="text-xs font-bold text-indigo-900 mb-1">Waiting for Primary Partner</p>
-                       <p className="text-[10px] text-indigo-600 font-medium">Your partner is currently picking up the order items from the restaurant.</p>
-                     </div>
-                   </div>
                  )}
 
                  {isUploadingBill && (
@@ -450,8 +457,8 @@ export const PickupActionModal = ({
                  />
               </div>
 
-              {/* Share Order Option for Large Orders (required before complete) */}
-              {totalQuantity >= splitThreshold && !order.dispatch?.sharedPartnerId && (
+              {/* Optional second driver for large orders — primary decides at pickup */}
+              {totalQuantity >= splitThreshold && !isSearchingPartner && !partnerJoined && !isSharedRider && (
                 <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 flex flex-col gap-3 mt-2">
                   <div className="flex gap-3 items-start">
                     <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 shrink-0">
@@ -459,72 +466,75 @@ export const PickupActionModal = ({
                     </div>
                     <div className="flex-1">
                       <p className="text-[10px] font-bold text-blue-700 uppercase tracking-widest mb-1">
-                        Second partner required
+                        Need another driver?
                       </p>
                       <p className="text-xs font-medium text-blue-900 leading-tight">
-                        This bulk order has {totalQuantity} items. A second delivery partner must join before you can complete delivery.
-                        {order.dispatch?.isShared
-                          ? ' Waiting for a partner to accept the share…'
-                          : ' Share now to open the order for another rider.'}
+                        This order has {totalQuantity} items. If you need help, find a new driver. Otherwise you can complete this order yourself.
                       </p>
                     </div>
                   </div>
-                  {!order.dispatch?.isShared && (
                   <button
-                    onClick={handleShareOrder}
+                    onClick={handleFindNewDriver}
                     disabled={isSharing}
                     className="w-full py-3 rounded-xl bg-blue-600 text-white font-bold text-[10px] uppercase tracking-widest shadow-md active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                   >
                     {isSharing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Share2 className="w-4 h-4" />}
-                    <span>Share with Partner</span>
+                    <span>Find New Driver</span>
                   </button>
-                  )}
                 </div>
               )}
 
-              {(order.dispatch?.isShared || order.dispatch?.sharedPartnerId) && (
+              {/* Searching — no call button until a partner actually joins */}
+              {isSearchingPartner && (
+                <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 flex gap-3 items-start mt-2">
+                  <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 shrink-0">
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-[10px] font-bold text-amber-700 uppercase tracking-widest mb-1">
+                      Finding a driver…
+                    </p>
+                    <p className="text-xs font-medium text-amber-900 leading-tight">
+                      Searching for another driver. You can keep picking up — if none joins, complete alone after the search times out.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Partner joined — both drivers can call each other */}
+              {partnerJoined && otherPartner && (
                 <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 flex flex-col gap-3 mt-2">
                   <div className="flex gap-3 items-center">
                     <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 shrink-0">
                       <Users className="w-5 h-5" />
                     </div>
-                    <div className="flex-1">
-                      <p className="text-[10px] font-bold text-indigo-700 uppercase tracking-widest mb-1">Shared Order Status</p>
-                      <p className="text-xs font-bold text-indigo-900">
-                        {order.dispatch?.sharedPartnerId ? "Partner has joined! Earnings will be split." : "Waiting for another partner to join..."}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[10px] font-bold text-indigo-700 uppercase tracking-widest mb-1">
+                        Delivery Partner
+                      </p>
+                      <p className="text-xs font-bold text-indigo-900 truncate">
+                        {otherPartner.fullName || otherPartner.name || 'Delivery Partner'}
+                      </p>
+                      <p className="text-[10px] font-medium text-indigo-600 mt-0.5">
+                        Delivery amount will be split equally. Complete your pickup independently.
                       </p>
                     </div>
-                    {otherPartner && (
-                      <button 
-                        onClick={handleCallPartner}
-                        className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center text-white shadow-lg active:scale-95 transition-all"
-                      >
-                        <PhoneCall className="w-4 h-4" />
-                      </button>
-                    )}
+                    <button
+                      onClick={handleCallPartner}
+                      className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center text-white shadow-lg active:scale-95 transition-all shrink-0"
+                      title="Call partner"
+                    >
+                      <PhoneCall className="w-4 h-4" />
+                    </button>
                   </div>
-                  {otherPartner && (
-                    <div className="flex items-center gap-2 px-1">
-                      <div className="w-6 h-6 rounded-full overflow-hidden bg-white border border-indigo-100">
-                        <img src={otherPartner.profileImage || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png'} className="w-full h-full object-cover" />
-                      </div>
-                      <span className="text-[10px] font-bold text-indigo-800">
-                        {effectiveIsPrimary ? 'Shared with: ' : 'Primary Partner: '}
-                        {otherPartner.fullName || otherPartner.name || 'Delivery Partner'}
-                      </span>
-                    </div>
-                  )}
                 </div>
               )}
 
               <div>
                 <p className={`text-center text-[10px] font-bold uppercase tracking-widest mb-3 ${billImageUploaded ? 'text-green-600' : 'text-gray-400'}`}>
-                  {effectiveIsPrimary || !isSharedOrder
-                    ? (billImageUploaded ? "Check the restaurant logo - Swipe to pick up" : "Capture bill to unlock swipe")
-                    : "Waiting for pick up confirmation..."
-                  }
+                  {billImageUploaded ? "Check the restaurant logo - Swipe to pick up" : "Capture bill to unlock swipe"}
                 </p>
-                {(effectiveIsPrimary || !isSharedOrder) && (
+                {canActOnPickup && (
                   <ActionSlider 
                     key="action-pickup"
                     label="Slide to Pick Up" 

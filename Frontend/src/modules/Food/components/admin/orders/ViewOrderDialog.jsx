@@ -17,6 +17,7 @@ import {
   Tag,
   Loader2,
   Star,
+  X,
 } from "lucide-react"
 import {
   Dialog,
@@ -24,6 +25,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  DialogClose,
 } from "@food/components/ui/dialog"
 import { adminAPI } from "@food/api"
 
@@ -277,10 +279,10 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
     items: true,
     history: true,
     pricing: true,
+    settlementLedger: true,
     deliveryPartner: false,
     address: false,
     bill: false,
-    settlement: false,
   })
 
   useEffect(() => {
@@ -496,6 +498,28 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
     }
   }, [data])
 
+  const sharedDeliveryPartner = useMemo(() => {
+    if (!data) return null
+    const sp =
+      data.dispatch?.sharedPartnerId && typeof data.dispatch.sharedPartnerId === "object"
+        ? data.dispatch.sharedPartnerId
+        : null
+    if (!sp && !data.dispatch?.sharedPartnerId) return null
+    return {
+      name: sp?.name || sp?.fullName || "Partner rider",
+      phone: sp?.phone || sp?.phoneNumber || "N/A",
+      rating: sp?.rating,
+      totalRatings: sp?.totalRatings,
+      riderEarning: data.sharedRiderEarning,
+      partnerId: idOf(sp) || idOf(data.dispatch?.sharedPartnerId),
+      role: "shared",
+    }
+  }, [data])
+
+  const isMultiDriver = Boolean(
+    sharedDeliveryPartner || data?.isDualLeg || data?.dispatch?.sharedPartnerId,
+  )
+
   const timelineEvents = useMemo(() => {
     if (!data) return []
     const events = []
@@ -586,8 +610,18 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] bg-white p-0 overflow-y-auto">
-        <DialogHeader className="px-6 pt-6 pb-4 border-b border-slate-200 sticky top-0 bg-white z-10">
+      <DialogContent
+        className="max-w-4xl max-h-[90vh] bg-white p-0 overflow-y-auto"
+        showCloseButton={false}
+      >
+        <DialogHeader className="px-6 pt-6 pb-4 pr-14 border-b border-slate-200 sticky top-0 bg-white z-10 relative">
+          <DialogClose
+            type="button"
+            aria-label="Close order details"
+            className="absolute right-4 top-4 rounded-full p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors focus:outline-none focus:ring-2 focus:ring-orange-200"
+          >
+            <X className="h-5 w-5" />
+          </DialogClose>
           <DialogTitle className="flex items-center gap-2">
             <Eye className="w-5 h-5 text-orange-600" />
             Order Details
@@ -993,6 +1027,31 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
                         <span>{money(deliveryBreakdown.speedFeeModifier)}</span>
                       </div>
                     )}
+                  {deliveryBreakdown.speedShareAdmin != null &&
+                    Number(deliveryBreakdown.speedFeeModifier) !== 0 && (
+                      <div className="ml-2 space-y-0.5 text-[11px] text-slate-400">
+                        <div className="flex justify-between">
+                          <span>→ Admin</span>
+                          <span>{money(deliveryBreakdown.speedShareAdmin)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>→ Driver</span>
+                          <span>{money(deliveryBreakdown.speedShareDriver)}</span>
+                        </div>
+                      </div>
+                    )}
+                  {deliveryBreakdown.userCharge != null && (
+                    <div className="flex justify-between">
+                      <span>User Charge (slab)</span>
+                      <span>{money(deliveryBreakdown.userCharge)}</span>
+                    </div>
+                  )}
+                  {deliveryBreakdown.deliveryBoyFee != null && (
+                    <div className="flex justify-between">
+                      <span>Delivery Boy Fee (slab)</span>
+                      <span>{money(deliveryBreakdown.deliveryBoyFee)}</span>
+                    </div>
+                  )}
                   {deliveryBreakdown.multiplier != null &&
                     Number(deliveryBreakdown.multiplier) !== 1 && (
                       <div className="flex justify-between">
@@ -1060,7 +1119,21 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
                 <PriceRow label="Delivery Discount" value={pricing.deliveryDiscount} negative />
               )}
               {Number(pricing.platformSubsidy) > 0 && (
-                <PriceRow label="Platform Subsidy" value={pricing.platformSubsidy} negative />
+                <div className="space-y-1">
+                  <PriceRow
+                    label="Admin-borne delivery (pocket)"
+                    value={pricing.platformSubsidy}
+                    negative
+                  />
+                  <p className="ml-3 text-[11px] text-rose-600">
+                    Customer delivery was free. Admin pays riders from pocket for this order.
+                    {data?.riderEarning != null || data?.sharedRiderEarning != null
+                      ? ` Rider payout: ₹${(
+                          Number(data?.riderEarning || 0) + Number(data?.sharedRiderEarning || 0)
+                        ).toFixed(0)}.`
+                      : ""}
+                  </p>
+                </div>
               )}
 
               {restaurantGroups.length > 1 && (
@@ -1094,15 +1167,256 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
           </AccordionSection>
 
           <AccordionSection
+            id="settlementLedger"
+            title="Settlement Invoice (Who Got What)"
+            icon={Receipt}
+            open={openSections.settlementLedger}
+            onToggle={toggleSection}
+            badge={
+              data?.settlementBreakdown?.platform?.netProfit != null
+                ? `Platform ${money(data.settlementBreakdown.platform.netProfit)}`
+                : money(data?.platformProfit)
+            }
+          >
+            {(() => {
+              const sb = data?.settlementBreakdown
+              const driverPayout =
+                sb?.driver?.payout ??
+                Number(data?.riderEarning || 0) + Number(data?.sharedRiderEarning || 0)
+              // Only treat as salary when employmentType is explicitly salary.
+              // Do not infer from note text — create-time notes mention "Salary partners…" for all orders.
+              const isSalary = sb?.driver?.employmentType === "salary"
+              const restaurants =
+                Array.isArray(sb?.restaurants) && sb.restaurants.length
+                  ? sb.restaurants
+                  : (data?.restaurantSettlement || []).map((s) => ({
+                      restaurantName: s.restaurantName,
+                      foodAmount: s.foodAmount,
+                      packagingFee: s.packagingFee,
+                      commission: s.commission,
+                      speedShare: s.speedShare,
+                      couponDiscount: s.couponDiscount,
+                      payout: s.restaurantPayout,
+                    }))
+              const speed = sb?.speed || {
+                feeModifier: deliveryBreakdown?.speedFeeModifier,
+                admin: deliveryBreakdown?.speedShareAdmin,
+                restaurant: deliveryBreakdown?.speedShareRestaurant,
+                driver: deliveryBreakdown?.speedShareDriver,
+              }
+              const costBearers = Array.isArray(sb?.costBearers) ? sb.costBearers : []
+
+              return (
+                <div className="space-y-4 text-sm">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 space-y-2">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                      Customer paid
+                    </p>
+                    <PriceRow label="Order total" value={sb?.customer?.paid ?? pricing.total} />
+                    <PriceRow
+                      label="Food subtotal"
+                      value={
+                        sb?.customer?.foodSubtotal ??
+                        pricing.foodSubtotal ??
+                        pricing.subtotal
+                      }
+                    />
+                    {(Number(sb?.customer?.packagingFee ?? pricing.packagingFee) > 0) && (
+                      <PriceRow
+                        label="Packaging"
+                        value={sb?.customer?.packagingFee ?? pricing.packagingFee}
+                      />
+                    )}
+                    <PriceRow
+                      label="Delivery paid"
+                      value={sb?.customer?.deliveryPaid ?? Math.max(0, Number(pricing.deliveryFee || 0) - Number(pricing.deliveryDiscount || 0))}
+                    />
+                    {(Number(sb?.customer?.tax ?? data?.vatTax ?? pricing.tax) > 0) && (
+                      <PriceRow
+                        label="GST (on food)"
+                        value={sb?.customer?.tax ?? data?.vatTax ?? pricing.tax}
+                      />
+                    )}
+                    {Number(sb?.customer?.platformFee ?? pricing.platformFee) > 0 && (
+                      <PriceRow
+                        label="Platform fee"
+                        value={sb?.customer?.platformFee ?? pricing.platformFee}
+                      />
+                    )}
+                    {Number(sb?.customer?.discount || pricing.discount) > 0 && (
+                      <PriceRow
+                        label={`Coupon${sb?.customer?.couponCode || pricing.couponCode ? ` (${sb?.customer?.couponCode || pricing.couponCode})` : ""}`}
+                        value={sb?.customer?.discount ?? pricing.discount}
+                        negative
+                      />
+                    )}
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 p-3 space-y-2">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                      Restaurant payouts
+                    </p>
+                    {restaurants.length === 0 ? (
+                      <p className="text-xs text-slate-400">No restaurant settlement recorded</p>
+                    ) : (
+                      restaurants.map((r, idx) => (
+                        <div key={idx} className="border-b border-slate-100 last:border-0 pb-2 last:pb-0 space-y-1">
+                          <p className="font-medium text-slate-800">
+                            {r.restaurantName || `Restaurant ${idx + 1}`}
+                          </p>
+                          <div className="text-xs text-slate-500 flex flex-wrap gap-x-3 gap-y-1">
+                            <span>Food {money(r.foodAmount)}</span>
+                            <span>Pkg {money(r.packagingFee)}</span>
+                            <span>Commission −{money(r.commission)}</span>
+                            {Number(r.speedShare) > 0 && <span>Speed +{money(r.speedShare)}</span>}
+                            {Number(r.couponDiscount) > 0 && (
+                              <span>Coupon −{money(r.couponDiscount)}</span>
+                            )}
+                          </div>
+                          <PriceRow label="Payout" value={r.payout} emphasize />
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 p-3 space-y-2">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                      Driver payout
+                    </p>
+                    {isSalary ? (
+                      <p className="text-sm font-semibold text-amber-700">
+                        On salary — order earning ₹0
+                      </p>
+                    ) : (
+                      <>
+                        {sb?.driver?.deliveryBoyFee != null && (
+                          <PriceRow label="Delivery Boy Fee (slab)" value={sb.driver.deliveryBoyFee} />
+                        )}
+                        {Number(sb?.driver?.speedShare) > 0 && (
+                          <PriceRow label="Speed share" value={sb.driver.speedShare} />
+                        )}
+                        <PriceRow label="Primary rider" value={data?.riderEarning ?? driverPayout} emphasize />
+                        {Number(data?.sharedRiderEarning) > 0 && (
+                          <PriceRow label="Shared rider" value={data.sharedRiderEarning} />
+                        )}
+                      </>
+                    )}
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 p-3 space-y-2">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                      Platform
+                    </p>
+                    <PriceRow
+                      label="Platform fee"
+                      value={sb?.platform?.platformFee ?? pricing.platformFee}
+                    />
+                    <PriceRow
+                      label="Restaurant commission"
+                      value={sb?.platform?.restaurantCommission ?? pricing.restaurantCommission}
+                    />
+                    {(sb?.platform?.deliveryMarginBase != null ||
+                      data?.platformRevenue?.deliveryMargin != null) && (
+                      <PriceRow
+                        label="Delivery margin (User Charge − Boy Fee)"
+                        value={
+                          sb?.platform?.deliveryMarginBase ?? data?.platformRevenue?.deliveryMargin
+                        }
+                      />
+                    )}
+                    {Number(sb?.platform?.speedShare) > 0 && (
+                      <PriceRow label="Speed share (admin)" value={sb.platform.speedShare} />
+                    )}
+                    {isSalary && Number(sb?.platform?.salaryReclaim) > 0 && (
+                      <PriceRow
+                        label="Salary reclaim (full rider fee → admin)"
+                        value={sb.platform.salaryReclaim}
+                      />
+                    )}
+                    {Number(sb?.platform?.adminCouponDiscount) > 0 && (
+                      <PriceRow
+                        label="Admin coupon borne"
+                        value={sb.platform.adminCouponDiscount}
+                        negative
+                      />
+                    )}
+                    {Number(sb?.platform?.freeDeliverySubsidy) > 0 && (
+                      <PriceRow
+                        label="Free delivery subsidy"
+                        value={sb.platform.freeDeliverySubsidy}
+                        negative
+                      />
+                    )}
+                    {Number(sb?.platform?.negativeSpeedBear) > 0 && (
+                      <PriceRow
+                        label="Negative speed borne"
+                        value={sb.platform.negativeSpeedBear}
+                        negative
+                      />
+                    )}
+                    <PriceRow
+                      label="Platform net"
+                      value={sb?.platform?.netProfit ?? data?.platformProfit}
+                      emphasize
+                    />
+                  </div>
+
+                  {(Number(speed?.feeModifier) !== 0 ||
+                    Number(speed?.admin) !== 0 ||
+                    Number(speed?.restaurant) !== 0 ||
+                    Number(speed?.driver) !== 0) && (
+                    <div className="rounded-xl border border-slate-200 p-3 space-y-2">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                        Cart Delivery Speed split
+                      </p>
+                      <PriceRow label="Speed fee charged" value={speed.feeModifier} />
+                      <PriceRow label="Admin share" value={speed.admin} />
+                      <PriceRow label="Driver share" value={speed.driver} />
+                    </div>
+                  )}
+
+                  {costBearers.length > 0 && (
+                    <div className="rounded-xl border border-rose-100 bg-rose-50/50 p-3 space-y-2">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-rose-600">
+                        Cost bearers
+                      </p>
+                      {costBearers.map((c, idx) => (
+                        <div key={idx} className="flex justify-between gap-2 text-xs text-slate-700">
+                          <span>
+                            {humanizeStatus(c.type)} → {humanizeStatus(c.bearer)}
+                            {c.note ? ` · ${c.note}` : ""}
+                          </span>
+                          <span className="font-semibold shrink-0">{money(c.amount)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
+          </AccordionSection>
+
+          <AccordionSection
             id="deliveryPartner"
-            title="Delivery Partner"
+            title={isMultiDriver ? "Delivery Partners (2)" : "Delivery Partner"}
             icon={Truck}
             open={openSections.deliveryPartner}
             onToggle={toggleSection}
-            badge={deliveryPartner?.dispatchStatus ? humanizeStatus(deliveryPartner.dispatchStatus) : null}
+            badge={
+              isMultiDriver
+                ? "Multi-driver"
+                : deliveryPartner?.dispatchStatus
+                  ? humanizeStatus(deliveryPartner.dispatchStatus)
+                  : null
+            }
           >
             {deliveryPartner ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-4">
+                <div>
+                  <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2">
+                    {isMultiDriver ? "Lead rider" : "Assigned rider"}
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <DetailRow label="Name" value={deliveryPartner.name} />
                 <DetailRow label="Phone" value={deliveryPartner.phone} />
                 {deliveryPartner.partnerId ? (
@@ -1138,6 +1452,54 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
                 <DetailRow label="Accepted At" value={formatDateTime(deliveryPartner.acceptedAt)} />
                 {deliveryPartner.riderEarning != null && (
                   <DetailRow label="Rider Earning" value={money(deliveryPartner.riderEarning)} />
+                )}
+                  </div>
+                </div>
+
+                {sharedDeliveryPartner && (
+                  <div className="pt-4 border-t border-slate-100">
+                    <p className="text-[11px] font-semibold text-indigo-600 uppercase tracking-wider mb-2">
+                      Second rider
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <DetailRow label="Name" value={sharedDeliveryPartner.name} />
+                      <DetailRow label="Phone" value={sharedDeliveryPartner.phone} />
+                      {sharedDeliveryPartner.partnerId ? (
+                        <DetailRow label="Partner ID" value={sharedDeliveryPartner.partnerId} mono />
+                      ) : null}
+                      {sharedDeliveryPartner.riderEarning != null && (
+                        <DetailRow
+                          label="Rider Earning"
+                          value={money(sharedDeliveryPartner.riderEarning)}
+                        />
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {isMultiDriver && Array.isArray(data?.legs) && data.legs.length > 0 && (
+                  <div className="pt-4 border-t border-slate-100">
+                    <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2">
+                      Dual-leg status
+                    </p>
+                    <div className="space-y-2">
+                      {data.legs.map((leg, idx) => (
+                        <div
+                          key={leg.legIndex ?? idx}
+                          className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs flex flex-wrap gap-3 justify-between"
+                        >
+                          <span className="font-semibold text-slate-700">
+                            Leg {(leg.legIndex ?? idx) + 1} · {leg.role || "driver"}
+                          </span>
+                          <span className="text-slate-600">
+                            {humanizeStatus(leg.status || "pending")}
+                            {leg.otpVerified ? " · OTP ✓" : ""}
+                            {leg.earning != null ? ` · ${money(leg.earning)}` : ""}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
             ) : (
@@ -1286,98 +1648,6 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
             </AccordionSection>
           ) : null}
 
-          {((Array.isArray(data?.partialRefunds) && data.partialRefunds.length > 0) ||
-            (Array.isArray(data?.settlementSnapshots) && data.settlementSnapshots.length > 0) ||
-            data?.isMultiRestaurant ||
-            data?.pricing?.deliveryFeeBreakdown?.isSplitOrder) && (
-            <AccordionSection
-              id="settlement"
-              title="Settlement Audit"
-              icon={Receipt}
-              open={openSections.settlement}
-              onToggle={toggleSection}
-              badge={
-                Array.isArray(data?.partialRefunds) && data.partialRefunds.length > 0
-                  ? `${data.partialRefunds.length} refund${data.partialRefunds.length > 1 ? "s" : ""}`
-                  : data?.isMultiRestaurant
-                    ? "Multi"
-                    : null
-              }
-            >
-              <div className="flex flex-wrap gap-2 mb-3">
-                {data?.isMultiRestaurant && (
-                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-full bg-violet-100 text-violet-700">
-                    Multi-restaurant
-                  </span>
-                )}
-                {data?.pricing?.deliveryFeeBreakdown?.isSplitOrder && (
-                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-full bg-amber-100 text-amber-700">
-                    Bulk / split fee
-                  </span>
-                )}
-                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-full bg-slate-100 text-slate-700">
-                  Rider ₹{Number(data?.riderEarning || 0).toFixed(0)}
-                  {Number(data?.sharedRiderEarning || 0) > 0
-                    ? ` + Shared ₹${Number(data.sharedRiderEarning || 0).toFixed(0)}`
-                    : ""}
-                </span>
-              </div>
-
-              {Array.isArray(data?.partialRefunds) && data.partialRefunds.length > 0 && (
-                <div className="mb-3 space-y-2">
-                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    Partial wallet refunds
-                  </p>
-                  {data.partialRefunds.map((r, idx) => (
-                    <div
-                      key={`pr-${idx}`}
-                      className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-3 text-sm"
-                    >
-                      <div className="flex justify-between gap-2">
-                        <span className="font-medium text-slate-800">
-                          {r.restaurantName || "Restaurant"}
-                        </span>
-                        <span className="font-bold text-emerald-700">
-                          ₹{Number(r.amount || 0).toFixed(2)}
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-500 mt-1">
-                        Food ₹{Number(r.foodAmount || 0).toFixed(0)} · Pack ₹
-                        {Number(r.packagingFee || 0).toFixed(0)} · Tax ₹
-                        {Number(r.taxShare || 0).toFixed(0)} · {r.destination || "wallet"}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {Array.isArray(data?.settlementSnapshots) && data.settlementSnapshots.length > 0 && (
-                <div className="space-y-2 max-h-48 overflow-y-auto">
-                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    Snapshots
-                  </p>
-                  {[...data.settlementSnapshots].reverse().map((s, idx) => (
-                    <div
-                      key={`snap-${idx}`}
-                      className="rounded-lg border border-slate-100 bg-slate-50 p-2.5 text-xs"
-                    >
-                      <div className="flex justify-between gap-2 font-semibold text-slate-700">
-                        <span className="uppercase tracking-wide">{s.event}</span>
-                        <span>₹{Number(s.pricing?.total ?? 0).toFixed(0)}</span>
-                      </div>
-                      <p className="text-slate-500 mt-0.5">
-                        Rider ₹{Number(s.riderEarning || 0).toFixed(0)}
-                        {Number(s.sharedRiderEarning || 0) > 0
-                          ? ` / Shared ₹${Number(s.sharedRiderEarning || 0).toFixed(0)}`
-                          : ""}
-                        {s.note ? ` — ${s.note}` : ""}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </AccordionSection>
-          )}
         </div>
       </DialogContent>
     </Dialog>

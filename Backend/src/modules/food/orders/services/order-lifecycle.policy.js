@@ -274,6 +274,10 @@ export function getTotalItemCount(orderOrItems) {
   return items.reduce((sum, it) => sum + (Number(it?.quantity) || 1), 0);
 }
 
+/**
+ * Bulk / large cart: eligible for an optional second-driver search
+ * ("Find new driver"). Does NOT mean a second driver is mandatory.
+ */
 export function isShareRequired(order, settings = {}) {
   const splitEnabled = settings?.splitOrderEnabled !== false;
   const threshold = Number(settings?.splitOrderThreshold ?? 20);
@@ -286,8 +290,8 @@ export function isSharedDriverJoined(order) {
 }
 
 /**
- * Fully locked: all active restaurants accepted + primary driver accepted,
- * and if share is required then shared partner must have joined.
+ * Fully locked: all active restaurants accepted + primary driver accepted.
+ * Second-driver share is optional and does not block the lock.
  * Not locked while any pickup is awaiting DP resend.
  */
 export function isOrderFullyLocked(order, settings = {}) {
@@ -301,7 +305,6 @@ export function isOrderFullyLocked(order, settings = {}) {
 
   if (!areAllActiveRestaurantsAccepted(order)) return false;
   if (!isPrimaryDriverAccepted(order)) return false;
-  if (isShareRequired(order, settings) && !isSharedDriverJoined(order)) return false;
   return true;
 }
 
@@ -605,6 +608,7 @@ export function pushSettlementSnapshot(order, event, note = '') {
     platformProfit: Number(order.platformProfit) || 0,
     driverSettlement: order.driverSettlement || null,
     platformRevenue: order.platformRevenue || null,
+    settlementBreakdown: order.settlementBreakdown || null,
     deliveryFeeBreakdown: breakdown,
     isMultiRestaurant: Boolean(order.isMultiRestaurant),
     isSplitOrder: Boolean(breakdown?.isSplitOrder),

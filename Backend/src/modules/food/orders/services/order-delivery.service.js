@@ -52,7 +52,7 @@ import {
   pushStatusHistory,
   sanitizeOrderForExternal,
   isStatusAdvance,
-  buildDeliverySocketPayload,
+  resolveRiderPayoutAmount,
   SHARE_TIMEOUT_MS,
   PICKUP_GEOFENCE_METERS,
   DROP_GEOFENCE_METERS,
@@ -159,12 +159,21 @@ async function getPartnerCashCapacity(deliveryPartnerId) {
                   $sum: { 
                       $cond: [
                           { $eq: ["$dispatch.deliveryPartnerId", partnerObjectId] },
-                          { 
-                              $cond: [
-                                  { $gt: [{ $ifNull: ["$riderEarning", 0] }, 0] },
+                          {
+                              $ifNull: [
                                   "$riderEarning",
-                                  { $ifNull: ["$pricing.deliveryFee", 0] }
-                              ]
+                                  {
+                                      $ifNull: [
+                                          "$pricing.deliveryFeeBreakdown.riderFee",
+                                          {
+                                              $ifNull: [
+                                                  "$settlementBreakdown.driver.payout",
+                                                  { $ifNull: ["$pricing.deliveryFeeBreakdown.deliveryBoyFee", 0] },
+                                              ],
+                                          },
+                                      ],
+                                  },
+                              ],
                           },
                           { $ifNull: ["$sharedRiderEarning", 0] }
                       ]
@@ -639,25 +648,24 @@ export async function listOrdersAvailableDelivery(deliveryPartnerId, query) {
     : [];
   const txByOrderId = new Map(txRows.map((t) => [String(t.orderId), t]));
 
+  const partner = await FoodDeliveryPartner.findById(deliveryPartnerId)
+    .select('employmentType')
+    .lean();
+  const employmentType = partner?.employmentType || 'per_order';
+  const isSalaryPartner = employmentType === 'salary';
+  const earningDisplayMode = isSalaryPartner ? 'salary' : 'per_order';
+
   const enriched = (docs || []).map((doc) => {
     const tx = txByOrderId.get(String(doc?._id)) || null;
     const pricing = tx?.pricing || doc.pricing;
-    const riderEarning = (() => {
-      const candidates = [
-        doc?.riderEarning,
-        pricing?.deliveryFeeBreakdown?.riderFee,
-        pricing?.deliveryFeeBreakdown?.deliveryBoyFee,
-      ];
-      for (const value of candidates) {
-        const n = Number(value);
-        if (Number.isFinite(n) && n > 0) return n;
-      }
-      for (const value of candidates) {
-        const n = Number(value);
-        if (Number.isFinite(n) && n >= 0) return n;
-      }
-      return 0;
-    })();
+    const orderForPayout = {
+      ...doc,
+      pricing,
+      riderEarning: isSalaryPartner ? 0 : doc?.riderEarning,
+    };
+    const riderEarning = isSalaryPartner
+      ? 0
+      : resolveRiderPayoutAmount(orderForPayout);
     const base = tx
       ? {
           ...doc,
@@ -673,6 +681,8 @@ export async function listOrdersAvailableDelivery(deliveryPartnerId, query) {
       riderEarning,
       earnings: riderEarning,
       deliveryBoyFee: Number(pricing?.deliveryFeeBreakdown?.deliveryBoyFee ?? riderEarning) || 0,
+      employmentType,
+      earningDisplayMode,
     };
   });
 
@@ -689,7 +699,7 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
   const partnerId = new mongoose.Types.ObjectId(deliveryPartnerId);
 
   let existingOrder = await FoodOrder.findOne(identity)
-    .select('pricing payment dispatch orderStatus')
+    .select('pricing payment dispatch orderStatus riderEarning platformProfit settlementBreakdown')
     .lean();
 
   if (!existingOrder) {
@@ -802,23 +812,64 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
   };
 
   const deliveryPartner = await FoodDeliveryPartner.findById(partnerId).lean();
-  const settings = await FoodDeliveryBoySettings.findOne().lean();
 
   const isSalary = deliveryPartner?.employmentType === 'salary';
   const baseRiderEarning = Number(existingOrder.riderEarning) || 0;
-  
-  let finalRiderEarning = baseRiderEarning;
-  if (isSalary) {
-    finalRiderEarning = 0;
-  } else {
-    const adminComm = Number(settings?.adminCommissionPercentage) || 0;
-    finalRiderEarning = Math.max(0, baseRiderEarning - (baseRiderEarning * (adminComm / 100)));
-  }
+
+  // Per-order: keep frozen Delivery Boy Fee (+ speed share). Salary: no order-level earning.
+  // Admin commission % removed from food accept path.
+  const finalRiderEarning = isSalary ? 0 : baseRiderEarning;
 
   const basePlatformProfit = Number(existingOrder.platformProfit) || 0;
-  // If rider earning decreased, platform profit increases by that difference
   const earningDifference = baseRiderEarning - finalRiderEarning;
-  const newPlatformProfit = Math.max(0, basePlatformProfit + earningDifference);
+  const newPlatformProfit = Number((basePlatformProfit + earningDifference).toFixed(2));
+
+  const existingBreakdown = existingOrder.settlementBreakdown && typeof existingOrder.settlementBreakdown === 'object'
+    ? existingOrder.settlementBreakdown
+    : null;
+  const nextSettlementBreakdown = existingBreakdown
+    ? {
+        ...existingBreakdown,
+        driver: {
+          ...(existingBreakdown.driver || {}),
+          payout: finalRiderEarning,
+          employmentType: isSalary ? 'salary' : (deliveryPartner?.employmentType || 'per_order'),
+          note: isSalary
+            ? 'Partner is on salary; order-level rider earning is ₹0'
+            : (existingBreakdown.driver?.note || 'Per-order Delivery Boy Fee'),
+        },
+        platform: {
+          ...(existingBreakdown.platform || {}),
+          netProfit: newPlatformProfit,
+          salaryReclaim: isSalary ? baseRiderEarning : 0,
+        },
+        ...(isSalary
+          ? {
+              costBearers: [
+                ...((existingBreakdown.costBearers || []).filter(
+                  (c) => String(c?.type || '') !== 'salary_reclaim',
+                )),
+                {
+                  type: 'salary_reclaim',
+                  bearer: 'admin',
+                  amount: baseRiderEarning,
+                  note: 'Salary partner — delivery charge retained by admin (no per-order rider payout)',
+                },
+              ],
+            }
+          : {}),
+      }
+    : undefined;
+
+  const nextDriverSettlement = existingOrder.driverSettlement && typeof existingOrder.driverSettlement === 'object'
+    ? {
+        ...existingOrder.driverSettlement,
+        driverPayout: finalRiderEarning,
+        deliveryFee: isSalary
+          ? Number(existingOrder.pricing?.deliveryFee || 0) || 0
+          : existingOrder.driverSettlement.deliveryFee,
+      }
+    : undefined;
 
   const order = await FoodOrder.findOneAndUpdate(
     {
@@ -849,6 +900,8 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
         'dispatch.acceptedAt': now,
         riderEarning: finalRiderEarning,
         platformProfit: newPlatformProfit,
+        ...(nextSettlementBreakdown ? { settlementBreakdown: nextSettlementBreakdown } : {}),
+        ...(nextDriverSettlement ? { driverSettlement: nextDriverSettlement } : {}),
         'dispatch.offeredTo.$[acceptedOffer].action': 'accepted',
       },
       $push: {
@@ -914,61 +967,17 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
 
   const responseOrder = sanitizeOrderForExternal(order);
 
-  // Bulk orders: auto-open share slot so a 2nd driver can join (required before complete)
+  // Settlement snapshot only — bulk/split second-driver search is opt-in via
+  // "Find new driver" after the primary assesses the load at pickup.
   try {
     pushSettlementSnapshot(
       order,
       'accept',
       `Rider accepted; riderEarning=₹${Number(order.riderEarning) || 0}`,
     );
-
-    const boySettings =
-      (await FoodDeliveryBoySettings.findOne({ isActive: true }).sort({ createdAt: -1 }).lean()) ||
-      (await FoodDeliveryBoySettings.findOne().sort({ createdAt: -1 }).lean());
-    if (
-      isShareRequired(order, boySettings || {}) &&
-      !order.dispatch?.sharedPartnerId &&
-      !order.dispatch?.isShared
-    ) {
-      const totalEarning = Number(order.riderEarning || order.pricing?.deliveryFee || 0);
-      const sharedSplit = Math.round(totalEarning / 2);
-      order.dispatch.isShared = true;
-      order.dispatch.shareOpenedAt = new Date();
-      order.sharedRiderEarning = sharedSplit;
-      order.riderEarning = Math.max(0, totalEarning - sharedSplit);
-      pushStatusHistory(order, {
-        byRole: 'SYSTEM',
-        byId: deliveryPartnerId,
-        from: order.orderStatus,
-        to: order.orderStatus,
-        note: 'Bulk order auto-opened for second delivery partner (share required)',
-      });
-      pushSettlementSnapshot(
-        order,
-        'share',
-        `Auto-share bulk: primary ₹${order.riderEarning}, shared ₹${order.sharedRiderEarning}`,
-      );
-      await order.save();
-      Object.assign(responseOrder, sanitizeOrderForExternal(order));
-
-      try {
-        const io = getIO();
-        if (io) {
-          const payload = buildDeliverySocketPayload(order, order.restaurantId);
-          io.to('all_delivery').emit('shareable_order_available', {
-            ...payload,
-            sharedFrom: deliveryPartnerId,
-            shareRequired: true,
-          });
-        }
-      } catch (sockErr) {
-        logger.warn(`Auto-share socket emit failed: ${sockErr?.message || sockErr}`);
-      }
-    } else {
-      await order.save();
-    }
-  } catch (shareErr) {
-    logger.warn(`Accept settlement / auto-share failed: ${shareErr?.message || shareErr}`);
+    await order.save();
+  } catch (acceptErr) {
+    logger.warn(`Accept settlement snapshot failed: ${acceptErr?.message || acceptErr}`);
   }
 
   void (async () => {
@@ -1755,7 +1764,27 @@ export async function confirmReachedDropDelivery(orderId, deliveryPartnerId) {
     };
     await order.save();
 
-    emitDeliveryDropOtpToUser(order, String(dropLeg.otp || '').trim());
+    const pendingLegOtps = (order.legs || [])
+      .filter(
+        (leg) =>
+          String(leg?.status || '') === 'at_drop' &&
+          !leg?.otpVerified &&
+          String(leg?.otp || '').trim(),
+      )
+      .map((leg) => ({
+        legIndex: leg.legIndex,
+        role: leg.role,
+        partnerId: leg.partnerId ? String(leg.partnerId) : null,
+        otp: String(leg.otp).trim(),
+      }));
+
+    emitDeliveryDropOtpToUser(order, String(dropLeg.otp || '').trim(), {
+      legIndex: dropLeg.legIndex,
+      role: dropLeg.role,
+      partnerId: deliveryPartnerId,
+      isDualLeg: true,
+      legOtps: pendingLegOtps,
+    });
     emitOrderUpdate(order, deliveryPartnerId);
     enqueueOrderEvent('leg_reached_drop', {
       orderMongoId: order._id?.toString?.(),
@@ -2224,52 +2253,55 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
   const boySettings =
     (await FoodDeliveryBoySettings.findOne({ isActive: true }).sort({ createdAt: -1 }).lean()) ||
     (await FoodDeliveryBoySettings.findOne().sort({ createdAt: -1 }).lean());
+  // Bulk second-driver is optional: primary may complete alone unless they opened a
+  // share slot that is still waiting within SHARE_TIMEOUT_MS.
   if (isShareRequired(order, boySettings || {}) && !isSharedDriverJoined(order)) {
-    // Solo-complete fallback: if the share slot has been open past SHARE_TIMEOUT_MS with no
-    // second partner joining, let the primary complete alone with the full earning restored.
-    // Guarantees a bulk order can never get permanently stuck at completion.
     const shareOpenedAt = order.dispatch?.shareOpenedAt
       ? new Date(order.dispatch.shareOpenedAt).getTime()
       : null;
+    const shareWasOpened =
+      Boolean(order.dispatch?.isShared) || shareOpenedAt != null;
     const shareTimedOut =
       shareOpenedAt != null && Date.now() - shareOpenedAt >= SHARE_TIMEOUT_MS;
 
-    if (!shareTimedOut) {
+    if (shareWasOpened && !shareTimedOut) {
       throw new ValidationError(
-        'This is a bulk order and requires a second delivery partner. Share the order and wait for a partner to join before completing.',
+        'Waiting for a second delivery partner. If no one joins, you can complete alone after the search times out.',
       );
     }
 
-    const restoredEarning =
-      Number(order.riderEarning || 0) + Number(order.sharedRiderEarning || 0);
-    order.riderEarning = restoredEarning;
-    order.sharedRiderEarning = 0;
-    order.dispatch.isShared = false;
-    order.dispatch.shareOpenedAt = null;
-    pushStatusHistory(order, {
-      byRole: 'SYSTEM',
-      byId: deliveryPartnerId,
-      from: order.orderStatus,
-      to: order.orderStatus,
-      note: `No second partner joined within ${Math.round(
-        SHARE_TIMEOUT_MS / 60000,
-      )} min; primary completing solo with full earning ₹${restoredEarning}.`,
-    });
-    try {
-      await notifyOwnersSafely(
-        [{ ownerType: 'ADMIN', ownerId: 'GLOBAL' }],
-        {
-          title: 'Bulk order completed solo',
-          body: `Order #${order.order_id || order._id} had no second driver join in time; the primary partner is completing it alone.`,
-          data: {
-            type: 'bulk_solo_complete',
-            orderId: order._id.toString(),
-            orderMongoId: order._id?.toString?.() || '',
+    if (shareWasOpened) {
+      const restoredEarning =
+        Number(order.riderEarning || 0) + Number(order.sharedRiderEarning || 0);
+      order.riderEarning = restoredEarning;
+      order.sharedRiderEarning = 0;
+      order.dispatch.isShared = false;
+      order.dispatch.shareOpenedAt = null;
+      pushStatusHistory(order, {
+        byRole: 'SYSTEM',
+        byId: deliveryPartnerId,
+        from: order.orderStatus,
+        to: order.orderStatus,
+        note: `No second partner joined within ${Math.round(
+          SHARE_TIMEOUT_MS / 60000,
+        )} min; primary completing solo with full earning ₹${restoredEarning}.`,
+      });
+      try {
+        await notifyOwnersSafely(
+          [{ ownerType: 'ADMIN', ownerId: 'GLOBAL' }],
+          {
+            title: 'Bulk order completed solo',
+            body: `Order #${order.order_id || order._id} had no second driver join in time; the primary partner is completing it alone.`,
+            data: {
+              type: 'bulk_solo_complete',
+              orderId: order._id.toString(),
+              orderMongoId: order._id?.toString?.() || '',
+            },
           },
-        },
-      );
-    } catch (err) {
-      logger.warn(`Bulk solo-complete admin alert failed: ${err?.message || err}`);
+        );
+      } catch (err) {
+        logger.warn(`Bulk solo-complete admin alert failed: ${err?.message || err}`);
+      }
     }
   }
   
@@ -2376,7 +2408,12 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
     orderMongoId: order._id?.toString?.(),
     orderId: order.orderId || order._id.toString(),
     deliveryPartnerId,
+    restaurantId: order.restaurantId?._id?.toString?.() || order.restaurantId?.toString?.(),
+    riderEarning: Number(order.riderEarning) || 0,
+    sharedRiderEarning: Number(order.sharedRiderEarning) || 0,
+    platformProfit: Number(order.platformProfit) || 0,
     payMethod: finalPayMethod,
+    paymentMethod: finalPayMethod,
     prevPayStatus,
     paymentStatus: 'paid'
   });

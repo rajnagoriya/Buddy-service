@@ -62,6 +62,94 @@ export async function enqueueOrderEvent(action, payload = {}) {
 import { haversineKm } from '../../../../core/location/haversine.util.js';
 export { haversineKm };
 
+/**
+ * Single source of truth for what the driver is paid on an order.
+ * NEVER use customer `pricing.deliveryFee` here — that is the customer charge
+ * (userCharge + speed + multi), not the rider payout.
+ *
+ * Priority:
+ * 1. Frozen `order.riderEarning` / `sharedRiderEarning` (includes salary = ₹0)
+ * 2. `pricing.deliveryFeeBreakdown.riderFee`
+ * 3. `settlementBreakdown.driver.payout`
+ * 4. `pricing.deliveryFeeBreakdown.deliveryBoyFee`
+ */
+export function resolveRiderPayoutAmount(order, { partnerId } = {}) {
+  if (!order) return 0;
+
+  const partnerStr = partnerId != null ? String(partnerId) : '';
+  const primaryId = String(
+    order?.dispatch?.deliveryPartnerId?._id || order?.dispatch?.deliveryPartnerId || '',
+  );
+  const sharedId = String(
+    order?.dispatch?.sharedPartnerId?._id || order?.dispatch?.sharedPartnerId || '',
+  );
+
+  if (partnerStr && sharedId && partnerStr === sharedId) {
+    if (order.sharedRiderEarning !== undefined && order.sharedRiderEarning !== null) {
+      return Math.max(0, Number(order.sharedRiderEarning) || 0);
+    }
+    return 0;
+  }
+
+  // Explicit frozen field — keep 0 for salary partners (do not fall through).
+  if (order.riderEarning !== undefined && order.riderEarning !== null) {
+    return Math.max(0, Number(order.riderEarning) || 0);
+  }
+
+  const breakdown = order?.pricing?.deliveryFeeBreakdown || {};
+  const settlementPayout = order?.settlementBreakdown?.driver?.payout;
+  const candidates = [
+    breakdown.riderFee,
+    settlementPayout,
+    breakdown.deliveryBoyFee,
+  ];
+  for (const value of candidates) {
+    if (value === undefined || value === null) continue;
+    const n = Number(value);
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  return 0;
+}
+
+/**
+ * Mongo aggregation expression for primary-partner rider payout.
+ * $ifNull skips only null/missing — explicit 0 (salary) is preserved.
+ * Never falls back to pricing.deliveryFee.
+ */
+export const RIDER_PAYOUT_MONGO_EXPR = {
+  $ifNull: [
+    '$riderEarning',
+    {
+      $ifNull: [
+        '$pricing.deliveryFeeBreakdown.riderFee',
+        {
+          $ifNull: [
+            '$settlementBreakdown.driver.payout',
+            { $ifNull: ['$pricing.deliveryFeeBreakdown.deliveryBoyFee', 0] },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+/** Mongo expr: payout for a given partner (primary vs shared). */
+export function riderPayoutForPartnerMongoExpr(partnerObjectId) {
+  return {
+    $cond: [
+      { $eq: ['$dispatch.deliveryPartnerId', partnerObjectId] },
+      RIDER_PAYOUT_MONGO_EXPR,
+      {
+        $cond: [
+          { $eq: ['$dispatch.sharedPartnerId', partnerObjectId] },
+          { $ifNull: ['$sharedRiderEarning', 0] },
+          0,
+        ],
+      },
+    ],
+  };
+}
+
 export function resolveSlabAmounts(rule) {
   if (!rule) return { userCharge: 0, deliveryBoyFee: 0 };
   const legacyBase = Number(rule.basePayout);
@@ -267,25 +355,113 @@ export function applyDeliverySurcharges(baseFee, { isMultiRestaurant, isSplitOrd
 }
 
 export function resolveSpeedFeeModifier(deliveryBoySettings, deliverySpeedOptionId, deliveryOptionName) {
+  const matched = resolveSpeedOption(
+    deliveryBoySettings,
+    deliverySpeedOptionId,
+    deliveryOptionName,
+  );
+  return matched ? Number(matched.feeModifier) || 0 : 0;
+}
+
+/** Resolve the selected Cart Delivery Speed option document (enabled only). */
+export function resolveSpeedOption(deliveryBoySettings, deliverySpeedOptionId, deliveryOptionName) {
   const options = Array.isArray(deliveryBoySettings?.deliverySpeedOptions)
     ? deliveryBoySettings.deliverySpeedOptions.filter((o) => o && o.isEnabled !== false)
     : [];
-  if (!options.length) return 0;
+  if (!options.length) return null;
 
   const id = String(deliverySpeedOptionId || "").trim();
   if (id) {
     const byId = options.find((o) => String(o.id) === id);
-    if (byId) return Number(byId.feeModifier) || 0;
+    if (byId) return byId;
   }
 
   const name = String(deliveryOptionName || "").trim().toLowerCase();
   if (name) {
     const byName = options.find((o) => String(o.name || "").trim().toLowerCase() === name);
-    if (byName) return Number(byName.feeModifier) || 0;
+    if (byName) return byName;
   }
 
-  const defaultOption = options.find((o) => o.isDefault) || options[0];
-  return Number(defaultOption?.feeModifier) || 0;
+  return options.find((o) => o.isDefault) || options[0] || null;
+}
+
+/**
+ * Split Cart Delivery Speed fee between admin and driver only (no restaurant).
+ * - fee <= 0: no driver share; negative amount is borne entirely by admin
+ * - fee > 0: driver gets configured driverShareAmount (clamped), admin gets remainder
+ */
+export function splitSpeedFeeShares(speedFeeModifier, { driverShareAmount } = {}) {
+  const fee = Number(speedFeeModifier) || 0;
+  if (!Number.isFinite(fee) || fee === 0) {
+    return {
+      feeModifier: 0,
+      speedShareAdmin: 0,
+      speedShareRestaurant: 0,
+      speedShareDriver: 0,
+      adminBearsNegative: false,
+    };
+  }
+  if (fee < 0) {
+    return {
+      feeModifier: fee,
+      speedShareAdmin: fee,
+      speedShareRestaurant: 0,
+      speedShareDriver: 0,
+      adminBearsNegative: true,
+    };
+  }
+
+  const configured = Number(driverShareAmount);
+  const driverShare = Number.isFinite(configured)
+    ? Math.min(fee, Math.max(0, configured))
+    : 0;
+  const speedShareDriver = Number(driverShare.toFixed(2));
+  const speedShareAdmin = Number((fee - speedShareDriver).toFixed(2));
+
+  return {
+    feeModifier: fee,
+    speedShareAdmin,
+    speedShareRestaurant: 0,
+    speedShareDriver,
+    adminBearsNegative: false,
+  };
+}
+
+/** Weight a total amount across restaurant groups by food subtotal (remainder on last). */
+export function allocateByFoodSubtotal(totalAmount, restaurantGroups = []) {
+  const groups = Array.isArray(restaurantGroups) ? restaurantGroups : [];
+  const amount = Math.max(0, Number(totalAmount) || 0);
+  if (!groups.length || amount === 0) {
+    return groups.map((g) => ({
+      restaurantId: g.restaurantId,
+      amount: 0,
+    }));
+  }
+  const foodTotal = groups.reduce((s, g) => s + (Number(g.subtotal) || 0), 0);
+  if (foodTotal <= 0) {
+    const each = Math.floor((amount * 100) / groups.length) / 100;
+    return groups.map((g, idx) => ({
+      restaurantId: g.restaurantId,
+      amount:
+        idx === groups.length - 1
+          ? Number((amount - each * (groups.length - 1)).toFixed(2))
+          : each,
+    }));
+  }
+  let allocated = 0;
+  return groups.map((g, idx) => {
+    if (idx === groups.length - 1) {
+      return {
+        restaurantId: g.restaurantId,
+        amount: Number((amount - allocated).toFixed(2)),
+      };
+    }
+    const share = Number(
+      (((Number(g.subtotal) || 0) / foodTotal) * amount).toFixed(2),
+    );
+    allocated += share;
+    return { restaurantId: g.restaurantId, amount: share };
+  });
 }
 
 export function generateFourDigitDeliveryOtp() {
@@ -320,7 +496,7 @@ export function sanitizeOrderForExternal(orderDoc) {
   return o;
 }
 
-export function emitDeliveryDropOtpToUser(order, plainOtp) {
+export function emitDeliveryDropOtpToUser(order, plainOtp, meta = {}) {
   try {
     const io = getIO();
     if (!io || !plainOtp || !order?.userId) return;
@@ -328,8 +504,14 @@ export function emitDeliveryDropOtpToUser(order, plainOtp) {
       orderMongoId: order._id?.toString?.(),
       orderId: order.order_id || order._id?.toString?.(),
       otp: plainOtp,
-      message:
-        "Share this OTP with your delivery partner to hand over the order.",
+      legIndex: meta.legIndex ?? null,
+      role: meta.role || null,
+      partnerId: meta.partnerId ? String(meta.partnerId) : null,
+      isDualLeg: Boolean(meta.isDualLeg),
+      legOtps: Array.isArray(meta.legOtps) ? meta.legOtps : undefined,
+      message: meta.isDualLeg
+        ? "Share each OTP with the matching delivery partner at drop-off."
+        : "Share this OTP with your delivery partner to hand over the order.",
     });
   } catch (e) {
     logger.warn(`emitDeliveryDropOtpToUser failed: ${e?.message || e}`);
@@ -494,6 +676,297 @@ export function normalizeOrderForClient(orderDoc) {
   };
 }
 
+function slimPublicPartner(partner) {
+  if (!partner) return null;
+  if (typeof partner !== 'object') return partner;
+  return {
+    _id: partner._id,
+    name: partner.name || partner.fullName || '',
+    fullName: partner.fullName || partner.name || '',
+    phone: partner.phone || partner.phoneNumber || '',
+    phoneNumber: partner.phoneNumber || partner.phone || '',
+    avatar: partner.avatar || partner.profileImage || null,
+    profileImage: partner.profileImage || partner.avatar || null,
+    rating: partner.rating,
+    totalRatings: partner.totalRatings,
+  };
+}
+
+function slimPublicRestaurant(restaurant) {
+  if (!restaurant) return null;
+  if (typeof restaurant !== 'object') return restaurant;
+  const location = restaurant.location || undefined;
+  // Ensure map clients always get GeoJSON coordinates when only lat/lng exist.
+  let normalizedLocation = location;
+  if (location && (!Array.isArray(location.coordinates) || location.coordinates.length < 2)) {
+    const lat = Number(location.latitude ?? location.lat);
+    const lng = Number(location.longitude ?? location.lng);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      normalizedLocation = {
+        ...location,
+        type: location.type || 'Point',
+        coordinates: [lng, lat],
+        latitude: lat,
+        longitude: lng,
+      };
+    }
+  }
+  return {
+    _id: restaurant._id,
+    restaurantName: restaurant.restaurantName || restaurant.name || '',
+    name: restaurant.name || restaurant.restaurantName || '',
+    phone: restaurant.phone || restaurant.ownerPhone || restaurant.primaryContactNumber || '',
+    ownerPhone: restaurant.ownerPhone || restaurant.phone || '',
+    profileImage: restaurant.profileImage || restaurant.logo || null,
+    logo: restaurant.logo || restaurant.profileImage || null,
+    slug: restaurant.slug || restaurant.restaurantSlug || undefined,
+    location: normalizedLocation,
+  };
+}
+
+function normalizeGeoLocation(location) {
+  if (!location || typeof location !== 'object') return location || null;
+  if (Array.isArray(location.coordinates) && location.coordinates.length >= 2) {
+    return {
+      ...location,
+      type: location.type || 'Point',
+      coordinates: [Number(location.coordinates[0]), Number(location.coordinates[1])],
+    };
+  }
+  const lat = Number(location.latitude ?? location.lat);
+  const lng = Number(location.longitude ?? location.lng);
+  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+    return {
+      ...location,
+      type: location.type || 'Point',
+      coordinates: [lng, lat],
+      latitude: lat,
+      longitude: lng,
+    };
+  }
+  return location;
+}
+
+function resolveRestaurantCoordsForUser(order) {
+  const fromRestaurant = normalizeGeoLocation(order?.restaurantId?.location);
+  if (Array.isArray(fromRestaurant?.coordinates) && fromRestaurant.coordinates.length >= 2) {
+    return fromRestaurant.coordinates;
+  }
+  const pickups = Array.isArray(order?.pickups) ? order.pickups : [];
+  for (const pickup of pickups) {
+    const loc = normalizeGeoLocation(pickup?.location);
+    if (Array.isArray(loc?.coordinates) && loc.coordinates.length >= 2) {
+      return loc.coordinates;
+    }
+  }
+  return null;
+}
+
+function resolveCustomerCoordsForUser(order) {
+  const addr = order?.deliveryAddress || order?.address || {};
+  const fromLoc = normalizeGeoLocation(addr?.location);
+  if (Array.isArray(fromLoc?.coordinates) && fromLoc.coordinates.length >= 2) {
+    return fromLoc.coordinates;
+  }
+  if (Array.isArray(addr?.coordinates) && addr.coordinates.length >= 2) {
+    return [Number(addr.coordinates[0]), Number(addr.coordinates[1])];
+  }
+  return null;
+}
+
+function slimCustomerPricing(pricing = {}) {
+  return {
+    subtotal: Number(pricing.subtotal) || 0,
+    foodSubtotal: Number(pricing.foodSubtotal ?? pricing.subtotal) || 0,
+    tax: Number(pricing.tax) || 0,
+    packagingFee: Number(pricing.packagingFee) || 0,
+    deliveryFee: Number(pricing.deliveryFee) || 0,
+    platformFee: Number(pricing.platformFee) || 0,
+    discount: Number(pricing.discount) || 0,
+    deliveryDiscount: Number(pricing.deliveryDiscount) || 0,
+    total: Number(pricing.total) || 0,
+    currency: pricing.currency || 'INR',
+    couponCode: pricing.couponCode || undefined,
+    couponCategory: pricing.couponCategory || undefined,
+  };
+}
+
+function resolveRestaurantAcceptedAt(order) {
+  const trackingAt = order?.tracking?.confirmed?.timestamp || order?.tracking?.preparing?.timestamp;
+  if (trackingAt) return trackingAt;
+  const history = Array.isArray(order?.statusHistory) ? order.statusHistory : [];
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    const to = String(history[i]?.to || '').toLowerCase();
+    if (['confirmed', 'accepted', 'preparing'].includes(to)) {
+      return history[i]?.at || null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Lean customer-facing order payload for GET /food/orders/:id (and similar user views).
+ * Strips settlements, earnings, commission internals, and raw statusHistory.
+ */
+export function toUserOrderResponse(orderDoc, extras = {}) {
+  const base = normalizeOrderForClient(orderDoc);
+  const order = orderDoc?.toObject ? orderDoc.toObject() : orderDoc || {};
+  const restaurantAcceptedAt = resolveRestaurantAcceptedAt(order);
+
+  const items = Array.isArray(order.items)
+    ? order.items.map((item) => ({
+        itemId: item.itemId || item._id || item.id,
+        name: item.name,
+        variantId: item.variantId,
+        variantName: item.variantName,
+        variantPrice: item.variantPrice ?? item.price,
+        quantity: item.quantity,
+        price: item.price,
+        image: item.image || item.imageUrl,
+        isVeg: item.isVeg,
+        restaurantId: item.restaurantId,
+      }))
+    : [];
+
+  const pickups = Array.isArray(order.pickups)
+    ? order.pickups.map((p) => ({
+        restaurantId: p.restaurantId,
+        restaurantName: p.restaurantName,
+        restaurantAddress: p.restaurantAddress,
+        restaurantPhone: p.restaurantPhone,
+        restaurantLogo: p.restaurantLogo,
+        status: p.status,
+        location: normalizeGeoLocation(p.location),
+        items: p.items,
+        sequence: p.sequence,
+        readyAt: p.readyAt,
+      }))
+    : [];
+
+  const dispatchPartner = slimPublicPartner(order.dispatch?.deliveryPartnerId);
+  const sharedPartner = slimPublicPartner(order.dispatch?.sharedPartnerId);
+  const slimRestaurant = slimPublicRestaurant(order.restaurantId);
+  const restaurantCoords = resolveRestaurantCoordsForUser({
+    ...order,
+    restaurantId: slimRestaurant,
+    pickups,
+  });
+  const customerCoords = resolveCustomerCoordsForUser(order);
+  const deliveryAddressRaw = order.deliveryAddress || order.address || null;
+  const deliveryAddress = deliveryAddressRaw
+    ? {
+        ...deliveryAddressRaw,
+        location: normalizeGeoLocation(deliveryAddressRaw.location) || deliveryAddressRaw.location,
+        coordinates:
+          customerCoords ||
+          deliveryAddressRaw.coordinates ||
+          undefined,
+      }
+    : null;
+
+  return {
+    _id: base._id,
+    orderMongoId: base.orderMongoId,
+    orderId: base.orderId,
+    order_id: order.order_id || base.orderId,
+    orderStatus: order.orderStatus || base.status || '',
+    status: base.status,
+    createdAt: order.createdAt,
+    updatedAt: order.updatedAt,
+    scheduledAt: order.scheduledAt || null,
+    cancelledAt: order.cancelledAt || undefined,
+    deliveredAt: base.deliveredAt,
+    note: order.note || '',
+    restaurantNote: base.restaurantNote || '',
+    sendCutlery: Boolean(order.sendCutlery),
+    isMultiRestaurant: Boolean(order.isMultiRestaurant),
+    deliveryOption: order.deliveryOption || null,
+    deliveryTime: order.deliveryTime || null,
+    estimatedTime: Number(order.estimatedTime) || null,
+    estimatedDeliveryTime: Number(order.estimatedDeliveryTime || order.estimatedTime) || null,
+    restaurantAcceptedAt,
+    restaurantId: slimRestaurant,
+    restaurantName:
+      order.restaurantName ||
+      slimRestaurant?.restaurantName ||
+      slimRestaurant?.name ||
+      '',
+    restaurantPhone:
+      order.restaurantPhone ||
+      slimRestaurant?.phone ||
+      slimRestaurant?.ownerPhone ||
+      '',
+    restaurantSlug: order.restaurantSlug || slimRestaurant?.slug || undefined,
+    // Explicit map helpers so tracking UI does not depend on nested populate shape.
+    restaurantLocation: restaurantCoords
+      ? { type: 'Point', coordinates: restaurantCoords }
+      : null,
+    userId: order.userId
+      ? {
+          _id: order.userId._id,
+          name: order.userId.name || order.userId.fullName || '',
+          fullName: order.userId.fullName || order.userId.name || '',
+          phone: order.userId.phone || '',
+        }
+      : undefined,
+    customerName: order.customerName || '',
+    customerPhone: order.customerPhone || '',
+    deliveryAddress,
+    // Alias used by some tracking transforms
+    address: deliveryAddress,
+    items,
+    pickups,
+    pricing: slimCustomerPricing(order.pricing),
+    payment: {
+      method: order.payment?.method || '',
+      status: order.payment?.status || '',
+      refund: order.payment?.refund
+        ? { destination: order.payment.refund.destination, status: order.payment.refund.status }
+        : undefined,
+    },
+    dispatch: {
+      status: order.dispatch?.status || '',
+      acceptedAt: order.dispatch?.acceptedAt || null,
+      deliveryPartnerId: dispatchPartner,
+      sharedPartnerId: sharedPartner,
+    },
+    deliveryPartnerId: dispatchPartner || base.deliveryPartnerId || null,
+    deliveryState: {
+      currentPhase: base.deliveryState?.currentPhase || null,
+      status: base.deliveryState?.status || null,
+      currentLocation: base.deliveryState?.currentLocation || null,
+      deliveredAt: base.deliveryState?.deliveredAt || base.deliveredAt || null,
+    },
+    tracking: order.tracking
+      ? {
+          confirmed: order.tracking.confirmed || undefined,
+          preparing: order.tracking.preparing || undefined,
+          ready: order.tracking.ready || undefined,
+          outForDelivery: order.tracking.outForDelivery || undefined,
+          delivered: order.tracking.delivered || undefined,
+        }
+      : undefined,
+    ratings: order.ratings || {},
+    rating: base.rating,
+    delayContext: order.delayContext?.reason
+      ? { reason: order.delayContext.reason }
+      : undefined,
+    cancellationReason: base.cancellationReason,
+    failureReason: base.failureReason,
+    riderToRestaurantDistanceKm: base.riderToRestaurantDistanceKm,
+    deliveryVerification: extras.deliveryVerification || {
+      dropOtp: {
+        required: Boolean(order.deliveryVerification?.dropOtp?.required),
+        verified: Boolean(order.deliveryVerification?.dropOtp?.verified),
+      },
+    },
+    handoverOtp: extras.handoverOtp || undefined,
+    isDualLeg: extras.isDualLeg || undefined,
+    legProgress: extras.legProgress || undefined,
+    legHandoverOtps: extras.legHandoverOtps || undefined,
+  };
+}
+
 /**
  * Amount the restaurant receives for this order:
  * food + packaging - commission - (restaurant-funded coupon discount when applicable).
@@ -516,15 +989,20 @@ export function resolveRestaurantEarnings(order, restaurantId) {
   let foodAmount = 0;
   let packagingFee = 0;
   let commission = 0;
+  let speedShare = 0;
   let payout = null;
 
   if (match) {
     foodAmount = Number(match.foodAmount) || 0;
     packagingFee = Number(match.packagingFee) || 0;
     commission = Number(match.commission) || 0;
+    speedShare = Number(match.speedShare) || 0;
     payout = Number(match.restaurantPayout);
     if (!Number.isFinite(payout)) {
-      payout = Math.max(0, Number((foodAmount + packagingFee - commission).toFixed(2)));
+      payout = Math.max(
+        0,
+        Number((foodAmount + packagingFee + speedShare - commission).toFixed(2)),
+      );
     }
   } else {
     const items = Array.isArray(order?.items) ? order.items : [];
@@ -548,17 +1026,28 @@ export function resolveRestaurantEarnings(order, restaurantId) {
       orderRestaurantId === rid
         ? Number(pricing.restaurantCommission || 0) || 0
         : 0;
-    payout = Math.max(0, Number((foodAmount + packagingFee - commission).toFixed(2)));
+    speedShare =
+      orderRestaurantId === rid
+        ? Number(pricing?.deliveryFeeBreakdown?.speedShareRestaurant || 0) || 0
+        : 0;
+    payout = Math.max(
+      0,
+      Number((foodAmount + packagingFee + speedShare - commission).toFixed(2)),
+    );
   }
 
   // Restaurant-funded coupons reduce restaurant payout (matches FoodTransaction.restaurantShare).
-  // Apply only for the primary restaurant when coupon is restaurant-created.
+  // Prefer settlement.couponDiscount when already applied at create.
+  const settlementCouponDiscount = Number(match?.couponDiscount) || 0;
   const applyCouponDiscount =
+    settlementCouponDiscount <= 0 &&
     isRestaurantCoupon &&
     discount > 0 &&
     (settlements.length <= 1 || rid === orderRestaurantId);
-  const restaurantDiscount = applyCouponDiscount ? discount : 0;
-  if (restaurantDiscount > 0) {
+  const restaurantDiscount = settlementCouponDiscount > 0
+    ? settlementCouponDiscount
+    : (applyCouponDiscount ? discount : 0);
+  if (restaurantDiscount > 0 && settlementCouponDiscount <= 0) {
     payout = Math.max(0, Number((payout - restaurantDiscount).toFixed(2)));
   }
 
@@ -566,6 +1055,7 @@ export function resolveRestaurantEarnings(order, restaurantId) {
     foodAmount: Number(foodAmount.toFixed(2)),
     packagingFee: Number(packagingFee.toFixed(2)),
     commission: Number(commission.toFixed(2)),
+    speedShare: Number(speedShare.toFixed(2)),
     discount: Number(restaurantDiscount.toFixed(2)),
     payout: Number((Number.isFinite(payout) ? payout : 0).toFixed(2)),
   };
@@ -1044,38 +1534,8 @@ export function buildDeliverySocketPayload(orderDoc, restaurantDoc = null) {
     userName: order?.customerName || order?.deliveryAddress?.fullName || order?.deliveryAddress?.name || order?.userId?.name || "",
     userPhone: order?.customerPhone || order?.deliveryAddress?.phone || order?.userId?.phone || "",
     note: order?.note || "",
-    riderEarning: (() => {
-      const candidates = [
-        order?.riderEarning,
-        order?.pricing?.deliveryFeeBreakdown?.riderFee,
-        order?.pricing?.deliveryFeeBreakdown?.deliveryBoyFee,
-      ];
-      for (const value of candidates) {
-        const n = Number(value);
-        if (Number.isFinite(n) && n > 0) return n;
-      }
-      for (const value of candidates) {
-        const n = Number(value);
-        if (Number.isFinite(n) && n >= 0) return n;
-      }
-      return 0;
-    })(),
-    earnings: (() => {
-      const candidates = [
-        order?.riderEarning,
-        order?.pricing?.deliveryFeeBreakdown?.riderFee,
-        order?.pricing?.deliveryFeeBreakdown?.deliveryBoyFee,
-      ];
-      for (const value of candidates) {
-        const n = Number(value);
-        if (Number.isFinite(n) && n > 0) return n;
-      }
-      for (const value of candidates) {
-        const n = Number(value);
-        if (Number.isFinite(n) && n >= 0) return n;
-      }
-      return 0;
-    })(),
+    riderEarning: resolveRiderPayoutAmount(order),
+    earnings: resolveRiderPayoutAmount(order),
     deliveryBoyFee: Number(
       order?.pricing?.deliveryFeeBreakdown?.deliveryBoyFee
       ?? order?.riderEarning

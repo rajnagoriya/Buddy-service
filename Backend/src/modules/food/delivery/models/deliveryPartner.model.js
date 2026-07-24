@@ -149,6 +149,12 @@ const deliveryPartnerSchema = new mongoose.Schema(
             enum: ['weekly', 'monthly'],
             default: 'weekly'
         },
+        /** Fixed salary amount set by admin when employmentType is salary */
+        salaryAmount: {
+            type: Number,
+            default: 0,
+            min: 0
+        },
         zone: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'FoodZone',
