@@ -18,7 +18,7 @@ function monthShort(monthIndex) {
 
 function getFixedCurrentCycleWindow(now = new Date()) {
     const startDay = 15;
-    
+
     let year = now.getFullYear();
     let month = now.getMonth();
 

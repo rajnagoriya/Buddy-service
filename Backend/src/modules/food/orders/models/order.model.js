@@ -134,10 +134,10 @@ const paymentSchema = new mongoose.Schema(
         },
         // ✅ NEW: Added refund object to track refund status without breaking existing flow
         refund: {
-            status: { 
-                type: String, 
-                enum: ['none', 'pending', 'processed', 'failed'], 
-                default: 'none' 
+            status: {
+                type: String,
+                enum: ['none', 'pending', 'processed', 'failed'],
+                default: 'none'
             },
             destination: {
                 type: String,
@@ -271,10 +271,10 @@ const pickupSchema = new mongoose.Schema(
     {
         restaurantId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodRestaurant', required: true },
         restaurantName: { type: String, default: '' },
-        status: { 
-            type: String, 
-            enum: ['pending', 'accepted', 'preparing', 'ready', 'picked_up', 'cancelled'], 
-            default: 'pending' 
+        status: {
+            type: String,
+            enum: ['pending', 'accepted', 'preparing', 'ready', 'picked_up', 'cancelled'],
+            default: 'pending'
         },
         location: {
             type: buildLocationSchema(),

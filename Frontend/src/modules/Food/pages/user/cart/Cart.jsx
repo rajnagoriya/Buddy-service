@@ -1373,7 +1373,7 @@ function Cart() {
     ? (pricing.packagingFee ?? 0)
     : (feeSettings.packagingFee ?? 0) * Math.max(1, uniqueRestaurantIds.length)
   const gstCharges = pricing != null ? (pricing.tax ?? 0) : Math.round(subtotal * ((feeSettings.gstRate ?? 0) / 100))
-  
+
   // Calculate discount from backend pricing or applied coupon
   const discount = (() => {
     if (pricing?.discount) {
@@ -1760,9 +1760,9 @@ function Cart() {
     const finalRestaurantId =
       resolveEntityId(
         restaurantData?.restaurantId ||
-          restaurantData?._id ||
-          cart[0]?.restaurantId ||
-          restaurantId,
+        restaurantData?._id ||
+        cart[0]?.restaurantId ||
+        restaurantId,
       ) || null
     const finalRestaurantName = restaurantData?.name || cart[0]?.restaurant || null
 
@@ -2321,13 +2321,13 @@ function Cart() {
                                   && !isPlatformFirstTimeBlocked
                                 const source = coupon.sourceLabel || (coupon.createdBy === "restaurant" ? "Restaurant" : "Platform")
                                 return (
-                                    <SelectItem
+                                  <SelectItem
                                     key={coupon.code}
                                     value={coupon.code}
                                     disabled={!isEligible}
-                                    >
+                                  >
                                     {coupon.code} — {coupon.discountDisplay || `Save ${RUPEE_SYMBOL}${coupon.discount}`} ({source})
-                                    </SelectItem>
+                                  </SelectItem>
                                 )
                               })}
                             </SelectContent>
@@ -2377,15 +2377,15 @@ function Cart() {
                         <div
                           key={option.id}
                           className={`flex items-center justify-between p-2.5 rounded-xl cursor-pointer border transition-all ${isSelected
-                              ? "border-[#16A34A] bg-[#16A34A]/5 dark:bg-[#16A34A]/10 shadow-xs"
-                              : "border-gray-100 hover:border-green-200 dark:border-gray-800 dark:hover:border-gray-700 bg-white dark:bg-[#141414]"
+                            ? "border-[#16A34A] bg-[#16A34A]/5 dark:bg-[#16A34A]/10 shadow-xs"
+                            : "border-gray-100 hover:border-green-200 dark:border-gray-800 dark:hover:border-gray-700 bg-white dark:bg-[#141414]"
                             }`}
                           onClick={() => setDeliveryOption(option.id)}
                         >
                           <div className="flex items-center gap-2.5 min-w-0">
                             <div className={`p-1.5 rounded-lg transition-colors shrink-0 ${isSelected
-                                ? "bg-[#16A34A] text-white"
-                                : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+                              ? "bg-[#16A34A] text-white"
+                              : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"
                               }`}>
                               <IconComponent className="h-3.5 w-3.5" />
                             </div>

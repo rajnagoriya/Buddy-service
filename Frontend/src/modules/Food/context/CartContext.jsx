@@ -530,77 +530,36 @@ export function CartProvider({ children }) {
           }
         }
 
-        if (restaurantMap.size >= 3) {
+        if (restaurantMap.size >= 2) {
           return {
             ok: false,
-            error: 'You can order from a maximum of 3 restaurants at a time',
+            error: 'You can only select from two restro',
             code: 'MAX_RESTAURANTS_EXCEEDED',
           }
         }
 
-        // Anchor = first restaurant in cart (A). B and C must both be near A.
+        // Anchor = first restaurant in cart (A). Second restaurant B must be near A.
         const anchorRestaurant = getFirstRestaurantFromCart(safeCart)
         const maxKm = Number(liveSettings?.multiOrderMaxDistance) > 0
           ? Number(liveSettings.multiOrderMaxDistance)
           : undefined
 
-        // Prefer backend road-distance validation (default 5 km)
-        let backendValidated = false
-        if (anchorRestaurant?.restaurantId && newItemRestaurantId) {
-          try {
-            await orderAPI.validateRestaurantChain({
-              anchorRestaurantId: anchorRestaurant.restaurantId,
-              lastRestaurantId: anchorRestaurant.restaurantId,
-              newRestaurantId: newItemRestaurantId,
-            })
-            backendValidated = true
-          } catch (err) {
-            const apiMessage =
-              err?.response?.data?.message
-              || err?.response?.data?.error
-              || err?.message
-              || CHAIN_RADIUS_VALIDATION_MESSAGE
-            const looksLikeRadius =
-              /outside the allowed|road distance|radius/i.test(String(apiMessage))
-            if (looksLikeRadius || err?.response?.status === 400) {
-              return {
-                ok: false,
-                error: apiMessage || CHAIN_RADIUS_VALIDATION_MESSAGE,
-                code: 'RESTAURANT_CHAIN_RADIUS',
-                anchorRestaurantId: anchorRestaurant.restaurantId,
-                lastRestaurantId: anchorRestaurant.restaurantId,
-                newRestaurantId: newItemRestaurantId,
-              }
-            }
-            // Network / unexpected: fall through to local haversine check
-          }
-        }
+        // Perform instant frontend distance comparison using coordinates (no API call needed)
+        const chainCheck = validateChainRestaurantRadius(
+          anchorRestaurant,
+          item,
+          maxKm,
+        )
 
-        if (!backendValidated) {
-          const chainCheck = validateChainRestaurantRadius(
-            {
-              latitude: anchorRestaurant?.lat,
-              longitude: anchorRestaurant?.lng,
-              restaurantId: anchorRestaurant?.restaurantId,
-            },
-            {
-              latitude: item?.latitude,
-              longitude: item?.longitude,
-              restaurantId: newItemRestaurantId,
-            },
-            maxKm,
-          )
-
-          if (!chainCheck.skipped && !chainCheck.valid) {
-            return {
-              ok: false,
-              error: CHAIN_RADIUS_VALIDATION_MESSAGE,
-              code: 'RESTAURANT_CHAIN_RADIUS',
-              distanceKm: chainCheck.distanceKm,
-              anchorRestaurantId: anchorRestaurant?.restaurantId,
-              lastRestaurantId: anchorRestaurant?.restaurantId,
-              newRestaurantId: newItemRestaurantId,
-            }
+        if (!chainCheck.skipped && !chainCheck.valid) {
+          return {
+            ok: false,
+            error: CHAIN_RADIUS_VALIDATION_MESSAGE,
+            code: 'RESTAURANT_CHAIN_RADIUS',
+            distanceKm: chainCheck.distanceKm,
+            anchorRestaurantId: anchorRestaurant?.restaurantId,
+            lastRestaurantId: anchorRestaurant?.restaurantId,
+            newRestaurantId: newItemRestaurantId,
           }
         }
       }

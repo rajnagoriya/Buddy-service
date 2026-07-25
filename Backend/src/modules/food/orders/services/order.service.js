@@ -417,13 +417,13 @@ export async function createOrder(userId, dto, options = {}) {
   const restaurantGroups = Array.isArray(recalculated.pricing?.restaurantGroups)
     ? recalculated.pricing.restaurantGroups
     : restaurants.map((r) => ({
-        restaurantId: String(r._id),
-        restaurantName: r.name || r.restaurantName,
-        subtotal: pricedItems
-          .filter((it) => String(it.restaurantId) === String(r._id))
-          .reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.quantity) || 1), 0),
-        packagingFee: 0,
-      }));
+      restaurantId: String(r._id),
+      restaurantName: r.name || r.restaurantName,
+      subtotal: pricedItems
+        .filter((it) => String(it.restaurantId) === String(r._id))
+        .reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.quantity) || 1), 0),
+      packagingFee: 0,
+    }));
 
   const breakdown = normalizedPricing.deliveryFeeBreakdown || {};
   // Speed fee is shared only between admin and driver (restaurant share removed).
@@ -612,23 +612,23 @@ export async function createOrder(userId, dto, options = {}) {
 
   const payment = verifiedPrepaid
     ? {
-        method: "razorpay",
-        status: "paid",
-        amountDue: normalizedPricing.total,
-        razorpay: {
-          orderId: verifiedPrepaid.razorpayOrderId,
-          paymentId: verifiedPrepaid.razorpayPaymentId,
-          signature: verifiedPrepaid.razorpaySignature,
-        },
-        qr: {},
-      }
+      method: "razorpay",
+      status: "paid",
+      amountDue: normalizedPricing.total,
+      razorpay: {
+        orderId: verifiedPrepaid.razorpayOrderId,
+        paymentId: verifiedPrepaid.razorpayPaymentId,
+        signature: verifiedPrepaid.razorpaySignature,
+      },
+      qr: {},
+    }
     : {
-        method: paymentMethod,
-        status: isCash ? "cod_pending" : isWallet ? "paid" : "created",
-        amountDue: normalizedPricing.total,
-        razorpay: {},
-        qr: {},
-      };
+      method: paymentMethod,
+      status: isCash ? "cod_pending" : isWallet ? "paid" : "created",
+      amountDue: normalizedPricing.total,
+      razorpay: {},
+      qr: {},
+    };
 
   const isScheduledOrder = dto.scheduledAt && new Date(dto.scheduledAt) > new Date();
 
@@ -1271,7 +1271,7 @@ export async function getOrderById(
 
   if (userId && orderUserId !== userId.toString())
     throw new ForbiddenError("Not your order");
-  
+
   if (deliveryPartnerId && orderPartnerId !== deliveryPartnerId.toString() && sharedPartnerId !== deliveryPartnerId.toString()) {
     throw new ForbiddenError("Not your delivery order");
   }
@@ -1482,11 +1482,11 @@ export async function recoverStuckOrders() {
         const activeRestaurantIds =
           Array.isArray(order.pickups) && order.pickups.length > 0
             ? [...new Set(
-                order.pickups
-                  .filter((p) => isActivePickup(p))
-                  .map((p) => String(p.restaurantId || ''))
-                  .filter(Boolean),
-              )]
+              order.pickups
+                .filter((p) => isActivePickup(p))
+                .map((p) => String(p.restaurantId || ''))
+                .filter(Boolean),
+            )]
             : [String(order.restaurantId || '')].filter(Boolean);
         for (const rid of activeRestaurantIds) {
           await notifyRestaurantNewOrder(order, rid, { freshNotify: true });
@@ -3728,9 +3728,9 @@ export async function getMultiOrderSettlementReport(query = {}) {
         : null,
       primaryRestaurant: o.restaurantId
         ? {
-            name: o.restaurantId.restaurantName || o.restaurantId.name,
-            id: String(o.restaurantId._id || o.restaurantId),
-          }
+          name: o.restaurantId.restaurantName || o.restaurantId.name,
+          id: String(o.restaurantId._id || o.restaurantId),
+        }
         : null,
     };
   });
@@ -3794,7 +3794,7 @@ export async function reportOrderDelay(orderId, userId, role, reason) {
         reportedBy: role
       });
     }
-  } catch {}
+  } catch { }
 
   return order;
 }
@@ -3813,7 +3813,7 @@ export async function shareOrderDelivery(orderId, deliveryPartnerId) {
 
   const currentStatus = order.orderStatus;
   const sharedStatuses = ['accepted', 'preparing', 'ready_for_pickup', 'picked_up'];
-  
+
   if (!sharedStatuses.includes(currentStatus)) {
     throw new ValidationError(`Order in status '${currentStatus}' cannot be shared.`);
   }
@@ -4006,11 +4006,11 @@ export async function acceptSharedOrderDelivery(orderId, newPartnerId) {
       io.to(rooms.delivery(oldPartnerId)).emit('order_status_update', payload);
       io.to(rooms.delivery(newPartnerId)).emit('order_status_update', payload);
       io.to(rooms.user(order.userId)).emit('delivery_partner_updated', payload);
-      
+
       // Also notify all riders that the shareable slot is no longer available
       io.to('all_delivery').emit('order_claimed', { orderId: order._id.toString() });
     }
-  } catch (err) {}
+  } catch (err) { }
 
   await order.populate([
     { path: 'restaurantId' },
@@ -4046,7 +4046,7 @@ export async function processScheduledOrderAlerts() {
       const from = order.orderStatus;
       order.orderStatus = 'created';
       order.restaurantNotifiedForSchedule = true;
-      
+
       order.statusHistory.push({
         at: new Date(),
         byRole: 'SYSTEM',

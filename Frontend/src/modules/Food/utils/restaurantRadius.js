@@ -8,14 +8,21 @@ export const CHAIN_RADIUS_VALIDATION_MESSAGE =
 export function extractLatLngFromItem(item) {
   if (!item || typeof item !== "object") return null
 
-  const lat = Number(item.latitude ?? item.lat)
-  const lng = Number(item.longitude ?? item.lng)
+  const directLat = Number(
+    item.latitude ?? item.lat ?? item.location?.latitude ?? item.location?.lat ?? item.restaurantObj?.latitude ?? item.restaurantObj?.lat
+  )
+  const directLng = Number(
+    item.longitude ?? item.lng ?? item.location?.longitude ?? item.location?.lng ?? item.restaurantObj?.longitude ?? item.restaurantObj?.lng
+  )
 
-  if (Number.isFinite(lat) && Number.isFinite(lng)) {
-    return { lat, lng }
+  if (Number.isFinite(directLat) && Number.isFinite(directLng)) {
+    return { lat: directLat, lng: directLng }
   }
 
-  const coords = item?.location?.coordinates
+  const coords =
+    item?.location?.coordinates ||
+    item?.restaurantObj?.location?.coordinates ||
+    item?.restaurantData?.location?.coordinates
   if (Array.isArray(coords) && coords.length >= 2) {
     const coordLng = Number(coords[0])
     const coordLat = Number(coords[1])
