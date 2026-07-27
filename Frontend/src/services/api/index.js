@@ -1956,7 +1956,7 @@ export const deliveryAPI = {
     deliveryMeCacheTime = 0;
     try {
       localStorage.removeItem("app:isOnline");
-    } catch (_) {}
+    } catch (_) { }
     const token =
       refreshToken ||
       (typeof localStorage !== "undefined"
@@ -2908,12 +2908,12 @@ export const diningAPI = {
   createBooking: (payload = {}) => {
     const restaurantId = String(
       payload?.restaurantId ||
-        payload?.restaurant ||
-        payload?.restaurantRef?._id ||
-        payload?.restaurantRef?.id ||
-        payload?.restaurant?._id ||
-        payload?.restaurant?.id ||
-        "",
+      payload?.restaurant ||
+      payload?.restaurantRef?._id ||
+      payload?.restaurantRef?.id ||
+      payload?.restaurant?._id ||
+      payload?.restaurant?.id ||
+      "",
     ).trim();
 
     const dateValue = payload?.date

@@ -139,129 +139,129 @@ async function getPartnerCashCapacity(deliveryPartnerId) {
   const [ordersAgg, cashAgg, bonusAgg, depositsAgg, withdrawalsAgg] = await Promise.all([
     // 1. Earnings aggregation
     FoodOrder.aggregate([
-      { 
-          $match: { 
-              $and: [
-                  {
-                      $or: [
-                          { 'dispatch.deliveryPartnerId': partnerObjectId }, 
-                          { 'dispatch.sharedPartnerId': partnerObjectId }
-                      ]
-                  },
-                  { orderStatus: 'delivered' }
+      {
+        $match: {
+          $and: [
+            {
+              $or: [
+                { 'dispatch.deliveryPartnerId': partnerObjectId },
+                { 'dispatch.sharedPartnerId': partnerObjectId }
               ]
-          } 
+            },
+            { orderStatus: 'delivered' }
+          ]
+        }
       },
-      { 
-          $group: { 
-              _id: null, 
-              totalEarned: { 
-                  $sum: { 
-                      $cond: [
-                          { $eq: ["$dispatch.deliveryPartnerId", partnerObjectId] },
-                          {
-                              $ifNull: [
-                                  "$riderEarning",
-                                  {
-                                      $ifNull: [
-                                          "$pricing.deliveryFeeBreakdown.riderFee",
-                                          {
-                                              $ifNull: [
-                                                  "$settlementBreakdown.driver.payout",
-                                                  { $ifNull: ["$pricing.deliveryFeeBreakdown.deliveryBoyFee", 0] },
-                                              ],
-                                          },
-                                      ],
-                                  },
-                              ],
-                          },
-                          { $ifNull: ["$sharedRiderEarning", 0] }
-                      ]
-                  } 
-              }
-          } 
+      {
+        $group: {
+          _id: null,
+          totalEarned: {
+            $sum: {
+              $cond: [
+                { $eq: ["$dispatch.deliveryPartnerId", partnerObjectId] },
+                {
+                  $ifNull: [
+                    "$riderEarning",
+                    {
+                      $ifNull: [
+                        "$pricing.deliveryFeeBreakdown.riderFee",
+                        {
+                          $ifNull: [
+                            "$settlementBreakdown.driver.payout",
+                            { $ifNull: ["$pricing.deliveryFeeBreakdown.deliveryBoyFee", 0] },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+                { $ifNull: ["$sharedRiderEarning", 0] }
+              ]
+            }
+          }
+        }
       }
     ]),
     // 2. Cash aggregation (Active orders included)
     FoodOrder.aggregate([
-      { 
-          $match: { 
-              $and: [
-                  {
-                      $or: [
-                          { 'dispatch.deliveryPartnerId': partnerObjectId }, 
-                          { 'dispatch.sharedPartnerId': partnerObjectId }
-                      ]
-                  },
-                  {
-                      orderStatus: { 
-                          $in: [
-                              'confirmed', 'preparing', 'ready_for_pickup', 'reached_pickup', 'picked_up', 'reached_drop', 'delivered', 'completed',
-                              'CONFIRMED', 'PREPARING', 'READY_FOR_PICKUP', 'REACHED_PICKUP', 'PICKED_UP', 'REACHED_DROP', 'DELIVERED', 'COMPLETED'
-                          ] 
-                      }
-                  },
-                  {
-                      $or: [
-                          { 'payment.method': { $in: ['cash', 'cod', 'CASH', 'COD'] } },
-                          { 'paymentMethod': { $in: ['cash', 'cod', 'CASH', 'COD'] } },
-                          { 
-                              $and: [
-                                  { 'payment.method': { $exists: false } },
-                                  { 'paymentMethod': { $exists: false } }
-                              ]
-                          }
-                      ]
-                  }
+      {
+        $match: {
+          $and: [
+            {
+              $or: [
+                { 'dispatch.deliveryPartnerId': partnerObjectId },
+                { 'dispatch.sharedPartnerId': partnerObjectId }
               ]
-          } 
-      },
-      { 
-          $group: { 
-              _id: null, 
-              actualCashCollected: { 
-                  $sum: { 
-                      $cond: [
-                          { $in: ["$orderStatus", ["delivered", "completed", "DELIVERED", "COMPLETED"]] },
-                          { 
-                              $cond: [
-                                  { $gt: [{ $ifNull: ["$amountToCollect", 0] }, 0] }, 
-                                  "$amountToCollect",
-                                  { 
-                                      $cond: [
-                                          { $gt: [{ $ifNull: ["$payment.amountDue", 0] }, 0] },
-                                          "$payment.amountDue",
-                                          { $ifNull: ["$pricing.total", { $ifNull: ["$totalAmount", 0] }] }
-                                      ]
-                                  }
-                              ]
-                          },
-                          0
-                      ]
-                  } 
-              },
-              pendingCashLiability: { 
-                  $sum: { 
-                      $cond: [
-                          { $not: { $in: ["$orderStatus", ["delivered", "completed", "DELIVERED", "COMPLETED"]] } },
-                          { 
-                              $cond: [
-                                  { $gt: [{ $ifNull: ["$amountToCollect", 0] }, 0] }, 
-                                  "$amountToCollect",
-                                  { 
-                                      $cond: [
-                                          { $gt: [{ $ifNull: ["$payment.amountDue", 0] }, 0] },
-                                          "$payment.amountDue",
-                                          { $ifNull: ["$pricing.total", { $ifNull: ["$totalAmount", 0] }] }
-                                      ]
-                                  }
-                              ]
-                          },
-                          0
-                      ]
-                  } 
+            },
+            {
+              orderStatus: {
+                $in: [
+                  'confirmed', 'preparing', 'ready_for_pickup', 'reached_pickup', 'picked_up', 'reached_drop', 'delivered', 'completed',
+                  'CONFIRMED', 'PREPARING', 'READY_FOR_PICKUP', 'REACHED_PICKUP', 'PICKED_UP', 'REACHED_DROP', 'DELIVERED', 'COMPLETED'
+                ]
               }
-          } 
+            },
+            {
+              $or: [
+                { 'payment.method': { $in: ['cash', 'cod', 'CASH', 'COD'] } },
+                { 'paymentMethod': { $in: ['cash', 'cod', 'CASH', 'COD'] } },
+                {
+                  $and: [
+                    { 'payment.method': { $exists: false } },
+                    { 'paymentMethod': { $exists: false } }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          actualCashCollected: {
+            $sum: {
+              $cond: [
+                { $in: ["$orderStatus", ["delivered", "completed", "DELIVERED", "COMPLETED"]] },
+                {
+                  $cond: [
+                    { $gt: [{ $ifNull: ["$amountToCollect", 0] }, 0] },
+                    "$amountToCollect",
+                    {
+                      $cond: [
+                        { $gt: [{ $ifNull: ["$payment.amountDue", 0] }, 0] },
+                        "$payment.amountDue",
+                        { $ifNull: ["$pricing.total", { $ifNull: ["$totalAmount", 0] }] }
+                      ]
+                    }
+                  ]
+                },
+                0
+              ]
+            }
+          },
+          pendingCashLiability: {
+            $sum: {
+              $cond: [
+                { $not: { $in: ["$orderStatus", ["delivered", "completed", "DELIVERED", "COMPLETED"]] } },
+                {
+                  $cond: [
+                    { $gt: [{ $ifNull: ["$amountToCollect", 0] }, 0] },
+                    "$amountToCollect",
+                    {
+                      $cond: [
+                        { $gt: [{ $ifNull: ["$payment.amountDue", 0] }, 0] },
+                        "$payment.amountDue",
+                        { $ifNull: ["$pricing.total", { $ifNull: ["$totalAmount", 0] }] }
+                      ]
+                    }
+                  ]
+                },
+                0
+              ]
+            }
+          }
+        }
       }
     ]),
     // 3. Bonuses
@@ -447,8 +447,7 @@ async function syncRazorpayQrPayment(orderDoc) {
     link = await fetchRazorpayPaymentLink(paymentLinkId);
   } catch (error) {
     logger.warn(
-      `Razorpay payment-link fetch failed for ${paymentLinkId}: ${
-        error?.message || error
+      `Razorpay payment-link fetch failed for ${paymentLinkId}: ${error?.message || error
       }`,
     );
     return orderDoc.payment;
@@ -616,15 +615,15 @@ export async function listOrdersAvailableDelivery(deliveryPartnerId, query) {
 
   const filter = partnerCapacity.hasCapacity
     ? {
-        $or: [
-          {
-            'dispatch.status': 'unassigned',
-            orderStatus: { $in: ['confirmed', 'preparing', 'ready_for_pickup'] },
-          },
-          shareableFilter,
-          activeOwnOrderFilter,
-        ],
-      }
+      $or: [
+        {
+          'dispatch.status': 'unassigned',
+          orderStatus: { $in: ['confirmed', 'preparing', 'ready_for_pickup'] },
+        },
+        shareableFilter,
+        activeOwnOrderFilter,
+      ],
+    }
     : activeOwnOrderFilter;
 
   const [docs, total] = await Promise.all([
@@ -668,13 +667,13 @@ export async function listOrdersAvailableDelivery(deliveryPartnerId, query) {
       : resolveRiderPayoutAmount(orderForPayout);
     const base = tx
       ? {
-          ...doc,
-          paymentMethod: tx.payment?.method || tx.paymentMethod || doc.paymentMethod,
-          payment: tx.payment || doc.payment,
-          pricing,
-          amounts: tx.amounts || doc.amounts,
-          transactionStatus: tx.status || doc.transactionStatus,
-        }
+        ...doc,
+        paymentMethod: tx.payment?.method || tx.paymentMethod || doc.paymentMethod,
+        payment: tx.payment || doc.payment,
+        pricing,
+        amounts: tx.amounts || doc.amounts,
+        transactionStatus: tx.status || doc.transactionStatus,
+      }
       : { ...doc, pricing };
     return {
       ...base,
@@ -829,46 +828,46 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
     : null;
   const nextSettlementBreakdown = existingBreakdown
     ? {
-        ...existingBreakdown,
-        driver: {
-          ...(existingBreakdown.driver || {}),
-          payout: finalRiderEarning,
-          employmentType: isSalary ? 'salary' : (deliveryPartner?.employmentType || 'per_order'),
-          note: isSalary
-            ? 'Partner is on salary; order-level rider earning is ₹0'
-            : (existingBreakdown.driver?.note || 'Per-order Delivery Boy Fee'),
-        },
-        platform: {
-          ...(existingBreakdown.platform || {}),
-          netProfit: newPlatformProfit,
-          salaryReclaim: isSalary ? baseRiderEarning : 0,
-        },
-        ...(isSalary
-          ? {
-              costBearers: [
-                ...((existingBreakdown.costBearers || []).filter(
-                  (c) => String(c?.type || '') !== 'salary_reclaim',
-                )),
-                {
-                  type: 'salary_reclaim',
-                  bearer: 'admin',
-                  amount: baseRiderEarning,
-                  note: 'Salary partner — delivery charge retained by admin (no per-order rider payout)',
-                },
-              ],
-            }
-          : {}),
-      }
+      ...existingBreakdown,
+      driver: {
+        ...(existingBreakdown.driver || {}),
+        payout: finalRiderEarning,
+        employmentType: isSalary ? 'salary' : (deliveryPartner?.employmentType || 'per_order'),
+        note: isSalary
+          ? 'Partner is on salary; order-level rider earning is ₹0'
+          : (existingBreakdown.driver?.note || 'Per-order Delivery Boy Fee'),
+      },
+      platform: {
+        ...(existingBreakdown.platform || {}),
+        netProfit: newPlatformProfit,
+        salaryReclaim: isSalary ? baseRiderEarning : 0,
+      },
+      ...(isSalary
+        ? {
+          costBearers: [
+            ...((existingBreakdown.costBearers || []).filter(
+              (c) => String(c?.type || '') !== 'salary_reclaim',
+            )),
+            {
+              type: 'salary_reclaim',
+              bearer: 'admin',
+              amount: baseRiderEarning,
+              note: 'Salary partner — delivery charge retained by admin (no per-order rider payout)',
+            },
+          ],
+        }
+        : {}),
+    }
     : undefined;
 
   const nextDriverSettlement = existingOrder.driverSettlement && typeof existingOrder.driverSettlement === 'object'
     ? {
-        ...existingOrder.driverSettlement,
-        driverPayout: finalRiderEarning,
-        deliveryFee: isSalary
-          ? Number(existingOrder.pricing?.deliveryFee || 0) || 0
-          : existingOrder.driverSettlement.deliveryFee,
-      }
+      ...existingOrder.driverSettlement,
+      driverPayout: finalRiderEarning,
+      deliveryFee: isSalary
+        ? Number(existingOrder.pricing?.deliveryFee || 0) || 0
+        : existingOrder.driverSettlement.deliveryFee,
+    }
     : undefined;
 
   const order = await FoodOrder.findOneAndUpdate(
@@ -1024,8 +1023,7 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
       await foodTransactionService.updateTransactionRider(order._id, deliveryPartnerId);
     } catch (error) {
       logger.error(
-        `Error updating delivery rider transaction for ${order._id}: ${
-          error?.message || error
+        `Error updating delivery rider transaction for ${order._id}: ${error?.message || error
         }`,
       );
     }
@@ -1065,11 +1063,11 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
         // Notify EVERY active pickup restaurant with THEIR scoped status (not aggregate)
         const pickupRestaurantIdsForSocket = Array.isArray(order.pickups)
           ? [...new Set(
-              order.pickups
-                .filter((p) => isActivePickup(p))
-                .map((p) => String(p?.restaurantId || ''))
-                .filter(Boolean),
-            )]
+            order.pickups
+              .filter((p) => isActivePickup(p))
+              .map((p) => String(p?.restaurantId || ''))
+              .filter(Boolean),
+          )]
           : [];
         const restaurantTargets = pickupRestaurantIdsForSocket.length
           ? pickupRestaurantIdsForSocket
@@ -1115,11 +1113,11 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
 
       const pickupRestaurantIds = Array.isArray(order.pickups)
         ? [...new Set(
-            order.pickups
-              .filter((p) => isActivePickup(p))
-              .map((p) => String(p?.restaurantId || ''))
-              .filter(Boolean),
-          )]
+          order.pickups
+            .filter((p) => isActivePickup(p))
+            .map((p) => String(p?.restaurantId || ''))
+            .filter(Boolean),
+        )]
         : [];
 
       if (pickupRestaurantIds.length > 0) {
@@ -1159,8 +1157,7 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
       }
     } catch (error) {
       logger.error(
-        `Error notifying delivery acceptance for ${order._id}: ${
-          error?.message || error
+        `Error notifying delivery acceptance for ${order._id}: ${error?.message || error
         }`,
       );
     }
@@ -1183,7 +1180,7 @@ export async function rejectOrderDelivery(orderId, deliveryPartnerId) {
 
   const isObjectId = mongoose.Types.ObjectId.isValid(orderId);
   let order = await FoodOrder.findOne(identity).select('+deliveryOtp');
-  
+
   if (!order) {
     const Order = mongoose.model('Order');
     let qcOrder = await Order.findOne(identity);
@@ -1194,7 +1191,7 @@ export async function rejectOrderDelivery(orderId, deliveryPartnerId) {
         (item) => String(item.partnerId) === String(deliveryPartnerId) && item.action === 'offered'
       );
       if (offer) offer.action = 'rejected';
-      
+
       qcOrder.dispatch.status = 'unassigned';
       qcOrder.dispatch.deliveryPartnerId = undefined;
       qcOrder.dispatch.assignedAt = undefined;
@@ -1387,9 +1384,8 @@ export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId) {
       [{ ownerType: 'RESTAURANT', ownerId: order.restaurantId }],
       {
         title: 'Rider arrived!',
-        body: `${partner?.name || 'The delivery partner'} has arrived at ${
-          restaurant?.restaurantName || 'your restaurant'
-        } to pick up Order #${order._id.toString()}.`,
+        body: `${partner?.name || 'The delivery partner'} has arrived at ${restaurant?.restaurantName || 'your restaurant'
+          } to pick up Order #${order._id.toString()}.`,
         data: {
           type: 'rider_arrived',
           orderId: String(order._id.toString()),
@@ -1400,8 +1396,7 @@ export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId) {
     );
   } catch (error) {
     logger.error(
-      `Error notifying restaurant about rider arrival for ${order._id}: ${
-        error?.message || error
+      `Error notifying restaurant about rider arrival for ${order._id}: ${error?.message || error
       }`,
     );
   }
@@ -1435,7 +1430,7 @@ export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImag
     if (!isPrimary) {
       throw new ForbiddenError('Not your order');
     }
-    
+
     const prePickup = ['DELIVERY_ASSIGNED', 'PICKUP_READY'];
     if (!prePickup.includes(order.workflowStatus)) {
       throw new ValidationError('Invalid state for pickup confirmation');
@@ -1541,7 +1536,7 @@ export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImag
         billImageUrl: null,
         lastPickupBillImageUrl: billImageUrl || null,
       };
-      
+
       // We mark this history entry as a partial pickup
       pushStatusHistory(order, {
         byRole: 'DELIVERY_PARTNER',
@@ -1615,7 +1610,7 @@ export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImag
     }
 
     if (!isStatusAdvance(from, nextStatus)) {
-        throw new ValidationError(`Order is already at status '${from}'. Cannot re-mark as '${nextStatus}'.`);
+      throw new ValidationError(`Order is already at status '${from}'. Cannot re-mark as '${nextStatus}'.`);
     }
     order.orderStatus = nextStatus;
     // Keep single-restaurant pickup row in sync so restaurant-scoped reads see the handover.
@@ -1672,7 +1667,7 @@ export async function confirmReachedDropDelivery(orderId, deliveryPartnerId) {
     if (!isPrimary) {
       throw new ForbiddenError('Not your order');
     }
-    
+
     if (order.workflowStatus !== 'OUT_FOR_DELIVERY') {
       throw new ValidationError('Order not ready for OTP');
     }
@@ -1898,7 +1893,7 @@ export async function confirmSplitDelivery(orderId, deliveryPartnerId) {
 
   await order.save();
   emitOrderUpdate(order, deliveryPartnerId);
-  
+
   return sanitizeOrderForExternal(order);
 }
 
@@ -1918,7 +1913,7 @@ export async function verifyDropOtpDelivery(orderId, deliveryPartnerId, otp) {
     if (!isPrimary) {
       throw new ForbiddenError('Not your order');
     }
-    
+
     if (order.workflowStatus !== 'OUT_FOR_DELIVERY') {
       throw new ValidationError('Invalid state for OTP verification');
     }
@@ -2237,7 +2232,7 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
   const from = order.orderStatus;
   const nextStatus = 'delivered';
   if (!isStatusAdvance(from, nextStatus)) {
-      throw new ValidationError(`Order is already at status '${from}'. Cannot re-mark as '${nextStatus}'.`);
+    throw new ValidationError(`Order is already at status '${from}'. Cannot re-mark as '${nextStatus}'.`);
   }
   // 4A: adjacency guard — 'delivered' may only follow 'picked_up'. Closes the rank-only hole
   // where ready_for_pickup → delivered (skipping pickup) was accepted because 80 > 40.
@@ -2304,7 +2299,7 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
       }
     }
   }
-  
+
   // 2. Financial Context Resolution
   const tx = await FoodTransaction.findOne({ orderId: order._id }).lean();
   const prevPayStatus = String(tx?.payment?.status || order?.payment?.status || 'cod_pending');
@@ -2367,8 +2362,8 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
   // 5. Update Financial Ledger (FoodTransaction)
   // This triggers the sync back to FoodOrder.payment.method which updates the Rider's Cash Limit (if cash) or Pocket (always).
   const ledgerKind =
-    finalPayMethod === 'cash' 
-      ? 'cod_marked_paid_on_delivery' 
+    finalPayMethod === 'cash'
+      ? 'cod_marked_paid_on_delivery'
       : (finalPayMethod === 'razorpay_qr' ? 'cod_collect_qr_settled' : 'payment_snapshot_sync');
 
   await foodTransactionService.updateTransactionStatus(order._id, ledgerKind, {
@@ -2400,10 +2395,10 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
         io.to(rooms.delivery(order.dispatch.sharedPartnerId)).emit('order_earnings_split', splitPayload);
       }
     }
-  } catch (err) {}
+  } catch (err) { }
 
   emitOrderUpdate(order, deliveryPartnerId);
-  
+
   enqueueOrderEvent('delivery_completed', {
     orderMongoId: order._id?.toString?.(),
     orderId: order.orderId || order._id.toString(),
@@ -2440,7 +2435,7 @@ export async function updateOrderStatusDelivery(orderId, deliveryPartnerId, orde
     if (!isPrimary) {
       throw new ForbiddenError('Not your order');
     }
-    
+
     order.orderStatus = orderStatus;
     order.status = orderStatus;
     await order.save();
@@ -2455,7 +2450,7 @@ export async function updateOrderStatusDelivery(orderId, deliveryPartnerId, orde
 
   const from = order.orderStatus;
   if (!isStatusAdvance(from, orderStatus)) {
-      throw new ValidationError(`Current order status '${from}' is further ahead than '${orderStatus}'. Order cannot be moved backwards.`);
+    throw new ValidationError(`Current order status '${from}' is further ahead than '${orderStatus}'. Order cannot be moved backwards.`);
   }
   order.orderStatus = orderStatus;
   pushStatusHistory(order, {

@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  ChefHat, MapPin, Phone, 
-  ChevronDown, ChevronUp, Package, 
+import {
+  ChefHat, MapPin, Phone,
+  ChevronDown, ChevronUp, Package,
   Navigation, CheckCircle2, Camera, Loader2, Image as ImageIcon,
   Clock
 } from 'lucide-react';
@@ -17,13 +17,13 @@ import { useDeliveryStore } from '@/modules/DeliveryV2/store/useDeliveryStore';
  * PickupActionModal - Unified White/Green Theme with Slider Actions.
  * Includes Bill Upload feature prior to pickup.
  */
-export const PickupActionModal = ({ 
-  order, 
-  status, 
-  isWithinRange, 
+export const PickupActionModal = ({
+  order,
+  status,
+  isWithinRange,
   distanceToTarget,
   eta,
-  onReachedPickup, 
+  onReachedPickup,
   onPickedUp,
   onMinimize,
 }) => {
@@ -135,14 +135,14 @@ export const PickupActionModal = ({
         toast.success("Looking for another driver…");
         const { activeOrder, setActiveOrder } = useDeliveryStore.getState();
         if (activeOrder && (activeOrder._id === order._id || activeOrder.orderId === order.orderId)) {
-           setActiveOrder({
-              ...activeOrder,
-              dispatch: {
-                 ...activeOrder.dispatch,
-                 isShared: true,
-                 shareOpenedAt: new Date().toISOString(),
-              }
-           });
+          setActiveOrder({
+            ...activeOrder,
+            dispatch: {
+              ...activeOrder.dispatch,
+              isShared: true,
+              shareOpenedAt: new Date().toISOString(),
+            }
+          });
         }
       }
     } catch (err) {
@@ -161,7 +161,7 @@ export const PickupActionModal = ({
         const id = user?._id || user?.id || user?.partnerId;
         if (id) return String(id);
       }
-    } catch {}
+    } catch { }
     try {
       const token = localStorage.getItem('delivery_accessToken');
       if (!token) return null;
@@ -255,7 +255,7 @@ export const PickupActionModal = ({
         {/* Handle / Minimize */}
         <div className="w-full flex justify-center pb-2 sm:pb-4 pt-1">
           <button onClick={onMinimize} className="p-1 hover:bg-gray-100 active:scale-95 transition-all rounded-full flex flex-col items-center">
-             <ChevronDown className="w-6 h-6 text-gray-400 stroke-3" />
+            <ChevronDown className="w-6 h-6 text-gray-400 stroke-3" />
           </button>
         </div>
 
@@ -296,7 +296,7 @@ export const PickupActionModal = ({
                   <Phone className="w-5 h-5" />
                 </button>
               )}
-              <button 
+              <button
                 onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(restaurantAddress)}`, '_blank')}
                 className="w-10 h-10 rounded-full bg-gray-900 flex items-center justify-center text-white shadow-lg"
               >
@@ -307,105 +307,102 @@ export const PickupActionModal = ({
         ) : (
           <div className="space-y-4 mb-6">
             <div className="flex items-center justify-between">
-               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Multi-Pickup Route</p>
-               <div className="flex items-center gap-2">
-                 <button
-                   onClick={() => setShowDelayPicker(true)}
-                   className="w-7 h-7 rounded-full bg-orange-50 flex items-center justify-center text-orange-600 border border-orange-100"
-                   title="Report Delay"
-                 >
-                   <Clock className="w-4 h-4" />
-                 </button>
-                 <p className="text-[10px] font-bold text-orange-500 uppercase tracking-widest">
-                    {activePickups.filter(p => ['picked_up', 'ready_for_handover'].includes(p.status)).length} / {activePickups.length} Picked
-                 </p>
-               </div>
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Multi-Pickup Route</p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowDelayPicker(true)}
+                  className="w-7 h-7 rounded-full bg-orange-50 flex items-center justify-center text-orange-600 border border-orange-100"
+                  title="Report Delay"
+                >
+                  <Clock className="w-4 h-4" />
+                </button>
+                <p className="text-[10px] font-bold text-orange-500 uppercase tracking-widest">
+                  {activePickups.filter(p => ['picked_up', 'ready_for_handover'].includes(p.status)).length} / {activePickups.length} Picked
+                </p>
+              </div>
             </div>
             {activePickups.map((p, idx) => {
-               const isDone = ['picked_up', 'ready_for_handover'].includes(p.status);
-               const isCurrent = !isDone && activePickups.findIndex(px => !['picked_up', 'ready_for_handover'].includes(px.status)) === idx;
-               
-               return (
-                 <div
-                   key={String(p.restaurantId || idx)}
-                   className={`p-4 rounded-2xl border-2 transition-all min-w-0 ${
-                     isCurrent
-                       ? 'bg-orange-50/50 border-orange-200'
-                       : isDone
-                         ? 'bg-green-50/30 border-green-100 opacity-60'
-                         : 'bg-gray-50/50 border-gray-100'
-                   }`}
-                 >
-                    <div className="flex items-start justify-between gap-2 min-w-0">
-                       <div className="flex gap-3 min-w-0 flex-1">
-                          <div className={`w-10 h-10 shrink-0 rounded-xl flex items-center justify-center shadow-sm ${isCurrent ? 'bg-orange-500 text-white' : 'bg-white text-gray-400'}`}>
-                             <ChefHat className="w-5 h-5" />
-                          </div>
-                           <div className="min-w-0 flex-1">
-                              <h4 className="text-sm font-bold text-gray-950 break-words [overflow-wrap:anywhere]">{p.restaurantName}</h4>
-                              <div className="flex flex-wrap items-start gap-1.5 mt-0.5">
-                                <p className="text-[10px] text-gray-500 break-words [overflow-wrap:anywhere] min-w-0 flex-1">
-                                  {p.location?.address || p.restaurantAddress || 'Pickup location'}
-                                </p>
-                                <span className={`shrink-0 text-[8px] px-1.5 py-0.5 rounded-full font-bold uppercase ${
-                                  p.status === 'pending' ? 'bg-gray-100 text-gray-500' : 
-                                  p.status === 'accepted' || p.status === 'preparing' ? 'bg-blue-100 text-blue-600' :
-                                  'bg-green-100 text-green-600'
-                                }`}>
-                                  {p.status === 'pending' ? 'Waiting' : p.status}
-                                </span>
-                              </div>
-                           </div>
-                       </div>
-                       <div className="flex gap-2 shrink-0">
-                          {p.phone && (
-                            <button onClick={() => window.location.href = `tel:${p.phone}`} className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-green-600 border border-gray-100">
-                               <Phone className="w-4 h-4" />
-                            </button>
-                          )}
-                          <button 
-                            onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(p.location?.address || p.restaurantAddress || p.restaurantName)}`, '_blank')}
-                            className="w-8 h-8 rounded-full bg-gray-900 flex items-center justify-center text-white"
-                          >
-                             <Navigation className="w-4 h-4" />
-                          </button>
-                       </div>
-                    </div>
-                    {isCurrent && (
-                       <div className="mt-3 flex items-center justify-between border-t border-orange-100 pt-3">
-                          <p className="text-[9px] font-bold text-orange-600 uppercase tracking-widest">
-                             {isAtPickup ? "Reached Pickup Location" : `${(distanceToTarget / 1000).toFixed(1)} km to this store`}
+              const isDone = ['picked_up', 'ready_for_handover'].includes(p.status);
+              const isCurrent = !isDone && activePickups.findIndex(px => !['picked_up', 'ready_for_handover'].includes(px.status)) === idx;
+
+              return (
+                <div
+                  key={String(p.restaurantId || idx)}
+                  className={`p-4 rounded-2xl border-2 transition-all min-w-0 ${isCurrent
+                      ? 'bg-orange-50/50 border-orange-200'
+                      : isDone
+                        ? 'bg-green-50/30 border-green-100 opacity-60'
+                        : 'bg-gray-50/50 border-gray-100'
+                    }`}
+                >
+                  <div className="flex items-start justify-between gap-2 min-w-0">
+                    <div className="flex gap-3 min-w-0 flex-1">
+                      <div className={`w-10 h-10 shrink-0 rounded-xl flex items-center justify-center shadow-sm ${isCurrent ? 'bg-orange-500 text-white' : 'bg-white text-gray-400'}`}>
+                        <ChefHat className="w-5 h-5" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <h4 className="text-sm font-bold text-gray-950 break-words [overflow-wrap:anywhere]">{p.restaurantName}</h4>
+                        <div className="flex flex-wrap items-start gap-1.5 mt-0.5">
+                          <p className="text-[10px] text-gray-500 break-words [overflow-wrap:anywhere] min-w-0 flex-1">
+                            {p.location?.address || p.restaurantAddress || 'Pickup location'}
                           </p>
-                       </div>
-                    )}
-                    {isDone && (
-                       <div className="mt-2 flex items-center gap-1 text-[9px] font-bold text-green-600 uppercase tracking-widest">
-                          <CheckCircle2 className="w-3 h-3" />
-                          <span>Picked Up</span>
-                       </div>
-                    )}
-                 </div>
-               );
+                          <span className={`shrink-0 text-[8px] px-1.5 py-0.5 rounded-full font-bold uppercase ${p.status === 'pending' ? 'bg-gray-100 text-gray-500' :
+                              p.status === 'accepted' || p.status === 'preparing' ? 'bg-blue-100 text-blue-600' :
+                                'bg-green-100 text-green-600'
+                            }`}>
+                            {p.status === 'pending' ? 'Waiting' : p.status}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      {p.phone && (
+                        <button onClick={() => window.location.href = `tel:${p.phone}`} className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-green-600 border border-gray-100">
+                          <Phone className="w-4 h-4" />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(p.location?.address || p.restaurantAddress || p.restaurantName)}`, '_blank')}
+                        className="w-8 h-8 rounded-full bg-gray-900 flex items-center justify-center text-white"
+                      >
+                        <Navigation className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                  {isCurrent && (
+                    <div className="mt-3 flex items-center justify-between border-t border-orange-100 pt-3">
+                      <p className="text-[9px] font-bold text-orange-600 uppercase tracking-widest">
+                        {isAtPickup ? "Reached Pickup Location" : `${(distanceToTarget / 1000).toFixed(1)} km to this store`}
+                      </p>
+                    </div>
+                  )}
+                  {isDone && (
+                    <div className="mt-2 flex items-center gap-1 text-[9px] font-bold text-green-600 uppercase tracking-widest">
+                      <CheckCircle2 className="w-3 h-3" />
+                      <span>Picked Up</span>
+                    </div>
+                  )}
+                </div>
+              );
             })}
           </div>
         )}
 
         {/* Action Sliders */}
-          <div className="space-y-4 sm:space-y-6">
-           {!hasReachedPickup ? (
+        <div className="space-y-4 sm:space-y-6">
+          {!hasReachedPickup ? (
             <div>
-              <p className={`text-center text-[10px] font-bold uppercase tracking-widest mb-3 transition-colors ${
-                isPending ? 'text-red-500' : isWithinRange ? 'text-green-600' : 'text-orange-500 animate-pulse'
-              }`}>
-                {isPending 
-                  ? 'Wait for Restaurant to Accept Order...' 
-                  : isWithinRange 
-                    ? 'Ready - Swipe to confirm arrival' 
+              <p className={`text-center text-[10px] font-bold uppercase tracking-widest mb-3 transition-colors ${isPending ? 'text-red-500' : isWithinRange ? 'text-green-600' : 'text-orange-500 animate-pulse'
+                }`}>
+                {isPending
+                  ? 'Wait for Restaurant to Accept Order...'
+                  : isWithinRange
+                    ? 'Ready - Swipe to confirm arrival'
                     : 'Heading to restaurant'}
               </p>
-              <ActionSlider 
+              <ActionSlider
                 key="action-reach"
-                label={isPending ? "Waiting for Restaurant..." : "Slide to Reach"} 
+                label={isPending ? "Waiting for Restaurant..." : "Slide to Reach"}
                 successLabel="Reached!"
                 disabled={!isWithinRange || isPending}
                 onConfirm={onReachedPickup}
@@ -415,46 +412,46 @@ export const PickupActionModal = ({
           ) : (
             <div className="space-y-4">
               <div className="flex justify-center items-center gap-3 w-full">
-                 {!billImageUploaded && !isUploadingBill && canActOnPickup && (
-                   <>
-                      <button
-                        onClick={handleTakeCameraPhoto}
-                        className="flex-1 flex items-center justify-center gap-2 py-3 sm:py-4 rounded-2xl bg-gray-900 text-white font-bold text-[11px] sm:text-xs uppercase tracking-widest shadow-lg active:scale-95 transition-all"
-                      >
-                        <Camera className="w-5 h-5" />
-                        <span>Camera</span>
-                      </button>
-                      <button
-                        onClick={handlePickFromGallery}
-                        className="flex-1 flex items-center justify-center gap-2 py-3 sm:py-4 rounded-2xl bg-orange-50 text-orange-600 border border-orange-100 font-bold text-[11px] sm:text-xs uppercase tracking-widest active:scale-95 transition-all"
-                      >
-                        <ImageIcon className="w-5 h-5" />
-                        <span>Gallery</span>
-                      </button>
-                   </>
-                 )}
+                {!billImageUploaded && !isUploadingBill && canActOnPickup && (
+                  <>
+                    <button
+                      onClick={handleTakeCameraPhoto}
+                      className="flex-1 flex items-center justify-center gap-2 py-3 sm:py-4 rounded-2xl bg-gray-900 text-white font-bold text-[11px] sm:text-xs uppercase tracking-widest shadow-lg active:scale-95 transition-all"
+                    >
+                      <Camera className="w-5 h-5" />
+                      <span>Camera</span>
+                    </button>
+                    <button
+                      onClick={handlePickFromGallery}
+                      className="flex-1 flex items-center justify-center gap-2 py-3 sm:py-4 rounded-2xl bg-orange-50 text-orange-600 border border-orange-100 font-bold text-[11px] sm:text-xs uppercase tracking-widest active:scale-95 transition-all"
+                    >
+                      <ImageIcon className="w-5 h-5" />
+                      <span>Gallery</span>
+                    </button>
+                  </>
+                )}
 
-                 {isUploadingBill && (
-                    <div className="w-full flex items-center justify-center gap-2 py-3 sm:py-4 rounded-2xl bg-gray-50 text-gray-400 font-bold text-[11px] sm:text-xs uppercase tracking-widest">
-                       <Loader2 className="w-4 h-4 animate-spin" />
-                       <span>Uploading...</span>
-                    </div>
-                 )}
+                {isUploadingBill && (
+                  <div className="w-full flex items-center justify-center gap-2 py-3 sm:py-4 rounded-2xl bg-gray-50 text-gray-400 font-bold text-[11px] sm:text-xs uppercase tracking-widest">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Uploading...</span>
+                  </div>
+                )}
 
-                 {billImageUploaded && (
-                    <div className="w-full flex items-center justify-center gap-2 py-3 sm:py-4 rounded-2xl bg-green-100 text-green-700 font-bold text-[11px] sm:text-xs uppercase tracking-widest">
-                       <CheckCircle2 className="w-4 h-4" />
-                       <span>Bill Uploaded</span>
-                    </div>
-                 )}
+                {billImageUploaded && (
+                  <div className="w-full flex items-center justify-center gap-2 py-3 sm:py-4 rounded-2xl bg-green-100 text-green-700 font-bold text-[11px] sm:text-xs uppercase tracking-widest">
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Bill Uploaded</span>
+                  </div>
+                )}
 
-                 <input
-                   ref={cameraInputRef}
-                   type="file"
-                   accept="image/*"
-                   onChange={(e) => handleBillImageSelect(e.target.files[0])}
-                   className="hidden"
-                 />
+                <input
+                  ref={cameraInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => handleBillImageSelect(e.target.files[0])}
+                  className="hidden"
+                />
               </div>
 
               {/* Optional second driver for large orders — primary decides at pickup */}
@@ -535,9 +532,9 @@ export const PickupActionModal = ({
                   {billImageUploaded ? "Check the restaurant logo - Swipe to pick up" : "Capture bill to unlock swipe"}
                 </p>
                 {canActOnPickup && (
-                  <ActionSlider 
+                  <ActionSlider
                     key="action-pickup"
-                    label="Slide to Pick Up" 
+                    label="Slide to Pick Up"
                     successLabel="Picked Up!"
                     disabled={!billImageUploaded}
                     onConfirm={() => onPickedUp(billImageUrl)}
@@ -560,7 +557,7 @@ export const PickupActionModal = ({
           )}
 
           {/* Collapsible Order Summary */}
-          <button 
+          <button
             onClick={() => setShowItems(!showItems)}
             className="w-full flex items-center justify-between p-3.5 sm:p-4 bg-gray-50 rounded-2xl hover:bg-gray-100 transition-colors"
           >
@@ -604,7 +601,7 @@ export const PickupActionModal = ({
               <div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6" />
               <h3 className="text-xl font-black text-gray-900 mb-2">Report Delay</h3>
               <p className="text-sm text-gray-500 mb-6 font-medium">Why is it taking longer? Select a reason to inform the customer.</p>
-              
+
               <div className="grid grid-cols-2 gap-3">
                 {delayReasons.map((r, i) => (
                   <button
@@ -618,7 +615,7 @@ export const PickupActionModal = ({
                 ))}
               </div>
 
-              <button 
+              <button
                 onClick={() => setShowDelayPicker(false)}
                 className="w-full mt-6 py-4 rounded-2xl text-gray-400 font-bold text-xs uppercase tracking-widest hover:text-gray-600 transition-colors"
               >

@@ -10,16 +10,16 @@ const foodTransactionSchema = new mongoose.Schema({
     sharedPartnerId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodDeliveryPartner', index: true },
 
     // Core Payment Info
-    paymentMethod: { 
-        type: String, 
-        enum: ['cash', 'razorpay', 'razorpay_qr', 'wallet'], 
-        required: true 
+    paymentMethod: {
+        type: String,
+        enum: ['cash', 'razorpay', 'razorpay_qr', 'wallet'],
+        required: true
     },
-    status: { 
-        type: String, 
-        enum: ['pending', 'authorized', 'captured', 'failed', 'refunded'], 
+    status: {
+        type: String,
+        enum: ['pending', 'authorized', 'captured', 'failed', 'refunded'],
         default: 'pending',
-        index: true 
+        index: true
     },
     currency: { type: String, default: 'INR' },
 
@@ -92,14 +92,14 @@ const foodTransactionSchema = new mongoose.Schema({
         amount: Number,
         at: { type: Date, default: Date.now },
         note: String,
-        recordedBy: { 
-            role: { type: String }, 
+        recordedBy: {
+            role: { type: String },
             id: { type: mongoose.Schema.Types.ObjectId }
         }
     }]
-}, { 
-    collection: 'food_transactions', 
-    timestamps: true 
+}, {
+    collection: 'food_transactions',
+    timestamps: true
 });
 
 // Powerful indexes for Finance & Analytics

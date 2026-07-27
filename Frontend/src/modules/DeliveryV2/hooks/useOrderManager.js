@@ -8,8 +8,8 @@ import { toast } from 'sonner';
  * Connects directly to the backend API services.
  */
 export const useOrderManager = () => {
-  const { 
-    activeOrder, tripStatus, updateTripStatus, clearActiveOrder, setActiveOrder, riderLocation 
+  const {
+    activeOrder, tripStatus, updateTripStatus, clearActiveOrder, setActiveOrder, riderLocation
   } = useDeliveryStore();
 
   const resolveOrderId = (orderLike = activeOrder) =>
@@ -32,13 +32,13 @@ export const useOrderManager = () => {
     acceptOrderInFlight.current = true;
     try {
       const isShared = order.isShared || order.dispatch?.isShared;
-      const response = isShared 
+      const response = isShared
         ? await deliveryAPI.acceptSharedOrder(orderId)
         : await deliveryAPI.acceptOrder(orderId);
-      
+
       if (response?.data?.success) {
         const fullOrder = response.data.data?.order || order;
-        
+
         // Robustly determine locations from multiple possible formats (Populated API vs Socket)
         // Robustly determine locations from multiple possible formats
         const getLoc = (ref, keysLat, keysLng) => {
@@ -68,12 +68,12 @@ export const useOrderManager = () => {
 
         // Fallback to main restaurantId or top-level keys
         if (!resLoc) {
-          resLoc = getLoc(fullOrder.restaurantId, ['latitude', 'lat'], ['longitude', 'lng']) || 
-                   getLoc(fullOrder, ['restaurant_lat', 'restaurantLat', 'latitude'], ['restaurant_lng', 'restaurantLng', 'longitude']);
+          resLoc = getLoc(fullOrder.restaurantId, ['latitude', 'lat'], ['longitude', 'lng']) ||
+            getLoc(fullOrder, ['restaurant_lat', 'restaurantLat', 'latitude'], ['restaurant_lng', 'restaurantLng', 'longitude']);
         }
-                       
-        const cusLoc = getLoc(fullOrder.deliveryAddress, ['latitude', 'lat'], ['longitude', 'lng']) || 
-                       getLoc(fullOrder, ['customer_lat', 'customerLat', 'latitude'], ['customer_lng', 'customerLng', 'longitude']);
+
+        const cusLoc = getLoc(fullOrder.deliveryAddress, ['latitude', 'lat'], ['longitude', 'lng']) ||
+          getLoc(fullOrder, ['customer_lat', 'customerLat', 'latitude'], ['customer_lng', 'customerLng', 'longitude']);
 
         setActiveOrder({
           ...fullOrder,
@@ -147,12 +147,12 @@ export const useOrderManager = () => {
     try {
       // confirmOrderId(orderId, confirmedOrderId, location, data)
       const response = await deliveryAPI.confirmOrderId(
-        orderId, 
-        activeOrder.displayOrderId || orderId, 
+        orderId,
+        activeOrder.displayOrderId || orderId,
         riderLocation || {},
         { billImageUrl }
       );
-      
+
       if (response?.data?.success) {
         const updatedOrder = response.data.data?.order;
         if (updatedOrder) {
@@ -198,7 +198,7 @@ export const useOrderManager = () => {
                 const id = user?._id || user?.id || user?.partnerId;
                 if (id) return String(id);
               }
-            } catch {}
+            } catch { }
             return null;
           };
           const riderId = getRiderId();
@@ -277,7 +277,7 @@ export const useOrderManager = () => {
             const user = JSON.parse(stored);
             return String(user?._id || user?.id || user?.partnerId || '');
           }
-        } catch {}
+        } catch { }
         return '';
       };
       const riderId = getRiderId();
@@ -330,9 +330,9 @@ export const useOrderManager = () => {
       if (!error?.response) {
         toast.error(
           error?.response?.data?.error ||
-            error?.response?.data?.message ||
-            error?.message ||
-            'Verification failed',
+          error?.response?.data?.message ||
+          error?.message ||
+          'Verification failed',
         );
       }
       throw error;
