@@ -6,6 +6,12 @@ import { FoodRestaurantWithdrawal } from '../models/foodRestaurantWithdrawal.mod
 import { getBalance } from '../../../../core/payments/transaction.service.js';
 import { buildPaginationMeta, buildPaginationOptions } from '../../../../utils/helpers.js';
 
+/**
+ * Statuses considered "delivered" / order completed — only these orders
+ * should generate a restaurant wallet credit.
+ */
+const DELIVERED_STATUSES = ['delivered'];
+
 function toTwoDigitYearString(dateObj) {
     const y = String(dateObj.getFullYear());
     return y.slice(-2);
@@ -82,11 +88,21 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
     const nowWindow = getFixedCurrentCycleWindow(new Date());
 
     // Wallet balance: full ledger (not limited to settlement cycle window).
+    // The actual wallet balance is credited only after order delivery (delivery_completed event).
     const ledger = await getBalance('restaurant', String(rid));
 
+    // Only include transactions linked to DELIVERED orders.
+    // Restaurant earnings are credited to their wallet only after order completion.
+    const deliveredOrderIds = await FoodOrder.find({
+        restaurantId: rid,
+        orderStatus: { $in: DELIVERED_STATUSES },
+    }).select('_id').lean().then(docs => docs.map(d => d._id));
+
     // Unsettled orders for the live earnings list (matches withdrawable balance).
+    // Only show earnings from delivered orders — not from accepted/preparing orders.
     const currentTransactions = await FoodTransaction.find({
         restaurantId: rid,
+        orderId: { $in: deliveredOrderIds },
         status: { $in: ['captured', 'authorized'] },
         'settlement.isRestaurantSettled': { $ne: true }
     })
@@ -124,9 +140,10 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
 
     const currentCycleOrders = currentTransactions.map(mapTxToRestaurantOrder);
 
-    // Calculate global estimated payout (all unsettled transactions)
+    // Calculate global estimated payout (only from delivered, unsettled orders)
     const allUnsettledTransactions = await FoodTransaction.find({
         restaurantId: rid,
+        orderId: { $in: deliveredOrderIds },
         status: { $in: ['captured', 'authorized'] },
         'settlement.isRestaurantSettled': { $ne: true }
     }).select('amounts.restaurantShare').lean();
@@ -193,8 +210,16 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
         pagination: buildPaginationMeta({ page, limit, total: 0 }),
     };
     if (startDate && endDate) {
+        // For past cycles, also only include delivered orders
+        const pastDeliveredOrderIds = await FoodOrder.find({
+            restaurantId: rid,
+            orderStatus: { $in: DELIVERED_STATUSES },
+            createdAt: { $gte: startDate, $lte: endDate },
+        }).select('_id').lean().then(docs => docs.map(d => d._id));
+
         const pastFilter = {
             restaurantId: rid,
+            orderId: { $in: pastDeliveredOrderIds },
             status: { $in: ['captured', 'authorized'] },
             createdAt: { $gte: startDate, $lte: endDate },
         };
