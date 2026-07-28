@@ -85,6 +85,7 @@ import {
   isActivePickup,
   isShareRequired,
   pushSettlementSnapshot,
+  applyCancellationSettlement,
   computeRestaurantPrepMinutes,
   computeOrderEtaMinutes,
   assignPickupSequence,
@@ -510,18 +511,20 @@ export async function createOrder(userId, dto, options = {}) {
   const platformSubsidy = Number(normalizedPricing.platformSubsidy) || 0;
   const negativeSpeedBear = speedShareAdmin < 0 ? Math.abs(speedShareAdmin) : 0;
 
-  // Customer delivery fee (gross) funds rider + resto speed share; remainder stays with platform.
-  const platformProfit = Number(
+  // Net platform profit: use what the customer actually paid for delivery (not gross fee),
+  // do not subtract platformSubsidy separately (waived delivery is already ₹0 customer charge).
+  const rawPlatformProfit = Number(
     (
       Number(normalizedPricing.platformFee) +
-      Number(normalizedPricing.deliveryFee) +
+      customerDeliveryFeePaid +
       totalRestaurantCommission -
       riderEarning -
       speedShareRestaurantTotal -
       adminCouponDiscount -
-      platformSubsidy
+      negativeSpeedBear
     ).toFixed(2),
   );
+  const platformProfit = Math.max(0, rawPlatformProfit);
 
   const costBearers = [];
   if (platformSubsidy > 0) {
@@ -598,7 +601,8 @@ export async function createOrder(userId, dto, options = {}) {
       adminCouponDiscount,
       freeDeliverySubsidy: platformSubsidy,
       negativeSpeedBear,
-      netProfit: platformProfit,
+      netProfit: rawPlatformProfit,
+      netProfitStored: platformProfit,
     },
     speed: {
       feeModifier: Number(breakdown.speedFeeModifier) || 0,
@@ -1072,6 +1076,11 @@ export async function cancelOrderNoDriverFound(orderId) {
   });
 
   await applyOrderRefundIfPaid(order, { note: cancelNote, preferWallet: true });
+  applyCancellationSettlement(order, {
+    cancelledBy: 'system',
+    note: cancelNote,
+  });
+  pushSettlementSnapshot(order, 'admin_cancel', cancelNote);
   await order.save();
 
   const refundDetail =
@@ -1142,12 +1151,20 @@ async function finalizeRestaurantRejectionExhausted(order, restaurantId, note = 
     recordedByRole: 'RESTAURANT',
     recordedById: restaurantId,
     note: cancelNote,
+    preferWallet: true,
   });
+  applyCancellationSettlement(order, {
+    cancelledBy: 'restaurant',
+    note: cancelNote,
+  });
+  pushSettlementSnapshot(order, 'admin_cancel', cancelNote);
   await order.save();
 
   const refundDetail =
     order.payment?.status === 'refunded'
-      ? ` Refund of ₹${order.pricing.total} is being processed.`
+      ? order.payment?.refund?.destination === 'wallet'
+        ? ` ₹${order.pricing.total} has been credited to your wallet.`
+        : ` Your refund of ₹${order.pricing.total} is being processed.`
       : '';
   const userMessage = `The restaurant is not accepting this order.${refundDetail}`;
   const riderMessage = `Restaurant rejected order #${order.order_id || order._id}. You are now free to accept new orders.`;
@@ -1166,10 +1183,9 @@ async function finalizeRestaurantRejectionExhausted(order, restaurantId, note = 
       io.to(rooms.user(order.userId)).emit('order_status_update', payload);
       io.to(rooms.restaurant(restaurantId)).emit('order_status_update', payload);
       if (assignedRiderId) {
-        io.to(rooms.delivery(assignedRiderId)).emit('order_status_update', {
-          ...payload,
-          message: riderMessage,
-        });
+        const riderPayload = { ...payload, message: riderMessage };
+        io.to(rooms.delivery(assignedRiderId)).emit('order_status_update', riderPayload);
+        io.to(rooms.delivery(assignedRiderId)).emit('order_cancelled', riderPayload);
       }
     }
   } catch (err) {
@@ -1730,6 +1746,12 @@ export async function cancelOrder(orderId, userId, reason, refundDestination = "
     }
   }
 
+  applyCancellationSettlement(order, {
+    cancelledBy: 'user',
+    note: reason || 'Order cancelled by customer',
+  });
+  pushSettlementSnapshot(order, 'admin_cancel', reason || 'Order cancelled by customer');
+
   await order.save();
 
   enqueueOrderEvent("order_cancelled_by_user", {
@@ -1876,6 +1898,7 @@ export async function submitOrderRatings(orderId, userId, dto) {
     restaurantRating: dto.restaurantRating,
     deliveryPartnerRating: hasDeliveryPartner ? dto.deliveryPartnerRating : null
   });
+  return normalizeOrderForClient(order);
 }
 
 export async function updateOrderInstructions(orderId, userId, instructions) {
@@ -2070,6 +2093,56 @@ async function finalizeDroppedRestaurantPartialContinue(order, restaurantId, not
     );
   }
 
+  // Keep settlement ledger in sync with remaining restaurants after a partial drop.
+  if (order.settlementBreakdown && typeof order.settlementBreakdown === 'object') {
+    const remainingSettlements = Array.isArray(order.restaurantSettlement)
+      ? order.restaurantSettlement
+      : [];
+    const remainingCommission = remainingSettlements.reduce(
+      (sum, s) => sum + (Number(s.commission) || 0),
+      0,
+    );
+    order.settlementBreakdown = {
+      ...order.settlementBreakdown,
+      customer: {
+        ...(order.settlementBreakdown.customer || {}),
+        paid: Number(order.pricing?.total) || 0,
+        foodSubtotal: Number(order.pricing?.foodSubtotal ?? order.pricing?.subtotal) || 0,
+        packagingFee: Number(order.pricing?.packagingFee) || 0,
+        tax: Number(order.pricing?.tax) || 0,
+      },
+      restaurants: remainingSettlements.map((s) => ({
+        restaurantId: s.restaurantId,
+        restaurantName: s.restaurantName,
+        foodAmount: s.foodAmount,
+        packagingFee: s.packagingFee,
+        commission: s.commission,
+        speedShare: s.speedShare,
+        couponDiscount: s.couponDiscount,
+        payout: s.restaurantPayout,
+      })),
+      platform: {
+        ...(order.settlementBreakdown.platform || {}),
+        restaurantCommission: remainingCommission,
+      },
+    };
+    if (order.pricing) {
+      order.pricing.restaurantCommission = remainingCommission;
+    }
+  }
+
+  try {
+    await foodTransactionService.voidRestaurantTransaction(
+      order._id,
+      rid,
+      note || `${restaurantName} dropped from multi-restaurant order`,
+    );
+  } catch (err) {
+    logger.warn(
+      `Failed to void FoodTransaction for dropped restaurant ${rid} on order ${order._id}: ${err?.message || err}`,
+    );
+  }
+
   // Remove dropped restaurant items from active items list (keep for audit in statusHistory)
   const droppedItems = (order.items || []).filter(
     (it) => String(it?.restaurantId || '') === rid,
@@ -2240,6 +2313,20 @@ async function finalizeDroppedRestaurantPartialContinue(order, restaurantId, not
     logger.warn(`partial drop socket emit failed: ${err?.message || err}`);
   }
 
+  const riderId = order.dispatch?.deliveryPartnerId
+    ? String(order.dispatch.deliveryPartnerId)
+    : null;
+  const sharedRiderId = order.dispatch?.sharedPartnerId
+    ? String(order.dispatch.sharedPartnerId)
+    : null;
+  const driverTargets = [];
+  if (riderId) {
+    driverTargets.push({ ownerType: 'DELIVERY_PARTNER', ownerId: riderId });
+  }
+  if (sharedRiderId && sharedRiderId !== riderId) {
+    driverTargets.push({ ownerType: 'DELIVERY_PARTNER', ownerId: sharedRiderId });
+  }
+
   await notifyOwnersSafely(
     [{ ownerType: 'USER', ownerId: order.userId }],
     {
@@ -2251,9 +2338,25 @@ async function finalizeDroppedRestaurantPartialContinue(order, restaurantId, not
         orderMongoId: String(order._id),
         refundAmount: String(refundAmount),
         restaurantName,
+        restaurantId: rid,
       },
     },
   );
+
+  if (driverTargets.length > 0) {
+    await notifyOwnersSafely(driverTargets, {
+      title: 'Restaurant removed from order',
+      body: `${restaurantName} was removed from order #${order.order_id || order._id}. Continue with remaining pickups.`,
+      data: {
+        type: 'order_partial_restaurant_dropped',
+        orderId: String(order._id),
+        orderMongoId: String(order._id),
+        refundAmount: String(refundAmount),
+        restaurantName,
+        restaurantId: rid,
+      },
+    });
+  }
 
   enqueueOrderEvent('order_partial_restaurant_dropped', {
     orderMongoId: order._id?.toString?.(),
@@ -2263,6 +2366,68 @@ async function finalizeDroppedRestaurantPartialContinue(order, restaurantId, not
   });
 
   return order;
+}
+
+/**
+ * Admin drops one restaurant from a multi-restaurant order.
+ * Continues with remaining restaurants + partial wallet refund (same path as restaurant reject).
+ */
+export async function dropRestaurantFromOrderByAdmin(
+  orderId,
+  restaurantId,
+  adminId,
+  reason = '',
+) {
+  const identity = buildOrderIdentityFilter(orderId);
+  if (!identity) throw new ValidationError('Order id required');
+  if (!restaurantId) throw new ValidationError('Restaurant id required');
+
+  const order = await FoodOrder.findOne(identity);
+  if (!order) throw new NotFoundError('Order not found');
+
+  const terminal = [
+    'delivered',
+    'cancelled_by_user',
+    'cancelled_by_restaurant',
+    'cancelled_by_admin',
+  ];
+  if (terminal.includes(order.orderStatus)) {
+    throw new ValidationError('Order cannot be modified in its current status');
+  }
+
+  const active = getActivePickups(order);
+  const isMulti =
+    Boolean(order.isMultiRestaurant) ||
+    active.length > 1 ||
+    (Array.isArray(order.pickups) && order.pickups.length > 1);
+  if (!isMulti) {
+    throw new ValidationError(
+      'Use full order cancel for single-restaurant orders',
+    );
+  }
+
+  const rid = String(restaurantId);
+  const pickup = (order.pickups || []).find(
+    (p) => String(p.restaurantId || '') === rid && !p.permanentlyDropped,
+  );
+  if (!pickup) {
+    throw new ValidationError('Active pickup not found for this restaurant');
+  }
+
+  const restaurantName = pickup.restaurantName || 'Restaurant';
+  const note =
+    reason?.trim() ||
+    `Admin removed ${restaurantName} from multi-restaurant order`;
+
+  pushStatusHistory(order, {
+    byRole: 'ADMIN',
+    byId: adminId,
+    from: order.orderStatus,
+    to: order.orderStatus,
+    note,
+  });
+
+  return finalizeDroppedRestaurantPartialContinue(order, restaurantId, note);
 }
 
 export async function updateOrderStatusRestaurant(
@@ -2697,6 +2862,18 @@ export async function listOrdersAvailableDelivery(deliveryPartnerId, query) {
 
 export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
   return deliveryService.acceptOrderDelivery(orderId, deliveryPartnerId);
+}
+
+export async function setPickupSequenceDelivery(
+  orderId,
+  deliveryPartnerId,
+  restaurantIds,
+) {
+  return deliveryService.setPickupSequenceDelivery(
+    orderId,
+    deliveryPartnerId,
+    restaurantIds,
+  );
 }
 
 export async function rejectOrderDelivery(orderId, deliveryPartnerId) {
@@ -3343,6 +3520,11 @@ export async function cancelOrderByAdmin(
     note: cancelNote,
     preferWallet: refundDestination === "wallet",
   });
+  applyCancellationSettlement(order, {
+    cancelledBy: 'admin',
+    note: cancelNote,
+  });
+  pushSettlementSnapshot(order, 'admin_cancel', cancelNote);
   await order.save();
 
   const refundDetail =
@@ -3562,12 +3744,18 @@ export async function cancelOrderAdmin(orderId, adminId, reason = '') {
     note: cancelNote,
     preferWallet: true,
   });
+  applyCancellationSettlement(order, {
+    cancelledBy: 'admin',
+    note: cancelNote,
+  });
   pushSettlementSnapshot(order, 'admin_cancel', cancelNote);
   await order.save();
 
   const refundDetail =
     order.payment?.status === 'refunded' || order.payment?.refund?.status === 'processed'
-      ? ` Refund of ₹${order.pricing?.total || 0} has been initiated.`
+      ? order.payment?.refund?.destination === 'wallet'
+        ? ` ₹${order.pricing?.total || 0} has been credited to your wallet.`
+        : ` Your refund of ₹${order.pricing?.total || 0} is being processed.`
       : '';
   const userMessage = `Your order was cancelled by support.${refundDetail}`;
   const riderMessage = `Order #${order.order_id || order._id} was cancelled by admin. You are free to accept new orders.`;

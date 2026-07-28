@@ -1332,6 +1332,9 @@ function Cart() {
     ? (Number(pricing.deliveryDiscount) || 0)
     : (isFreeDeliveryCoupon(appliedCoupon) ? deliveryFee : 0)
   const customerDeliveryFee = Math.max(0, deliveryFee - deliveryDiscount)
+  const isDeliveryFreeForCustomer =
+    customerDeliveryFee === 0 &&
+    (deliveryDiscount > 0 || Number(pricing?.platformSubsidy) > 0 || deliveryFeeBreakdown?.speedSkippedBecauseFreeDelivery)
   const deliveryBaseBeforeMultiplier = deliveryFeeBreakdown?.baseFee != null
     ? Number(deliveryFeeBreakdown.baseFee)
     : deliveryFeeBeforeSpeed
@@ -1345,11 +1348,11 @@ function Cart() {
     return 0
   })()
   const hasDistanceDeliveryBreakdown =
-    deliveryFeeBreakdown?.source === "distance" &&
-    Number.isFinite(Number(deliveryFeeBreakdown?.distanceKm))
+    Number.isFinite(Number(deliveryFeeBreakdown?.distanceKm)) &&
+    (deliveryFeeBreakdown?.source === "distance" || deliveryFeeBreakdown?.source === "free")
   const deliveryFeeBreakdownText = hasDistanceDeliveryBreakdown
-    ? `Distance ${Number(deliveryFeeBreakdown.distanceKm).toFixed(1)} km`
-    : null
+    ? `Distance ${Number(deliveryFeeBreakdown.distanceKm).toFixed(1)} km${isDeliveryFreeForCustomer ? " · delivery free" : ""}`
+    : (isDeliveryFreeForCustomer ? "Delivery free on this order" : null)
 
   // Detect multi-restaurant order
   const uniqueRestaurantIds = [...new Set(cart
@@ -2055,7 +2058,7 @@ function Cart() {
         setCouponCode("")
         showCouponError(errorMessage)
       } else {
-        showCouponError(errorMessage)
+        toast.error(errorMessage)
       }
       releasePlaceOrderLock()
     }
@@ -2371,7 +2374,9 @@ function Cart() {
                     {deliveryOptions.map((option) => {
                       const isSelected = deliveryOption === option.id
                       const IconComponent = option.icon
-                      const feeAmount = Math.max(0, deliveryFeeBeforeSpeed + (Number(option.feeModifier) || 0))
+                      const feeAmount = isDeliveryFreeForCustomer
+                        ? 0
+                        : Math.max(0, deliveryFeeBeforeSpeed + (Number(option.feeModifier) || 0))
 
                       return (
                         <div
@@ -2411,8 +2416,15 @@ function Cart() {
                                 {option.time}
                               </p>
                               <p className="text-[10px] font-semibold text-gray-400 mt-0.5 leading-none">
-                                {feeAmount === 0 ? "FREE" : `${RUPEE_SYMBOL}${feeAmount.toFixed(2)}`}
+                                {isDeliveryFreeForCustomer || feeAmount === 0
+                                  ? "FREE"
+                                  : `${RUPEE_SYMBOL}${feeAmount.toFixed(2)}`}
                               </p>
+                              {isDeliveryFreeForCustomer && (
+                                <p className="text-[9px] text-emerald-600 mt-0.5 leading-none">
+                                  ETA only
+                                </p>
+                              )}
                             </div>
                             <div className={`h-3.5 w-3.5 rounded-full border flex items-center justify-center shrink-0 ${isSelected ? "border-[#16A34A] bg-[#16A34A]" : "border-gray-300 dark:border-gray-600"
                               }`}>
@@ -2767,7 +2779,7 @@ function Cart() {
                             </span>
                           </div>
                         )}
-                        {speedFeeModifier !== 0 && selectedDeliveryOption && (
+                        {speedFeeModifier !== 0 && selectedDeliveryOption && !isDeliveryFreeForCustomer && (
                           <div className="flex justify-between text-sm">
                             <span className="text-gray-600 dark:text-gray-400">
                               {speedFeeModifier > 0

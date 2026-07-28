@@ -43,18 +43,67 @@ export const PickupActionModal = ({
     { label: "Rain/Weather", icon: "🌧️", value: "Rain/Weather 🌧️" }
   ];
 
-  // Current multi-restaurant stop — bill must be captured again at each restaurant
+  // Current multi-restaurant stop — follow driver-chosen sequence
   const currentPickupKey = useMemo(() => {
     if (order?.isMultiRestaurant && Array.isArray(order.pickups) && order.pickups.length > 0) {
-      const next = order.pickups.find(
-        (p) => !p.permanentlyDropped && !['picked_up', 'ready_for_handover', 'cancelled'].includes(String(p.status || '')),
-      );
+      const remaining = order.pickups
+        .filter(
+          (p) =>
+            !p.permanentlyDropped &&
+            !['picked_up', 'ready_for_handover', 'cancelled'].includes(String(p.status || '')),
+        )
+        .sort((a, b) => (Number(a.sequence) || 0) - (Number(b.sequence) || 0));
+      const next = remaining[0];
       if (next) {
         return String(next.restaurantId || next._id || next.restaurantName || '');
       }
     }
     return String(order?._id || order?.orderId || 'single');
   }, [order?._id, order?.orderId, order?.isMultiRestaurant, order?.pickups]);
+
+  const orderedPickups = useMemo(() => {
+    const list = Array.isArray(order?.pickups) ? [...order.pickups] : [];
+    return list.sort((a, b) => (Number(a.sequence) || 0) - (Number(b.sequence) || 0));
+  }, [order?.pickups]);
+
+  const activePickups = useMemo(
+    () =>
+      orderedPickups.filter(
+        (p) => !p.permanentlyDropped && String(p.status || '') !== 'cancelled',
+      ),
+    [orderedPickups],
+  );
+
+  const currentPickup = useMemo(() => {
+    return (
+      activePickups.find(
+        (p) => !['picked_up', 'ready_for_handover'].includes(String(p.status || '')),
+      ) || null
+    );
+  }, [activePickups]);
+
+  const currentPickupName =
+    currentPickup?.restaurantName ||
+    order.restaurantName ||
+    order.restaurant_name ||
+    'Restaurant';
+  const currentPickupAddress =
+    currentPickup?.location?.address ||
+    currentPickup?.location?.formattedAddress ||
+    currentPickup?.restaurantAddress ||
+    order.restaurantAddress ||
+    order.restaurant_address ||
+    order.restaurantLocation?.address ||
+    'Address not available';
+  const currentPickupPhone =
+    currentPickup?.phone ||
+    order.restaurantPhone ||
+    order.restaurant_phone ||
+    order.restaurantId?.phone ||
+    '';
+  const pickedCount = activePickups.filter((p) =>
+    ['picked_up', 'ready_for_handover'].includes(String(p.status || '')),
+  ).length;
 
   useEffect(() => {
     setBillImageUploaded(false);
@@ -211,14 +260,6 @@ export const PickupActionModal = ({
   const hasReachedPickup = order.deliveryState?.status === 'reached_pickup' || order.deliveryState?.currentPhase === 'at_pickup';
   const isPending = order.orderStatus === 'created';
 
-  const activePickups = useMemo(
-    () =>
-      (Array.isArray(order.pickups) ? order.pickups : []).filter(
-        (p) => !p.permanentlyDropped && String(p.status || '') !== 'cancelled',
-      ),
-    [order.pickups],
-  );
-
   const totalQuantity = React.useMemo(() => {
     let count = 0;
     if (Array.isArray(order.items)) {
@@ -232,9 +273,9 @@ export const PickupActionModal = ({
     return count;
   }, [order.items, order.pickups]);
 
-  const restaurantName = order.restaurantName || order.restaurant_name || 'Restaurant';
-  const restaurantAddress = order.restaurantAddress || order.restaurant_address || order.restaurantLocation?.address || 'Address not available';
-  const restaurantPhone = order.restaurantPhone || order.restaurant_phone || order.restaurantId?.phone || '';
+  const restaurantName = currentPickupName;
+  const restaurantAddress = currentPickupAddress;
+  const restaurantPhone = currentPickupPhone;
   const items = order.items || [];
   const restaurantLogo = order.restaurantImage || order.restaurant?.logo || order.restaurant?.profileImage || 'https://cdn-icons-png.flaticon.com/512/3170/3170733.png';
 
@@ -317,71 +358,119 @@ export const PickupActionModal = ({
                   <Clock className="w-4 h-4" />
                 </button>
                 <p className="text-[10px] font-bold text-orange-500 uppercase tracking-widest">
-                  {activePickups.filter(p => ['picked_up', 'ready_for_handover'].includes(p.status)).length} / {activePickups.length} Picked
+                  {pickedCount} / {activePickups.length} Picked
                 </p>
               </div>
             </div>
-            {activePickups.map((p, idx) => {
-              const isDone = ['picked_up', 'ready_for_handover'].includes(p.status);
-              const isCurrent = !isDone && activePickups.findIndex(px => !['picked_up', 'ready_for_handover'].includes(px.status)) === idx;
+
+            {currentPickup ? (
+              <div className="rounded-2xl bg-orange-500 text-white p-3.5 shadow-lg shadow-orange-200">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-orange-100">
+                  Now picking up
+                </p>
+                <p className="text-base font-bold mt-0.5">{currentPickupName}</p>
+                <p className="text-[11px] text-orange-50/90 mt-1 line-clamp-2">{currentPickupAddress}</p>
+                <div className="mt-2 flex gap-2">
+                  {currentPickupPhone ? (
+                    <button
+                      type="button"
+                      onClick={() => { window.location.href = `tel:${currentPickupPhone}`; }}
+                      className="flex-1 py-2 rounded-xl bg-white/15 text-xs font-semibold inline-flex items-center justify-center gap-1.5"
+                    >
+                      <Phone className="w-3.5 h-3.5" /> Call
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      window.open(
+                        `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(currentPickupAddress)}`,
+                        '_blank',
+                      )
+                    }
+                    className="flex-1 py-2 rounded-xl bg-white text-orange-700 text-xs font-semibold inline-flex items-center justify-center gap-1.5"
+                  >
+                    <Navigation className="w-3.5 h-3.5" /> Navigate
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {orderedPickups.map((p, idx) => {
+              const cancelled =
+                Boolean(p.permanentlyDropped) ||
+                String(p.status || '').toLowerCase() === 'cancelled';
+              const isDone = ['picked_up', 'ready_for_handover'].includes(String(p.status || ''));
+              const isCurrent =
+                !cancelled &&
+                !isDone &&
+                String(p.restaurantId || '') === String(currentPickup?.restaurantId || '');
 
               return (
                 <div
                   key={String(p.restaurantId || idx)}
-                  className={`p-4 rounded-2xl border-2 transition-all min-w-0 ${isCurrent
-                      ? 'bg-orange-50/50 border-orange-200'
-                      : isDone
-                        ? 'bg-green-50/30 border-green-100 opacity-60'
-                        : 'bg-gray-50/50 border-gray-100'
-                    }`}
+                  className={`p-4 rounded-2xl border-2 transition-all min-w-0 ${
+                    cancelled
+                      ? 'bg-rose-50/50 border-rose-100 opacity-80'
+                      : isCurrent
+                        ? 'bg-orange-50/50 border-orange-200'
+                        : isDone
+                          ? 'bg-green-50/30 border-green-100 opacity-60'
+                          : 'bg-gray-50/50 border-gray-100'
+                  }`}
                 >
                   <div className="flex items-start justify-between gap-2 min-w-0">
                     <div className="flex gap-3 min-w-0 flex-1">
-                      <div className={`w-10 h-10 shrink-0 rounded-xl flex items-center justify-center shadow-sm ${isCurrent ? 'bg-orange-500 text-white' : 'bg-white text-gray-400'}`}>
-                        <ChefHat className="w-5 h-5" />
+                      <div
+                        className={`w-10 h-10 shrink-0 rounded-xl flex items-center justify-center shadow-sm ${
+                          cancelled
+                            ? 'bg-rose-100 text-rose-500'
+                            : isCurrent
+                              ? 'bg-orange-500 text-white'
+                              : isDone
+                                ? 'bg-green-500 text-white'
+                                : 'bg-white text-gray-400'
+                        }`}
+                      >
+                        {isDone ? (
+                          <CheckCircle2 className="w-5 h-5" />
+                        ) : (
+                          <ChefHat className="w-5 h-5" />
+                        )}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <h4 className="text-sm font-bold text-gray-950 break-words [overflow-wrap:anywhere]">{p.restaurantName}</h4>
+                        <h4 className="text-sm font-bold text-gray-950 break-words [overflow-wrap:anywhere]">
+                          {p.restaurantName}
+                        </h4>
                         <div className="flex flex-wrap items-start gap-1.5 mt-0.5">
                           <p className="text-[10px] text-gray-500 break-words [overflow-wrap:anywhere] min-w-0 flex-1">
                             {p.location?.address || p.restaurantAddress || 'Pickup location'}
                           </p>
-                          <span className={`shrink-0 text-[8px] px-1.5 py-0.5 rounded-full font-bold uppercase ${p.status === 'pending' ? 'bg-gray-100 text-gray-500' :
-                              p.status === 'accepted' || p.status === 'preparing' ? 'bg-blue-100 text-blue-600' :
-                                'bg-green-100 text-green-600'
-                            }`}>
-                            {p.status === 'pending' ? 'Waiting' : p.status}
+                          <span
+                            className={`shrink-0 text-[8px] px-1.5 py-0.5 rounded-full font-bold uppercase ${
+                              cancelled
+                                ? 'bg-rose-100 text-rose-700'
+                                : isDone
+                                  ? 'bg-green-100 text-green-700'
+                                  : isCurrent
+                                    ? 'bg-orange-100 text-orange-700'
+                                    : p.status === 'ready'
+                                      ? 'bg-blue-100 text-blue-700'
+                                      : 'bg-gray-100 text-gray-500'
+                            }`}
+                          >
+                            {cancelled
+                              ? 'Cancelled'
+                              : isDone
+                                ? 'Picked'
+                                : isCurrent
+                                  ? 'Current'
+                                  : String(p.status || 'pending').replace(/_/g, ' ')}
                           </span>
                         </div>
                       </div>
                     </div>
-                    <div className="flex gap-2 shrink-0">
-                      {p.phone && (
-                        <button onClick={() => window.location.href = `tel:${p.phone}`} className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-green-600 border border-gray-100">
-                          <Phone className="w-4 h-4" />
-                        </button>
-                      )}
-                      <button
-                        onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(p.location?.address || p.restaurantAddress || p.restaurantName)}`, '_blank')}
-                        className="w-8 h-8 rounded-full bg-gray-900 flex items-center justify-center text-white"
-                      >
-                        <Navigation className="w-4 h-4" />
-                      </button>
-                    </div>
                   </div>
-                  {isCurrent && (
-                    <div className="mt-3 flex items-center justify-between border-t border-orange-100 pt-3">
-                      <p className="text-[9px] font-bold text-orange-600 uppercase tracking-widest">
-                        {isAtPickup ? "Reached Pickup Location" : `${(distanceToTarget / 1000).toFixed(1)} km to this store`}
-                      </p>
-                    </div>
-                  )}
-                  {isDone && (
-                    <div className="mt-2 flex items-center gap-1 text-[9px] font-bold text-green-600 uppercase tracking-widest">
-                      <CheckCircle2 className="w-3 h-3" />
-                      <span>Picked Up</span>
-                    </div>
-                  )}
                 </div>
               );
             })}
@@ -397,8 +486,8 @@ export const PickupActionModal = ({
                 {isPending
                   ? 'Wait for Restaurant to Accept Order...'
                   : isWithinRange
-                    ? 'Ready - Swipe to confirm arrival'
-                    : 'Heading to restaurant'}
+                    ? `Ready — swipe when at ${currentPickupName}`
+                    : `Heading to ${currentPickupName}`}
               </p>
               <ActionSlider
                 key="action-reach"

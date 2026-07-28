@@ -80,19 +80,57 @@ export async function getRestaurantCommissionSnapshot(orderDoc) {
   return computeRestaurantCommissionAmount(baseAmount, rule);
 }
 
+function buildPaymentSnapshot(order) {
+  return {
+    method: String(order.payment?.method || 'cash'),
+    status: String(order.payment?.status || 'cod_pending'),
+    amountDue: Number(order.payment?.amountDue ?? order.pricing?.total ?? 0) || 0,
+    razorpay: {
+      orderId: String(order.payment?.razorpay?.orderId || ''),
+      paymentId: String(order.payment?.razorpay?.paymentId || ''),
+      signature: String(order.payment?.razorpay?.signature || ''),
+    },
+    qr: {
+      qrId: String(order.payment?.qr?.qrId || ''),
+      imageUrl: String(order.payment?.qr?.imageUrl || ''),
+      paymentLinkId: String(order.payment?.qr?.paymentLinkId || ''),
+      shortUrl: String(order.payment?.qr?.shortUrl || ''),
+      status: String(order.payment?.qr?.status || ''),
+      expiresAt: order.payment?.qr?.expiresAt || null,
+    },
+  };
+}
+
+function resolveSettlementRows(order) {
+  const settlements = Array.isArray(order.restaurantSettlement) ? order.restaurantSettlement : [];
+  if (settlements.length > 0) return settlements;
+  if (order.restaurantId) {
+    return [
+      {
+        restaurantId: order.restaurantId,
+        foodAmount: Number(order.pricing?.subtotal) || 0,
+        packagingFee: Number(order.pricing?.packagingFee) || 0,
+        commission: Number(order.pricing?.restaurantCommission) || 0,
+        restaurantPayout: null,
+      },
+    ];
+  }
+  return [];
+}
+
 /**
- * Creates an initial 'pending' transaction when an order is created.
+ * Creates initial transaction row(s) when an order is created.
+ * Multi-restaurant: one FoodTransaction per restaurantSettlement row so each
+ * restaurant only sees/earns its own share. Platform/rider amounts live only on
+ * the primary (order.restaurantId) row to avoid double-counting admin reports.
  */
 export async function createInitialTransaction(order) {
   const { commissionAmount } = await getRestaurantCommissionSnapshot(order);
 
-  // Split logic
   const totalCustomerPaid = order.pricing?.total || 0;
   const riderShare = order.riderEarning || 0;
-  // Prefer commission already computed & stored on the order (source of truth for this order),
-  // fallback to rule snapshot for older orders.
   const restaurantCommissionFromOrder = Number(order.pricing?.restaurantCommission);
-  const restaurantCommission =
+  const orderLevelCommission =
     Number.isFinite(restaurantCommissionFromOrder) && restaurantCommissionFromOrder > 0
       ? restaurantCommissionFromOrder
       : (commissionAmount || 0);
@@ -106,36 +144,13 @@ export async function createInitialTransaction(order) {
     Number(order.pricing?.deliveryFeeBreakdown?.speedShareRestaurant) || 0,
   );
 
-  // Prefer frozen restaurantSettlement totals when present
-  const settlements = Array.isArray(order.restaurantSettlement) ? order.restaurantSettlement : [];
-  let restaurantNet;
-  if (settlements.length > 0) {
-    restaurantNet = Number(
-      settlements
-        .reduce((s, row) => s + (Number(row.restaurantPayout) || 0), 0)
-        .toFixed(2),
-    );
-  } else {
-    restaurantNet = Number(
-      (
-        (order.pricing?.subtotal || 0) +
-        (order.pricing?.packagingFee || 0) +
-        speedShareRestaurant -
-        restaurantCommission
-      ).toFixed(2),
-    );
-    if (isRestaurantCoupon && discount > 0) {
-      restaurantNet = Math.max(0, Number((restaurantNet - discount).toFixed(2)));
-    }
-  }
-
   const platformNetProfit = Number(
     (
       order.platformProfit ??
       (
         (order.pricing?.platformFee || 0) +
         (order.pricing?.deliveryFee || 0) +
-        restaurantCommission -
+        orderLevelCommission -
         riderShare -
         speedShareRestaurant -
         (isRestaurantCoupon ? 0 : discount) -
@@ -144,120 +159,165 @@ export async function createInitialTransaction(order) {
     ).toFixed(2),
   );
 
-  const transaction = new FoodTransaction({
-    orderId: order._id,
+  const settlements = resolveSettlementRows(order);
+  const primaryRid = String(order.restaurantId?._id || order.restaurantId || '');
+  const paymentSnapshot = buildPaymentSnapshot(order);
+  const paymentMethod = order.payment?.method || 'cash';
+  const status = order.payment?.status === 'paid' ? 'captured' : 'pending';
 
-    userId: order.userId,
-    restaurantId: order.restaurantId,
-    deliveryPartnerId: order.dispatch?.deliveryPartnerId,
-    paymentMethod: order.payment?.method || 'cash',
-    status: order.payment?.status === 'paid' ? 'captured' : 'pending',
-    payment: {
-      method: String(order.payment?.method || 'cash'),
-      status: String(order.payment?.status || 'cod_pending'),
-      amountDue: Number(order.payment?.amountDue ?? order.pricing?.total ?? 0) || 0,
-      razorpay: {
-        orderId: String(order.payment?.razorpay?.orderId || ''),
-        paymentId: String(order.payment?.razorpay?.paymentId || ''),
-        signature: String(order.payment?.razorpay?.signature || ''),
-      },
-      qr: {
-        qrId: String(order.payment?.qr?.qrId || ''),
-        imageUrl: String(order.payment?.qr?.imageUrl || ''),
-        paymentLinkId: String(order.payment?.qr?.paymentLinkId || ''),
-        shortUrl: String(order.payment?.qr?.shortUrl || ''),
-        status: String(order.payment?.qr?.status || ''),
-        expiresAt: order.payment?.qr?.expiresAt || null,
-      }
-    },
-    pricing: {
-      subtotal: Number(order.pricing?.subtotal || 0) || 0,
-      tax: Number(order.pricing?.tax || 0) || 0,
-      packagingFee: Number(order.pricing?.packagingFee || 0) || 0,
-      deliveryFee: Number(order.pricing?.deliveryFee || 0) || 0,
-      platformFee: Number(order.pricing?.platformFee || 0) || 0,
-      restaurantCommission,
-      discount: Number(order.pricing?.discount || 0) || 0,
-      total: Number(order.pricing?.total || 0) || 0,
-      currency: String(order.pricing?.currency || order.currency || 'INR'),
-    },
-    amounts: {
-      totalCustomerPaid,
-      restaurantShare: Math.max(0, restaurantNet),
-      restaurantCommission,
-      riderShare,
-      primaryRiderShare: order.riderEarning || riderShare, // Fallback to total if not split yet
-      sharedRiderShare: order.sharedRiderEarning || 0,
-      platformNetProfit,
-      taxAmount: Number(order.pricing?.tax || 0) || 0
-    },
-    gateway: {
-      razorpayOrderId: order.payment?.razorpay?.orderId,
-      qrUrl: order.payment?.qr?.imageUrl
-    },
-    history: [{
-      kind: 'created',
-      amount: totalCustomerPaid,
-      note: 'Initial transaction created with order'
-    }]
-  });
+  const rows = [];
+  for (const settlement of settlements) {
+    const rid = settlement.restaurantId?._id || settlement.restaurantId;
+    if (!rid) continue;
+    const isPrimary = String(rid) === primaryRid || (settlements.length === 1);
+    const commission = Number(settlement.commission);
+    const restaurantCommission = Number.isFinite(commission)
+      ? commission
+      : (isPrimary ? orderLevelCommission : 0);
 
-  await transaction.save();
+    let restaurantNet = Number(settlement.restaurantPayout);
+    if (!Number.isFinite(restaurantNet)) {
+      restaurantNet = Number(
+        (
+          (Number(settlement.foodAmount) || 0) +
+          (Number(settlement.packagingFee) || 0) +
+          (isPrimary ? speedShareRestaurant : 0) -
+          restaurantCommission -
+          (isPrimary && isRestaurantCoupon ? discount : 0)
+        ).toFixed(2),
+      );
+    }
+    restaurantNet = Math.max(0, restaurantNet);
 
-  // Link back to the order
+    const foodAmount = Number(settlement.foodAmount) || 0;
+    const packagingFee = Number(settlement.packagingFee) || 0;
+    const rowCustomerPaid = isPrimary
+      ? totalCustomerPaid
+      : Math.max(0, Number((foodAmount + packagingFee).toFixed(2)));
+
+    rows.push(
+      new FoodTransaction({
+        orderId: order._id,
+        userId: order.userId,
+        restaurantId: rid,
+        isPrimary,
+        deliveryPartnerId: order.dispatch?.deliveryPartnerId,
+        paymentMethod,
+        status,
+        payment: paymentSnapshot,
+        pricing: {
+          subtotal: isPrimary ? (Number(order.pricing?.subtotal || 0) || 0) : foodAmount,
+          tax: isPrimary ? (Number(order.pricing?.tax || 0) || 0) : 0,
+          packagingFee: isPrimary
+            ? (Number(order.pricing?.packagingFee || 0) || 0)
+            : packagingFee,
+          deliveryFee: isPrimary ? (Number(order.pricing?.deliveryFee || 0) || 0) : 0,
+          platformFee: isPrimary ? (Number(order.pricing?.platformFee || 0) || 0) : 0,
+          restaurantCommission,
+          discount: isPrimary ? (Number(order.pricing?.discount || 0) || 0) : 0,
+          total: isPrimary ? (Number(order.pricing?.total || 0) || 0) : rowCustomerPaid,
+          currency: String(order.pricing?.currency || order.currency || 'INR'),
+        },
+        amounts: {
+          totalCustomerPaid: rowCustomerPaid,
+          restaurantShare: restaurantNet,
+          restaurantCommission,
+          riderShare: isPrimary ? riderShare : 0,
+          primaryRiderShare: isPrimary ? (order.riderEarning || riderShare) : 0,
+          sharedRiderShare: isPrimary ? (order.sharedRiderEarning || 0) : 0,
+          platformNetProfit: isPrimary ? platformNetProfit : 0,
+          taxAmount: isPrimary ? (Number(order.pricing?.tax || 0) || 0) : 0,
+        },
+        gateway: {
+          razorpayOrderId: order.payment?.razorpay?.orderId,
+          qrUrl: order.payment?.qr?.imageUrl,
+        },
+        history: [
+          {
+            kind: 'created',
+            amount: rowCustomerPaid,
+            note: isPrimary
+              ? 'Initial transaction created with order'
+              : 'Per-restaurant transaction for multi-restaurant order',
+          },
+        ],
+      }),
+    );
+  }
+
+  if (rows.length === 0) {
+    throw new Error('Unable to create food transaction: no restaurant settlement');
+  }
+
+  if (!rows.some((r) => r.isPrimary)) {
+    rows[0].isPrimary = true;
+  }
+
+  const saved = await FoodTransaction.insertMany(rows);
+  const primaryTx =
+    saved.find((t) => t.isPrimary) ||
+    saved.find((t) => String(t.restaurantId) === primaryRid) ||
+    saved[0];
+
   try {
     await mongoose.model('FoodOrder').updateOne(
       { _id: order._id },
-      { $set: { transactionId: transaction._id } }
+      { $set: { transactionId: primaryTx._id } },
     );
   } catch (err) {
     // Log but don't fail transaction if the backlink fails
   }
 
-  return transaction;
+  return primaryTx;
 }
 
 /**
- * Updates transaction status (captured, settled, etc) and appends to history.
+ * Updates all transaction rows for an order (captured, settled, etc).
  */
 export async function updateTransactionStatus(orderId, kind, details = {}) {
-  const query = { orderId };
-  const transaction = await FoodTransaction.findOne(query);
-  if (!transaction) return null;
+  const transactions = await FoodTransaction.find({ orderId });
+  if (!transactions.length) return null;
 
-  if (details.status) transaction.status = details.status;
-  if (details.razorpayPaymentId) transaction.gateway.razorpayPaymentId = details.razorpayPaymentId;
-  if (details.razorpaySignature) transaction.gateway.razorpaySignature = details.razorpaySignature;
+  for (const transaction of transactions) {
+    if (details.status) transaction.status = details.status;
+    if (details.razorpayPaymentId) {
+      transaction.gateway = transaction.gateway || {};
+      transaction.gateway.razorpayPaymentId = details.razorpayPaymentId;
+    }
+    if (details.razorpaySignature) {
+      transaction.gateway = transaction.gateway || {};
+      transaction.gateway.razorpaySignature = details.razorpaySignature;
+    }
 
-  // Sync payment method if provided (e.g. switching from cash to QR)
-  if (details.paymentMethod) {
-    transaction.paymentMethod = details.paymentMethod;
-    transaction.payment.method = details.paymentMethod;
+    if (details.paymentMethod) {
+      transaction.paymentMethod = details.paymentMethod;
+      transaction.payment = transaction.payment || {};
+      transaction.payment.method = details.paymentMethod;
+    }
+
+    if (details.sharedPartnerId && transaction.isPrimary) {
+      transaction.sharedPartnerId = details.sharedPartnerId;
+    }
+
+    if (details.primaryRiderShare !== undefined && transaction.isPrimary) {
+      transaction.amounts.primaryRiderShare = details.primaryRiderShare;
+    }
+
+    if (details.sharedRiderShare !== undefined && transaction.isPrimary) {
+      transaction.amounts.sharedRiderShare = details.sharedRiderShare;
+    }
+
+    transaction.history.push({
+      kind,
+      amount: transaction.amounts.totalCustomerPaid,
+      at: new Date(),
+      note: details.note || `Transaction updated: ${kind}`,
+      recordedBy: { role: details.recordedByRole || 'SYSTEM', id: details.recordedById },
+    });
+
+    await transaction.save();
   }
 
-  if (details.sharedPartnerId) {
-    transaction.sharedPartnerId = details.sharedPartnerId;
-  }
-
-  if (details.primaryRiderShare !== undefined) {
-    transaction.amounts.primaryRiderShare = details.primaryRiderShare;
-  }
-
-  if (details.sharedRiderShare !== undefined) {
-    transaction.amounts.sharedRiderShare = details.sharedRiderShare;
-  }
-
-  transaction.history.push({
-    kind,
-    amount: transaction.amounts.totalCustomerPaid,
-    at: new Date(),
-    note: details.note || `Transaction updated: ${kind}`,
-    recordedBy: { role: details.recordedByRole || 'SYSTEM', id: details.recordedById }
-  });
-
-  await transaction.save();
-
-  // Sync back to order as well
   if (details.paymentMethod || details.status) {
     try {
       const updateFields = {};
@@ -266,26 +326,81 @@ export async function updateTransactionStatus(orderId, kind, details = {}) {
 
       await mongoose.model('FoodOrder').updateOne(
         { _id: orderId },
-        { $set: updateFields }
+        { $set: updateFields },
       );
     } catch (err) {
       console.error('Failed to sync transaction status to order:', err.message);
     }
   }
 
-  return transaction;
+  return transactions.find((t) => t.isPrimary) || transactions[0];
 }
 
 /**
- * Updates the rider in the transaction when an order is accepted.
+ * Updates the rider on all transaction rows when an order is accepted.
  */
 export async function updateTransactionRider(orderId, riderId) {
-  const query = { orderId };
-  return await FoodTransaction.findOneAndUpdate(
-    query,
+  await FoodTransaction.updateMany(
+    { orderId },
     { $set: { deliveryPartnerId: riderId } },
-    { new: true }
   );
+  return FoodTransaction.findOne({ orderId, isPrimary: true }) ||
+    FoodTransaction.findOne({ orderId });
+}
+
+/**
+ * Void / mark refunded the transaction row for a dropped restaurant in a multi-resto order.
+ * Reassigns isPrimary to another remaining row when needed.
+ */
+export async function voidRestaurantTransaction(orderId, restaurantId, note = '') {
+  const rid = String(restaurantId || '');
+  if (!rid || !orderId) return null;
+
+  const tx = await FoodTransaction.findOne({
+    orderId,
+    restaurantId: mongoose.Types.ObjectId.isValid(rid)
+      ? new mongoose.Types.ObjectId(rid)
+      : rid,
+  });
+  if (!tx) {
+    // Legacy single-tx multi-resto: reduce primary share by dropped restaurant amount if possible
+    return null;
+  }
+
+  const wasPrimary = Boolean(tx.isPrimary);
+  tx.status = 'refunded';
+  tx.amounts.restaurantShare = 0;
+  tx.history.push({
+    kind: 'refunded',
+    amount: 0,
+    at: new Date(),
+    note: note || 'Restaurant dropped from multi-restaurant order',
+    recordedBy: { role: 'SYSTEM' },
+  });
+  tx.isPrimary = false;
+  await tx.save();
+
+  if (wasPrimary) {
+    const nextPrimary = await FoodTransaction.findOne({
+      orderId,
+      restaurantId: { $ne: rid },
+      status: { $nin: ['refunded', 'failed'] },
+    }).sort({ createdAt: 1 });
+    if (nextPrimary) {
+      nextPrimary.isPrimary = true;
+      await nextPrimary.save();
+      try {
+        await mongoose.model('FoodOrder').updateOne(
+          { _id: orderId },
+          { $set: { transactionId: nextPrimary._id } },
+        );
+      } catch (err) {
+        // ignore backlink failure
+      }
+    }
+  }
+
+  return tx;
 }
 
 /**
@@ -296,6 +411,6 @@ export async function settleRestaurant(orderId, adminId) {
     status: 'captured', // Ensure it's marked as captured if it was pending cash
     note: 'Restaurant payout settled by admin',
     recordedByRole: 'ADMIN',
-    recordedById: adminId
+    recordedById: adminId,
   });
 }

@@ -127,24 +127,34 @@ function getRefreshToken(module) {
   }
 }
 
-let isRefreshing = false;
-let refreshSubscribers = [];
+const refreshStateByModule = new Map();
 
-function subscribeToRefresh(cb) {
-  refreshSubscribers.push(cb);
+function getRefreshState(module) {
+  if (!refreshStateByModule.has(module)) {
+    refreshStateByModule.set(module, {
+      isRefreshing: false,
+      subscribers: [],
+    });
+  }
+  return refreshStateByModule.get(module);
+}
+
+function subscribeToRefresh(module, cb) {
+  getRefreshState(module).subscribers.push(cb);
 }
 
 function onRefreshed(newToken, module) {
-  refreshSubscribers.forEach((cb) => cb(newToken, module));
-  refreshSubscribers = [];
+  const state = getRefreshState(module);
+  state.subscribers.forEach((cb) => cb(newToken));
+  state.subscribers = [];
 }
 
 function onRefreshFailed(module) {
   clearModuleAuth(module);
-  // Fail any queued requests that were waiting for this refresh
-  refreshSubscribers.forEach((cb) => cb(null, module));
-  refreshSubscribers = [];
-  
+  const state = getRefreshState(module);
+  state.subscribers.forEach((cb) => cb(null));
+  state.subscribers = [];
+
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent("authRefreshFailed", { detail: { module } }));
   }
@@ -199,12 +209,16 @@ apiClient.interceptors.response.use(
     const refreshToken = getRefreshToken(module);
     if (!refreshToken) {
       clearModuleAuth(module);
+      if (module === "restaurant" && typeof window !== "undefined") {
+        window.dispatchEvent(new Event("restaurantAuthChanged"));
+      }
       return Promise.reject(err);
     }
 
-    if (isRefreshing) {
+    const state = getRefreshState(module);
+    if (state.isRefreshing) {
       return new Promise((resolve, reject) => {
-        subscribeToRefresh((newToken) => {
+        subscribeToRefresh(module, (newToken) => {
           if (newToken) {
             original.headers.Authorization = `Bearer ${newToken}`;
             resolve(apiClient(original));
@@ -216,7 +230,7 @@ apiClient.interceptors.response.use(
     }
 
     original._retry = true;
-    isRefreshing = true;
+    state.isRefreshing = true;
 
     try {
       // Use relative URL so this works both with an explicit baseURL and with a dev proxy.
@@ -240,7 +254,7 @@ apiClient.interceptors.response.use(
       onRefreshFailed(module);
       return Promise.reject(err);
     } finally {
-      isRefreshing = false;
+      state.isRefreshing = false;
     }
 
     onRefreshFailed(module);

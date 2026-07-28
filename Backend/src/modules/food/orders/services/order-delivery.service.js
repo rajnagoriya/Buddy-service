@@ -1174,6 +1174,120 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
   return responseOrder;
 }
 
+/**
+ * After accept, driver chooses visit order for active multi-restaurant pickups.
+ * Body: ordered restaurantId[] covering every non-dropped pickup that is not yet picked_up.
+ * Already picked_up stops keep their sequence and stay before remaining stops.
+ */
+export async function setPickupSequenceDelivery(
+  orderId,
+  deliveryPartnerId,
+  restaurantIds = [],
+) {
+  const identity = buildOrderIdentityFilter(orderId);
+  if (!identity) throw new ValidationError('Order id required');
+
+  const order = await FoodOrder.findOne(identity);
+  if (!order) throw new NotFoundError('Order not found');
+
+  const partnerId = String(deliveryPartnerId);
+  const isPrimary =
+    String(order.dispatch?.deliveryPartnerId || '') === partnerId;
+  const isShared =
+    String(order.dispatch?.sharedPartnerId || '') === partnerId;
+  if (!isPrimary && !isShared) {
+    throw new ForbiddenError('Not your order');
+  }
+  if (!order.dispatch?.deliveryPartnerId) {
+    throw new ValidationError('Accept the order before setting pickup sequence');
+  }
+
+  const active = (order.pickups || []).filter(
+    (p) => !p.permanentlyDropped && String(p.status || '') !== 'cancelled',
+  );
+  if (active.length < 2) {
+    throw new ValidationError('Pickup sequence only applies to multi-restaurant orders');
+  }
+
+  const remaining = active.filter(
+    (p) => String(p.status || '') !== 'picked_up',
+  );
+  if (remaining.length === 0) {
+    throw new ValidationError('All restaurants already picked up');
+  }
+
+  const orderedIds = (Array.isArray(restaurantIds) ? restaurantIds : [])
+    .map((id) => String(id || '').trim())
+    .filter(Boolean);
+  if (orderedIds.length !== remaining.length) {
+    throw new ValidationError(
+      `Provide exactly ${remaining.length} restaurant id(s) for remaining pickups`,
+    );
+  }
+
+  const remainingById = new Map(
+    remaining.map((p) => [String(p.restaurantId || ''), p]),
+  );
+  const seen = new Set();
+  for (const rid of orderedIds) {
+    if (seen.has(rid)) {
+      throw new ValidationError('Duplicate restaurant in pickup sequence');
+    }
+    seen.add(rid);
+    if (!remainingById.has(rid)) {
+      throw new ValidationError(`Restaurant ${rid} is not an active remaining pickup`);
+    }
+  }
+
+  const alreadyPicked = active
+    .filter((p) => String(p.status || '') === 'picked_up')
+    .sort((a, b) => (Number(a.sequence) || 0) - (Number(b.sequence) || 0));
+
+  let seq = 0;
+  for (const p of alreadyPicked) {
+    p.sequence = seq++;
+  }
+  for (const rid of orderedIds) {
+    remainingById.get(rid).sequence = seq++;
+  }
+  order.markModified('pickups');
+
+  pushStatusHistory(order, {
+    byRole: 'DELIVERY_PARTNER',
+    byId: deliveryPartnerId,
+    from: order.orderStatus,
+    to: order.orderStatus,
+    note: `Driver set pickup sequence: ${orderedIds.join(' → ')}`,
+  });
+
+  await order.save();
+
+  try {
+    const io = getIO();
+    if (io) {
+      const payload = {
+        orderMongoId: order._id?.toString?.(),
+        orderId: order._id.toString(),
+        orderStatus: order.orderStatus,
+        pickups: order.pickups,
+        type: 'pickup_sequence_updated',
+        title: 'Pickup sequence updated',
+        message: 'Driver updated restaurant visit order',
+      };
+      io.to(rooms.user(order.userId)).emit('order_status_update', payload);
+      io.to(rooms.delivery(partnerId)).emit('order_status_update', payload);
+      for (const p of active) {
+        const rid = String(p.restaurantId || '');
+        if (rid) io.to(rooms.restaurant(rid)).emit('order_status_update', payload);
+      }
+    }
+  } catch (err) {
+    logger.warn(`setPickupSequence socket emit failed: ${err?.message || err}`);
+  }
+
+  return sanitizeOrderForExternal(order);
+}
+
 export async function rejectOrderDelivery(orderId, deliveryPartnerId) {
   const identity = buildOrderIdentityFilter(orderId);
   if (!identity) throw new ValidationError('Order id required');

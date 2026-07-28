@@ -16,6 +16,7 @@ import {
   ShieldCheck,
   AlertCircle,
   CarTaxiFront,
+  LogOut,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -23,7 +24,9 @@ import apiClient, {
   driverOnboardingAPI,
   getApiErrorMessage,
   uploadAPI,
+  clearIdentitySession,
 } from "@food/api";
+import { clearModuleAuth } from "@food/utils/auth";
 import { invalidateDriverGuardCache } from "../components/DriverGuard";
 import DriverPageLoader from "../components/DriverPageLoader";
 import {
@@ -187,11 +190,11 @@ export default function OnboardingWizard() {
         const taxiVehicle = data?.taxiVehicle?.number
           ? data.taxiVehicle
           : {
-              type: legacyVehicle.type || "",
-              vehicleTypeId: legacyVehicle.model || "",
-              name: legacyVehicle.make || "",
-              number: legacyVehicle.number || "",
-            };
+            type: legacyVehicle.type || "",
+            vehicleTypeId: legacyVehicle.model || "",
+            name: legacyVehicle.make || "",
+            number: legacyVehicle.number || "",
+          };
 
         setState((prev) => ({
           ...prev,
@@ -454,9 +457,9 @@ export default function OnboardingWizard() {
         },
         pan: finalState.kyc.pan.number
           ? {
-              number: finalState.kyc.pan.number,
-              documentUrl: finalState.kyc.pan.documentUrl,
-            }
+            number: finalState.kyc.pan.number,
+            documentUrl: finalState.kyc.pan.documentUrl,
+          }
           : undefined,
         drivingLicense: {
           number: finalState.kyc.drivingLicense.number,
@@ -468,12 +471,12 @@ export default function OnboardingWizard() {
         bankMode === "upi"
           ? { upiId: finalState.bank.upiId }
           : {
-              accountHolderName: finalState.bank.accountHolderName,
-              accountNumber: finalState.bank.accountNumber,
-              ifscCode: finalState.bank.ifscCode,
-              bankName: finalState.bank.bankName,
-              branchName: finalState.bank.branchName,
-            };
+            accountHolderName: finalState.bank.accountHolderName,
+            accountNumber: finalState.bank.accountNumber,
+            ifscCode: finalState.bank.ifscCode,
+            bankName: finalState.bank.bankName,
+            branchName: finalState.bank.branchName,
+          };
       await persistAndAdvance(driverOnboardingAPI.saveBank, bankPayload);
     } else if (current.key === "selfie") {
       setStepLoading(true);
@@ -503,27 +506,46 @@ export default function OnboardingWizard() {
     setActiveIdx((idx) => Math.max(0, idx - 1));
   };
 
+  const handleLogout = () => {
+    clearModuleAuth("driver");
+    clearModuleAuth("delivery");
+    clearIdentitySession();
+    ["driverToken", "token", "driverInfo", "role", "driverRole", "chatRole"].forEach((k) =>
+      localStorage.removeItem(k),
+    );
+    navigate("/driver/login", { replace: true });
+  };
+
   if (bootLoading) {
     return <DriverPageLoader label="Loading your progress…" />;
   }
 
   return (
-    <div className="h-[100dvh] bg-[#0c1410] text-white font-['Poppins'] flex flex-col overflow-hidden sm:items-center sm:justify-center sm:p-4">
-      <div className="w-full max-w-md mx-auto flex flex-col h-full sm:h-[min(90dvh,900px)] sm:rounded-3xl sm:shadow-2xl sm:overflow-hidden sm:border sm:border-white/5">
+    <div className="h-[100dvh] bg-gray-50 text-gray-900 font-['Poppins'] flex flex-col overflow-hidden sm:items-center sm:justify-center sm:p-4">
+      <div className="w-full max-w-md mx-auto flex flex-col h-full sm:h-[min(90dvh,900px)] sm:rounded-3xl sm:shadow-2xl sm:overflow-hidden sm:border sm:border-gray-100">
         {/* Header — sticky */}
-        <div className="sticky top-0 z-20 shrink-0 bg-gradient-to-br from-[#1f3a23] via-[#2a4e2f] to-[#3a6b41] px-5 pt-[max(1.25rem,env(safe-area-inset-top))] pb-5">
+        <div className="sticky top-0 z-20 shrink-0 bg-gradient-to-br from-green-600 via-green-700 to-green-800 px-5 pt-[max(1.25rem,env(safe-area-inset-top))] pb-5">
           <div className="flex items-center justify-between mb-3">
-            <p className="text-[11px] text-[#9bc78a] font-bold uppercase tracking-[0.2em]">
+            <p className="text-[11px] text-green-200 font-bold uppercase tracking-[0.2em]">
               {resubmitMode ? "Update & Resubmit" : "Partner Onboarding"}
             </p>
-            <span className="text-[11px] font-bold text-white/60 bg-white/10 px-2.5 py-1 rounded-full">
-              {activeIdx + 1}/{steps.length}
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="text-[11px] font-bold text-gray-500 bg-white px-2.5 py-1 rounded-full">
+                {activeIdx + 1}/{steps.length}
+              </span>
+              <button
+                onClick={handleLogout}
+                className="w-7 h-7 rounded-full bg-white hover:bg-white flex items-center justify-center transition-colors text-red-500"
+                title="Logout"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
 
-          <div className="h-1.5 bg-white/10 rounded-full overflow-hidden mb-4">
+          <div className="h-1.5 bg-gray-50 rounded-full overflow-hidden mb-4">
             <motion.div
-              className="h-full bg-[#88c170] rounded-full"
+              className="h-full bg-white rounded-full"
               initial={false}
               animate={{ width: `${progressPct}%` }}
               transition={{ duration: 0.35, ease: "easeOut" }}
@@ -544,12 +566,12 @@ export default function OnboardingWizard() {
                   className={[
                     "flex-1 min-w-0 py-1.5 px-1 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all truncate",
                     active
-                      ? "bg-white text-[#0c1410]"
+                      ? "bg-white text-green-700"
                       : done
-                      ? "bg-[#88c170]/20 text-[#cfe3c6] hover:bg-[#88c170]/30"
-                      : reachable
-                      ? "bg-white/10 text-white/60 hover:bg-white/15"
-                      : "bg-white/5 text-white/25 cursor-not-allowed",
+                        ? "bg-white/20 text-gray-900 hover:bg-gray-100"
+                        : reachable
+                          ? "bg-gray-50 text-gray-600 hover:bg-white/20"
+                          : "bg-white shadow-sm text-gray-400 cursor-not-allowed",
                   ].join(" ")}
                 >
                   {s.label}
@@ -559,9 +581,9 @@ export default function OnboardingWizard() {
           </div>
 
           <h2 className="text-xl font-black tracking-tight">{meta.title}</h2>
-          <p className="text-[13px] text-white/60 mt-1 leading-relaxed">{meta.subtitle}</p>
+          <p className="text-[13px] text-green-50 mt-1 leading-relaxed">{meta.subtitle}</p>
           {resubmitMode ? (
-            <p className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] font-medium text-amber-100">
+            <p className="mt-3 rounded-xl border border-amber-400/30 bg-amber-500/20 px-3 py-2 text-[12px] font-medium text-amber-50">
               Update the fields flagged by admin, then submit again. Your existing application will be
               updated — no new account is created.
             </p>
@@ -569,7 +591,7 @@ export default function OnboardingWizard() {
         </div>
 
         {/* Step body — scrollable middle */}
-        <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-5 space-y-4 bg-[#0c1410]">
+        <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-5 space-y-4 bg-gray-50">
           <AnimatePresence mode="wait">
             <motion.div
               key={current.key}
@@ -582,34 +604,19 @@ export default function OnboardingWizard() {
               {current.key === "services" && (
                 <>
                   <ServiceToggle
-                    checked={state.onboardingServices.includes("food")}
+                    checked={state.onboardingServices.includes("food") || state.onboardingServices.includes("quickCommerce")}
                     onChange={(checked) => {
                       markTouched("onboardingServices");
                       setState((s) => ({
                         ...s,
                         onboardingServices: checked
-                          ? Array.from(new Set([...s.onboardingServices, "food"]))
-                          : s.onboardingServices.filter((x) => x !== "food"),
+                          ? Array.from(new Set([...s.onboardingServices, "food", "quickCommerce"]))
+                          : s.onboardingServices.filter((x) => x !== "food" && x !== "quickCommerce"),
                       }));
                     }}
                     Icon={Bike}
-                    title="Food Delivery"
-                    subtitle="Deliver restaurant orders nearby"
-                  />
-                  <ServiceToggle
-                    checked={state.onboardingServices.includes("quickCommerce")}
-                    onChange={(checked) => {
-                      markTouched("onboardingServices");
-                      setState((s) => ({
-                        ...s,
-                        onboardingServices: checked
-                          ? Array.from(new Set([...s.onboardingServices, "quickCommerce"]))
-                          : s.onboardingServices.filter((x) => x !== "quickCommerce"),
-                      }));
-                    }}
-                    Icon={Bike}
-                    title="Quick Commerce"
-                    subtitle="Deliver groceries and quick-commerce orders"
+                    title="Food & Quick Delivery"
+                    subtitle="Deliver restaurant and quick-commerce orders"
                   />
                   <ServiceToggle
                     checked={state.onboardingServices.includes("taxi")}
@@ -629,7 +636,7 @@ export default function OnboardingWizard() {
                   {showErr("onboardingServices") ? (
                     <p className="text-[11px] font-semibold text-red-400">{showErr("onboardingServices")}</p>
                   ) : null}
-                  <div className="rounded-2xl bg-white/5 border border-white/10 p-3 text-[11px] text-white/50 leading-relaxed">
+                  <div className="rounded-2xl bg-white shadow-sm border border-gray-200 p-3 text-[11px] text-gray-400 leading-relaxed">
                     You'll only be active on one service at a time. The other pauses while you're on a job.
                   </div>
                 </>
@@ -638,7 +645,7 @@ export default function OnboardingWizard() {
               {current.key === "vehicle_food" && (
                 <>
                   <div>
-                    <label className="text-[11px] text-white/50 font-bold uppercase tracking-widest mb-2 block">
+                    <label className="text-[11px] text-gray-400 font-bold uppercase tracking-widest mb-2 block">
                       Vehicle Type <span className="text-red-400">*</span>
                     </label>
                     <div className="grid grid-cols-2 gap-2">
@@ -655,11 +662,11 @@ export default function OnboardingWizard() {
                             className={[
                               "flex flex-col items-center gap-1.5 p-4 rounded-xl border transition-all",
                               selected
-                                ? "bg-[#88c170]/15 border-[#88c170] text-white"
-                                : "bg-white/5 border-white/10 text-white/50 hover:border-white/20",
+                                ? "bg-green-600/15 border-green-600 text-gray-900"
+                                : "bg-white shadow-sm border-gray-200 text-gray-400 hover:border-gray-200",
                             ].join(" ")}
                           >
-                            <Icon className={["w-6 h-6", selected ? "text-[#88c170]" : ""].join(" ")} />
+                            <Icon className={["w-6 h-6", selected ? "text-green-600" : ""].join(" ")} />
                             <span className="text-[12px] font-bold">{label}</span>
                           </button>
                         );
@@ -699,11 +706,11 @@ export default function OnboardingWizard() {
               {current.key === "vehicle_taxi" && (
                 <>
                   <div>
-                    <label className="text-[11px] text-white/50 font-bold uppercase tracking-widest mb-2 block">
+                    <label className="text-[11px] text-gray-400 font-bold uppercase tracking-widest mb-2 block">
                       Vehicle Type <span className="text-red-400">*</span>
                     </label>
                     {taxiTypesLoading ? (
-                      <div className="flex items-center justify-center py-8 text-white/40 text-sm gap-2">
+                      <div className="flex items-center justify-center py-8 text-gray-400 text-sm gap-2">
                         <Loader2 className="w-4 h-4 animate-spin" />
                         Loading vehicle types…
                       </div>
@@ -731,8 +738,8 @@ export default function OnboardingWizard() {
                               className={[
                                 "flex flex-col items-center gap-2 p-3 rounded-xl border transition-all text-center",
                                 selected
-                                  ? "bg-[#88c170]/15 border-[#88c170] text-white"
-                                  : "bg-white/5 border-white/10 text-white/50 hover:border-white/20",
+                                  ? "bg-green-600/15 border-green-600 text-gray-900"
+                                  : "bg-white shadow-sm border-gray-200 text-gray-400 hover:border-gray-200",
                               ].join(" ")}
                             >
                               {item.image || item.map_icon ? (
@@ -742,7 +749,7 @@ export default function OnboardingWizard() {
                                   className="w-10 h-10 object-contain"
                                 />
                               ) : (
-                                <Car className={["w-8 h-8", selected ? "text-[#88c170]" : ""].join(" ")} />
+                                <Car className={["w-8 h-8", selected ? "text-green-600" : ""].join(" ")} />
                               )}
                               <span className="text-[11px] font-bold leading-tight">{item.name}</span>
                             </button>
@@ -769,11 +776,11 @@ export default function OnboardingWizard() {
                               className={[
                                 "flex flex-col items-center gap-1.5 p-3 rounded-xl border transition-all",
                                 selected
-                                  ? "bg-[#88c170]/15 border-[#88c170] text-white"
-                                  : "bg-white/5 border-white/10 text-white/50 hover:border-white/20",
+                                  ? "bg-green-600/15 border-green-600 text-gray-900"
+                                  : "bg-white shadow-sm border-gray-200 text-gray-400 hover:border-gray-200",
                               ].join(" ")}
                             >
-                              <Icon className={["w-5 h-5", selected ? "text-[#88c170]" : ""].join(" ")} />
+                              <Icon className={["w-5 h-5", selected ? "text-green-600" : ""].join(" ")} />
                               <span className="text-[10px] font-bold">{label}</span>
                             </button>
                           );
@@ -968,7 +975,7 @@ export default function OnboardingWizard() {
 
               {current.key === "bank" && (
                 <>
-                  <div className="flex rounded-xl bg-white/5 p-1 border border-white/10">
+                  <div className="flex rounded-xl bg-white shadow-sm p-1 border border-gray-200">
                     {[
                       { key: "bank", label: "Bank Account" },
                       { key: "upi", label: "UPI ID" },
@@ -983,8 +990,8 @@ export default function OnboardingWizard() {
                         className={[
                           "flex-1 py-2.5 rounded-lg text-[12px] font-bold transition-all",
                           bankMode === tab.key
-                            ? "bg-[#88c170] text-[#0c1410] shadow-sm"
-                            : "text-white/50 hover:text-white/70",
+                            ? "bg-green-600 text-white shadow-sm"
+                            : "text-gray-400 hover:text-gray-600",
                         ].join(" ")}
                       >
                         {tab.label}
@@ -1052,7 +1059,7 @@ export default function OnboardingWizard() {
                         error={showErr("bank.upiId")}
                         placeholder="yourname@bank"
                       />
-                      <p className="text-[11px] text-white/40 leading-relaxed">
+                      <p className="text-[11px] text-gray-400 leading-relaxed">
                         Earnings will be sent to this UPI ID. Make sure it is active.
                       </p>
                     </SectionCard>
@@ -1071,8 +1078,8 @@ export default function OnboardingWizard() {
                     capture="user"
                     variant="selfie"
                   />
-                  <div className="flex items-start gap-2.5 rounded-xl bg-[#88c170]/5 border border-[#88c170]/20 p-3">
-                    <ShieldCheck className="w-4 h-4 text-[#88c170] shrink-0 mt-0.5" />
+                  <div className="flex items-start gap-2.5 rounded-xl bg-green-600/5 border border-green-600/20 p-3">
+                    <ShieldCheck className="w-4 h-4 text-green-600 shrink-0 mt-0.5" />
                     <p className="text-[11px] text-[#cfe3c6] leading-relaxed">
                       Your photo is only used for identity verification and is never shared publicly.
                     </p>
@@ -1084,12 +1091,12 @@ export default function OnboardingWizard() {
         </div>
 
         {/* Footer actions — sticky */}
-        <div className="sticky bottom-0 z-20 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] bg-[#0c1410] border-t border-white/5 flex gap-3 shrink-0">
+        <div className="sticky bottom-0 z-20 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] bg-gray-50 border-t border-gray-100 flex gap-3 shrink-0">
           <button
             type="button"
             onClick={handleBack}
             disabled={activeIdx === 0 || stepLoading}
-            className="flex-1 h-12 rounded-2xl bg-white/5 border border-white/10 text-white/80 disabled:text-white/25 font-bold disabled:bg-transparent transition-colors"
+            className="flex-1 h-12 rounded-2xl bg-white shadow-sm border border-gray-200 text-gray-900/80 disabled:text-gray-900/25 font-bold disabled:bg-transparent transition-colors"
           >
             Back
           </button>
@@ -1097,7 +1104,7 @@ export default function OnboardingWizard() {
             type="button"
             onClick={handleNext}
             disabled={stepLoading || Object.keys(stepErrors).length > 0}
-            className="flex-[2] h-12 rounded-2xl bg-[#88c170] hover:bg-[#7eb463] disabled:bg-white/10 disabled:text-white/30 text-[#0c1410] font-extrabold flex items-center justify-center gap-2 transition-colors active:scale-[0.98]"
+            className="flex-[2] h-12 rounded-2xl bg-green-600 hover:bg-green-700 disabled:bg-gray-50 disabled:text-gray-300 text-white font-extrabold flex items-center justify-center gap-2 transition-colors active:scale-[0.98]"
           >
             {stepLoading ? (
               <Loader2 className="w-5 h-5 animate-spin" />
@@ -1125,7 +1132,7 @@ function Field({ label, value, onChange, onBlur, placeholder, type = "text", inp
   const invalid = Boolean(error);
   return (
     <div>
-      <label className="text-[11px] text-white/50 font-bold uppercase tracking-widest mb-1.5 block">
+      <label className="text-[11px] text-gray-400 font-bold uppercase tracking-widest mb-1.5 block">
         {label}
         {isRequired && <span className="text-red-400 ml-0.5">*</span>}
       </label>
@@ -1139,10 +1146,10 @@ function Field({ label, value, onChange, onBlur, placeholder, type = "text", inp
         maxLength={maxLength}
         aria-invalid={invalid}
         className={[
-          "w-full h-12 bg-white/5 rounded-xl px-4 text-white font-semibold outline-none placeholder:text-white/30 transition-colors",
+          "w-full h-12 bg-white shadow-sm rounded-xl px-4 text-gray-900 font-semibold outline-none placeholder:text-gray-300 transition-colors",
           invalid
             ? "border border-red-400 focus:ring-2 focus:ring-red-400/30"
-            : "border border-white/10 focus:border-[#88c170] focus:ring-2 focus:ring-[#88c170]/20",
+            : "border border-gray-200 focus:border-green-600 focus:ring-2 focus:ring-[#88c170]/20",
         ].join(" ")}
       />
       {invalid && (
@@ -1155,16 +1162,16 @@ function Field({ label, value, onChange, onBlur, placeholder, type = "text", inp
 function Select({ label, value, onChange, options }) {
   return (
     <div>
-      <label className="text-[11px] text-white/50 font-bold uppercase tracking-widest mb-1.5 block">
+      <label className="text-[11px] text-gray-400 font-bold uppercase tracking-widest mb-1.5 block">
         {label}
       </label>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full h-12 bg-white/5 border border-white/10 rounded-xl px-4 text-white font-semibold outline-none focus:border-[#88c170]"
+        className="w-full h-12 bg-white shadow-sm border border-gray-200 rounded-xl px-4 text-gray-900 font-semibold outline-none focus:border-green-600"
       >
         {options.map((opt) => (
-          <option key={opt.value} value={opt.value} className="bg-[#0c1410]">
+          <option key={opt.value} value={opt.value} className="bg-gray-50">
             {opt.label}
           </option>
         ))}
@@ -1175,11 +1182,11 @@ function Select({ label, value, onChange, options }) {
 
 function SectionCard({ title, required: isRequired, optional, children }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 space-y-3">
+    <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-4 space-y-3">
       <div className="flex items-center gap-2">
-        <h3 className="text-[13px] font-bold text-white">{title}</h3>
-        {isRequired && <span className="text-[9px] font-bold uppercase tracking-wider text-[#88c170] bg-[#88c170]/10 px-1.5 py-0.5 rounded">Required</span>}
-        {optional && <span className="text-[9px] font-bold uppercase tracking-wider text-white/30">Optional</span>}
+        <h3 className="text-[13px] font-bold text-gray-900">{title}</h3>
+        {isRequired && <span className="text-[9px] font-bold uppercase tracking-wider text-green-600 bg-green-600/10 px-1.5 py-0.5 rounded">Required</span>}
+        {optional && <span className="text-[9px] font-bold uppercase tracking-wider text-gray-300">Optional</span>}
       </div>
       {children}
     </div>
@@ -1221,13 +1228,13 @@ function DocumentUpload({
 
   return (
     <div>
-      <label className="text-[11px] text-white/50 font-bold uppercase tracking-widest mb-1.5 block">
+      <label className="text-[11px] text-gray-400 font-bold uppercase tracking-widest mb-1.5 block">
         {label}
         {!optional && <span className="text-red-400 ml-0.5">*</span>}
       </label>
 
       {value ? (
-        <div className="relative rounded-xl overflow-hidden border border-white/10 bg-white/5">
+        <div className="relative rounded-xl overflow-hidden border border-gray-200 bg-white shadow-sm">
           <img
             src={value}
             alt={label}
@@ -1239,7 +1246,7 @@ function DocumentUpload({
               type="button"
               disabled={busy}
               onClick={() => (capture ? cameraRef : inputRef).current?.click()}
-              className="flex-1 h-9 rounded-lg bg-white/20 backdrop-blur text-white text-[11px] font-bold hover:bg-white/30 transition-colors"
+              className="flex-1 h-9 rounded-lg bg-white/20 backdrop-blur text-gray-900 text-[11px] font-bold hover:bg-gray-100 transition-colors"
             >
               Retake
             </button>
@@ -1247,12 +1254,12 @@ function DocumentUpload({
               type="button"
               disabled={busy}
               onClick={() => onChange("", null)}
-              className="h-9 px-3 rounded-lg bg-red-500/80 backdrop-blur text-white text-[11px] font-bold hover:bg-red-500 transition-colors"
+              className="h-9 px-3 rounded-lg bg-red-500/80 backdrop-blur text-gray-900 text-[11px] font-bold hover:bg-red-500 transition-colors"
             >
               Remove
             </button>
           </div>
-          <div className="absolute top-2 right-2 bg-[#88c170] text-[#0c1410] rounded-full p-1">
+          <div className="absolute top-2 right-2 bg-green-600 text-white rounded-full p-1">
             <CheckCircle2 className="w-4 h-4" />
           </div>
         </div>
@@ -1266,27 +1273,27 @@ function DocumentUpload({
             isSelfie ? "h-44" : "h-28",
             invalid
               ? "border-red-400/50 bg-red-400/5"
-              : "border-white/15 bg-white/[0.02] hover:border-[#88c170]/50 hover:bg-[#88c170]/5",
+              : "border-gray-200 bg-gray-50 hover:border-green-600/50 hover:bg-green-600/5",
             busy ? "opacity-60" : "",
           ].join(" ")}
         >
           {busy ? (
-            <Loader2 className="w-6 h-6 animate-spin text-[#88c170]" />
+            <Loader2 className="w-6 h-6 animate-spin text-green-600" />
           ) : isSelfie ? (
             <>
-              <div className="w-14 h-14 rounded-full bg-[#88c170]/15 flex items-center justify-center">
-                <Camera className="w-7 h-7 text-[#88c170]" />
+              <div className="w-14 h-14 rounded-full bg-green-600/15 flex items-center justify-center">
+                <Camera className="w-7 h-7 text-green-600" />
               </div>
-              <span className="text-[12px] font-bold text-white/70">Tap to take selfie</span>
+              <span className="text-[12px] font-bold text-gray-600">Tap to take selfie</span>
             </>
           ) : (
             <>
-              <UploadCloud className="w-6 h-6 text-white/40" />
-              <span className="text-[11px] font-bold text-white/50">Tap to upload photo</span>
+              <UploadCloud className="w-6 h-6 text-gray-400" />
+              <span className="text-[11px] font-bold text-gray-400">Tap to upload photo</span>
             </>
           )}
           {hint && !busy && (
-            <span className="text-[10px] text-white/30 px-4 text-center">{hint}</span>
+            <span className="text-[10px] text-gray-300 px-4 text-center">{hint}</span>
           )}
         </button>
       )}
@@ -1296,7 +1303,7 @@ function DocumentUpload({
           type="button"
           disabled={busy}
           onClick={() => cameraRef.current?.click()}
-          className="mt-2 w-full flex items-center justify-center gap-1.5 py-2 text-[11px] font-bold text-[#88c170] hover:text-[#9ed086]"
+          className="mt-2 w-full flex items-center justify-center gap-1.5 py-2 text-[11px] font-bold text-green-600 hover:text-green-700"
         >
           <ImagePlus className="w-3.5 h-3.5" />
           Use camera instead
@@ -1338,26 +1345,26 @@ function ServiceToggle({ checked, onChange, Icon, title, subtitle }) {
       className={[
         "w-full text-left p-4 rounded-2xl border transition-all flex items-center gap-3 active:scale-[0.99]",
         checked
-          ? "bg-[#88c170]/10 border-[#88c170] shadow-[0_0_0_2px_rgba(136,193,112,0.15)]"
-          : "bg-white/5 border-white/10 hover:border-white/20",
+          ? "bg-green-600/10 border-green-600 shadow-[0_0_0_2px_rgba(136,193,112,0.15)]"
+          : "bg-white shadow-sm border-gray-200 hover:border-gray-200",
       ].join(" ")}
     >
       <div
         className={[
           "w-11 h-11 rounded-xl flex items-center justify-center shrink-0",
-          checked ? "bg-[#88c170] text-[#0c1410]" : "bg-white/10 text-white/60",
+          checked ? "bg-green-600 text-white" : "bg-gray-50 text-gray-500",
         ].join(" ")}
       >
         <Icon className="w-5 h-5" />
       </div>
       <div className="flex-1 min-w-0">
-        <div className="text-white font-bold">{title}</div>
-        <div className="text-[12px] text-white/50">{subtitle}</div>
+        <div className="text-gray-900 font-bold">{title}</div>
+        <div className="text-[12px] text-gray-400">{subtitle}</div>
       </div>
       <div
         className={[
           "w-6 h-6 rounded-full border-2 flex items-center justify-center shrink-0",
-          checked ? "border-[#88c170] bg-[#88c170] text-[#0c1410]" : "border-white/20",
+          checked ? "border-green-600 bg-green-600 text-white" : "border-gray-200",
         ].join(" ")}
       >
         {checked && <CheckCircle2 className="w-4 h-4" />}

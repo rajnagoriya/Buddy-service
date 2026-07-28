@@ -8,6 +8,7 @@ import {
   checkOfferEligibility,
   computeOfferDiscount,
   getCreatedByType,
+  isFreeDeliveryCoupon,
   logOfferAction,
   mapCouponRejectionMessage,
 } from '../../admin/services/offer.service.js';
@@ -342,7 +343,7 @@ export async function calculateOrderPricing(userId, dto) {
       dto.deliveryOption,
     )
     : null;
-  const speedFeeModifier = matchedSpeedOption
+  const rawSpeedFeeModifier = matchedSpeedOption
     ? Number(matchedSpeedOption.feeModifier) || 0
     : (speedOptions.length > 0
       ? resolveSpeedFeeModifier(
@@ -352,31 +353,65 @@ export async function calculateOrderPricing(userId, dto) {
       )
       : 0);
 
-  const speedShares = splitSpeedFeeShares(speedFeeModifier, {
-    driverShareAmount: matchedSpeedOption?.driverShareAmount,
-  });
-  // Signed speed modifier: positive adds, negative subtracts (final fee floored at 0)
-  const speedAdjustment = Number(speedFeeModifier) || 0;
-
-  // Customer: base → speed → multi-resto (+ split doubles distance/default base only)
+  // Customer: base → multi-resto / split surcharges (speed applied below only when delivery is not waived)
   const multiCharge = isMultiRestaurant
     ? Math.max(0, Number(deliveryBoySettings?.multiOrderAdditionalCharge) || 0)
     : 0;
   const splitExtraCustomer = isSplitOrder ? baseDeliveryFee : 0;
   const customerSurcharge = multiCharge + splitExtraCustomer;
-  const deliveryFee = Math.max(
-    0,
-    baseDeliveryFee + speedAdjustment + customerSurcharge,
-  );
+  const baseCustomerDeliveryFee = Math.max(0, baseDeliveryFee + customerSurcharge);
 
-  // Rider: slab/default + same multi/split; speed driver share on top (unchanged by free delivery)
+  // Free delivery (threshold or free-delivery coupon): customer pays ₹0 — speed fee must not apply.
+  let deliveryWaived = isFreeByThreshold;
+  const codeRaw = dto.couponCode
+    ? String(dto.couponCode).trim().toUpperCase()
+    : '';
+  if (!deliveryWaived && codeRaw) {
+    const now = new Date();
+    const offer = await FoodOffer.findOne({
+      couponCode: codeRaw,
+      isDeleted: { $ne: true },
+      $or: [{ approvalStatus: 'approved' }, { approvalStatus: { $exists: false } }],
+    }).lean();
+    if (offer && isFreeDeliveryCoupon(offer)) {
+      const eligibility = await checkOfferEligibility(offer, {
+        userId,
+        restaurantIds,
+        subtotal,
+        isMultiRestaurant,
+        now,
+      });
+      if (eligibility.eligible) {
+        deliveryWaived = true;
+      }
+    }
+  }
+
+  const speedFeeModifier = deliveryWaived ? 0 : rawSpeedFeeModifier;
+  const speedShares = deliveryWaived
+    ? {
+      speedShareAdmin: 0,
+      speedShareDriver: 0,
+      speedShareRestaurant: 0,
+      adminBearsNegative: false,
+    }
+    : splitSpeedFeeShares(speedFeeModifier, {
+      driverShareAmount: matchedSpeedOption?.driverShareAmount,
+    });
+  const speedAdjustment = Number(speedFeeModifier) || 0;
+
+  const deliveryFee = deliveryWaived
+    ? baseCustomerDeliveryFee
+    : Math.max(0, baseCustomerDeliveryFee + speedAdjustment);
+
+  // Rider: slab/default + multi/split; speed driver share only when customer delivery is not fully waived
   const riderSurchargeResult = applyDeliverySurcharges(baseRiderFee, {
     isMultiRestaurant,
     isSplitOrder,
     deliveryBoySettings,
   });
   const riderFee = Number(
-    (riderSurchargeResult.fee + speedShares.speedShareDriver).toFixed(2),
+    (riderSurchargeResult.fee + (deliveryWaived ? 0 : speedShares.speedShareDriver)).toFixed(2),
   );
   const deliveryMarginBase = Math.max(
     0,
@@ -394,6 +429,8 @@ export async function calculateOrderPricing(userId, dto) {
     multiplier: isSplitOrder ? 2 : 1,
     additionalCharge: customerSurcharge,
     speedFeeModifier,
+    speedFeeModifierSelected: deliveryWaived ? rawSpeedFeeModifier : speedFeeModifier,
+    speedSkippedBecauseFreeDelivery: deliveryWaived,
     speedDriverShareConfigured: Math.max(0, Number(matchedSpeedOption?.driverShareAmount) || 0),
     speedShareAdmin: speedShares.speedShareAdmin,
     speedShareRestaurant: 0,
@@ -421,9 +458,6 @@ export async function calculateOrderPricing(userId, dto) {
   let couponCategory = null;
   let appliedCoupon = null;
   let couponError = null;
-  const codeRaw = dto.couponCode
-    ? String(dto.couponCode).trim().toUpperCase()
-    : '';
 
   // Free-delivery threshold: customer pays ₹0 delivery; admin bears the waived fee
   // (same accounting as a free-delivery coupon). Rider fee stays in breakdown.

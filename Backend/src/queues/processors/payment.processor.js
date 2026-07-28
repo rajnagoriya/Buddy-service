@@ -61,7 +61,7 @@ async function loadOrderSettlement(data = {}) {
 
     return FoodOrder.findOne(identity)
         .select(
-            'order_id orderId restaurantId dispatch riderEarning sharedRiderEarning platformProfit pricing settlementBreakdown restaurantSettlement payment',
+            'order_id orderId restaurantId isMultiRestaurant pickups dispatch riderEarning sharedRiderEarning platformProfit pricing settlementBreakdown restaurantSettlement payment',
         )
         .lean();
 }
@@ -102,13 +102,17 @@ async function handleDeliveryCompleted(data) {
     );
 
     const settlements = Array.isArray(order?.restaurantSettlement) ? order.restaurantSettlement : [];
+    const isMultiRestaurant =
+        settlements.length > 1 ||
+        Boolean(order?.isMultiRestaurant) ||
+        (Array.isArray(order?.pickups) && order.pickups.length > 1);
     const commissionAmount = settlements.length
         ? settlements.reduce((sum, s) => sum + (Number(s.restaurantPayout) || 0), 0)
         : Math.max(0, Number(data.commissionAmount) || 0);
 
     const paymentMethod = order?.payment?.method || data.paymentMethod || data.payMethod;
 
-    // 1. Credit restaurant wallet(s)
+    // 1. Credit restaurant wallet(s) — always prefer per-restaurant settlement rows.
     if (settlements.length > 0) {
         for (const s of settlements) {
             const rid = s.restaurantId?._id?.toString?.() || s.restaurantId?.toString?.();
@@ -122,13 +126,18 @@ async function handleDeliveryCompleted(data) {
                     description: `Order ${orderId} - restaurant payout`,
                     category: 'commission',
                     orderId: orderMongoId,
-                    metadata: { orderId, paymentMethod },
+                    metadata: { orderId, paymentMethod, restaurantId: rid },
                 });
                 logger.info(`[PaymentProcessor] Restaurant ${rid} credited ${payout} for order ${orderId}`);
             } catch (err) {
                 logger.error(`[PaymentProcessor] Failed to credit restaurant ${rid}: ${err.message}`);
             }
         }
+    } else if (isMultiRestaurant) {
+        // Never dump the full multi-resto payout onto the primary restaurant.
+        logger.error(
+            `[PaymentProcessor] Multi-restaurant order ${orderId} missing restaurantSettlement; skipping restaurant wallet credits`,
+        );
     } else if (restaurantId && commissionAmount > 0) {
         try {
             await creditWallet({

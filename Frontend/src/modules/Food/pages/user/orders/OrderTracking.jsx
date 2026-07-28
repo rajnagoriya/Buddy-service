@@ -522,6 +522,7 @@ const transformOrderForTracking = (apiOrder, previousOrder = null, explicitResta
     })(),
     isMultiRestaurant: apiOrder?.isMultiRestaurant || (apiOrder?.pickups?.length > 1) || previousOrder?.isMultiRestaurant || false,
     pickups: apiOrder?.pickups || previousOrder?.pickups || [],
+    partialRefunds: apiOrder?.partialRefunds || previousOrder?.partialRefunds || [],
     cancellationReason: apiOrder?.cancellationReason || previousOrder?.cancellationReason || null,
     ratings: apiOrder?.ratings || previousOrder?.ratings || {},
     restaurantRating: apiOrder?.ratings?.restaurant?.rating || apiOrder?.restaurantRating || previousOrder?.restaurantRating || null,
@@ -721,6 +722,7 @@ export default function OrderTracking() {
   const hasDeliveryPartner = !!(order?.deliveryPartnerId || order?.deliveryPartnerName)
   const hasDeliveryRating = Number.isFinite(Number(order?.ratings?.deliveryPartner?.rating || order?.deliveryPartnerRating))
   const isOrderRated = hasRestaurantRating && (!hasDeliveryPartner || hasDeliveryRating)
+  const ratingPromptedRef = useRef(false)
 
   const handleOpenRating = () => {
     setSelectedRestaurantRating(order?.ratings?.restaurant?.rating || order?.restaurantRating || null)
@@ -748,15 +750,32 @@ export default function OrderTracking() {
       })
       
       const updatedOrderData = response?.data?.data?.order || response?.data?.order
-      if (updatedOrderData) {
-        setOrder(prev => ({
-          ...prev,
-          ...updatedOrderData,
-          ratings: updatedOrderData.ratings,
-          restaurantRating: updatedOrderData.ratings?.restaurant?.rating,
-          deliveryPartnerRating: updatedOrderData.ratings?.deliveryPartner?.rating
-        }))
+      const nextRatings = updatedOrderData?.ratings || {
+        restaurant: {
+          rating: selectedRestaurantRating,
+          comment: restaurantFeedbackText || '',
+          ratedAt: new Date().toISOString(),
+        },
+        ...(deliveryPartnerCheck
+          ? {
+              deliveryPartner: {
+                rating: selectedDeliveryRating,
+                comment: deliveryFeedbackText || '',
+                ratedAt: new Date().toISOString(),
+              },
+            }
+          : {}),
       }
+
+      setOrder((prev) => ({
+        ...prev,
+        ...(updatedOrderData || {}),
+        ratings: nextRatings,
+        restaurantRating: nextRatings?.restaurant?.rating ?? selectedRestaurantRating,
+        deliveryPartnerRating: deliveryPartnerCheck
+          ? (nextRatings?.deliveryPartner?.rating ?? selectedDeliveryRating)
+          : prev?.deliveryPartnerRating,
+      }))
 
       toast.success("Thanks for your feedback!")
       setShowRatingModal(false)
@@ -792,6 +811,44 @@ export default function OrderTracking() {
       order?.deliveryState?.status,
     ],
   )
+
+  // Auto-open rate restaurant + driver modal once order is delivered.
+  useEffect(() => {
+    if (orderStatus !== 'delivered' || isOrderRated || showRatingModal) return
+    if (ratingPromptedRef.current) return
+
+    const orderKey = String(order?.mongoId || order?._id || order?.id || '')
+    if (!orderKey) return
+
+    try {
+      const stored = JSON.parse(localStorage.getItem('shownRatingForOrders') || '[]')
+      if (Array.isArray(stored) && stored.includes(orderKey)) {
+        ratingPromptedRef.current = true
+        return
+      }
+      const next = Array.from(new Set([...stored, orderKey]))
+      localStorage.setItem('shownRatingForOrders', JSON.stringify(next))
+    } catch {
+      // ignore storage errors
+    }
+
+    ratingPromptedRef.current = true
+    const timer = setTimeout(() => {
+      setSelectedRestaurantRating(null)
+      setSelectedDeliveryRating(null)
+      setRestaurantFeedbackText('')
+      setDeliveryFeedbackText('')
+      setShowRatingModal(true)
+    }, 600)
+    return () => clearTimeout(timer)
+  }, [
+    orderStatus,
+    isOrderRated,
+    showRatingModal,
+    order?.mongoId,
+    order?._id,
+    order?.id,
+  ])
 
   const isDriverNotFoundCancelled = useMemo(() => {
     if (orderStatus !== 'cancelled') return false
@@ -1478,6 +1535,8 @@ export default function OrderTracking() {
           payment: payload.payment ?? prev?.payment,
           pricing: payload.pricing ?? prev?.pricing,
           pickups: payload.pickups ?? prev?.pickups,
+          partialRefunds: payload.partialRefunds ?? prev?.partialRefunds,
+          items: payload.items ?? prev?.items,
         }
         const transformed = transformOrderForTracking(apiPatch, prev)
         const ui = mapOrderToTrackingUiStatus(transformed)
@@ -2193,14 +2252,18 @@ export default function OrderTracking() {
               </div>
               <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100">Enjoyed your food?</h3>
               <p className="text-sm text-gray-500 dark:text-gray-400 mt-2 mb-6 max-w-[280px]">
-                Rate your experience with <span className="font-semibold text-gray-700 dark:text-gray-300">{order?.restaurant}</span> and help us improve!
+                Rate <span className="font-semibold text-gray-700 dark:text-gray-300">{order?.restaurant || "the restaurant"}</span>
+                {hasDeliveryPartner
+                  ? ` and ${order?.deliveryPartnerName || "your delivery partner"}`
+                  : ""}{" "}
+                to help us improve!
               </p>
               
               <Button 
                 onClick={handleOpenRating}
                 className="w-full max-w-[200px] bg-[#16A34A] hover:bg-[#15803D] text-white font-bold h-12 rounded-xl border-none shadow-lg shadow-[#16A34A]/20"
               >
-                Rate Order
+                Rate Restaurant & Driver
               </Button>
             </div>
           </motion.div>
@@ -2461,6 +2524,33 @@ export default function OrderTracking() {
         </motion.div>
 
         {/* Restaurant Section */}
+        {Array.isArray(order.partialRefunds) && order.partialRefunds.length > 0 ? (
+          <motion.div
+            className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl p-4"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            <p className="text-xs font-bold uppercase tracking-wider text-amber-800 dark:text-amber-200 mb-2">
+              Partial refunds
+            </p>
+            <div className="space-y-1.5">
+              {order.partialRefunds.map((entry, idx) => (
+                <div
+                  key={`${entry.restaurantId || idx}-${entry.at || idx}`}
+                  className="flex items-center justify-between gap-2 text-sm text-amber-900 dark:text-amber-100"
+                >
+                  <span>
+                    {entry.restaurantName || 'Restaurant'} cancelled
+                    {entry.status === 'failed' ? ' (refund pending)' : ''}
+                  </span>
+                  <span className="font-semibold">
+                    ₹{Number(entry.amount || 0).toFixed(0)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        ) : null}
         {(order.pickups && order.pickups.length > 0 ? order.pickups : [{
           restaurantName: order.restaurant,
           restaurantAddress: order.restaurantAddress,
@@ -2468,7 +2558,11 @@ export default function OrderTracking() {
         }]).map((pickup, pIdx) => (
           <motion.div
             key={`pickup-card-${pIdx}`}
-            className="bg-white dark:bg-[#1a1a1a] rounded-xl shadow-sm overflow-hidden"
+            className={`bg-white dark:bg-[#1a1a1a] rounded-xl shadow-sm overflow-hidden ${
+              pickup.permanentlyDropped || String(pickup.status || '').toLowerCase() === 'cancelled'
+                ? 'opacity-75'
+                : ''
+            }`}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.75 + (pIdx * 0.05) }}
@@ -2481,8 +2575,11 @@ export default function OrderTracking() {
                 />
               </div>
               <div className="flex-1">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                    <p className="font-semibold text-gray-900 dark:text-gray-100">{pickup.restaurantName || order.restaurant}</p>
+                   {(pickup.permanentlyDropped || String(pickup.status || '').toLowerCase() === 'cancelled') && (
+                     <span className="bg-rose-100 text-rose-700 text-[8px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider">Cancelled</span>
+                   )}
                    {pickup.status === 'picked_up' && (
                      <span className="bg-green-100 text-green-700 text-[8px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider">Picked</span>
                    )}
@@ -2875,7 +2972,7 @@ export default function OrderTracking() {
           <DialogHeader className="mb-2">
             <DialogTitle className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
               <Star className="w-6 h-6 text-[#16A34A] fill-[#16A34A]" />
-              Rate your Experience
+              Rate restaurant & driver
             </DialogTitle>
           </DialogHeader>
 

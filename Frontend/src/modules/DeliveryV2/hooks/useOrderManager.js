@@ -53,16 +53,20 @@ export const useOrderManager = () => {
           return null;
         };
 
-        // For multi-restaurant, find the next pending pickup location
+        // For multi-restaurant, find the next pending pickup location (driver sequence)
         let resLoc = null;
         if (fullOrder.isMultiRestaurant && Array.isArray(fullOrder.pickups)) {
-          const nextPickup = fullOrder.pickups.find(
-            (p) =>
-              !p.permanentlyDropped &&
-              !['picked_up', 'cancelled'].includes(String(p.status || '')),
-          );
+          const nextPickup = [...fullOrder.pickups]
+            .filter(
+              (p) =>
+                !p.permanentlyDropped &&
+                !['picked_up', 'cancelled'].includes(String(p.status || '')),
+            )
+            .sort((a, b) => (Number(a.sequence) || 0) - (Number(b.sequence) || 0))[0];
           if (nextPickup) {
-            resLoc = getLoc(nextPickup, ['latitude', 'lat'], ['longitude', 'lng']);
+            resLoc =
+              getLoc(nextPickup, ['latitude', 'lat'], ['longitude', 'lng']) ||
+              getLoc(nextPickup.location, ['latitude', 'lat'], ['longitude', 'lng']);
           }
         }
 
@@ -169,11 +173,17 @@ export const useOrderManager = () => {
           };
 
           let nextRestaurantLocation = activeOrder?.restaurantLocation || null;
+          let nextPickupName = '';
           if (updatedOrder.isMultiRestaurant && Array.isArray(updatedOrder.pickups)) {
-            const nextPickup = updatedOrder.pickups.find(
-              (p) => !p.permanentlyDropped && !['picked_up', 'ready_for_handover', 'cancelled'].includes(String(p.status || '')),
-            );
+            const nextPickup = [...updatedOrder.pickups]
+              .filter(
+                (p) =>
+                  !p.permanentlyDropped &&
+                  !['picked_up', 'ready_for_handover', 'cancelled'].includes(String(p.status || '')),
+              )
+              .sort((a, b) => (Number(a.sequence) || 0) - (Number(b.sequence) || 0))[0];
             if (nextPickup) {
+              nextPickupName = nextPickup.restaurantName || '';
               nextRestaurantLocation = getLoc(nextPickup, ['latitude', 'lat'], ['longitude', 'lng'])
                 || getLoc(nextPickup.location, ['latitude', 'lat'], ['longitude', 'lng'])
                 || nextRestaurantLocation;
@@ -216,12 +226,16 @@ export const useOrderManager = () => {
             toast.success(
               myLegCollected && !isFullyPicked
                 ? 'Your items collected! Heading to Drop-off'
-                : 'All items collected! Heading to Drop-off',
+                : 'All restaurants picked up! Heading to customer',
             );
           } else {
             // Revert to PICKING_UP to target the NEXT restaurant in the pickups array
             updateTripStatus('PICKING_UP');
-            toast.info('Pickup confirmed. Capture bill at the next restaurant.');
+            toast.success(
+              nextPickupName
+                ? `Pickup done. Next: ${nextPickupName} — reach store, then capture bill.`
+                : 'Pickup confirmed. Continue to the next restaurant.',
+            );
           }
         } else {
           updateTripStatus('PICKED_UP');

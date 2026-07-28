@@ -364,6 +364,49 @@ export const ProfileDetailsV2 = () => {
     toast.success("UPI QR selected")
   }
 
+  
+  const getBankDetailsError = (key, value) => {
+    if (!value) return null;
+    switch(key) {
+      case 'accountNumber':
+        if (!/^\d{9,18}$/.test(value.trim())) return "Must be 9-18 digits";
+        break;
+      case 'ifscCode':
+        if (!/^[A-Z]{4}0[A-Z0-9]{6}$/i.test(value.trim())) return "Invalid IFSC (e.g. SBIN0001234)";
+        break;
+      case 'panNumber':
+        if (!/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/i.test(value.trim())) return "Invalid PAN (e.g. ABCDE1234F)";
+        break;
+      case 'upiId':
+        if (!/^[\w\.-]+@[\w\.-]+$/.test(value.trim())) return "Invalid UPI (e.g. user@bank)";
+        break;
+    }
+    return null;
+  }
+
+
+  const hasBankDetailsChanged = () => {
+    if (upiQrFile) return true;
+    
+    const initial = {
+      accountHolderName: profile?.documents?.bankDetails?.accountHolderName || "",
+      accountNumber: profile?.documents?.bankDetails?.accountNumber || "",
+      ifscCode: profile?.documents?.bankDetails?.ifscCode || "",
+      bankName: profile?.documents?.bankDetails?.bankName || "",
+      panNumber: profile?.documents?.pan?.number || "",
+      upiId: profile?.documents?.bankDetails?.upiId || "",
+    };
+
+    return (
+      bankDetails.accountHolderName !== initial.accountHolderName ||
+      bankDetails.accountNumber !== initial.accountNumber ||
+      bankDetails.ifscCode !== initial.ifscCode ||
+      bankDetails.bankName !== initial.bankName ||
+      bankDetails.panNumber !== initial.panNumber ||
+      bankDetails.upiId !== initial.upiId
+    );
+  };
+
   const submitBankDetails = async () => {
     setIsUpdatingBankDetails(true)
     try {
@@ -461,9 +504,9 @@ export const ProfileDetailsV2 = () => {
           <Icon className="w-6 h-6" />
         </div>
         <div>
-          <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.15em] mb-0.5">{label}</p>
+          <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wider mb-0.5">{label}</p>
           <div className="flex items-center gap-2">
-            <h4 className="text-sm font-bold text-gray-900">{value || "—"}</h4>
+            <h4 className="text-sm font-semibold text-gray-900">{value || "—"}</h4>
             {badge}
           </div>
         </div>
@@ -484,9 +527,9 @@ export const ProfileDetailsV2 = () => {
           <button onClick={goBack} className="p-2 hover:bg-gray-100 rounded-xl transition-all active:scale-90">
             <ArrowLeft className="w-5 h-5 text-gray-700" />
           </button>
-          <h1 className="text-lg font-black text-black uppercase tracking-tight leading-none">Profile</h1>
+          <h1 className="text-base font-semibold text-gray-900">Profile</h1>
         </div>
-        <div className="bg-[#16A34A] text-[#0F172A] px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest shadow-lg shadow-green-500/20">
+        <div className="bg-[#16A34A] text-[#0F172A] px-3 py-1.5 rounded-full text-[10px] font-semibold uppercase tracking-wider shadow-lg shadow-green-500/20">
           ID: {profile?.deliveryId || "..."}
         </div>
       </div>
@@ -537,14 +580,14 @@ export const ProfileDetailsV2 = () => {
         </div>
 
         <div className="text-center pt-6">
-           <h2 className="text-2xl font-black text-gray-900 leading-none">{profile?.name}</h2>
-           <p className="text-[11px] font-bold text-gray-400 uppercase tracking-[0.2em] mt-2 mb-4">Delivery Partner • {profile?.location?.city}</p>
+           <h2 className="text-xl font-bold text-gray-900">{profile?.name}</h2>
+           <p className="text-xs font-medium text-gray-500 mt-2 mb-4">Delivery Partner • {profile?.location?.city}</p>
            
            <div className="flex items-center justify-center gap-2">
-              <div className={`${isAdminApproved ? 'bg-[#16A34A] text-[#0F172A]' : 'bg-[#16A34A]/10 text-[#16A34A]'} px-4 py-2 rounded-2xl text-xs font-black uppercase tracking-widest border ${isAdminApproved ? 'border-[#15803D] shadow-lg shadow-green-500/20' : 'border-[#16A34A]/20'} flex items-center gap-2`}>
+              <div className={`${isAdminApproved ? 'bg-[#16A34A] text-[#0F172A]' : 'bg-[#16A34A]/10 text-[#16A34A]'} px-4 py-2 rounded-2xl text-xs font-semibold uppercase tracking-wider border ${isAdminApproved ? 'border-[#15803D] shadow-lg shadow-green-500/20' : 'border-[#16A34A]/20'} flex items-center gap-2`}>
                  <CheckCircle className="w-4 h-4" /> {isAdminApproved ? "Approved" : (profile?.status || "Pending")}
               </div>
-              <div className="bg-[#16A34A]/10 text-[#16A34A] px-4 py-2 rounded-2xl text-xs font-black uppercase tracking-widest border border-[#16A34A]/20 flex items-center gap-2">
+              <div className="bg-[#16A34A]/10 text-[#16A34A] px-4 py-2 rounded-2xl text-xs font-semibold uppercase tracking-wider border border-[#16A34A]/20 flex items-center gap-2">
                  <Smartphone className="w-4 h-4" /> {profile?.phone}
               </div>
            </div>
@@ -553,19 +596,19 @@ export const ProfileDetailsV2 = () => {
         {/* ─── RIDER STATS ─── */}
         <div className="grid grid-cols-2 gap-3">
            <div className="bg-white border border-gray-100 p-4 rounded-3xl shadow-sm text-center">
-              <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1">Rider Level</p>
-              <h4 className="text-xl font-black text-gray-900">{riderLevel}</h4>
+              <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wider mb-1">Rider Level</p>
+              <h4 className="text-lg font-semibold text-gray-900">{riderLevel}</h4>
            </div>
            <div className="bg-white border border-gray-100 p-4 rounded-3xl shadow-sm text-center">
-              <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1">Total Rating</p>
-              <h4 className="text-xl font-black text-gray-900">{ratingDisplay}</h4>
+              <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wider mb-1">Total Rating</p>
+              <h4 className="text-lg font-semibold text-gray-900">{ratingDisplay}</h4>
            </div>
         </div>
 
         {/* ─── VEHICLE SECTION ─── */}
         <section>
           <div className="flex items-center justify-between mb-3 px-1">
-             <h3 className="text-xs font-black text-gray-950 uppercase tracking-widest flex items-center gap-2">
+             <h3 className="text-xs font-semibold text-gray-800 uppercase tracking-wider flex items-center gap-2">
                 {(() => {
                   const type = String(profile?.vehicle?.type || "").toLowerCase();
                   if (type.includes("car")) return <Car className="w-4 h-4 text-gray-400" />;
@@ -597,7 +640,7 @@ export const ProfileDetailsV2 = () => {
         {/* ─── ZONE SELECTION SECTION ─── */}
         <section>
           <div className="flex items-center justify-between mb-3 px-1">
-             <h3 className="text-xs font-black text-gray-950 uppercase tracking-widest flex items-center gap-2">
+             <h3 className="text-xs font-semibold text-gray-800 uppercase tracking-wider flex items-center gap-2">
                 <MapPin className="w-4 h-4 text-gray-400" /> Delivery Service Zone
              </h3>
           </div>
@@ -610,79 +653,92 @@ export const ProfileDetailsV2 = () => {
           />
         </section>
 
-        {/* ─── BANK & PAYMENTS SECTION (ENHANCED) ─── */}
+        {/* ─── BANK & PAYMENTS SECTION ─── */}
         <section>
-           <div className="flex items-center justify-between mb-4 px-1">
-              <h3 className="text-xs font-black text-gray-950 uppercase tracking-widest flex items-center gap-2">
+           <div className="flex items-center justify-between mb-3 px-1">
+              <h3 className="text-xs font-semibold text-gray-800 uppercase tracking-wider flex items-center gap-2">
                  <Banknote className="w-4 h-4 text-gray-400" /> Bank & Payments
               </h3>
-              <button 
-                onClick={() => {
-                  // Reset state to current profile data when opening
-                  setBankDetails({
-                    accountHolderName: profile?.documents?.bankDetails?.accountHolderName || "",
-                    accountNumber: profile?.documents?.bankDetails?.accountNumber || "",
-                    ifscCode: profile?.documents?.bankDetails?.ifscCode || "",
-                    bankName: profile?.documents?.bankDetails?.bankName || "",
-                    panNumber: profile?.documents?.pan?.number || "",
-                    upiId: profile?.documents?.bankDetails?.upiId || "",
-                    upiQrCode: profile?.documents?.bankDetails?.upiQrCode || null
-                  })
-                  setUpiQrFile(null)
-                  setUpiQrPreview(null)
-                  setShowBankDetailsPopup(true)
-                }} 
-                className="text-[10px] font-black text-[#16A34A] uppercase tracking-widest hover:underline"
-              >
-                Edit Details
-              </button>
            </div>
            
-           <div className="space-y-3">
-              <div className="bg-[#121212] rounded-3xl p-6 text-white shadow-2xl relative overflow-hidden group">
-                 <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-16 -mt-16 blur-2xl group-hover:bg-white/10 transition-colors" />
-                 <div className="relative z-10">
-                    <div className="flex justify-between items-start mb-10">
-                       <div>
-                          <p className="text-white/40 text-[9px] font-black uppercase tracking-[0.2em] mb-1">Bank Account</p>
-                          <h4 className="text-lg font-bold tracking-tight">{bankDetails.bankName || "Link Account"}</h4>
-                       </div>
-                       <Banknote className="w-8 h-8 text-[#16A34A]/50" />
-                    </div>
-                    <div className="flex justify-between items-end">
-                       <div>
-                          <p className="text-xs font-mono font-medium text-white/60 tracking-[0.2em]">
-                             {bankDetails.accountNumber ? `•••• •••• •••• ${bankDetails.accountNumber.slice(-4)}` : "XXXX XXXX XXXX XXXX"}
-                          </p>
-                          <p className="text-[10px] font-bold text-white/40 uppercase tracking-widest mt-2">{bankDetails.accountHolderName || "Account Holder"}</p>
-                       </div>
-                       <div className="text-right">
-                          <p className="text-[9px] font-black text-white/40 uppercase tracking-widest mb-1">IFSC Code</p>
-                          <p className="text-sm font-black tracking-widest">{bankDetails.ifscCode || "—"}</p>
-                       </div>
-                    </div>
-                 </div>
+           <div className="grid gap-3">
+              {/* Bank Account */}
+              <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                     <div className="w-10 h-10 bg-green-50 rounded-xl flex items-center justify-center text-green-600 border border-green-100/50">
+                        <Banknote className="w-5 h-5" />
+                     </div>
+                     <div>
+                        <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Bank Account</p>
+                        <p className="text-sm font-semibold text-gray-900">{bankDetails.bankName || "Not Linked"}</p>
+                        {bankDetails.accountNumber && (
+                           <p className="text-xs text-gray-500 mt-0.5">
+                             •••• {bankDetails.accountNumber.slice(-4)}
+                           </p>
+                        )}
+                     </div>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      setBankDetails({
+                        accountHolderName: profile?.documents?.bankDetails?.accountHolderName || "",
+                        accountNumber: profile?.documents?.bankDetails?.accountNumber || "",
+                        ifscCode: profile?.documents?.bankDetails?.ifscCode || "",
+                        bankName: profile?.documents?.bankDetails?.bankName || "",
+                        panNumber: profile?.documents?.pan?.number || "",
+                        upiId: profile?.documents?.bankDetails?.upiId || "",
+                        upiQrCode: profile?.documents?.bankDetails?.upiQrCode || null
+                      })
+                      setUpiQrFile(null)
+                      setUpiQrPreview(null)
+                      setShowBankDetailsPopup(true)
+                    }} 
+                    className="p-2 hover:bg-gray-50 rounded-lg text-gray-400 hover:text-green-600 transition-colors"
+                  >
+                    <Edit2 className="w-4 h-4" />
+                  </button>
               </div>
 
               {/* UPI Section */}
-              <div className="bg-white rounded-3xl p-6 border border-gray-100 shadow-sm flex items-center justify-between group">
-                 <div className="flex items-center gap-5">
-                    <div className="w-14 h-14 bg-[#16A34A]/10 rounded-2xl flex items-center justify-center text-[#16A34A] border border-[#16A34A]/20 group-hover:scale-105 transition-transform">
-                       <Smartphone className="w-7 h-7" />
-                    </div>
-                    <div>
-                       <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-1">UPI ID</p>
-                       <h4 className="text-base font-black text-gray-900">{bankDetails.upiId || "Not added"}</h4>
-                    </div>
-                 </div>
-                 {bankDetails.upiQrCode && (
-                    <button 
-                      onClick={() => { setSelectedDocument({ name: "UPI Scanner", url: bankDetails.upiQrCode }); setShowDocumentModal(true); }}
-                      className="w-14 h-14 bg-gray-50 rounded-2xl border border-gray-100 flex items-center justify-center text-gray-400 hover:text-black hover:border-black/20 transition-all"
-                    >
-                       <QrCode className="w-6 h-6" />
-                    </button>
-                 )}
+              <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                     <div className="w-10 h-10 bg-green-50 rounded-xl flex items-center justify-center text-green-600 border border-green-100/50">
+                        <Smartphone className="w-5 h-5" />
+                     </div>
+                     <div>
+                        <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">UPI ID</p>
+                        <p className="text-sm font-semibold text-gray-900">{bankDetails.upiId || "Not added"}</p>
+                     </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                     {bankDetails.upiQrCode && (
+                        <button 
+                          onClick={() => { setSelectedDocument({ name: "UPI Scanner", url: bankDetails.upiQrCode }); setShowDocumentModal(true); }}
+                          className="p-2 bg-gray-50 text-gray-400 rounded-lg hover:text-black transition-colors"
+                        >
+                          <QrCode className="w-4 h-4" />
+                        </button>
+                     )}
+                     <button 
+                        onClick={() => {
+                          setBankDetails({
+                            accountHolderName: profile?.documents?.bankDetails?.accountHolderName || "",
+                            accountNumber: profile?.documents?.bankDetails?.accountNumber || "",
+                            ifscCode: profile?.documents?.bankDetails?.ifscCode || "",
+                            bankName: profile?.documents?.bankDetails?.bankName || "",
+                            panNumber: profile?.documents?.pan?.number || "",
+                            upiId: profile?.documents?.bankDetails?.upiId || "",
+                            upiQrCode: profile?.documents?.bankDetails?.upiQrCode || null
+                          })
+                          setUpiQrFile(null)
+                          setUpiQrPreview(null)
+                          setShowBankDetailsPopup(true)
+                        }} 
+                        className="p-2 hover:bg-gray-50 rounded-lg text-gray-400 hover:text-green-600 transition-colors"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                  </div>
               </div>
            </div>
         </section>
@@ -690,7 +746,7 @@ export const ProfileDetailsV2 = () => {
         {/* ─── DOCUMENTS SECTION ─── */}
         <section>
           <div className="flex items-center justify-between mb-4 px-1">
-             <h3 className="text-xs font-black text-gray-950 uppercase tracking-widest flex items-center gap-2">
+             <h3 className="text-xs font-semibold text-gray-800 uppercase tracking-wider flex items-center gap-2">
                 <Shield className="w-4 h-4 text-gray-400" /> Verification Docs
              </h3>
           </div>
@@ -763,14 +819,14 @@ export const ProfileDetailsV2 = () => {
             <div className="grid grid-cols-2 gap-3 px-2">
                 <button 
                   onClick={() => setShowDeletePopup(false)}
-                  className="bg-gray-100 text-gray-500 py-4 rounded-2xl font-black uppercase tracking-widest text-[11px] active:scale-95"
+                  className="bg-gray-100 text-gray-500 py-4 rounded-2xl font-semibold uppercase tracking-wider text-[11px] active:scale-95"
                 >
                   Cancel
                 </button>
                 <button 
                   onClick={handleDeletePhoto}
                   disabled={isDeletingImage}
-                  className="bg-red-500 text-white py-4 rounded-2xl font-black uppercase tracking-widest text-[11px] shadow-lg shadow-red-500/20 active:scale-95 flex items-center justify-center gap-2"
+                  className="bg-red-500 text-white py-4 rounded-2xl font-semibold uppercase tracking-wider text-[11px] shadow-lg shadow-red-500/20 active:scale-95 flex items-center justify-center gap-2"
                 >
                   {isDeletingImage ? <Loader2 className="w-4 h-4 animate-spin" /> : "Yes, Remove"}
                 </button>
@@ -819,7 +875,7 @@ export const ProfileDetailsV2 = () => {
                           <MapPin className="w-5 h-5" />
                         </div>
                         <div className="text-left">
-                          <h4 className={`text-sm font-black uppercase tracking-tight ${isSelected ? 'text-[#16A34A]' : 'text-gray-900'}`}>
+                          <h4 className={`text-sm font-semibold uppercase tracking-wide ${isSelected ? 'text-[#16A34A]' : 'text-gray-900'}`}>
                             {zone.name}
                           </h4>
                           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
@@ -843,7 +899,7 @@ export const ProfileDetailsV2 = () => {
             
             <button 
               onClick={() => setShowZonePopup(false)}
-              className="w-full bg-gray-100 text-gray-500 py-4 rounded-2xl font-black uppercase tracking-widest text-[11px] mt-4 active:scale-95"
+              className="w-full bg-gray-100 text-gray-500 py-4 rounded-2xl font-semibold uppercase tracking-wider text-[11px] mt-4 active:scale-95"
             >
               Close
             </button>
@@ -971,26 +1027,33 @@ export const ProfileDetailsV2 = () => {
                { label: "Bank Name", key: "bankName", icon: MapPin, maxLength: 60 },
                { label: "PAN Number", key: "panNumber", icon: FileText, format: (v) => v.toUpperCase(), maxLength: 10 },
                { label: "UPI ID", key: "upiId", icon: Smartphone, maxLength: 60 }
-             ].map((field) => (
-               <div key={field.key} className="bg-gray-50/50 p-4 rounded-2xl border border-gray-100 group focus-within:border-[#16A34A]/50 transition-all">
-                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest flex items-center gap-2 mb-2">
-                     <field.icon className="w-3.5 h-3.5" /> {field.label}
-                  </label>
-                  <input 
-                    type="text" 
-                    value={bankDetails[field.key]} 
-                    onChange={(e) => {
-                        let val = e.target.value;
-                        if (field.isNumeric) val = val.replace(/\D/g, "");
-                        if (field.maxLength && val.length > field.maxLength) return;
-                        if (field.format) val = field.format(val);
-                        setBankDetails({...bankDetails, [field.key]: val})
-                    }} 
-                    className="w-full bg-transparent text-sm font-bold text-gray-950 outline-none"
-                    placeholder={`Enter ${field.label.toLowerCase()}`}
-                  />
-               </div>
-             ))}
+             ].map((field) => {
+               const errorMsg = getBankDetailsError(field.key, bankDetails[field.key]);
+               const hasError = !!errorMsg;
+               return (
+                 <div key={field.key} className="mb-2">
+                   <div className={`bg-gray-50/50 p-4 rounded-2xl border ${hasError ? 'border-red-500' : 'border-gray-100 group focus-within:border-[#16A34A]/50'} transition-all`}>
+                      <label className={`text-[10px] font-semibold uppercase tracking-wider flex items-center gap-2 mb-2 ${hasError ? 'text-red-500' : 'text-gray-500'}`}>
+                         <field.icon className="w-3.5 h-3.5" /> {field.label}
+                      </label>
+                      <input 
+                        type="text" 
+                        value={bankDetails[field.key]} 
+                        onChange={(e) => {
+                            let val = e.target.value;
+                            if (field.isNumeric) val = val.replace(/\D/g, "");
+                            if (field.maxLength && val.length > field.maxLength) return;
+                            if (field.format) val = field.format(val);
+                            setBankDetails({...bankDetails, [field.key]: val})
+                        }} 
+                        className="w-full bg-transparent text-sm font-semibold text-gray-950 outline-none"
+                        placeholder={`Enter ${field.label.toLowerCase()}`}
+                      />
+                   </div>
+                   {hasError && <p className="text-red-500 text-[10px] font-medium mt-1 ml-2">{errorMsg}</p>}
+                 </div>
+               )
+             })}
 
              {/* UPI Scanner Upload */}
              <div className="bg-[#16A34A]/10 p-6 rounded-3xl border border-[#16A34A]/20 flex flex-col items-center gap-4 text-center">
@@ -1032,10 +1095,10 @@ export const ProfileDetailsV2 = () => {
 
           <button 
             onClick={submitBankDetails} 
-            disabled={isUpdatingBankDetails} 
-            className="w-full bg-[#16A34A] text-[#0F172A] py-5 rounded-[1.5rem] font-black uppercase tracking-[0.2em] shadow-xl hover:bg-[#15803D] transition-all active:scale-95 flex items-center justify-center gap-3 disabled:opacity-50"
+            disabled={isUpdatingBankDetails || Object.keys(bankDetails).some(key => getBankDetailsError(key, bankDetails[key])) || !hasBankDetailsChanged()} 
+            className={`w-full py-5 rounded-[1.5rem] font-semibold uppercase tracking-wider shadow-xl transition-all active:scale-95 flex items-center justify-center gap-3 disabled:opacity-50 ${(!Object.keys(bankDetails).some(key => getBankDetailsError(key, bankDetails[key])) && hasBankDetailsChanged()) ? 'bg-[#16A34A] text-[#0F172A] hover:bg-[#15803D]' : 'bg-gray-200 text-gray-500'}`}
           >
-            {isUpdatingBankDetails ? <><Loader2 className="w-5 h-5 animate-spin" /> saving...</> : "Update Systems"}
+            {isUpdatingBankDetails ? <><Loader2 className="w-5 h-5 animate-spin" /> saving...</> : "Save Details"}
           </button>
         </div>
       </BottomPopup>
@@ -1052,7 +1115,7 @@ export const ProfileDetailsV2 = () => {
              className="fixed inset-0 z-[1000] bg-black/95 backdrop-blur-xl flex flex-col items-center p-6"
           >
              <div className="w-full flex justify-between items-center mb-10 pt-safe">
-                <h3 className="text-white text-lg font-black uppercase tracking-widest">{selectedDocument.name}</h3>
+                <h3 className="text-white text-lg font-semibold uppercase tracking-wider">{selectedDocument.name}</h3>
                 <button onClick={() => setShowDocumentModal(false)} className="bg-white/10 text-white p-3 rounded-2xl hover:bg-white/20 transition-all active:scale-90">
                    <X className="w-6 h-6" />
                 </button>

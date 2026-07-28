@@ -260,7 +260,7 @@ export default function DriverHome() {
 
   if (bootLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#0c1410] text-white">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 text-gray-900">
         <Loader2 className="w-6 h-6 animate-spin" />
       </div>
     );
@@ -271,31 +271,31 @@ export default function DriverHome() {
   const taxiActive = mode === "taxi";
 
   return (
-    <div className="min-h-screen bg-[#0c1410] text-white font-['Poppins']">
+    <div className="min-h-screen bg-gray-50 text-gray-900 font-['Poppins']">
       <div className="max-w-md mx-auto p-5 pb-24">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <p className="uppercase text-[10px] text-[#9bc78a] font-bold tracking-[0.25em]">
+            <p className="uppercase text-[10px] text-green-600 font-bold tracking-[0.25em]">
               Buddy Partner
             </p>
-            <h1 className="text-white text-2xl font-black mt-1">
+            <h1 className="text-gray-900 text-2xl font-black mt-1">
               {identity?.name ? `Hi, ${identity.name.split(" ")[0]}` : "Welcome back"}
             </h1>
-            <p className="text-white/40 text-[12px] font-medium">+91 {identity?.phone || "—"}</p>
+            <p className="text-gray-500 text-[12px] font-medium">+91 {identity?.phone || "—"}</p>
           </div>
           <button
             type="button"
             onClick={handleLogout}
-            className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white/70 hover:text-white"
+            className="w-10 h-10 rounded-xl bg-white border border-gray-200 flex items-center justify-center text-gray-500 hover:text-gray-900 shadow-sm"
             aria-label="Sign out"
           >
             <LogOut className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="rounded-3xl bg-white/[0.04] border border-white/10 p-5 mb-5">
-          <p className="text-[12px] uppercase tracking-widest font-bold text-[#9bc78a] mb-3">
+        <div className="rounded-3xl bg-white border border-gray-100 shadow-sm p-5 mb-5">
+          <p className="text-[12px] uppercase tracking-widest font-bold text-green-600 mb-3">
             Service status
           </p>
           <div className="space-y-2">
@@ -307,21 +307,21 @@ export default function DriverHome() {
               const notEnabled = status === "not_enabled";
               const reason = rejection?.[key]?.reason;
               return (
-                <div key={key} className="rounded-2xl border border-white/10 bg-white/5 p-3 flex items-start gap-3">
-                  <div className={`w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center shrink-0 ${accent}`}>
+                <div key={key} className="rounded-2xl border border-gray-100 bg-gray-50 p-3 flex items-start gap-3">
+                  <div className={`w-9 h-9 rounded-lg bg-gray-50 flex items-center justify-center shrink-0 ${accent}`}>
                     <Icon className="w-4 h-4" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-bold text-[13px]">{label}</span>
                       {approved ? (
-                        <span className="text-[10px] uppercase tracking-widest text-[#88c170]">Approved</span>
+                        <span className="text-[10px] uppercase tracking-widest text-green-600">Approved</span>
                       ) : pending ? (
                         <span className="text-[10px] uppercase tracking-widest text-amber-400">Pending</span>
                       ) : rejected ? (
                         <span className="text-[10px] uppercase tracking-widest text-red-400">Rejected</span>
                       ) : notEnabled ? (
-                        <span className="text-[10px] uppercase tracking-widest text-white/40">Not selected</span>
+                        <span className="text-[10px] uppercase tracking-widest text-gray-500">Not selected</span>
                       ) : null}
                     </div>
                     {rejected && reason ? (
@@ -353,7 +353,7 @@ export default function DriverHome() {
                 <p className="text-[11px] uppercase tracking-widest font-bold text-red-300">
                   Action required
                 </p>
-                <p className="text-white font-bold text-[15px] mt-1">
+                <p className="text-gray-900 font-bold text-[15px] mt-1">
                   One or more services were rejected
                 </p>
                 <p className="text-[13px] text-red-100/70 mt-2">
@@ -373,11 +373,11 @@ export default function DriverHome() {
         ) : null}
 
         {/* Service toggles */}
-        <div className="rounded-3xl bg-white/[0.04] border border-white/10 p-5 mb-5">
+        <div className="rounded-3xl bg-white border border-gray-100 shadow-sm p-5 mb-5">
           <div className="flex items-center justify-between gap-3 mb-3">
             <div className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-[#88c170]" />
-              <span className="text-[12px] uppercase tracking-widest font-bold text-[#9bc78a]">
+              <Sparkles className="w-4 h-4 text-green-600" />
+              <span className="text-[12px] uppercase tracking-widest font-bold text-green-600">
                 Service Mode
               </span>
             </div>
@@ -385,14 +385,14 @@ export default function DriverHome() {
               className={[
                 "text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full",
                 isOffline
-                  ? "bg-white/10 text-white/50"
-                  : "bg-[#88c170]/20 text-[#88c170]",
+                  ? "bg-gray-100 text-gray-500"
+                  : "bg-green-100 text-green-600",
               ].join(" ")}
             >
               {isOffline ? "Offline" : foodActive ? "Food Active" : "Taxi Active"}
             </span>
           </div>
-          <p className="text-[13px] text-white/60 mb-4 leading-relaxed">
+          <p className="text-[13px] text-gray-500 mb-4 leading-relaxed">
             Turn on one service at a time. If both are off, you won't receive any jobs.
           </p>
 
@@ -410,11 +410,11 @@ export default function DriverHome() {
                   key={key}
                   className={[
                     "rounded-2xl border p-4 flex items-center gap-3 transition-all",
-                    active ? "bg-[#88c170]/10 border-[#88c170]/40" : "bg-white/5 border-white/10",
+                    active ? "bg-green-50 border-green-500/30" : "bg-gray-50 border-gray-100",
                     !enabled ? "opacity-60" : "",
                   ].join(" ")}
                 >
-                  <div className={["w-11 h-11 rounded-xl bg-white/5 flex items-center justify-center shrink-0", accent].join(" ")}>
+                  <div className={["w-11 h-11 rounded-xl bg-gray-50 flex items-center justify-center shrink-0", accent].join(" ")}>
                     <Icon className="w-5 h-5" />
                   </div>
                   <div className="flex-1 min-w-0">
@@ -427,10 +427,10 @@ export default function DriverHome() {
                         <span className="text-[10px] uppercase tracking-widest text-red-400">Rejected</span>
                       )}
                       {!enabled && (
-                        <span className="text-[10px] uppercase tracking-widest text-white/40">Not Enrolled</span>
+                        <span className="text-[10px] uppercase tracking-widest text-gray-500">Not Enrolled</span>
                       )}
                     </div>
-                    <div className="text-white/50 text-[12px] mt-0.5">{description}</div>
+                    <div className="text-gray-400 text-[12px] mt-0.5">{description}</div>
                   </div>
                   <label className="relative inline-flex items-center shrink-0 cursor-pointer">
                     <input
@@ -442,8 +442,8 @@ export default function DriverHome() {
                     />
                     <div
                       className={[
-                        "w-12 h-7 rounded-full transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-[#88c170]/40",
-                        disabled ? "bg-white/10 cursor-not-allowed" : "bg-white/15 peer-checked:bg-[#88c170]",
+                        "w-12 h-7 rounded-full transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-green-600/40",
+                        disabled ? "bg-white/10 cursor-not-allowed" : "bg-gray-200 peer-checked:bg-green-600",
                       ].join(" ")}
                     />
                     <div
@@ -460,7 +460,7 @@ export default function DriverHome() {
           </div>
 
           {switching && (
-            <div className="flex items-center justify-center gap-2 mt-4 text-[12px] text-white/50">
+            <div className="flex items-center justify-center gap-2 mt-4 text-[12px] text-gray-400">
               <Loader2 className="w-4 h-4 animate-spin" />
               Updating service mode…
             </div>
@@ -511,8 +511,8 @@ function ApplyForServiceCard({ cta, loading, onApply }) {
           <Icon className="w-5 h-5 text-white" />
         </div>
         <div>
-          <h3 className="text-white font-bold text-[15px] leading-snug">{title}</h3>
-          <p className="text-[12px] text-white/60 mt-1 leading-relaxed">{description}</p>
+          <h3 className="text-gray-900 font-bold text-[15px] leading-snug">{title}</h3>
+          <p className="text-[12px] text-gray-500 mt-1 leading-relaxed">{description}</p>
         </div>
       </div>
       <button
@@ -551,7 +551,7 @@ function CapabilityCard({ Icon, title, status, enabled, href }) {
 
   const className = [
     "block rounded-2xl border p-4 transition-all",
-    isReady ? "bg-[#88c170]/10 border-[#88c170]/30" : isRejected ? "bg-red-500/10 border-red-500/30" : "bg-white/5 border-white/10",
+    isReady ? "bg-green-50 border-green-500/30" : isRejected ? "bg-red-500/10 border-red-500/30" : "bg-gray-50 border-gray-100",
     !enabled ? "opacity-70" : "",
   ].join(" ");
 
@@ -559,10 +559,10 @@ function CapabilityCard({ Icon, title, status, enabled, href }) {
     <>
       <Icon className={[
         "w-5 h-5 mb-2",
-        isReady ? "text-[#88c170]" : "text-white/40",
+        isReady ? "text-green-600" : "text-gray-500",
       ].join(" ")} />
-      <div className="text-white font-bold text-[13px]">{title}</div>
-      <div className="text-[11px] text-white/40 mt-1 capitalize">{label}</div>
+      <div className="text-gray-900 font-bold text-[13px]">{title}</div>
+      <div className="text-[11px] text-gray-500 mt-1 capitalize">{label}</div>
     </>
   );
 

@@ -42,6 +42,11 @@ const LIBRARIES = ['places', 'geometry', 'drawing'];
 
 export const LiveMap = ({ onMapClick, onMapLoad, onPathReceived, onPolylineReceived, zoom = 12 }) => {
   const { riderLocation, activeOrder, tripStatus } = useDeliveryStore();
+  const showRoute = Boolean(
+    activeOrder &&
+    tripStatus !== 'COMPLETED' &&
+    tripStatus !== 'IDLE',
+  );
   
   const { isLoaded, loadError } = useJsApiLoader({
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY,
@@ -74,6 +79,14 @@ export const LiveMap = ({ onMapClick, onMapLoad, onPathReceived, onPolylineRecei
     setDirections(null);
     setBaselineDirections(null);
   }, [tripStatus, activeOrder?._id]);
+
+  // Drop any cached route as soon as the trip ends (completed / idle / no order).
+  useEffect(() => {
+    if (showRoute) return;
+    setLastDirectionsAt(0);
+    setDirections(null);
+    setBaselineDirections(null);
+  }, [showRoute]);
 
   const parsePoint = useCallback((raw) => {
     if (!raw) return null;
@@ -124,19 +137,28 @@ export const LiveMap = ({ onMapClick, onMapLoad, onPathReceived, onPolylineRecei
   }, [lastDirectionsAt, directions, parsedRiderLocation, targetLocation]);
 
   useEffect(() => {
-    if (directions && onPathReceived) {
-      const path = directions.routes[0]?.overview_path;
-      if (path) {
-        const simplePath = path.map(p => ({
-          lat: typeof p.lat === 'function' ? p.lat() : (p.lat || p.latitude),
-          lng: typeof p.lng === 'function' ? p.lng() : (p.lng || p.longitude)
-        }));
-        onPathReceived(simplePath);
-      }
+    if (!showRoute || !directions || !onPathReceived) {
+      if (!showRoute && onPathReceived) onPathReceived([]);
+      return;
     }
-  }, [directions, onPathReceived]);
+    const path = directions.routes[0]?.overview_path;
+    if (path) {
+      const simplePath = path.map(p => ({
+        lat: typeof p.lat === 'function' ? p.lat() : (p.lat || p.latitude),
+        lng: typeof p.lng === 'function' ? p.lng() : (p.lng || p.longitude)
+      }));
+      onPathReceived(simplePath);
+    }
+  }, [showRoute, directions, onPathReceived]);
 
   const directionsCallback = useCallback((result, status) => {
+    const { activeOrder: currentOrder, tripStatus: currentTripStatus } = useDeliveryStore.getState();
+    const routeAllowed =
+      currentOrder &&
+      currentTripStatus !== 'COMPLETED' &&
+      currentTripStatus !== 'IDLE';
+    if (!routeAllowed) return;
+
     if (status === 'OK' && result) {
       setDirections(result);
       setLastDirectionsAt(Date.now());
@@ -146,6 +168,13 @@ export const LiveMap = ({ onMapClick, onMapLoad, onPathReceived, onPolylineRecei
   }, [onPolylineReceived]);
 
   const baselineDirectionsCallback = useCallback((result, status) => {
+    const { activeOrder: currentOrder, tripStatus: currentTripStatus } = useDeliveryStore.getState();
+    const routeAllowed =
+      currentOrder &&
+      currentTripStatus !== 'COMPLETED' &&
+      currentTripStatus !== 'IDLE';
+    if (!routeAllowed) return;
+
     if (status === 'OK' && result) {
       setBaselineDirections(result);
     }
@@ -207,7 +236,9 @@ export const LiveMap = ({ onMapClick, onMapLoad, onPathReceived, onPolylineRecei
   }, [map, parsedRiderLocation, restaurantPoint, customerPoint]);
 
   const { remainingPath, traveledPath } = useMemo(() => {
-    if (!directions || !parsedRiderLocation || !window.google?.maps) return { remainingPath: [], traveledPath: [] };
+    if (!showRoute || !directions || !parsedRiderLocation || !window.google?.maps) {
+      return { remainingPath: [], traveledPath: [] };
+    }
     
     const fullPath = directions.routes[0].overview_path;
     if (!fullPath || fullPath.length === 0) return { remainingPath: [], traveledPath: [] };
@@ -247,11 +278,11 @@ export const LiveMap = ({ onMapClick, onMapLoad, onPathReceived, onPolylineRecei
     const remaining = [riderPoint, ...fullPath.slice(startIndex).map(toObj)];
 
     return { remainingPath: remaining, traveledPath: traveled };
-  }, [directions, parsedRiderLocation]);
+  }, [showRoute, directions, parsedRiderLocation]);
 
   // Fetch directions for the Rider to Target Location path
   useEffect(() => {
-    if (!isLoaded || !parsedRiderLocation || !targetLocation || !window.google) return;
+    if (!showRoute || !isLoaded || !parsedRiderLocation || !targetLocation || !window.google) return;
     if (!shouldUpdateRoute) return;
 
     const directionsService = new window.google.maps.DirectionsService();
@@ -265,11 +296,11 @@ export const LiveMap = ({ onMapClick, onMapLoad, onPathReceived, onPolylineRecei
         directionsCallback(result, status);
       }
     );
-  }, [isLoaded, parsedRiderLocation?.lat, parsedRiderLocation?.lng, targetLocation?.lat, targetLocation?.lng, shouldUpdateRoute, directionsCallback]);
+  }, [showRoute, isLoaded, parsedRiderLocation?.lat, parsedRiderLocation?.lng, targetLocation?.lat, targetLocation?.lng, shouldUpdateRoute, directionsCallback]);
 
   // Fetch baseline directions (Restaurant to Customer)
   useEffect(() => {
-    if (!isLoaded || !restaurantPoint || !customerPoint || !window.google || baselineDirections) return;
+    if (!showRoute || !isLoaded || !restaurantPoint || !customerPoint || !window.google || baselineDirections) return;
 
     const directionsService = new window.google.maps.DirectionsService();
     directionsService.route(
@@ -282,7 +313,7 @@ export const LiveMap = ({ onMapClick, onMapLoad, onPathReceived, onPolylineRecei
         baselineDirectionsCallback(result, status);
       }
     );
-  }, [isLoaded, restaurantPoint?.lat, restaurantPoint?.lng, customerPoint?.lat, customerPoint?.lng, baselineDirections, baselineDirectionsCallback]);
+  }, [showRoute, isLoaded, restaurantPoint?.lat, restaurantPoint?.lng, customerPoint?.lat, customerPoint?.lng, baselineDirections, baselineDirectionsCallback]);
 
   if (loadError) return <div className="absolute inset-0 flex items-center justify-center bg-gray-50 text-red-500 font-bold">Map Load Error</div>;
   if (!isLoaded) return <div className="absolute inset-0 flex items-center justify-center bg-gray-50"><div className="w-10 h-10 border-4 border-green-500 border-t-transparent rounded-full animate-spin" /></div>;
@@ -302,7 +333,7 @@ export const LiveMap = ({ onMapClick, onMapLoad, onPathReceived, onPolylineRecei
         options={mapOptions}
       >
 
-        {traveledPath.length > 0 && (
+        {showRoute && traveledPath.length > 0 && (
           <Polyline 
             path={traveledPath} 
             options={{ 
@@ -319,7 +350,7 @@ export const LiveMap = ({ onMapClick, onMapLoad, onPathReceived, onPolylineRecei
           />
         )}
 
-        {remainingPath.length > 0 && (
+        {showRoute && remainingPath.length > 0 && (
           <Polyline 
             path={remainingPath} 
             options={{ 
@@ -339,7 +370,7 @@ export const LiveMap = ({ onMapClick, onMapLoad, onPathReceived, onPolylineRecei
           </OverlayView>
         )}
 
-        {restaurantPoint && (
+        {showRoute && restaurantPoint && (
           <Marker
             position={restaurantPoint}
             icon={{
@@ -350,7 +381,7 @@ export const LiveMap = ({ onMapClick, onMapLoad, onPathReceived, onPolylineRecei
           />
         )}
 
-        {customerPoint && (
+        {showRoute && customerPoint && (
           <Marker
             position={customerPoint}
             icon={{

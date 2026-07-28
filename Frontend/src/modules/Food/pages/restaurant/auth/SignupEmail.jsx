@@ -143,11 +143,11 @@ export default function RestaurantSignupEmail() {
       
       if (data.accessToken && data.restaurant) {
         // Replace old token with new one (handles cross-module login)
-        setAuthData("restaurant", data.accessToken, data.restaurant)
+        setAuthData("restaurant", data.accessToken, data.restaurant, data.refreshToken)
         
         window.dispatchEvent(new Event("restaurantAuthChanged"))
         
-        navigate("/restaurant/onboarding", { replace: true })
+        navigate("/food/restaurant/onboarding", { replace: true })
       } else {
         throw new Error("Registration failed. Please try again.")
       }

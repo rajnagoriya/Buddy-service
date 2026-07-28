@@ -2,10 +2,14 @@ import mongoose from 'mongoose';
 
 const foodTransactionSchema = new mongoose.Schema({
     // Identifiers
-    orderId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodOrder', required: true, unique: true, index: true },
+    // Multi-restaurant orders create one transaction row per restaurant
+    // (compound unique on orderId + restaurantId below).
+    orderId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodOrder', required: true, index: true },
 
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodUser', required: true, index: true },
     restaurantId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodRestaurant', required: true, index: true },
+    /** Canonical payment/platform/rider ledger row for the order (one per order). */
+    isPrimary: { type: Boolean, default: true, index: true },
     deliveryPartnerId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodDeliveryPartner', index: true },
     sharedPartnerId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodDeliveryPartner', index: true },
 
@@ -103,8 +107,31 @@ const foodTransactionSchema = new mongoose.Schema({
 });
 
 // Powerful indexes for Finance & Analytics
+foodTransactionSchema.index({ orderId: 1, restaurantId: 1 }, { unique: true });
 foodTransactionSchema.index({ createdAt: -1 });
 foodTransactionSchema.index({ 'settlement.isRestaurantSettled': 1, restaurantId: 1 });
 foodTransactionSchema.index({ 'status': 1, paymentMethod: 1 });
+foodTransactionSchema.index({ orderId: 1, isPrimary: 1 });
 
 export const FoodTransaction = mongoose.model('FoodTransaction', foodTransactionSchema);
+
+// Multi-restaurant needs compound unique (orderId + restaurantId). Drop legacy
+// single-field unique on orderId if it still exists (non-blocking).
+(async () => {
+  try {
+    const coll = FoodTransaction.collection;
+    const indexes = await coll.indexes();
+    const legacy = indexes.find(
+      (idx) =>
+        idx?.unique &&
+        idx?.key &&
+        Object.keys(idx.key).length === 1 &&
+        idx.key.orderId === 1,
+    );
+    if (legacy?.name) {
+      await coll.dropIndex(legacy.name);
+    }
+  } catch (err) {
+    // Index may already be gone or DB not ready yet — ignore.
+  }
+})();

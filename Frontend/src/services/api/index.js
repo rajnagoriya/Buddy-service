@@ -629,6 +629,12 @@ export const adminAPI = {
       params: { limit: 30, page: 1, ...params },
       contextModule: "admin",
     }),
+  /** Cancelled orders with refund info (uses orders list API). */
+  getRefundRequests: (params = {}) =>
+    apiClient.get("/food/admin/orders", {
+      params: { limit: 1000, page: 1, status: "cancelled", ...params },
+      contextModule: "admin",
+    }),
   getOrderById: (orderId) =>
     apiClient.get(`/food/admin/orders/${String(orderId)}`, {
       contextModule: "admin",
@@ -644,6 +650,13 @@ export const adminAPI = {
       { contextModule: "admin" },
     );
   },
+  /** Drop one restaurant from a multi-restaurant order (partial refund + continue). */
+  dropRestaurantFromOrder: (orderId, restaurantId, body = {}) =>
+    apiClient.patch(
+      `/food/admin/orders/${String(orderId)}/restaurants/${String(restaurantId)}/drop`,
+      body ?? {},
+      { contextModule: "admin" },
+    ),
   getMultiOrderSettlementReport: (params = {}) =>
     apiClient.get("/food/admin/orders/settlement-report", {
       params,
@@ -2172,6 +2185,13 @@ export const deliveryAPI = {
       {
         contextModule: "delivery",
       },
+    ),
+  /** Set visit order for remaining multi-restaurant pickups after accept. */
+  setPickupSequence: (orderId, restaurantIds = []) =>
+    apiClient.patch(
+      `/food/delivery/orders/${String(orderId)}/pickup-sequence`,
+      { restaurantIds },
+      { contextModule: "delivery" },
     ),
   acceptSharedOrder: (orderId) =>
     apiClient.post(

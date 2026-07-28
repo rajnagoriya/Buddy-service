@@ -622,3 +622,127 @@ export function pushSettlementSnapshot(order, event, note = '') {
   order.settlementSnapshots.push(snap);
   return snap;
 }
+
+/**
+ * Rewrite settlement ledger for a cancelled order: full refund to customer,
+ * zero payouts for restaurant, driver, and platform.
+ */
+export function applyCancellationSettlement(order, { cancelledBy = 'system', note = '' } = {}) {
+  if (!order) return null;
+
+  const total = Number(order.pricing?.total) || 0;
+  const paymentMethod = String(order.payment?.method || 'cash').toLowerCase();
+  const paymentStatus = String(order.payment?.status || 'cod_pending').toLowerCase();
+  const refund = order.payment?.refund || {};
+  const refundStatus = String(refund.status || '').toLowerCase();
+  const isCod = paymentMethod === 'cash' || paymentMethod === 'cod';
+  const wasPaid =
+    paymentStatus === 'paid' ||
+    paymentStatus === 'refunded' ||
+    paymentMethod === 'wallet' ||
+    paymentMethod === 'razorpay';
+  const refundAmount =
+    Number(refund.amount) ||
+    (refundStatus === 'processed' || paymentStatus === 'refunded' ? total : 0);
+  const refundDestination = refund.destination || null;
+
+  const previousSb =
+    order.settlementBreakdown && typeof order.settlementBreakdown === 'object'
+      ? order.settlementBreakdown
+      : {};
+  const previousRestaurants = Array.isArray(previousSb.restaurants)
+    ? previousSb.restaurants
+    : Array.isArray(order.restaurantSettlement)
+      ? order.restaurantSettlement.map((s) => ({
+          restaurantId: s.restaurantId,
+          restaurantName: s.restaurantName,
+          foodAmount: s.foodAmount,
+          packagingFee: s.packagingFee,
+          commission: s.commission,
+          speedShare: s.speedShare,
+          couponDiscount: s.couponDiscount,
+          payout: s.restaurantPayout,
+        }))
+      : [];
+
+  const originalDriverPayout =
+    Number(previousSb.driver?.payout) ||
+    Number(order.riderEarning) ||
+    0;
+  const originalSharedPayout = Number(order.sharedRiderEarning) || 0;
+  const originalPlatformProfit =
+    Number(previousSb.platform?.netProfit) ||
+    Number(order.platformProfit) ||
+    0;
+
+  order.riderEarning = 0;
+  order.sharedRiderEarning = 0;
+  order.platformProfit = 0;
+
+  if (Array.isArray(order.restaurantSettlement)) {
+    order.restaurantSettlement = order.restaurantSettlement.map((s) => ({
+      ...(s?.toObject ? s.toObject() : s),
+      restaurantPayout: 0,
+    }));
+  }
+
+  const refundNote = (() => {
+    if (refundAmount > 0 && refundDestination === 'wallet') {
+      return `Full order amount ₹${refundAmount} credited to customer wallet`;
+    }
+    if (refundAmount > 0 && refundDestination === 'source') {
+      return `Full order amount ₹${refundAmount} refunded to original payment method`;
+    }
+    if (refundAmount > 0) {
+      return `Full order amount ₹${refundAmount} refunded to customer`;
+    }
+    if (isCod) return 'COD order — no online payment collected; nothing to refund';
+    return 'No refund applicable for this cancellation';
+  })();
+
+  order.settlementBreakdown = {
+    ...previousSb,
+    status: 'cancelled',
+    customer: {
+      ...(previousSb.customer || {}),
+      paid: total,
+      refund: refundAmount,
+      refundDestination,
+      refundStatus: refund.status || (paymentStatus === 'refunded' ? 'processed' : 'none'),
+      netCost: Math.max(0, total - refundAmount),
+      note: refundNote,
+    },
+    restaurants: previousRestaurants.map((r) => ({
+      ...r,
+      originalPayout: Number(r.payout) || 0,
+      payout: 0,
+      note: 'Order cancelled — no restaurant payout',
+    })),
+    driver: {
+      ...(previousSb.driver || {}),
+      originalPayout: originalDriverPayout,
+      originalSharedPayout,
+      payout: 0,
+      sharedPayout: 0,
+      note: 'Order cancelled — no driver payout',
+    },
+    platform: {
+      ...(previousSb.platform || {}),
+      originalNetProfit: originalPlatformProfit,
+      netProfit: 0,
+      note: 'Order cancelled — platform retains no profit',
+    },
+    cancellation: {
+      cancelledBy: String(cancelledBy || 'system'),
+      reason: note || '',
+      refundAmount,
+      refundDestination,
+      refundStatus: refund.status || (paymentStatus === 'refunded' ? 'processed' : 'none'),
+      wasPaid,
+      at: new Date(),
+    },
+    costBearers: [],
+  };
+
+  return order.settlementBreakdown;
+}

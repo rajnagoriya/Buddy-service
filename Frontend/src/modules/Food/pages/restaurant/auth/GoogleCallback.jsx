@@ -60,7 +60,8 @@ export default function RestaurantGoogleCallback() {
         }
 
         // Store authentication data using utility function
-        setAuthData("restaurant", token, user)
+        const refreshToken = searchParams.get("refreshToken")
+        setAuthData("restaurant", token, user, refreshToken)
 
         // Notify any listeners that auth state has changed
         window.dispatchEvent(new Event("restaurantAuthChanged"))
@@ -69,7 +70,7 @@ export default function RestaurantGoogleCallback() {
 
         // Redirect to restaurant home after short delay
         setTimeout(() => {
-          navigate("/restaurant")
+          navigate("/food/restaurant")
         }, 1200)
       } catch (err) {
         debugError("Restaurant Google auth error:", err)

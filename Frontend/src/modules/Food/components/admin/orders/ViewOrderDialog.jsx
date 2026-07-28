@@ -19,6 +19,7 @@ import {
   Star,
   X,
 } from "lucide-react"
+import { toast } from "sonner"
 import {
   Dialog,
   DialogContent,
@@ -272,6 +273,7 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
   const [detailOrder, setDetailOrder] = useState(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [detailError, setDetailError] = useState("")
+  const [droppingRestaurantId, setDroppingRestaurantId] = useState("")
   const [openSections, setOpenSections] = useState({
     summary: true,
     customer: false,
@@ -385,6 +387,69 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
   const pickups = Array.isArray(data?.pickups) ? data.pickups : []
   const restaurantGroups = Array.isArray(pricing.restaurantGroups) ? pricing.restaurantGroups : []
   const statusHistory = Array.isArray(data?.statusHistory) ? data.statusHistory : []
+  const cancellationInfo = useMemo(() => {
+    const rawStatus = String(data?.orderStatus || data?.status || "").toLowerCase()
+    const isCancelled =
+      rawStatus.includes("cancelled") ||
+      rawStatus.includes("canceled") ||
+      rawStatus === "rejected_by_restaurant"
+    const partialRefunds = Array.isArray(data?.partialRefunds) ? data.partialRefunds : []
+    if (!isCancelled && partialRefunds.length === 0) return null
+
+    const cancelEntry =
+      [...statusHistory]
+        .reverse()
+        .find((entry) => String(entry?.to || "").toLowerCase().includes("cancel")) ||
+      null
+    const refund = data?.payment?.refund || {}
+
+    const cancelledByLabel = (() => {
+      if (!isCancelled && partialRefunds.length > 0) return "Partial (multi-restaurant)"
+      if (rawStatus === "cancelled_by_user") return "Customer"
+      if (rawStatus === "cancelled_by_restaurant" || rawStatus === "rejected_by_restaurant") {
+        return "Restaurant"
+      }
+      if (rawStatus === "cancelled_by_admin") {
+        const note = String(cancelEntry?.note || data?.cancellationReason || "").toLowerCase()
+        if (note.includes("no delivery partner") || data?.failureReason === "driver_not_found") {
+          return "System (No driver found)"
+        }
+        return "Admin"
+      }
+      if (cancelEntry?.byRole) return humanizeStatus(cancelEntry.byRole)
+      return humanizeStatus(rawStatus)
+    })()
+
+    const partialTotal = partialRefunds.reduce(
+      (sum, entry) => sum + (Number(entry?.amount) || 0),
+      0,
+    )
+
+    return {
+      isFullCancel: isCancelled,
+      cancelledBy: cancelledByLabel,
+      reason: data?.cancellationReason || cancelEntry?.note || "",
+      cancelledAt: cancelEntry?.at || cancelEntry?.createdAt || null,
+      refundStatus:
+        refund.status ||
+        (partialRefunds.some((p) => p.status === "processed")
+          ? "processed"
+          : String(data?.payment?.status || "").toLowerCase() === "refunded"
+            ? "processed"
+            : partialRefunds.length
+              ? "partial"
+              : "none"),
+      refundDestination: refund.destination || (partialRefunds.length ? "wallet" : null),
+      refundAmount:
+        refund.amount ??
+        (isCancelled
+          ? data?.pricing?.total ?? data?.totalAmount ?? null
+          : partialTotal || null),
+      refundProcessedAt: refund.processedAt || null,
+      refundId: refund.refundId || null,
+      partialRefunds,
+    }
+  }, [data, statusHistory])
   const isMulti =
     Boolean(data?.isMultiRestaurant) ||
     pickups.length > 1 ||
@@ -407,6 +472,8 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
 
         return {
           key: rid || `pickup-${index}`,
+          restaurantId: rid,
+          permanentlyDropped: Boolean(pickup.permanentlyDropped),
           name:
             pickup.restaurantName ||
             group?.restaurantName ||
@@ -461,6 +528,86 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
       },
     ]
   }, [data, items, pickups, restaurantGroups])
+
+  const terminalStatuses = new Set([
+    "delivered",
+    "cancelled_by_user",
+    "cancelled_by_restaurant",
+    "cancelled_by_admin",
+    "cancelled",
+  ])
+  const canDropRestaurant =
+    isMulti &&
+    data &&
+    !terminalStatuses.has(String(data.orderStatus || data.status || "").toLowerCase())
+
+  const refreshOrderDetail = async () => {
+    const orderKey =
+      data?.orderMongoId ||
+      data?._id ||
+      data?.id ||
+      data?.orderId ||
+      data?.order_id ||
+      order?.orderMongoId ||
+      order?._id ||
+      order?.id ||
+      order?.orderId ||
+      ""
+    if (!orderKey) return
+    try {
+      const response = await adminAPI.getOrderById(orderKey)
+      const payload =
+        response?.data?.data?.order || response?.data?.order || response?.order || response?.data
+      if (payload && typeof payload === "object") {
+        setDetailOrder((prev) => ({ ...(prev || order || {}), ...payload }))
+      }
+    } catch (err) {
+      console.warn("Failed to refresh order detail", err)
+    }
+  }
+
+  const handleDropRestaurant = async (block) => {
+    const restaurantId = block?.restaurantId || block?.key
+    if (!restaurantId || !canDropRestaurant) return
+    const orderKey =
+      data?.orderMongoId ||
+      data?._id ||
+      data?.id ||
+      data?.orderId ||
+      data?.order_id ||
+      ""
+    if (!orderKey) {
+      toast.error("Order id missing")
+      return
+    }
+    const confirmed = window.confirm(
+      `Remove "${block.name}" from this multi-restaurant order?\n\nThe customer will get a partial wallet refund for that restaurant's items. The order continues with remaining restaurants.`,
+    )
+    if (!confirmed) return
+    setDroppingRestaurantId(restaurantId)
+    try {
+      const response = await adminAPI.dropRestaurantFromOrder(orderKey, restaurantId, {
+        reason: `Admin removed ${block.name} from multi-restaurant order`,
+      })
+      const updated =
+        response?.data?.data?.order || response?.data?.order || response?.order || null
+      if (updated) {
+        setDetailOrder((prev) => ({ ...(prev || {}), ...updated }))
+      } else {
+        await refreshOrderDetail()
+      }
+      toast.success(`${block.name} removed. Partial refund issued to customer wallet.`)
+    } catch (err) {
+      const msg =
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        err?.message ||
+        "Failed to remove restaurant"
+      toast.error(msg)
+    } finally {
+      setDroppingRestaurantId("")
+    }
+  }
 
   const deliveryPartner = useMemo(() => {
     if (!data) return null
@@ -699,9 +846,14 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
                   >
                     {data.orderStatus}
                   </span>
-                  {data.cancellationReason ? (
+                  {data.cancellationReason || cancellationInfo?.reason ? (
                     <p className="text-xs text-red-600 mt-1">
-                      Reason: {data.cancellationReason}
+                      Reason: {data.cancellationReason || cancellationInfo?.reason}
+                    </p>
+                  ) : null}
+                  {cancellationInfo?.cancelledBy ? (
+                    <p className="text-xs text-slate-600 mt-1">
+                      Cancelled by: {cancellationInfo.cancelledBy}
                     </p>
                   ) : null}
                 </div>
@@ -842,20 +994,60 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
                         <span className="text-slate-500">Food amount</span>
                         <p className="font-medium">{money(block.settlement.foodAmount)}</p>
                       </div>
-                      <div>
-                        <span className="text-slate-500">Commission</span>
-                        <p className="font-medium">{money(block.settlement.commission)}</p>
-                      </div>
-                      <div>
-                        <span className="text-slate-500">Commission GST</span>
-                        <p className="font-medium">{money(block.settlement.commissionGST)}</p>
-                      </div>
+                      {Number(block.settlement.commission) > 0 ? (
+                        <div>
+                          <span className="text-slate-500">Commission</span>
+                          <p className="font-medium">{money(block.settlement.commission)}</p>
+                        </div>
+                      ) : null}
+                      {Number(block.settlement.commissionGST) > 0 ? (
+                        <div>
+                          <span className="text-slate-500">Commission GST</span>
+                          <p className="font-medium">{money(block.settlement.commissionGST)}</p>
+                        </div>
+                      ) : null}
                       <div>
                         <span className="text-slate-500">Payout</span>
                         <p className="font-semibold text-emerald-700">
                           {money(block.settlement.restaurantPayout)}
                         </p>
                       </div>
+                    </div>
+                  ) : null}
+                  {canDropRestaurant &&
+                  block.restaurantId &&
+                  !block.permanentlyDropped &&
+                  String(block.status || "").toLowerCase() !== "cancelled" ? (
+                    <div className="pt-2 border-t border-slate-200">
+                      <button
+                        type="button"
+                        disabled={droppingRestaurantId === block.restaurantId}
+                        onClick={() => handleDropRestaurant(block)}
+                        className="text-xs font-semibold text-rose-700 hover:text-rose-800 disabled:opacity-50"
+                      >
+                        {droppingRestaurantId === block.restaurantId
+                          ? "Removing…"
+                          : "Cancel this restaurant (partial refund)"}
+                      </button>
+                    </div>
+                  ) : null}
+                  {block.permanentlyDropped ||
+                  String(block.status || "").toLowerCase() === "cancelled" ? (
+                    <div className="pt-2 border-t border-rose-100 space-y-1">
+                      <p className="text-xs font-medium text-rose-700">
+                        This restaurant was cancelled / removed from the order.
+                      </p>
+                      {(() => {
+                        const refund = (data?.partialRefunds || []).find(
+                          (r) => idOf(r.restaurantId) === block.restaurantId,
+                        )
+                        return refund ? (
+                          <p className="text-xs font-semibold text-amber-800">
+                            Customer refund: {money(refund.amount)} →{" "}
+                            {refund.destination || "wallet"} ({humanizeStatus(refund.status || "processed")})
+                          </p>
+                        ) : null
+                      })()}
                     </div>
                   ) : null}
                 </div>
@@ -898,6 +1090,112 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
               <p className="text-sm text-slate-500">No items found</p>
             )}
           </AccordionSection>
+
+          {cancellationInfo ? (
+            <AccordionSection
+              id="cancellationRefund"
+              title={
+                cancellationInfo.isFullCancel
+                  ? "Cancellation & Refund"
+                  : "Partial restaurant refunds"
+              }
+              icon={Receipt}
+              open={openSections.cancellationRefund ?? true}
+              onToggle={toggleSection}
+              badge={
+                cancellationInfo.partialRefunds?.length
+                  ? `${cancellationInfo.partialRefunds.length} partial`
+                  : cancellationInfo.refundStatus === "processed"
+                    ? "Refunded"
+                    : cancellationInfo.refundStatus === "failed"
+                      ? "Refund failed"
+                      : "Cancelled"
+              }
+            >
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {cancellationInfo.isFullCancel ? (
+                  <>
+                    <DetailRow label="Cancelled By" value={cancellationInfo.cancelledBy} />
+                    <DetailRow
+                      label="Cancelled At"
+                      value={formatDateTime(cancellationInfo.cancelledAt)}
+                    />
+                    <DetailRow
+                      label="Cancellation Reason"
+                      value={cancellationInfo.reason || "N/A"}
+                    />
+                  </>
+                ) : (
+                  <DetailRow
+                    label="Note"
+                    value="Order continues with remaining restaurants. Amounts below were refunded to the customer wallet."
+                  />
+                )}
+                <DetailRow
+                  label="Refund Status"
+                  value={humanizeStatus(cancellationInfo.refundStatus || "none")}
+                />
+                <DetailRow
+                  label="Refund Destination"
+                  value={
+                    cancellationInfo.refundDestination === "wallet"
+                      ? "Customer Wallet"
+                      : cancellationInfo.refundDestination === "source"
+                        ? "Original Payment Method"
+                        : cancellationInfo.refundDestination
+                          ? humanizeStatus(cancellationInfo.refundDestination)
+                          : "N/A"
+                  }
+                />
+                <DetailRow
+                  label="Refund Amount"
+                  value={
+                    cancellationInfo.refundAmount != null
+                      ? money(cancellationInfo.refundAmount)
+                      : "N/A"
+                  }
+                />
+                <DetailRow
+                  label="Refund Processed At"
+                  value={formatDateTime(cancellationInfo.refundProcessedAt)}
+                />
+                {cancellationInfo.refundId ? (
+                  <DetailRow label="Refund ID" value={cancellationInfo.refundId} />
+                ) : null}
+              </div>
+
+              {cancellationInfo.partialRefunds.length > 0 ? (
+                <div className="mt-4 rounded-lg border border-amber-100 bg-amber-50/60 p-3 space-y-2">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-amber-800">
+                    Partial refunds (multi-restaurant)
+                  </p>
+                  {cancellationInfo.partialRefunds.map((entry, idx) => (
+                    <div
+                      key={`${entry.restaurantId || idx}-${entry.processedAt || entry.at || idx}`}
+                      className="rounded-md bg-white/70 border border-amber-100 px-3 py-2 text-xs text-amber-900 space-y-1"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-semibold">
+                          {entry.restaurantName || entry.note || `Restaurant ${idx + 1}`}
+                        </span>
+                        <span className="font-bold">{money(entry.amount)}</span>
+                      </div>
+                      <div className="flex flex-wrap gap-2 text-[11px] text-amber-800/80">
+                        <span>To: {entry.destination || "wallet"}</span>
+                        <span>Status: {humanizeStatus(entry.status || "processed")}</span>
+                        {entry.at || entry.processedAt ? (
+                          <span>{formatDateTime(entry.at || entry.processedAt)}</span>
+                        ) : null}
+                      </div>
+                      {entry.note ? (
+                        <p className="text-[11px] italic text-amber-800/70">{entry.note}</p>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </AccordionSection>
+          ) : null}
 
           <AccordionSection
             id="history"
@@ -1173,13 +1471,158 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
             open={openSections.settlementLedger}
             onToggle={toggleSection}
             badge={
-              data?.settlementBreakdown?.platform?.netProfit != null
-                ? `Platform ${money(data.settlementBreakdown.platform.netProfit)}`
-                : money(data?.platformProfit)
+              data?.settlementBreakdown?.status === "cancelled" || cancellationInfo
+                ? `Refund ${money(
+                    data?.settlementBreakdown?.customer?.refund ??
+                      cancellationInfo?.refundAmount ??
+                      data?.pricing?.total ??
+                      data?.totalAmount,
+                  )}`
+                : data?.settlementBreakdown?.platform?.netProfit != null
+                  ? `Platform ${money(data.settlementBreakdown.platform.netProfit)}`
+                  : money(data?.platformProfit)
             }
           >
             {(() => {
               const sb = data?.settlementBreakdown
+              const isCancelledSettlement =
+                sb?.status === "cancelled" ||
+                Boolean(cancellationInfo) ||
+                String(data?.orderStatus || data?.status || "")
+                  .toLowerCase()
+                  .includes("cancelled")
+              const cancelLedger = sb?.cancellation || null
+              const customerRefund =
+                sb?.customer?.refund ??
+                cancelLedger?.refundAmount ??
+                cancellationInfo?.refundAmount ??
+                null
+              const customerPaid = sb?.customer?.paid ?? pricing.total
+
+              if (isCancelledSettlement) {
+                const restaurants =
+                  Array.isArray(sb?.restaurants) && sb.restaurants.length
+                    ? sb.restaurants
+                    : (data?.restaurantSettlement || []).map((s) => ({
+                        restaurantName: s.restaurantName,
+                        originalPayout: s.restaurantPayout,
+                        payout: 0,
+                      }))
+
+                return (
+                  <div className="space-y-4 text-sm">
+                    <div className="rounded-xl border border-rose-200 bg-rose-50/70 p-3 space-y-2">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-rose-700">
+                        Order cancelled — settlement reversed
+                      </p>
+                      <p className="text-xs text-rose-800">
+                        {sb?.customer?.note ||
+                          "Full paid amount is returned to the customer. Restaurant, driver, and platform receive nothing."}
+                      </p>
+                      {cancelLedger?.cancelledBy ? (
+                        <p className="text-xs text-rose-700">
+                          Cancelled by: {humanizeStatus(cancelLedger.cancelledBy)}
+                          {cancelLedger.reason ? ` — ${cancelLedger.reason}` : ""}
+                        </p>
+                      ) : null}
+                    </div>
+
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 space-y-2">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-800">
+                        Customer (refund recipient)
+                      </p>
+                      <PriceRow label="Amount paid" value={customerPaid} />
+                      <PriceRow
+                        label={
+                          sb?.customer?.refundDestination === "wallet" ||
+                          cancellationInfo?.refundDestination === "wallet"
+                            ? "Refunded to wallet"
+                            : sb?.customer?.refundDestination === "source"
+                              ? "Refunded to original payment"
+                              : "Refund amount"
+                        }
+                        value={customerRefund ?? 0}
+                        emphasize
+                      />
+                      <PriceRow
+                        label="Customer net cost"
+                        value={sb?.customer?.netCost ?? Math.max(0, Number(customerPaid) - Number(customerRefund || 0))}
+                      />
+                      {(sb?.customer?.refundStatus || cancellationInfo?.refundStatus) && (
+                        <p className="text-xs text-emerald-700">
+                          Refund status:{" "}
+                          {humanizeStatus(
+                            sb?.customer?.refundStatus || cancellationInfo?.refundStatus || "none",
+                          )}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="rounded-xl border border-slate-200 p-3 space-y-2">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                        Restaurant payouts
+                      </p>
+                      {restaurants.length === 0 ? (
+                        <p className="text-xs text-slate-400">No restaurant settlement</p>
+                      ) : (
+                        restaurants.map((r, idx) => (
+                          <div
+                            key={idx}
+                            className="border-b border-slate-100 last:border-0 pb-2 last:pb-0 space-y-1"
+                          >
+                            <p className="font-medium text-slate-800">
+                              {r.restaurantName || `Restaurant ${idx + 1}`}
+                            </p>
+                            {Number(r.originalPayout) > 0 ? (
+                              <p className="text-xs text-slate-400 line-through">
+                                Would have received {money(r.originalPayout)}
+                              </p>
+                            ) : null}
+                            <PriceRow label="Actual payout" value={0} emphasize />
+                            <p className="text-[11px] text-slate-500">
+                              {r.note || "Order cancelled — no payout"}
+                            </p>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    <div className="rounded-xl border border-slate-200 p-3 space-y-2">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                        Driver payout
+                      </p>
+                      {Number(sb?.driver?.originalPayout) > 0 ? (
+                        <p className="text-xs text-slate-400 line-through">
+                          Would have received {money(sb.driver.originalPayout)}
+                          {Number(sb?.driver?.originalSharedPayout) > 0
+                            ? ` (+ shared ${money(sb.driver.originalSharedPayout)})`
+                            : ""}
+                        </p>
+                      ) : null}
+                      <PriceRow label="Actual payout" value={0} emphasize />
+                      <p className="text-[11px] text-slate-500">
+                        {sb?.driver?.note || "Order cancelled — no driver payout"}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-200 p-3 space-y-2">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                        Platform
+                      </p>
+                      {Number(sb?.platform?.originalNetProfit) > 0 ? (
+                        <p className="text-xs text-slate-400 line-through">
+                          Would have earned {money(sb.platform.originalNetProfit)}
+                        </p>
+                      ) : null}
+                      <PriceRow label="Platform net" value={0} emphasize />
+                      <p className="text-[11px] text-slate-500">
+                        {sb?.platform?.note || "Order cancelled — platform retains no profit"}
+                      </p>
+                    </div>
+                  </div>
+                )
+              }
+
               const driverPayout =
                 sb?.driver?.payout ??
                 Number(data?.riderEarning || 0) + Number(data?.sharedRiderEarning || 0)
@@ -1267,7 +1710,9 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
                           <div className="text-xs text-slate-500 flex flex-wrap gap-x-3 gap-y-1">
                             <span>Food {money(r.foodAmount)}</span>
                             <span>Pkg {money(r.packagingFee)}</span>
-                            <span>Commission −{money(r.commission)}</span>
+                            {Number(r.commission) > 0 && (
+                              <span>Commission −{money(r.commission)}</span>
+                            )}
                             {Number(r.speedShare) > 0 && <span>Speed +{money(r.speedShare)}</span>}
                             {Number(r.couponDiscount) > 0 && (
                               <span>Coupon −{money(r.couponDiscount)}</span>
@@ -1311,10 +1756,12 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
                       label="Platform fee"
                       value={sb?.platform?.platformFee ?? pricing.platformFee}
                     />
-                    <PriceRow
-                      label="Restaurant commission"
-                      value={sb?.platform?.restaurantCommission ?? pricing.restaurantCommission}
-                    />
+                    {Number(sb?.platform?.restaurantCommission ?? pricing.restaurantCommission) > 0 ? (
+                      <PriceRow
+                        label="Restaurant commission"
+                        value={sb?.platform?.restaurantCommission ?? pricing.restaurantCommission}
+                      />
+                    ) : null}
                     {(sb?.platform?.deliveryMarginBase != null ||
                       data?.platformRevenue?.deliveryMargin != null) && (
                       <PriceRow

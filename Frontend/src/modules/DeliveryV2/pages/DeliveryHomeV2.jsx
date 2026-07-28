@@ -4,7 +4,7 @@ import { useDeliveryStore } from '@/modules/DeliveryV2/store/useDeliveryStore';
 import { useProximityCheck } from '@/modules/DeliveryV2/hooks/useProximityCheck';
 import { useOrderManager } from '@/modules/DeliveryV2/hooks/useOrderManager';
 import { useDeliveryNotifications } from '@food/hooks/useDeliveryNotifications';
-import { writeOrderTracking } from '@food/realtimeTracking';
+import { writeOrderTracking, clearOrderTracking } from '@food/realtimeTracking';
 import { deliveryAPI } from '@food/api';
 import { toast } from 'sonner';
 import '@/modules/DeliveryV2/deliveryTheme.css';
@@ -13,6 +13,7 @@ import '@/modules/DeliveryV2/deliveryTheme.css';
 import LiveMap from '@/modules/DeliveryV2/components/map/LiveMap';
 import { NewOrderModal } from '@/modules/DeliveryV2/components/modals/NewOrderModal';
 import { PickupActionModal } from '@/modules/DeliveryV2/components/modals/PickupActionModal';
+import { PickupSequenceModal } from '@/modules/DeliveryV2/components/modals/PickupSequenceModal';
 import { DeliveryVerificationModal } from '@/modules/DeliveryV2/components/modals/DeliveryVerificationModal';
 import { OrderSummaryModal } from '@/modules/DeliveryV2/components/modals/OrderSummaryModal';
 import ActionSlider from '@/modules/DeliveryV2/components/ui/ActionSlider';
@@ -96,24 +97,77 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
   });
 
   const [isModalMinimized, setIsModalMinimized] = useState(false);
+  const [isBottomNavHidden, setIsBottomNavHidden] = useState(false);
+  const [showPickupSequence, setShowPickupSequence] = useState(false);
+
+  useEffect(() => {
+    const handleHide = () => setIsBottomNavHidden(true);
+    const handleShow = () => setIsBottomNavHidden(false);
+    
+    window.addEventListener('hideDeliveryBottomNav', handleHide);
+    window.addEventListener('showDeliveryBottomNav', handleShow);
+    
+    return () => {
+      window.removeEventListener('hideDeliveryBottomNav', handleHide);
+      window.removeEventListener('showDeliveryBottomNav', handleShow);
+    };
+  }, []);
+
   const [eta, setEta] = useState(null);
   const lastLocationSentAt = useRef(0);
   const lastCoordRef = useRef(null);
   const rollingSpeedRef = useRef([]);
   const lastAutoArrivalRef = useRef({ PICKING_UP: false, PICKED_UP: false });
   const activeOrderIdRef = useRef(null);
+  const activeOrderRef = useRef(null);
+  const activePolylineRef = useRef(null);
+  const tripStatusRef = useRef(null);
   const clearLiveTripUiRef = useRef(null);
   const extractCurrentTripRef = useRef(null);
   const applyServerTripRef = useRef(null);
   const hasMountedTripSyncRef = useRef(false);
 
+  const [zoom, setZoom] = useState(16);
+  const [isSimMode, setIsSimMode] = useState(false);
+  const [simPath, setSimPath] = useState([]);
+  const [simIndex, setSimIndex] = useState(0);
+  const [simProgress, setSimProgress] = useState(0); // 0 to 1 between points
+  const [activePolyline, setActivePolyline] = useState(null);
+  const mapRef = useRef(null);
+  const simInitializedRef = useRef(false);
+  const [riderAddress, setRiderAddress] = useState("Determining location...");
+
   useEffect(() => {
     activeOrderIdRef.current = activeOrder
       ? String(activeOrder._id || activeOrder.orderId || activeOrder.orderMongoId || '')
       : null;
+    activeOrderRef.current = activeOrder;
   }, [activeOrder]);
 
-  const clearLiveTripUi = useCallback((toastMsg) => {
+  useEffect(() => {
+    activePolylineRef.current = activePolyline;
+  }, [activePolyline]);
+
+  useEffect(() => {
+    tripStatusRef.current = tripStatus;
+  }, [tripStatus]);
+
+  const clearTripMapState = useCallback((orderId) => {
+    const trackingId = orderId || activeOrderIdRef.current;
+    if (trackingId) {
+      clearOrderTracking(trackingId).catch(() => {});
+    }
+    setActivePolyline(null);
+    setIsSimMode(false);
+    setSimPath([]);
+    setSimIndex(0);
+    setSimProgress(0);
+    simInitializedRef.current = false;
+  }, []);
+
+  const finishTrip = useCallback((toastMsg) => {
+    const endedOrderId = activeOrderIdRef.current;
+    clearTripMapState(endedOrderId);
     resetTrip();
     setShowVerification(false);
     setIsModalMinimized(false);
@@ -121,7 +175,11 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
     clearNewOrder?.();
     clearSharedOrder?.();
     if (toastMsg) toast.error(toastMsg);
-  }, [resetTrip, clearNewOrder, clearSharedOrder]);
+  }, [clearTripMapState, resetTrip, clearNewOrder, clearSharedOrder]);
+
+  const clearLiveTripUi = useCallback((toastMsg) => {
+    finishTrip(toastMsg);
+  }, [finishTrip]);
 
   const extractCurrentTrip = useCallback((response) => {
     const data = response?.data?.data;
@@ -146,15 +204,36 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
     extractCurrentTripRef.current = extractCurrentTrip;
   }, [extractCurrentTrip]);
 
-  const [zoom, setZoom] = useState(16);
-  const [isSimMode, setIsSimMode] = useState(false);
-  const [simPath, setSimPath] = useState([]);
-  const [simIndex, setSimIndex] = useState(0);
-  const [simProgress, setSimProgress] = useState(0); // 0 to 1 between points
-  const [activePolyline, setActivePolyline] = useState(null);
-  const mapRef = useRef(null);
-  const simInitializedRef = useRef(false);
-  const [riderAddress, setRiderAddress] = useState("Determining location...");
+  // Clear map route when trip ends and active order is removed from store.
+  useEffect(() => {
+    if (!activeOrder) {
+      setActivePolyline(null);
+      setIsSimMode(false);
+      setSimPath([]);
+      setSimIndex(0);
+      setSimProgress(0);
+      simInitializedRef.current = false;
+    }
+  }, [activeOrder]);
+
+  // Clear route on map as soon as delivery is completed (summary modal can stay open).
+  useEffect(() => {
+    if (tripStatus !== 'COMPLETED') return;
+    const endedOrderId = activeOrderIdRef.current;
+    if (endedOrderId) {
+      clearOrderTracking(endedOrderId).catch(() => {});
+    }
+    setActivePolyline(null);
+    setIsSimMode(false);
+    setSimPath([]);
+    setSimIndex(0);
+    setSimProgress(0);
+    simInitializedRef.current = false;
+    // Notify LiveMap consumers / path callbacks that the route is gone.
+    if (typeof setSimPath === 'function') {
+      setSimPath([]);
+    }
+  }, [tripStatus]);
 
   // Reverse Geocoding Effect
   useEffect(() => {
@@ -243,17 +322,21 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
               mapRef.current.panTo({ lat, lng });
             }
 
-            // Sync with backend every 2.5 seconds during simulation so customer sees it
+              // Sync with backend every 2.5 seconds during simulation so customer sees it
             const now = Date.now();
-            if (now - lastSimUpdateSentAt.current >= 2000) { // Reduced to 2s to match backend throttle
+            const tripEnded =
+              !activeOrderRef.current ||
+              tripStatusRef.current === 'COMPLETED' ||
+              tripStatusRef.current === 'IDLE';
+            if (!tripEnded && now - lastSimUpdateSentAt.current >= 2000) { // Reduced to 2s to match backend throttle
               lastSimUpdateSentAt.current = now;
               const payload = {
                 lat,
                 lng,
                 heading,
-                orderId: activeOrder?.orderId || activeOrder?._id,
+                orderId: activeOrderRef.current?.orderId || activeOrderRef.current?._id,
                 status: 'on_the_way',
-                polyline: activePolyline // Include polyline in every stream update for resilience
+                polyline: activePolylineRef.current // Include polyline in every stream update for resilience
               };
               // A. HTTP Backup
               deliveryAPI.updateLocation(lat, lng, true, { heading }).catch(() => { });
@@ -272,8 +355,8 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                   lat,
                   lng,
                   heading,
-                  polyline: activePolyline,
-                  status: tripStatus,
+                  polyline: activePolylineRef.current,
+                  status: tripStatusRef.current,
                   eta: eta,
                   deliveryPartnerId: partnerId,
                 }).catch(() => { });
@@ -285,7 +368,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
       }, 50); // 20 FPS movement
     }
     return () => clearInterval(interval);
-  }, [isSimMode, simPath, simIndex, activeOrder, emitLocation, activePolyline, eta, tripStatus]);
+  }, [isSimMode, simPath, simIndex, emitLocation, eta]);
 
   // Fetch Emergency numbers and Profile (Restored logic)
   useEffect(() => {
@@ -501,6 +584,8 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
         if (cancelled) return;
         const serverData = extractCurrentTripRef.current?.(response) ?? null;
         if (!serverData) {
+          // After completion the backend no longer returns an active trip — keep the summary modal.
+          if (tripStatusRef.current === 'COMPLETED') return;
           clearLiveTripUiRef.current?.('This order is no longer active');
           return;
         }
@@ -531,7 +616,10 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
       deliveryAPI.getCurrentDelivery()
         .then((response) => {
           const serverData = extractCurrentTripRef.current?.(response) ?? null;
-          if (!serverData) clearLiveTripUiRef.current?.('This order is no longer active');
+          if (!serverData) {
+            if (tripStatusRef.current === 'COMPLETED') return;
+            clearLiveTripUiRef.current?.('This order is no longer active');
+          }
         })
         .catch(() => { });
     };
@@ -568,11 +656,21 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
       // CRITICAL: In Simulation Mode, we disable actual GPS to prevent overwriting our test position
       if (isSimMode) return;
 
+      const currentOrder = activeOrderRef.current;
+      const currentTripStatus = tripStatusRef.current;
+      // Trip ended — keep rider pin fresh, but do not stream order route/tracking anymore.
+      const tripEnded =
+        !currentOrder ||
+        currentTripStatus === 'COMPLETED' ||
+        currentTripStatus === 'IDLE';
+
       const { latitude: lat, longitude: lng, heading, speed } = pos.coords;
       const now = Date.now();
 
       const currentRiderPos = { lat, lng, heading: heading || 0 };
       setRiderLocation(currentRiderPos);
+
+      if (tripEnded) return;
 
       // Calculate Rolling Average Speed for Smart ETA
       if (speed && speed > 0) {
@@ -613,9 +711,9 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
           heading: heading || 0,
           speed: speed || 0,
           accuracy: pos.coords.accuracy,
-          orderId: activeOrder?.orderId || activeOrder?._id,
+          orderId: currentOrder?.orderId || currentOrder?._id,
           status: 'on_the_way',
-          polyline: activePolyline
+          polyline: activePolylineRef.current
         };
 
         deliveryAPI.updateLocation(lat, lng, true, {
@@ -636,8 +734,8 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
             lat,
             lng,
             heading: heading || 0,
-            polyline: activePolyline,
-            status: tripStatus,
+            polyline: activePolylineRef.current,
+            status: tripStatusRef.current,
             eta: eta,
             deliveryPartnerId: partnerId,
           }).catch(() => { });
@@ -714,7 +812,6 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
 
   useEffect(() => {
     if (!isOnline) return;
-    if (currentTab !== 'feed') return;
     if (activeOrder) return;
 
     let cancelled = false;
@@ -802,7 +899,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
       window.clearInterval(poller);
       if (socket) socket.off('order_earnings_split');
     };
-  }, [activeOrder?._id, activeOrder?.orderId, currentTab, isOnline, isSocketConnected, socket]);
+  }, [activeOrder?._id, activeOrder?.orderId, isOnline, isSocketConnected, socket]);
 
   useEffect(() => {
     if (orderStatusUpdate) {
@@ -1110,10 +1207,22 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                   onMapClick={handleMapClick}
                   onPathReceived={setSimPath}
                   onPolylineReceived={(poly) => {
+                    if (
+                      tripStatusRef.current === 'COMPLETED' ||
+                      tripStatusRef.current === 'IDLE' ||
+                      !activeOrderRef.current
+                    ) {
+                      return;
+                    }
                     setActivePolyline(poly);
-                    const orderId = activeOrder?.orderId || activeOrder?._id;
+                    const orderId =
+                      activeOrderRef.current?.orderId || activeOrderRef.current?._id;
                     if (orderId && poly) {
-                      writeOrderTracking(orderId, { polyline: poly, status: tripStatus, eta: eta }).catch(() => { });
+                      writeOrderTracking(orderId, {
+                        polyline: poly,
+                        status: tripStatusRef.current,
+                        eta: eta,
+                      }).catch(() => {});
                     }
                   }}
                   zoom={zoom}
@@ -1292,8 +1401,8 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
         {/* OVERLAYS (Persistent if active) */}
       </div>
 
-      {/* OVERLAYS (Persistent if active) - Outside flex container to avoid clipping and z-index issues */}
-      {(currentTab === 'feed' || activeOrder) && (
+      {/* OVERLAYS — show new order request on every tab, and trip modals when active */}
+      {(incomingOrder || activeOrder) && (
         <AnimatePresence>
           {!isModalMinimized && (
             <motion.div
@@ -1322,6 +1431,21 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                         setIncomingOrder(null);
                         clearNewOrder();
                         clearSharedOrder();
+                        if (currentTab !== 'feed') {
+                          navigate('/food/delivery/feed');
+                        }
+
+                        const activePickups = (o?.pickups || []).filter(
+                          (p) =>
+                            !p.permanentlyDropped &&
+                            String(p.status || '').toLowerCase() !== 'cancelled',
+                        );
+                        const isMulti =
+                          Boolean(o?.isMultiRestaurant) || activePickups.length > 1;
+                        if (isMulti && !isShared) {
+                          setShowPickupSequence(true);
+                          setIsModalMinimized(false);
+                        }
                       } catch (err) {
                         console.error('Acceptance failed in UI:', err);
                         const msg = String(err?.response?.data?.message || err?.response?.data?.error || err?.message || '');
@@ -1346,7 +1470,34 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                     onMinimize={() => setIsModalMinimized(true)}
                   />
                 )}
-                {activeOrder && (tripStatus === 'PICKING_UP' || tripStatus === 'REACHED_PICKUP') && (
+                {showPickupSequence && activeOrder && (
+                  <PickupSequenceModal
+                    order={activeOrder}
+                    onDone={(updated) => {
+                      const next = updated ? { ...activeOrder, ...updated } : activeOrder;
+                      const remaining = [...(next.pickups || [])]
+                        .filter(
+                          (p) =>
+                            !p.permanentlyDropped &&
+                            !['picked_up', 'cancelled'].includes(String(p.status || '')),
+                        )
+                        .sort((a, b) => (Number(a.sequence) || 0) - (Number(b.sequence) || 0));
+                      const first = remaining[0];
+                      let restaurantLocation = next.restaurantLocation;
+                      if (first?.location) {
+                        const loc = first.location;
+                        restaurantLocation = {
+                          lat: loc.coordinates?.[1] ?? loc.latitude ?? loc.lat,
+                          lng: loc.coordinates?.[0] ?? loc.longitude ?? loc.lng,
+                        };
+                      }
+                      setActiveOrder({ ...next, restaurantLocation });
+                      setShowPickupSequence(false);
+                    }}
+                    onSkip={() => setShowPickupSequence(false)}
+                  />
+                )}
+                {!showPickupSequence && activeOrder && (tripStatus === 'PICKING_UP' || tripStatus === 'REACHED_PICKUP') && (
                   <PickupActionModal
                     order={activeOrder}
                     status={tripStatus}
@@ -1418,8 +1569,10 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                   <DeliveryVerificationModal
                     order={activeOrder}
                     onComplete={async (otp, paymentOverride) => {
+                      const endedOrderId = activeOrderIdRef.current;
                       const res = await completeDelivery(otp, paymentOverride);
                       setShowVerification(false);
+                      clearTripMapState(endedOrderId);
                       return res;
                     }}
                     onClose={() => setShowVerification(false)}
@@ -1429,7 +1582,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                   <OrderSummaryModal
                     order={activeOrder}
                     riderProfile={riderProfile}
-                    onDone={resetTrip}
+                    onDone={() => finishTrip()}
                   />
                 )}
               </div>
@@ -1564,7 +1717,8 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
       )}
 
       {/* ─── 3. BOTTOM NAV (Premium Floating Pill Dock) ─── */}
-      <div className="fixed bottom-4 inset-x-6 z-[500] flex justify-center">
+      {!isBottomNavHidden && (
+        <div className="fixed bottom-4 inset-x-6 z-[500] flex justify-center">
         <div className="bg-white/95 rounded-full px-1.5 py-1.5 flex items-center gap-0.5 shadow-[0_10px_40px_-12px_rgba(0,0,0,0.2)] border border-gray-100 backdrop-blur-lg">
           {[
             { id: 'feed', label: 'Delivery', icon: LayoutGrid, path: '/food/delivery/feed' },
@@ -1598,6 +1752,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
           })}
         </div>
       </div>
+      )}
     </div>
   );
 }

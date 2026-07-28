@@ -936,15 +936,21 @@ export async function getTransactionReport(query = {}) {
 
     for (const tx of transactionRows) {
         // Calculate Summary
+        // Platform/customer/rider amounts live only on the primary tx row for multi-resto orders.
+        const isPrimaryTx = tx.isPrimary !== false;
         if (tx.status === 'captured' || tx.status === 'settled' || (tx.orderId && tx.orderId.orderStatus === 'delivered')) {
-            completedTransaction += tx.amounts?.totalCustomerPaid || 0;
-            adminEarning += tx.amounts?.platformNetProfit || 0;
+            if (isPrimaryTx) {
+                completedTransaction += tx.amounts?.totalCustomerPaid || 0;
+                adminEarning += tx.amounts?.platformNetProfit || 0;
+                deliverymanEarning += tx.amounts?.riderShare || 0;
+            }
             restaurantEarning += tx.amounts?.restaurantShare || 0;
-            deliverymanEarning += tx.amounts?.riderShare || 0;
         }
         if (tx.status === 'refunded' || (tx.orderId && tx.orderId.orderStatus === 'cancelled_by_admin')) {
             // Count number of refunded transactions according to old logic or sum them
-            refundedTransaction += tx.amounts?.totalCustomerPaid || 0;
+            if (isPrimaryTx) {
+                refundedTransaction += tx.amounts?.totalCustomerPaid || 0;
+            }
         }
     }
 
@@ -2420,7 +2426,13 @@ export async function getRestaurantAnalytics(restaurantId) {
     const [restaurant, commissionDoc, orders, txRows] = await Promise.all([
         FoodRestaurant.findById(rId).lean(),
         FoodRestaurantCommission.findOne({ restaurantId: rId, status: { $ne: false } }).lean(),
-        FoodOrder.find({ restaurantId: rId }).lean(),
+        FoodOrder.find({
+            $or: [
+                { restaurantId: rId },
+                { 'restaurantSettlement.restaurantId': rId },
+                { 'pickups.restaurantId': rId },
+            ],
+        }).lean(),
         FoodTransaction.find({ restaurantId: rId })
             .populate('orderId', 'orderStatus createdAt pricing')
             .sort({ createdAt: -1 })
@@ -2437,6 +2449,7 @@ export async function getRestaurantAnalytics(restaurantId) {
     const cancelledOrders = orders.filter(o => ['cancelled_by_user', 'cancelled_by_restaurant', 'cancelled_by_admin'].includes(o.orderStatus));
 
     // Money metrics should come from the ledger (FoodTransaction), not FoodOrder.
+    // Prefer settlement payout for this restaurant when present (fixes legacy summed primary txs).
     const completedTx = (txRows || []).filter((tx) => {
         const orderStatus = tx?.orderId?.orderStatus;
         if (orderStatus) return orderStatus === 'delivered';
@@ -2445,40 +2458,72 @@ export async function getRestaurantAnalytics(restaurantId) {
 
     const sum = (arr, pick) => (arr || []).reduce((s, it) => s + (Number(pick(it)) || 0), 0);
 
-    // 1) Total order value (gross customer paid)
-    const totalRevenue = sum(completedTx, (tx) => tx?.amounts?.totalCustomerPaid ?? tx?.pricing?.total ?? tx?.orderId?.pricing?.total);
+    const restaurantShareForOrder = (order) => {
+        const settlements = Array.isArray(order?.restaurantSettlement)
+            ? order.restaurantSettlement
+            : [];
+        const row = settlements.find(
+            (s) => String(s?.restaurantId?._id || s?.restaurantId || '') === String(rId),
+        );
+        if (row) return Math.max(0, Number(row.restaurantPayout) || 0);
+        return null;
+    };
+
+    // 1) Total order value (gross customer paid) — only primary txs to avoid multi-resto double count
+    const totalRevenue = sum(
+        completedTx.filter((tx) => tx.isPrimary !== false),
+        (tx) => tx?.amounts?.totalCustomerPaid ?? tx?.pricing?.total ?? tx?.orderId?.pricing?.total,
+    );
 
     // 2) Restaurant share (payout to restaurant)
-    const restaurantEarning = sum(completedTx, (tx) => tx?.amounts?.restaurantShare);
+    const restaurantEarning = completedOrders.reduce((sumE, order) => {
+        const fromSettlement = restaurantShareForOrder(order);
+        if (fromSettlement != null) return sumE + fromSettlement;
+        const tx = completedTx.find((t) => String(t.orderId?._id || t.orderId) === String(order._id));
+        return sumE + (Number(tx?.amounts?.restaurantShare) || 0);
+    }, 0);
 
     // 3) Restaurant commission paid to admin
-    const totalCommission = sum(completedTx, (tx) => tx?.amounts?.restaurantCommission ?? tx?.pricing?.restaurantCommission);
+    const totalCommission = completedOrders.reduce((sumC, order) => {
+        const settlements = Array.isArray(order?.restaurantSettlement)
+            ? order.restaurantSettlement
+            : [];
+        const row = settlements.find(
+            (s) => String(s?.restaurantId?._id || s?.restaurantId || '') === String(rId),
+        );
+        if (row) return sumC + (Number(row.commission) || 0);
+        const tx = completedTx.find((t) => String(t.orderId?._id || t.orderId) === String(order._id));
+        return sumC + (Number(tx?.amounts?.restaurantCommission ?? tx?.pricing?.restaurantCommission) || 0);
+    }, 0);
 
     // 4) Restaurant profit (in this system, equals restaurant share)
     const restaurantProfit = restaurantEarning;
 
-    const monthlyOrdersList = orders.filter(o => {
+    const monthlyCompletedOrders = completedOrders.filter((o) => {
         const d = new Date(o.createdAt);
         return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
     });
-    const monthlyCompletedTx = completedTx.filter((tx) => {
-        const d = new Date(tx?.createdAt || tx?.orderId?.createdAt || 0);
-        return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-    });
-    const monthlyProfit = sum(monthlyCompletedTx, (tx) => tx?.amounts?.restaurantShare);
+    const monthlyProfit = monthlyCompletedOrders.reduce((sumM, order) => {
+        const fromSettlement = restaurantShareForOrder(order);
+        if (fromSettlement != null) return sumM + fromSettlement;
+        const tx = completedTx.find((t) => String(t.orderId?._id || t.orderId) === String(order._id));
+        return sumM + (Number(tx?.amounts?.restaurantShare) || 0);
+    }, 0);
 
-    const yearlyOrdersList = orders.filter(o => {
+    const yearlyCompletedOrders = completedOrders.filter((o) => {
         const d = new Date(o.createdAt);
         return d.getFullYear() === currentYear;
     });
-    const yearlyCompletedTx = completedTx.filter((tx) => {
-        const d = new Date(tx?.createdAt || tx?.orderId?.createdAt || 0);
-        return d.getFullYear() === currentYear;
-    });
-    const yearlyProfit = sum(yearlyCompletedTx, (tx) => tx?.amounts?.restaurantShare);
+    const yearlyProfit = yearlyCompletedOrders.reduce((sumY, order) => {
+        const fromSettlement = restaurantShareForOrder(order);
+        if (fromSettlement != null) return sumY + fromSettlement;
+        const tx = completedTx.find((t) => String(t.orderId?._id || t.orderId) === String(order._id));
+        return sumY + (Number(tx?.amounts?.restaurantShare) || 0);
+    }, 0);
 
     const totalOrdersCount = orders.length;
-    const avgOrderValue = completedTx.length > 0 ? totalRevenue / completedTx.length : 0;
+    const primaryCompletedTx = completedTx.filter((tx) => tx.isPrimary !== false);
+    const avgOrderValue = primaryCompletedTx.length > 0 ? totalRevenue / primaryCompletedTx.length : 0;
 
     const uniqueCustomers = new Set(orders.map(o => String(o.userId))).size;
     const customerOrderCounts = orders.reduce((acc, o) => {
@@ -2511,8 +2556,8 @@ export async function getRestaurantAnalytics(restaurantId) {
         totalCommission,
         restaurantEarning, // restaurant share
         restaurantProfit,
-        monthlyOrders: monthlyOrdersList.length,
-        yearlyOrders: yearlyOrdersList.length,
+        monthlyOrders: monthlyCompletedOrders.length,
+        yearlyOrders: yearlyCompletedOrders.length,
         averageMonthlyProfit: monthlyProfit, // Placeholder: can be improved if historical data exists
         averageYearlyProfit: yearlyProfit,   // Placeholder: can be improved if historical data exists
         status: restaurant.status === 'approved' ? 'active' : 'inactive',

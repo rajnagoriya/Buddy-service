@@ -1,4 +1,4 @@
-import { onValue, ref, set, update } from 'firebase/database';
+import { onValue, ref, set, update, remove } from 'firebase/database';
 import { firebaseRealtimeDb, ensureFirebaseInitialized } from '@food/firebase';
 
 function sanitizeRealtimeKey(value) {
@@ -151,5 +151,13 @@ export async function writeOrderTracking(orderId, payload = {}) {
   if (partnerId) {
     await update(ref(firebaseRealtimeDb, `${orderPath}/riders/${partnerId}`), toWrite);
   }
+  return true;
+}
+
+/** Remove live tracking data when an order trip ends (cancelled or completed). */
+export async function clearOrderTracking(orderId) {
+  if (!orderId) return false;
+  ensureFirebaseInitialized({ enableAuth: false, enableRealtimeDb: true });
+  await remove(ref(firebaseRealtimeDb, getOrderTrackingPath(orderId)));
   return true;
 }

@@ -31,7 +31,7 @@ export const ProfileV2 = () => {
   const location = useLocation()
   const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [referralReward, setReferralReward] = useState(0)
+
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
   const [logoutSubmitting, setLogoutSubmitting] = useState(false)
   const [deleteAccountOpen, setDeleteAccountOpen] = useState(false)
@@ -57,29 +57,7 @@ export const ProfileV2 = () => {
     fetchProfile()
   }, [])
 
-  useEffect(() => {
-    deliveryAPI.getReferralStats().then((res) => {
-      const reward = res?.data?.data?.stats?.rewardAmount
-      setReferralReward(Number(reward) || 0)
-    }).catch(() => {})
-  }, [])
 
-  const refId = profile?._id || profile?.id || profile?.referralCode || ""
-  const referralLink = refId ? `${window.location.origin}/food/delivery/signup?ref=${encodeURIComponent(String(refId))}` : ""
-
-  const handleShareReferral = async () => {
-    if (!referralLink) return
-    const rewardText = referralReward > 0 ? `₹${referralReward}` : "rewards"
-    const shareText = `Join as a delivery partner and earn ${rewardText}.`
-    try {
-      if (navigator.share) {
-        await navigator.share({ title: "Delivery referral", text: shareText, url: referralLink })
-      } else {
-        const fallbackUrl = `https://wa.me/?text=${encodeURIComponent(`${shareText} ${referralLink}`)}`
-        window.open(fallbackUrl, "_blank", "noopener,noreferrer")
-      }
-    } catch (e) {}
-  }
 
   const handleLogout = async () => {
     if (logoutSubmitting) return
@@ -183,28 +161,14 @@ export const ProfileV2 = () => {
             <ChevronRight className="w-5 h-5 text-gray-300 shrink-0" />
           </button>
 
-          {/* Share & Earn */}
-          <div className="bg-[#16A34A] rounded-[1.5rem] p-5 flex items-center justify-between gap-4 shadow-xl shadow-green-600/20 border border-white/20">
-            <div className="min-w-0 text-left">
-              <h3 className="text-base font-black text-[#0F172A] uppercase tracking-tight mb-1">
-                Invite & Earn{referralReward > 0 ? ` ₹${referralReward}` : ""}
-              </h3>
-              <p className="text-[#0F172A]/60 text-[10px] font-bold uppercase tracking-wide">Invite friends to Buddy Service fleet.</p>
-            </div>
-            <button
-              onClick={handleShareReferral}
-              className="shrink-0 bg-white text-[#16A34A] px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg active:scale-90 transition-all"
-            >
-              Share
-            </button>
-          </div>
+
 
           {/* Support Section */}
           <div>
             <h3 className="text-gray-400 text-[10px] font-black uppercase tracking-[0.2em] mb-4 px-2 text-left">Support & Help</h3>
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-6">
               <div 
-                onClick={() => navigate('/food/delivery/support')}
+                onClick={() => navigate('/food/delivery/help/tickets')}
                 className="w-full p-4 border-b border-gray-50 flex items-center justify-between active:bg-gray-50 transition-colors"
               >
                 <div className="flex items-center gap-3">
