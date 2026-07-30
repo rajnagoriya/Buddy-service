@@ -39,7 +39,7 @@ const resolveDeliveryBackPath = ({ pathname, state }) => {
     normalizedPath === "/help/id-card" ||
     normalizedPath === "/help/tickets"
   ) {
-    return explicitBackPath || "/food/delivery/profile"
+    return explicitBackPath || "/driver/profile"
   }
 
   if (

@@ -527,7 +527,7 @@ export const ProfileDetailsV2 = () => {
           <button onClick={goBack} className="p-2 hover:bg-gray-100 rounded-xl transition-all active:scale-90">
             <ArrowLeft className="w-5 h-5 text-gray-700" />
           </button>
-          <h1 className="text-base font-semibold text-gray-900">Profile</h1>
+          <h1 className="text-base font-semibold text-gray-900">Edit Profile</h1>
         </div>
         <div className="bg-[#16A34A] text-[#0F172A] px-3 py-1.5 rounded-full text-[10px] font-semibold uppercase tracking-wider shadow-lg shadow-green-500/20">
           ID: {profile?.deliveryId || "..."}

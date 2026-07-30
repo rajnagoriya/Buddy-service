@@ -53,6 +53,7 @@ import { cn } from "@food/utils/utils"
 import { Input } from "@food/components/ui/input"
 import { adminSidebarMenu } from "@food/utils/adminSidebarMenu"
 import BusinessLogo from "@food/components/BusinessLogo"
+import { toast } from "sonner"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -663,8 +664,30 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
             </Link>
           </div>
 
-          {/* Taxi Switcher */}
+          {/* Taxi Switcher — temporary Coming Soon (restore Link to /taxi/admin when ready) */}
           <div className={cn("mt-2 animate-[slideIn_0.4s_ease-out_0.35s_both]", isCollapsed ? "px-1" : "px-0")}>
+            <button
+              type="button"
+              onClick={() =>
+                toast("Taxi is Coming Soon! 🚀", {
+                  description: "Taxi administration will be available soon.",
+                })
+              }
+              className={cn(
+                "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-yellow-600 text-white hover:from-amber-500 hover:to-yellow-500 transition-all duration-300 shadow-lg shadow-amber-900/20 group border border-amber-400/20",
+                isCollapsed && "justify-center"
+              )}
+              title={isCollapsed ? "Taxi Coming Soon" : undefined}
+            >
+              <Car className={cn("w-4 h-4 shrink-0 text-amber-100 group-hover:scale-110 transition-transform", isCollapsed ? "" : "")} />
+              {!isCollapsed && (
+                <div className="flex-1 flex items-center justify-between overflow-hidden">
+                  <span className="font-semibold text-xs uppercase tracking-wider truncate">Taxi Service</span>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-100/90 shrink-0">Soon</span>
+                </div>
+              )}
+            </button>
+            {/*
             <Link 
               to="/taxi/admin" 
               className={cn(
@@ -681,6 +704,7 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
                 </div>
               )}
             </Link>
+            */}
           </div>
         </div>
 

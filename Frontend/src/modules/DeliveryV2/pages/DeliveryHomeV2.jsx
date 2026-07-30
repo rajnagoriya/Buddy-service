@@ -26,7 +26,6 @@ import ActionSlider from '@/modules/DeliveryV2/components/ui/ActionSlider';
 // Sub Pages
 import PocketV2 from '@/modules/DeliveryV2/pages/PocketV2';
 import HistoryV2 from '@/modules/DeliveryV2/pages/HistoryV2';
-import ProfileV2 from '@/modules/DeliveryV2/pages/ProfileV2';
 
 // Icons
 import {
@@ -89,6 +88,13 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
   useEffect(() => {
     setCurrentTab(tab);
   }, [tab]);
+
+  // Profile lives on the unified /driver/profile page.
+  useEffect(() => {
+    if (tab === "profile") {
+      navigate("/driver/profile", { replace: true });
+    }
+  }, [navigate, tab]);
 
   const [showVerification, setShowVerification] = useState(false);
   const [showEmergencyPopup, setShowEmergencyPopup] = useState(false);
@@ -1460,9 +1466,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
           <PocketV2 />
         ) : currentTab === 'history' ? (
           <HistoryV2 />
-        ) : (
-          <ProfileV2 />
-        )}
+        ) : null}
 
         {/* OVERLAYS (Persistent if active) */}
       </div>
@@ -1807,7 +1811,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
             { id: 'feed', label: 'Delivery', icon: LayoutGrid, path: '/food/delivery/feed' },
             { id: 'pocket', label: 'Pocket', icon: Wallet, path: '/food/delivery/pocket' },
             { id: 'history', label: 'History', icon: History, path: '/food/delivery/history' },
-            { id: 'profile', label: 'Profile', icon: UserIcon, path: '/food/delivery/profile' },
+            { id: 'profile', label: 'Profile', icon: UserIcon, path: '/driver/profile' },
           ].map((item) => {
             const isActive = currentTab === item.id;
             const Icon = item.icon;

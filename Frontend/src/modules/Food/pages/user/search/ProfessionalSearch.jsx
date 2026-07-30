@@ -156,7 +156,7 @@ export default function ProfessionalSearch() {
       <div className="sticky top-0 z-50 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-xl border-b border-gray-100 dark:border-zinc-800 px-3 py-2 sm:px-4 sm:py-3">
         <div className="max-w-4xl mx-auto flex items-center gap-2 sm:gap-3">
           <button 
-            onClick={() => navigate(-1)} 
+            onClick={() => navigate("/food/user")} 
             className="p-1.5 sm:p-2 hover:bg-gray-100 dark:hover:bg-zinc-800 rounded-full transition-all active:scale-90"
           >
             <ArrowLeft className="w-5 h-5 text-gray-700 dark:text-gray-300" />

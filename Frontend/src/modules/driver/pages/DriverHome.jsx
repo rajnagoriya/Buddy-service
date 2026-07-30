@@ -221,6 +221,14 @@ export default function DriverHome() {
   const toggleService = async (serviceKey, turningOn) => {
     if (switching) return;
 
+    // Temporary: block entering taxi service until module is ready
+    if (serviceKey === "taxi") {
+      toast("Taxi is Coming Soon! 🚀", {
+        description: "We are working hard to bring you the best taxi experience.",
+      });
+      return;
+    }
+
     if (serviceKey === "taxi" && !taxiEnabled) {
       toast.error("Apply for Taxi below to enable this service.");
       return;
@@ -490,6 +498,7 @@ export default function DriverHome() {
             status={capabilities.taxi}
             enabled={taxiEnabled}
             href={PORTAL_TARGETS.taxi}
+            comingSoon
           />
         </div>
       </div>
@@ -537,9 +546,11 @@ function ApplyForServiceCard({ cta, loading, onApply }) {
   );
 }
 
-function CapabilityCard({ Icon, title, status, enabled, href }) {
+function CapabilityCard({ Icon, title, status, enabled, href, comingSoon = false }) {
   const normalized = String(status || "").toLowerCase();
-  const label = !enabled
+  const label = comingSoon
+    ? "Coming soon"
+    : !enabled
     ? "Not enrolled"
     : normalized === "rejected"
       ? "Rejected"
@@ -547,24 +558,46 @@ function CapabilityCard({ Icon, title, status, enabled, href }) {
   const isReady = enabled && (normalized === "approved" || normalized === "enabled" || normalized === "active");
   const isPending = enabled && !isReady && normalized !== "rejected";
   const isRejected = enabled && normalized === "rejected";
-  const target = !enabled || isRejected ? null : isPending ? "/driver/home" : href;
+  const target = comingSoon ? null : (!enabled || isRejected ? null : isPending ? "/driver/home" : href);
 
   const className = [
     "block rounded-2xl border p-4 transition-all",
-    isReady ? "bg-green-50 border-green-500/30" : isRejected ? "bg-red-500/10 border-red-500/30" : "bg-gray-50 border-gray-100",
-    !enabled ? "opacity-70" : "",
+    comingSoon
+      ? "bg-slate-50 border-slate-200 opacity-80 cursor-pointer"
+      : isReady
+        ? "bg-green-50 border-green-500/30"
+        : isRejected
+          ? "bg-red-500/10 border-red-500/30"
+          : "bg-gray-50 border-gray-100",
+    !enabled && !comingSoon ? "opacity-70" : "",
   ].join(" ");
 
   const content = (
     <>
       <Icon className={[
         "w-5 h-5 mb-2",
-        isReady ? "text-green-600" : "text-gray-500",
+        comingSoon ? "text-slate-400" : isReady ? "text-green-600" : "text-gray-500",
       ].join(" ")} />
       <div className="text-gray-900 font-bold text-[13px]">{title}</div>
       <div className="text-[11px] text-gray-500 mt-1 capitalize">{label}</div>
     </>
   );
+
+  if (comingSoon) {
+    return (
+      <button
+        type="button"
+        className={className + " text-left w-full"}
+        onClick={() =>
+          toast("Taxi is Coming Soon! 🚀", {
+            description: "We are working hard to bring you the best taxi experience.",
+          })
+        }
+      >
+        {content}
+      </button>
+    );
+  }
 
   if (!target) {
     return <div className={className}>{content}</div>;

@@ -55,7 +55,7 @@ export default function DeliveryLayout({
     "/food/delivery",
     "/food/delivery/requests",
     "/food/delivery/trip-history",
-    "/food/delivery/profile"
+    "/driver/profile",
   ].includes(location.pathname)
 
   if (approvalStatus === "loading") {

@@ -372,8 +372,9 @@ export default function AdminRouter() {
             <Route path="dining-requests" element={<DiningRequests />} />
           </Route>
 
-          {/* TAXI ADMIN - Redirect to Taxi Module's Admin */}
-          <Route path="taxi/*" element={<Navigate to="/taxi/admin" replace />} />
+          {/* TAXI ADMIN - Temporary Coming Soon (set TAXI_PORTALS_COMING_SOON false in taxi/routes.jsx to restore) */}
+          {/* <Route path="taxi/*" element={<Navigate to="/taxi/admin" replace />} /> */}
+          <Route path="taxi/*" element={<div className="p-8 text-center text-gray-500 bg-white min-h-[50vh] flex items-center justify-center border rounded-xl m-4">Taxi Administration - Coming Soon</div>} />
 
           {/* QUICK COMMERCE ADMIN - Placeholder for future implementation */}
           <Route path="quick-commerce/*" element={<div className="p-8 text-center text-gray-500 bg-white min-h-[50vh] flex items-center justify-center border rounded-xl m-4">Quick Commerce Administration - Coming Soon</div>} />

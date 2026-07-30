@@ -291,6 +291,12 @@ export default function UnifiedHeader({
                           });
                           return;
                         }
+                        if (service.id === 'taxi') {
+                          toast('Taxi is Coming Soon! 🚀', {
+                            description: 'We are working hard to bring you the best taxi experience.',
+                          });
+                          return;
+                        }
                         setActiveTab?.(service.id);
                         navigate(service.path);
                       }}

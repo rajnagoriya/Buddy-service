@@ -377,6 +377,22 @@ const REDIRECT_TO_DRIVER_LOGIN = () => <Navigate to="/driver/login" replace />;
 const REDIRECT_TO_DRIVER_ONBOARDING = () => <Navigate to="/driver/onboarding" replace />;
 const REDIRECT_TO_DRIVER_HOME = () => <Navigate to="/driver/home" replace />;
 
+/**
+ * TEMPORARY: block taxi user / driver / owner / admin portals with Coming Soon.
+ * Set to `false` to restore full taxi module access. Do not delete portal routes below.
+ */
+const TAXI_PORTALS_COMING_SOON = true;
+
+const TaxiModuleComingSoon = () => (
+  <div className="min-h-[70vh] flex flex-col items-center justify-center px-6 py-16 text-center bg-white">
+    <div className="text-sm font-black uppercase tracking-[0.3em] text-slate-400 mb-3">Coming Soon</div>
+    <h1 className="text-2xl font-bold text-slate-900 mb-2">Taxi Module</h1>
+    <p className="text-sm text-slate-500 max-w-sm">
+      We are working hard to bring you the best taxi experience. Stay tuned!
+    </p>
+  </div>
+);
+
 const UserHomeRoute = ({ taxiPrefixed = false }) => (
   getLocalUserToken()
     ? <UserHome />
@@ -572,6 +588,45 @@ const DriverEntryRedirect = () => {
 };
 
 export default function TaxiApp() {
+  // Temporary portal block — all user/driver/admin route code below is preserved.
+  if (TAXI_PORTALS_COMING_SOON) {
+    return (
+      <SettingsProvider>
+        <ScrollToTop />
+        <MainLayout>
+          <Suspense fallback={
+            <div className="flex items-center justify-center min-h-screen bg-white">
+              <span className="w-8 h-8 border-4 border-slate-200 border-t-slate-800 rounded-full animate-spin"></span>
+            </div>
+          }>
+            <Routes>
+              <Route path="/" element={<LandingPage />} />
+              <Route path="about" element={<AboutPage />} />
+              <Route path="contact" element={<ContactPage />} />
+              <Route path="support" element={<SupportPage />} />
+              <Route path="faq" element={<FaqPage />} />
+              <Route path="services" element={<ServicesPage />} />
+              <Route path="blog" element={<BlogPage />} />
+              <Route path="links" element={<LinksPage />} />
+              <Route path="terms" element={<LegalPage />} />
+              <Route path="terms-and-conditions" element={<LegalPage />} />
+              <Route path="privacy" element={<LegalPage />} />
+              <Route path="privacy-policy" element={<LegalPage />} />
+              <Route path="refund" element={<LegalPage />} />
+              <Route path="cancellation" element={<LegalPage />} />
+              <Route path="admin/login" element={<Navigate to="/admin/login" replace />} />
+              <Route path="user/*" element={<TaxiModuleComingSoon />} />
+              <Route path="driver/*" element={<TaxiModuleComingSoon />} />
+              <Route path="owner/*" element={<TaxiModuleComingSoon />} />
+              <Route path="admin/*" element={<TaxiModuleComingSoon />} />
+              <Route path="*" element={<TaxiModuleComingSoon />} />
+            </Routes>
+          </Suspense>
+        </MainLayout>
+      </SettingsProvider>
+    );
+  }
+
   return (
     <SettingsProvider>
       <RentalLocationTracker />

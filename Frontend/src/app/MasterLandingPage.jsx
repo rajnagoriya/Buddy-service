@@ -1,6 +1,7 @@
 import React from "react"
 import { motion } from "framer-motion"
 import { useNavigate } from "react-router-dom"
+import { toast } from "sonner"
 import { 
   UtensilsCrossed, 
   Car, 
@@ -126,7 +127,23 @@ export default function MasterLandingPage() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.3 + idx * 0.1, type: "spring", stiffness: 100 }}
                 whileHover={{ y: -12, scale: 1.02 }}
-                onClick={() => navigate(module.path)}
+                onClick={() => {
+                  if (module.id === "taxi" || module.id === "quick-commerce") {
+                    toast(
+                      module.id === "taxi"
+                        ? "Taxi is Coming Soon! 🚀"
+                        : "Mart is Coming Soon! 🚀",
+                      {
+                        description:
+                          module.id === "taxi"
+                            ? "We are working hard to bring you the best taxi experience."
+                            : "We are working hard to bring you the best grocery delivery experience.",
+                      },
+                    );
+                    return;
+                  }
+                  navigate(module.path);
+                }}
                 className="group cursor-pointer"
               >
                 <div className="relative h-full bg-white border border-gray-100 rounded-[32px] p-8 overflow-visible transition-all duration-300 shadow-[0_8px_30px_rgba(0,0,0,0.04)] group-hover:shadow-[0_20px_40px_rgba(0,0,0,0.08)] flex flex-col items-center text-center">

@@ -36,12 +36,15 @@ import {
   getPrimaryRestaurantMenuLookupId,
 } from "@food/utils/restaurantMenuCache";
 import { fetchRestaurantsCached } from "@food/utils/restaurantListCache";
-import { calculateDistance, formatDistance } from "@food/utils/common";
+import { calculateDistance, formatDistance, normalizeImageUrl, extractImages } from "@food/utils/common";
+import { foodImages } from "@food/constants/images";
+import { API_BASE_URL } from "@food/api/config";
 const debugLog = (...args) => {};
 const debugWarn = (...args) => {};
 const debugError = (...args) => {};
 const RUPEE_SYMBOL = "\u20B9";
 const UNDER_250_FILTERS_STORAGE_KEY = "food-under-250-filters";
+const BACKEND_ORIGIN = String(API_BASE_URL || "").replace(/\/api\/?$/, "");
 
 const readUnder250Filters = () => {
   if (typeof window === "undefined") {
@@ -293,7 +296,10 @@ export default function Under250() {
             : [];
         const images = list
           .map((banner) =>
-            typeof banner?.imageUrl === "string" ? banner.imageUrl.trim() : "",
+            normalizeImageUrl(
+              typeof banner?.imageUrl === "string" ? banner.imageUrl.trim() : "",
+              BACKEND_ORIGIN,
+            ),
           )
           .filter(Boolean);
         setBannerImages(images);
@@ -572,13 +578,22 @@ export default function Under250() {
             const name = String(cat?.name || "").trim();
             if (!name) return null;
 
+            const image =
+              extractImages([cat?.image, cat?.imageUrl, cat?.icon], BACKEND_ORIGIN)[0] ||
+              normalizeImageUrl(
+                typeof cat?.image === "string" ? cat.image : "",
+                BACKEND_ORIGIN,
+              ) ||
+              foodImages[index % foodImages.length] ||
+              foodImages[0];
+
             return {
               id: String(cat?.id || cat?._id || cat?.slug || `cat-${index}`),
               name,
               slug: String(
                 cat?.slug || name.toLowerCase().replace(/\s+/g, "-"),
               ),
-              image: cat?.imageUrl || cat?.image || cat?.icon || "",
+              image,
             };
           })
           .filter(Boolean);
@@ -948,7 +963,7 @@ export default function Under250() {
     <div
       className={`relative min-h-dvh bg-white dark:bg-[#0a0a0a] ${shouldShowGrayscale ? "grayscale opacity-75" : ""}`}
     >
-      {/* Mobile view banner with food-mobile-hero gradient wrapper */}
+      {/* Mobile view banner with compact food-mobile-hero */}
       <div className="md:hidden food-mobile-hero">
         <div
           className="food-mobile-hero__glow food-mobile-hero__glow--left"
@@ -960,11 +975,11 @@ export default function Under250() {
         />
         <div className="food-mobile-hero__pattern" aria-hidden />
 
-        <div className="pt-[calc(env(safe-area-inset-top,0px)+4.5rem)] relative w-full overflow-hidden pb-4">
+        <div className="pt-[calc(env(safe-area-inset-top,0px)+4.25rem)] relative w-full overflow-hidden pb-2">
           <div
             ref={bannerShellRef}
             data-banner-shell="true"
-            className="relative w-full overflow-hidden h-[clamp(140px,36vw,260px)] rounded-2xl mx-auto max-w-[95%] shadow-lg"
+            className="relative w-full overflow-hidden h-[112px] sm:h-[128px] rounded-2xl mx-auto max-w-[95%] shadow-md"
           >
             {bannerImages.length > 0 && (
               <div
@@ -1017,11 +1032,11 @@ export default function Under250() {
         </div>
       </div>
 
-      {/* Desktop view banner */}
+      {/* Desktop view banner — compact */}
       <div
         ref={bannerShellRef}
         data-banner-shell="true"
-        className="hidden md:block relative w-full overflow-hidden h-[clamp(200px,46vw,440px)] sm:h-[clamp(240px,42vw,520px)] md:-mt-24 lg:-mt-32"
+        className="hidden md:block relative w-full overflow-hidden h-[180px] lg:h-[220px] md:-mt-20 lg:-mt-24"
       >
         {/* Banner Image */}
         {bannerImages.length > 0 && (
@@ -1141,7 +1156,7 @@ export default function Under250() {
                         className="w-full h-full bg-white rounded-full"
                         objectFit="cover"
                         sizes="(max-width: 640px) 62px, (max-width: 768px) 96px, 112px"
-                        placeholder="blur"
+                        priority={index < 6}
                       />
                     </div>
                     <span
