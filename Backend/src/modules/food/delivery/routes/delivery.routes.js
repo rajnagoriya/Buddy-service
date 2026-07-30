@@ -39,6 +39,7 @@ router.get('/orders/current', authMiddleware, requireRoles('DELIVERY_PARTNER', '
 router.get('/orders/available', authMiddleware, requireRoles('DELIVERY_PARTNER', 'DRIVER'), orderController.listOrdersAvailableDeliveryController);
 router.get('/orders/:orderId', authMiddleware, requireRoles('DELIVERY_PARTNER', 'DRIVER'), orderController.getOrderByIdDeliveryController);
 router.patch('/orders/:orderId/accept', authMiddleware, requireRoles('DELIVERY_PARTNER', 'DRIVER'), orderController.acceptOrderDeliveryController);
+router.patch('/orders/:orderId/pickup-sequence', authMiddleware, requireRoles('DELIVERY_PARTNER', 'DRIVER'), orderController.setPickupSequenceDeliveryController);
 router.patch('/orders/:orderId/reject', authMiddleware, requireRoles('DELIVERY_PARTNER', 'DRIVER'), orderController.rejectOrderDeliveryController);
 router.patch('/orders/:orderId/reached-pickup', authMiddleware, requireRoles('DELIVERY_PARTNER', 'DRIVER'), orderController.confirmReachedPickupDeliveryController);
 router.patch('/orders/:orderId/confirm-pickup', authMiddleware, requireRoles('DELIVERY_PARTNER', 'DRIVER'), orderController.confirmPickupDeliveryController);

@@ -34,8 +34,7 @@ async function syncRazorpayQrPayment(orderDoc) {
     link = await fetchRazorpayPaymentLink(paymentLinkId);
   } catch (error) {
     logger.warn(
-      `Razorpay payment-link fetch failed for ${paymentLinkId}: ${
-        error?.message || error
+      `Razorpay payment-link fetch failed for ${paymentLinkId}: ${error?.message || error
       }`,
     );
     return orderDoc.payment;

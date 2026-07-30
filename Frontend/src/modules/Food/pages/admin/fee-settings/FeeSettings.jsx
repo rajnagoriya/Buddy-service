@@ -38,9 +38,6 @@ const PAGE_TABS = [
 ]
 
 const DEFAULT_PARTNER_SETTINGS = {
-  adminCommissionPercentage: 0,
-  weeklySalarySlabs: [],
-  monthlySalarySlabs: [],
   multiOrderEnabled: true,
   multiOrderMaxDistance: MULTI_ORDER_DISTANCE_MAX_KM,
   multiOrderAdditionalCharge: 0,
@@ -100,9 +97,6 @@ export default function FeeSettings() {
         const data = speedRes.data.data
         setDeliverySpeedOptions(data.deliverySpeedOptions || [])
         setPartnerSettings({
-          adminCommissionPercentage: data.adminCommissionPercentage || 0,
-          weeklySalarySlabs: data.weeklySalarySlabs || [],
-          monthlySalarySlabs: data.monthlySalarySlabs || [],
           multiOrderEnabled: data.multiOrderEnabled !== false,
           multiOrderMaxDistance: clampMultiOrderDistanceKm(
             data.multiOrderMaxDistance || MULTI_ORDER_DISTANCE_MAX_KM,
@@ -149,10 +143,6 @@ export default function FeeSettings() {
     try {
       setSaving(true)
 
-      const sanitizeSlabs = (slabs) => (slabs || [])
-        .filter((s) => s.orderCount !== "" && s.salaryAmount !== "")
-        .map((s) => ({ orderCount: Number(s.orderCount), salaryAmount: Number(s.salaryAmount) }))
-
       const feePayload = {
         deliveryFee: feeSettings.deliveryFee === "" ? undefined : Number(feeSettings.deliveryFee),
         freeDeliveryThreshold: feeSettings.freeDeliveryThreshold === "" ? undefined : Number(feeSettings.freeDeliveryThreshold),
@@ -168,20 +158,23 @@ export default function FeeSettings() {
       }
 
       const partnerPayload = {
-        adminCommissionPercentage: Number(partnerSettings.adminCommissionPercentage) || 0,
         multiOrderEnabled: Boolean(partnerSettings.multiOrderEnabled),
         multiOrderMaxDistance: clampedDistance,
         multiOrderAdditionalCharge: Number(partnerSettings.multiOrderAdditionalCharge) || 0,
         splitOrderEnabled: partnerSettings.splitOrderEnabled !== false,
         splitOrderThreshold: Number(partnerSettings.splitOrderThreshold) || 20,
-        weeklySalarySlabs: sanitizeSlabs(partnerSettings.weeklySalarySlabs),
-        monthlySalarySlabs: sanitizeSlabs(partnerSettings.monthlySalarySlabs),
-        deliverySpeedOptions: deliverySpeedOptions.map((option, index) => ({
-          ...option,
-          estimatedTime: Number(option.estimatedTime) || 30,
-          feeModifier: Number(option.feeModifier) || 0,
-          sortOrder: index,
-        })),
+        deliverySpeedOptions: deliverySpeedOptions.map((option, index) => {
+          const feeModifier = Number(option.feeModifier) || 0
+          const rawDriverShare = Number(option.driverShareAmount) || 0
+          return {
+            ...option,
+            estimatedTime: Number(option.estimatedTime) || 30,
+            feeModifier,
+            driverShareAmount:
+              feeModifier > 0 ? Math.min(feeModifier, Math.max(0, rawDriverShare)) : 0,
+            sortOrder: index,
+          }
+        }),
       }
 
       const [feeRes, partnerRes] = await Promise.all([
@@ -223,6 +216,7 @@ export default function FeeSettings() {
         time: "",
         estimatedTime: 30,
         feeModifier: 0,
+        driverShareAmount: 0,
         description: "",
         icon: "bike",
         isEnabled: true,
@@ -235,7 +229,27 @@ export default function FeeSettings() {
   const updateSpeedOption = (index, field, value) => {
     setDeliverySpeedOptions((prev) => {
       const next = [...prev]
-      next[index] = { ...next[index], [field]: value }
+      const current = { ...next[index], [field]: value }
+
+      if (field === "feeModifier") {
+        const fee = Number(value) || 0
+        if (fee <= 0) {
+          current.driverShareAmount = 0
+        } else {
+          const driverShare = Number(current.driverShareAmount) || 0
+          current.driverShareAmount = Math.min(fee, Math.max(0, driverShare))
+        }
+      }
+
+      if (field === "driverShareAmount") {
+        const fee = Math.max(0, Number(current.feeModifier) || 0)
+        const raw = Number(value)
+        current.driverShareAmount = fee <= 0
+          ? 0
+          : Math.min(fee, Math.max(0, Number.isFinite(raw) ? raw : 0))
+      }
+
+      next[index] = current
       if (field === "isDefault" && value) {
         return next.map((option, i) => ({ ...option, isDefault: i === index }))
       }
@@ -344,7 +358,7 @@ export default function FeeSettings() {
                     className="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
                     placeholder="0"
                   />
-                  <p className="text-xs text-slate-500">Not used for cart pricing. Delivery fee comes only from active Distance Rules (+ speed if enabled).</p>
+                  <p className="text-xs text-slate-500">Used when no Distance Rule matches the order distance (applies to both customer charge and delivery boy fee).</p>
                 </div>
                 <div className="space-y-2">
                   <label className="block text-sm font-semibold text-slate-700">Free Delivery Threshold (₹)</label>
@@ -481,8 +495,56 @@ export default function FeeSettings() {
                           <div>
                             <label className="block text-xs font-medium text-slate-500 mb-1">Fee modifier (₹)</label>
                             <input type="number" value={option.feeModifier ?? 0} onChange={(e) => updateSpeedOption(index, "feeModifier", e.target.value)} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-green-500 outline-none" />
+                            <p className="text-[11px] text-slate-400 mt-1">
+                              Negative = admin bears · Zero = no split · Positive = configure driver/admin below
+                            </p>
                           </div>
                         </div>
+                        {Number(option.feeModifier) > 0 ? (
+                          <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 p-3 space-y-3">
+                            <p className="text-xs font-semibold text-emerald-800 uppercase tracking-wide">
+                              Speed fee split (Driver + Admin only)
+                            </p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-xs font-medium text-slate-600 mb-1">Driver share (₹)</label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max={Number(option.feeModifier) || 0}
+                                  step="1"
+                                  value={option.driverShareAmount ?? 0}
+                                  onChange={(e) => updateSpeedOption(index, "driverShareAmount", e.target.value)}
+                                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-green-500 outline-none bg-white"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-slate-600 mb-1">Admin share (₹)</label>
+                                <input
+                                  type="number"
+                                  readOnly
+                                  value={Math.max(
+                                    0,
+                                    Number((Number(option.feeModifier || 0) - Number(option.driverShareAmount || 0)).toFixed(2)),
+                                  )}
+                                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-slate-100 text-slate-700 outline-none"
+                                />
+                              </div>
+                            </div>
+                            <p className="text-[11px] text-slate-500">
+                              Total fee ₹{Number(option.feeModifier) || 0} = Driver ₹{Number(option.driverShareAmount) || 0} + Admin ₹
+                              {Math.max(0, Number((Number(option.feeModifier || 0) - Number(option.driverShareAmount || 0)).toFixed(2)))}. Restaurant gets ₹0.
+                            </p>
+                          </div>
+                        ) : Number(option.feeModifier) < 0 ? (
+                          <div className="rounded-lg border border-amber-100 bg-amber-50/70 px-3 py-2 text-xs text-amber-800">
+                            Negative fee — entire amount is borne by admin. Split configuration is not available.
+                          </div>
+                        ) : (
+                          <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                            Zero fee — no driver/admin split to configure.
+                          </div>
+                        )}
                         <div>
                           <label className="block text-xs font-medium text-slate-500 mb-1">Description</label>
                           <input type="text" value={option.description || ""} onChange={(e) => updateSpeedOption(index, "description", e.target.value)} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-green-500 outline-none" />

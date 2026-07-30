@@ -220,18 +220,26 @@ export default function RestaurantOTP() {
           }
 
           const onboardingStatus = String(data?.onboardingStatus || "").toUpperCase()
+          const accountApproved =
+            String(restaurant?.status || "").toLowerCase() === "approved" ||
+            restaurant?.isActive === true ||
+            onboardingStatus === "APPROVED"
+
+          // Never send an already-approved restaurant back into the wizard.
           if (
-            onboardingStatus === "IN_PROGRESS" ||
-            onboardingStatus === "NOT_STARTED" ||
-            data?.isNewOnboarding ||
-            authData?.isSignUp
+            !accountApproved &&
+            (onboardingStatus === "IN_PROGRESS" ||
+              onboardingStatus === "NOT_STARTED" ||
+              data?.isNewOnboarding ||
+              authData?.isSignUp)
           ) {
             const step = data?.currentStep || (await checkOnboardingStatus()) || 1
             navigate(`/food/restaurant/onboarding?step=${step}`, { replace: true })
             return
           }
 
-          const onboardingComplete = isRestaurantOnboardingComplete(restaurant)
+          const onboardingComplete =
+            accountApproved || isRestaurantOnboardingComplete(restaurant)
           if (!onboardingComplete) {
             const incompleteStep = await checkOnboardingStatus()
             if (incompleteStep) {

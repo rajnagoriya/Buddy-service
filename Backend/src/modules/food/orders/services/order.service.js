@@ -62,12 +62,16 @@ import {
   toGeoPoint,
   pushStatusHistory,
   normalizeOrderForClient,
+  toUserOrderResponse,
   applyAggregateRating,
   derivePickupStatusFromOrderStatus,
   buildDeliverySocketPayload,
   notifyRestaurantNewOrder,
   isStatusAdvance,
   freeOrderDispatch,
+  resolveSpeedOption,
+  resolveDualPayoutPool,
+  applyEmploymentAwareDualEarnings,
   NO_DRIVER_AUTO_CANCEL_MS,
   SHARE_TIMEOUT_MS,
   RESTAURANT_ACK_RESEND_MS,
@@ -83,6 +87,7 @@ import {
   isActivePickup,
   isShareRequired,
   pushSettlementSnapshot,
+  applyCancellationSettlement,
   computeRestaurantPrepMinutes,
   computeOrderEtaMinutes,
   assignPickupSequence,
@@ -90,6 +95,10 @@ import {
   buildDeliveryLegs,
   getLegProgress,
   isDualLegActive,
+  getPendingLegHandoverOtps,
+  getAllLegHandoverOtps,
+  getLegForPartner,
+  toPartnerId,
 } from './order-lifecycle.policy.js';
 
 async function clearUserCartAfterOrder(userId) {
@@ -379,20 +388,61 @@ export async function createOrder(userId, dto, options = {}) {
   });
   // Visit order: farthest-from-customer first so the final leg to the customer is shortest.
   assignPickupSequence(pickups, userLoc);
-  // Real combined ETA: slowest kitchen (they cook in parallel) + travel over the whole trip.
+  // Fallback ETA from kitchen prep + travel (used only when no Delivery Speed Option is selected).
   const computedEtaMinutes = computeOrderEtaMinutes({ pickups }, totalDistanceKm);
+
+  // Prefer the customer's selected Delivery Speed Option time for user-facing ETA.
+  const matchedSpeedOption = resolveSpeedOption(
+    deliveryBoySettings,
+    dto.deliverySpeedOptionId,
+    dto.deliveryOption,
+  );
+  const speedEtaMinutes = matchedSpeedOption
+    ? Math.max(1, Number(matchedSpeedOption.estimatedTime) || 0)
+    : 0;
+  const speedTimeLabel = matchedSpeedOption
+    ? String(matchedSpeedOption.time || '').trim()
+    : '';
+  const speedOptionName = matchedSpeedOption
+    ? String(matchedSpeedOption.name || '').trim()
+    : '';
+  const orderEstimatedMinutes =
+    speedEtaMinutes ||
+    Math.max(1, Number(dto.estimatedTime) || 0) ||
+    computedEtaMinutes ||
+    30;
+  const orderDeliveryTimeLabel =
+    speedTimeLabel ||
+    String(dto.deliveryTime || '').trim() ||
+    `${orderEstimatedMinutes} mins`;
+  const orderDeliveryOptionName =
+    speedOptionName ||
+    String(dto.deliveryOption || '').trim() ||
+    'Standard Delivery';
 
   // Calculate restaurant commission per restaurant (sum stored on pricing for compat)
   const restaurantGroups = Array.isArray(recalculated.pricing?.restaurantGroups)
     ? recalculated.pricing.restaurantGroups
     : restaurants.map((r) => ({
-        restaurantId: String(r._id),
-        restaurantName: r.name || r.restaurantName,
-        subtotal: pricedItems
-          .filter((it) => String(it.restaurantId) === String(r._id))
-          .reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.quantity) || 1), 0),
-        packagingFee: 0,
-      }));
+      restaurantId: String(r._id),
+      restaurantName: r.name || r.restaurantName,
+      subtotal: pricedItems
+        .filter((it) => String(it.restaurantId) === String(r._id))
+        .reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.quantity) || 1), 0),
+      packagingFee: 0,
+    }));
+
+  const breakdown = normalizedPricing.deliveryFeeBreakdown || {};
+  // Speed fee is shared only between admin and driver (restaurant share removed).
+  const speedShareRestaurantTotal = 0;
+  const speedShareDriver = Math.max(0, Number(breakdown.speedShareDriver) || 0);
+  const speedShareAdmin = Number(breakdown.speedShareAdmin) || 0;
+
+  const isRestaurantCoupon = normalizedPricing.couponCreatedBy === 'restaurant';
+  const isAdminCoupon = normalizedPricing.couponCreatedBy === 'admin';
+  const foodDiscount = Number(normalizedPricing.discount) || 0;
+  // Restaurant coupon: primary restaurant bears the full food discount
+  const primaryRestaurantId = String(mainRestaurant._id);
 
   const restaurantSettlement = [];
   let totalRestaurantCommission = 0;
@@ -404,9 +454,16 @@ export async function createOrder(userId, dto, options = {}) {
       restaurantId: group.restaurantId,
     });
     const commission = Number(commissionAmount) || 0;
-    // GST on commission (18% marketplace services GST; informational for settlement reports)
     const commissionGST = Number((commission * 0.18).toFixed(2));
-    const restaurantPayout = Math.max(0, Number((foodAmount + packaging - commission).toFixed(2)));
+    const speedShare = 0;
+    const couponDiscount =
+      isRestaurantCoupon && foodDiscount > 0 && String(group.restaurantId) === primaryRestaurantId
+        ? foodDiscount
+        : 0;
+    const restaurantPayout = Math.max(
+      0,
+      Number((foodAmount + packaging + speedShare - commission - couponDiscount).toFixed(2)),
+    );
     totalRestaurantCommission += commission;
     restaurantSettlement.push({
       restaurantId: group.restaurantId,
@@ -415,6 +472,8 @@ export async function createOrder(userId, dto, options = {}) {
       packagingFee: packaging,
       commission,
       commissionGST,
+      speedShare,
+      couponDiscount,
       restaurantPayout,
     });
   }
@@ -425,13 +484,27 @@ export async function createOrder(userId, dto, options = {}) {
     0,
     normalizedPricing.deliveryFee - Number(normalizedPricing.deliveryDiscount || 0),
   );
-  const deliveryMargin = Math.max(0, Number((customerDeliveryFeePaid - riderEarning).toFixed(2)));
+  const deliveryMarginBase = Math.max(
+    0,
+    Number(
+      (
+        Number(breakdown.deliveryMarginBase) ||
+        Math.max(0, (Number(breakdown.baseFee) || 0) - (Number(breakdown.riderBaseFee) || 0))
+      ).toFixed(2),
+    ),
+  );
+  // Invoice delivery margin for platform = slab gap + admin's speed third (or negative speed bear)
+  const deliveryMargin = Math.max(
+    0,
+    Number((deliveryMarginBase + Math.max(0, speedShareAdmin)).toFixed(2)),
+  );
 
+  const tipAmount = Number(dto.tip || 0) || 0;
   const driverSettlement = {
     deliveryFee: customerDeliveryFeePaid,
-    tip: Number(dto.tip || 0) || 0,
+    tip: tipAmount,
     incentive: 0,
-    driverPayout: Math.max(0, Number((riderEarning + Number(dto.tip || 0)).toFixed(2))),
+    driverPayout: Math.max(0, Number((riderEarning + tipAmount).toFixed(2))),
   };
 
   const platformRevenue = {
@@ -440,34 +513,132 @@ export async function createOrder(userId, dto, options = {}) {
     deliveryMargin,
   };
 
-  const platformProfit = Math.max(
-    0,
-    normalizedPricing.platformFee +
-    normalizedPricing.deliveryFee +
-    normalizedPricing.restaurantCommission -
-    riderEarning -
-    Number(normalizedPricing.platformSubsidy || 0),
+  const adminCouponDiscount = isAdminCoupon ? foodDiscount : 0;
+  const platformSubsidy = Number(normalizedPricing.platformSubsidy) || 0;
+  const negativeSpeedBear = speedShareAdmin < 0 ? Math.abs(speedShareAdmin) : 0;
+
+  // Net platform profit: use what the customer actually paid for delivery (not gross fee),
+  // do not subtract platformSubsidy separately (waived delivery is already ₹0 customer charge).
+  const rawPlatformProfit = Number(
+    (
+      Number(normalizedPricing.platformFee) +
+      customerDeliveryFeePaid +
+      totalRestaurantCommission -
+      riderEarning -
+      speedShareRestaurantTotal -
+      adminCouponDiscount -
+      negativeSpeedBear
+    ).toFixed(2),
   );
+  const platformProfit = Math.max(0, rawPlatformProfit);
+
+  const costBearers = [];
+  if (platformSubsidy > 0) {
+    costBearers.push({
+      type: 'free_delivery',
+      amount: platformSubsidy,
+      bearer: 'admin',
+      note: 'Customer delivery waived; driver still receives Delivery Boy Fee',
+    });
+  }
+  if (adminCouponDiscount > 0) {
+    costBearers.push({
+      type: 'admin_coupon',
+      amount: adminCouponDiscount,
+      bearer: 'admin',
+      note: 'Admin coupon; restaurant and driver payouts unchanged',
+    });
+  }
+  if (isRestaurantCoupon && foodDiscount > 0) {
+    costBearers.push({
+      type: 'restaurant_coupon',
+      amount: foodDiscount,
+      bearer: 'restaurant',
+      note: 'Restaurant coupon deducted from restaurant payout',
+    });
+  }
+  if (negativeSpeedBear > 0) {
+    costBearers.push({
+      type: 'negative_speed',
+      amount: negativeSpeedBear,
+      bearer: 'admin',
+      note: 'Negative Cart Delivery Speed fee borne by admin',
+    });
+  }
+
+  const settlementBreakdown = {
+    customer: {
+      paid: Number(normalizedPricing.total) || 0,
+      foodSubtotal: Number(normalizedPricing.foodSubtotal || normalizedPricing.subtotal) || 0,
+      packagingFee: Number(normalizedPricing.packagingFee) || 0,
+      deliveryFee: Number(normalizedPricing.deliveryFee) || 0,
+      deliveryPaid: customerDeliveryFeePaid,
+      deliveryDiscount: Number(normalizedPricing.deliveryDiscount) || 0,
+      platformFee: Number(normalizedPricing.platformFee) || 0,
+      tax: Number(normalizedPricing.tax) || 0,
+      discount: foodDiscount,
+      couponCode: normalizedPricing.couponCode || null,
+      couponCreatedBy: normalizedPricing.couponCreatedBy || null,
+    },
+    restaurants: restaurantSettlement.map((s) => ({
+      restaurantId: s.restaurantId,
+      restaurantName: s.restaurantName,
+      foodAmount: s.foodAmount,
+      packagingFee: s.packagingFee,
+      commission: s.commission,
+      speedShare: s.speedShare,
+      couponDiscount: s.couponDiscount,
+      payout: s.restaurantPayout,
+    })),
+    driver: {
+      employmentType: 'per_order',
+      deliveryBoyFee: Number(breakdown.deliveryBoyFee) || 0,
+      riderBaseFee: Number(breakdown.riderBaseFee) || riderEarning,
+      speedShare: speedShareDriver,
+      tip: tipAmount,
+      payout: Math.max(0, Number((riderEarning + tipAmount).toFixed(2))),
+      note: 'Per-order earning from Delivery Boy Fee (+ speed share).',
+    },
+    platform: {
+      platformFee: Number(normalizedPricing.platformFee) || 0,
+      restaurantCommission: totalRestaurantCommission || 0,
+      deliveryMarginBase,
+      speedShare: Math.max(0, speedShareAdmin),
+      adminCouponDiscount,
+      freeDeliverySubsidy: platformSubsidy,
+      negativeSpeedBear,
+      netProfit: rawPlatformProfit,
+      netProfitStored: platformProfit,
+    },
+    speed: {
+      feeModifier: Number(breakdown.speedFeeModifier) || 0,
+      admin: speedShareAdmin,
+      restaurant: 0,
+      driver: speedShareDriver,
+      driverShareConfigured: Number(breakdown.speedDriverShareConfigured) || 0,
+    },
+    costBearers,
+  };
 
   const payment = verifiedPrepaid
     ? {
-        method: "razorpay",
-        status: "paid",
-        amountDue: normalizedPricing.total,
-        razorpay: {
-          orderId: verifiedPrepaid.razorpayOrderId,
-          paymentId: verifiedPrepaid.razorpayPaymentId,
-          signature: verifiedPrepaid.razorpaySignature,
-        },
-        qr: {},
-      }
+      method: "razorpay",
+      status: "paid",
+      amountDue: normalizedPricing.total,
+      razorpay: {
+        orderId: verifiedPrepaid.razorpayOrderId,
+        paymentId: verifiedPrepaid.razorpayPaymentId,
+        signature: verifiedPrepaid.razorpaySignature,
+      },
+      qr: {},
+    }
     : {
-        method: paymentMethod,
-        status: isCash ? "cod_pending" : isWallet ? "paid" : "created",
-        amountDue: normalizedPricing.total,
-        razorpay: {},
-        qr: {},
-      };
+      method: paymentMethod,
+      status: isCash ? "cod_pending" : isWallet ? "paid" : "created",
+      amountDue: normalizedPricing.total,
+      razorpay: {},
+      qr: {},
+    };
 
   const isScheduledOrder = dto.scheduledAt && new Date(dto.scheduledAt) > new Date();
 
@@ -485,6 +656,7 @@ export async function createOrder(userId, dto, options = {}) {
     restaurantSettlement,
     driverSettlement,
     platformRevenue,
+    settlementBreakdown,
     payment,
     orderStatus: isScheduledOrder ? "scheduled" : "created",
     restaurantNote: dto.restaurantNote || "",
@@ -494,9 +666,9 @@ export async function createOrder(userId, dto, options = {}) {
     riderEarning,
     platformProfit,
     deliveryFleet: dto.deliveryFleet || "standard",
-    deliveryOption: dto.deliveryOption || "Standard Delivery",
-    deliveryTime: dto.deliveryTime || "25–35 mins",
-    estimatedTime: computedEtaMinutes || dto.estimatedTime || 30,
+    deliveryOption: orderDeliveryOptionName,
+    deliveryTime: orderDeliveryTimeLabel,
+    estimatedTime: orderEstimatedMinutes,
     dispatch: { modeAtCreation: dispatchMode, status: "unassigned" },
     statusHistory: [
       {
@@ -910,6 +1082,11 @@ export async function cancelOrderNoDriverFound(orderId) {
   });
 
   await applyOrderRefundIfPaid(order, { note: cancelNote, preferWallet: true });
+  applyCancellationSettlement(order, {
+    cancelledBy: 'system',
+    note: cancelNote,
+  });
+  pushSettlementSnapshot(order, 'admin_cancel', cancelNote);
   await order.save();
 
   const refundDetail =
@@ -980,12 +1157,20 @@ async function finalizeRestaurantRejectionExhausted(order, restaurantId, note = 
     recordedByRole: 'RESTAURANT',
     recordedById: restaurantId,
     note: cancelNote,
+    preferWallet: true,
   });
+  applyCancellationSettlement(order, {
+    cancelledBy: 'restaurant',
+    note: cancelNote,
+  });
+  pushSettlementSnapshot(order, 'admin_cancel', cancelNote);
   await order.save();
 
   const refundDetail =
     order.payment?.status === 'refunded'
-      ? ` Refund of ₹${order.pricing.total} is being processed.`
+      ? order.payment?.refund?.destination === 'wallet'
+        ? ` ₹${order.pricing.total} has been credited to your wallet.`
+        : ` Your refund of ₹${order.pricing.total} is being processed.`
       : '';
   const userMessage = `The restaurant is not accepting this order.${refundDetail}`;
   const riderMessage = `Restaurant rejected order #${order.order_id || order._id}. You are now free to accept new orders.`;
@@ -1004,10 +1189,9 @@ async function finalizeRestaurantRejectionExhausted(order, restaurantId, note = 
       io.to(rooms.user(order.userId)).emit('order_status_update', payload);
       io.to(rooms.restaurant(restaurantId)).emit('order_status_update', payload);
       if (assignedRiderId) {
-        io.to(rooms.delivery(assignedRiderId)).emit('order_status_update', {
-          ...payload,
-          message: riderMessage,
-        });
+        const riderPayload = { ...payload, message: riderMessage };
+        io.to(rooms.delivery(assignedRiderId)).emit('order_status_update', riderPayload);
+        io.to(rooms.delivery(assignedRiderId)).emit('order_cancelled', riderPayload);
       }
     }
   } catch (err) {
@@ -1094,21 +1278,34 @@ export async function getOrderById(
       "restaurantName ownerPhone profileImage area city location rating totalRatings primaryContactNumber",
     )
     .populate("dispatch.deliveryPartnerId", "name fullName phone phoneNumber rating totalRatings profileImage avatar")
+    .populate("dispatch.sharedPartnerId", "name fullName phone phoneNumber rating totalRatings profileImage avatar")
     .populate("userId", "name fullName phone email")
     .select("+deliveryOtp")
     .lean();
   if (!order) throw new NotFoundError("Order not found");
 
-  if (admin) return normalizeOrderForClient(order);
+  if (admin) {
+    const out = normalizeOrderForClient(order);
+    if (isDualLegActive(order)) {
+      out.isDualLeg = true;
+      out.legProgress = getLegProgress(order);
+      out.legHandoverOtps = getAllLegHandoverOtps(order);
+      // Prefer per-leg OTPs; avoid implying a single shared handover code.
+      if (out.legHandoverOtps.length) {
+        delete out.deliveryOtp;
+      }
+    }
+    return out;
+  }
 
   const orderUserId = order.userId?._id?.toString() || order.userId?.toString();
   const orderRestaurantId = order.restaurantId?._id?.toString() || order.restaurantId?.toString();
-  const orderPartnerId = order.dispatch?.deliveryPartnerId?.toString();
-  const sharedPartnerId = order.dispatch?.sharedPartnerId?.toString();
+  const orderPartnerId = toPartnerId(order.dispatch?.deliveryPartnerId);
+  const sharedPartnerId = toPartnerId(order.dispatch?.sharedPartnerId);
 
   if (userId && orderUserId !== userId.toString())
     throw new ForbiddenError("Not your order");
-  
+
   if (deliveryPartnerId && orderPartnerId !== deliveryPartnerId.toString() && sharedPartnerId !== deliveryPartnerId.toString()) {
     throw new ForbiddenError("Not your delivery order");
   }
@@ -1152,19 +1349,24 @@ export async function getOrderById(
   if (userId) {
     const drop = order.deliveryVerification?.dropOtp || {};
     const secret = String(order.deliveryOtp || "").trim();
-    const out = normalizeOrderForClient(order);
-    delete out.deliveryOtp;
-    out.deliveryVerification = {
-      ...(order.deliveryVerification || {}),
-      dropOtp: {
-        required: Boolean(drop.required),
-        verified: Boolean(drop.verified),
+    const extras = {
+      deliveryVerification: {
+        dropOtp: {
+          required: Boolean(drop.required),
+          verified: Boolean(drop.verified),
+        },
       },
     };
-    if (!drop.verified && secret) {
-      out.handoverOtp = secret;
+    // Dual-driver: expose both partners + independent per-leg OTPs (available once assigned).
+    if (isDualLegActive(order)) {
+      extras.isDualLeg = true;
+      extras.legProgress = getLegProgress(order);
+      extras.legHandoverOtps = getPendingLegHandoverOtps(order, { onlyAtDrop: false });
+      // Never collapse dual-leg into a single handoverOtp — that couples both drivers.
+    } else if (!drop.verified && secret) {
+      extras.handoverOtp = secret;
     }
-    return out;
+    return toUserOrderResponse(order, extras);
   }
 
   return sanitizeOrderForExternal(order);
@@ -1179,20 +1381,9 @@ export async function getDropOtpUser(orderId, userId) {
   }).select("+deliveryOtp");
   if (!order) throw new NotFoundError("Order not found");
 
-  // Dual-leg: the customer needs one code per arriving driver, each verified independently.
+  // Dual-leg: the customer needs one code per driver, each verified independently.
   if (isDualLegActive(order)) {
-    const legOtps = (order.legs || [])
-      .filter(
-        (leg) =>
-          String(leg?.status || '') === 'at_drop' &&
-          !leg?.otpVerified &&
-          String(leg?.otp || '').trim(),
-      )
-      .map((leg) => ({
-        legIndex: leg.legIndex,
-        role: leg.role,
-        otp: String(leg.otp).trim(),
-      }));
+    const legOtps = getPendingLegHandoverOtps(order, { onlyAtDrop: false });
 
     if (legOtps.length === 0) {
       throw new ValidationError(
@@ -1298,11 +1489,11 @@ export async function recoverStuckOrders() {
         const activeRestaurantIds =
           Array.isArray(order.pickups) && order.pickups.length > 0
             ? [...new Set(
-                order.pickups
-                  .filter((p) => isActivePickup(p))
-                  .map((p) => String(p.restaurantId || ''))
-                  .filter(Boolean),
-              )]
+              order.pickups
+                .filter((p) => isActivePickup(p))
+                .map((p) => String(p.restaurantId || ''))
+                .filter(Boolean),
+            )]
             : [String(order.restaurantId || '')].filter(Boolean);
         for (const rid of activeRestaurantIds) {
           await notifyRestaurantNewOrder(order, rid, { freshNotify: true });
@@ -1393,21 +1584,12 @@ export async function resyncState(userId, role, options = {}) {
       ) {
         out.handoverOtp = order.deliveryOtp;
       }
-      // Dual-leg: the customer needs the pending code for each arriving driver.
+      // Dual-leg: the customer needs the pending code for each driver independently.
       if (isDualLegActive(order)) {
+        out.isDualLeg = true;
         out.legProgress = getLegProgress(order);
-        out.legHandoverOtps = (order.legs || [])
-          .filter(
-            (leg) =>
-              String(leg?.status || '') === 'at_drop' &&
-              !leg?.otpVerified &&
-              String(leg?.otp || '').trim(),
-          )
-          .map((leg) => ({
-            legIndex: leg.legIndex,
-            role: leg.role,
-            otp: String(leg.otp).trim(),
-          }));
+        out.legHandoverOtps = getPendingLegHandoverOtps(order, { onlyAtDrop: false });
+        delete out.handoverOtp;
       }
       return withEvents(out, order._id, order.eventSeq);
     }
@@ -1427,6 +1609,16 @@ export async function resyncState(userId, role, options = {}) {
     })
       .populate("restaurantId")
       .lean();
+
+    // Dual-leg: once this driver's own leg is delivered, they have no active trip
+    // (partner may still be completing). Prevents resurrecting map/route after done.
+    if (order && isDualLegActive(order)) {
+      const myLeg = getLegForPartner(order, userId);
+      if (myLeg && String(myLeg.status || '') === 'delivered') {
+        return withEvents(null, order._id, order.eventSeq);
+      }
+    }
+
     return withEvents(order ? sanitizeOrderForExternal(order) : null, order?._id, order?.eventSeq);
   }
 
@@ -1545,6 +1737,12 @@ export async function cancelOrder(orderId, userId, reason, refundDestination = "
       order.payment.refund = { status: "failed", destination: "wallet", amount: order.pricing.total };
     }
   }
+
+  applyCancellationSettlement(order, {
+    cancelledBy: 'user',
+    note: reason || 'Order cancelled by customer',
+  });
+  pushSettlementSnapshot(order, 'admin_cancel', reason || 'Order cancelled by customer');
 
   await order.save();
 
@@ -1692,6 +1890,7 @@ export async function submitOrderRatings(orderId, userId, dto) {
     restaurantRating: dto.restaurantRating,
     deliveryPartnerRating: hasDeliveryPartner ? dto.deliveryPartnerRating : null
   });
+  return normalizeOrderForClient(order);
 }
 
 export async function updateOrderInstructions(orderId, userId, instructions) {
@@ -1886,6 +2085,88 @@ async function finalizeDroppedRestaurantPartialContinue(order, restaurantId, not
     );
   }
 
+  // Keep settlement ledger in sync with remaining restaurants after a partial drop.
+  // Do NOT mark status as cancelled — the order continues.
+  if (order.settlementBreakdown && typeof order.settlementBreakdown === 'object') {
+    const remainingSettlements = Array.isArray(order.restaurantSettlement)
+      ? order.restaurantSettlement
+      : [];
+    const remainingCommission = remainingSettlements.reduce(
+      (sum, s) => sum + (Number(s.commission) || 0),
+      0,
+    );
+    const partialRefundTotal = (order.partialRefunds || []).reduce(
+      (sum, r) => sum + (Number(r?.amount) || 0),
+      0,
+    );
+    const prevCustomer = order.settlementBreakdown.customer || {};
+    const originalPaid =
+      Number(prevCustomer.originalPaid) ||
+      Number(prevCustomer.paid) ||
+      Number(order.pricing?.total) + refundAmount ||
+      0;
+    const nextBreakdown = {
+      ...order.settlementBreakdown,
+      status: 'active',
+      customer: {
+        ...prevCustomer,
+        originalPaid,
+        paid: Number(order.pricing?.total) || 0,
+        foodSubtotal: Number(order.pricing?.foodSubtotal ?? order.pricing?.subtotal) || 0,
+        packagingFee: Number(order.pricing?.packagingFee) || 0,
+        deliveryFee: Number(order.pricing?.deliveryFee) || 0,
+        deliveryPaid: Math.max(
+          0,
+          Number(order.pricing?.deliveryFee || 0) -
+            Number(order.pricing?.deliveryDiscount || 0),
+        ),
+        deliveryDiscount: Number(order.pricing?.deliveryDiscount) || 0,
+        platformFee: Number(order.pricing?.platformFee) || 0,
+        tax: Number(order.pricing?.tax) || 0,
+        partialRefund: partialRefundTotal + (Number(refundAmount) || 0),
+        refund: 0,
+        note: `${restaurantName} removed; ₹${refundAmount} refunded to customer wallet. Order continues.`,
+      },
+      restaurants: remainingSettlements.map((s) => ({
+        restaurantId: s.restaurantId,
+        restaurantName: s.restaurantName,
+        foodAmount: s.foodAmount,
+        packagingFee: s.packagingFee,
+        commission: s.commission,
+        speedShare: s.speedShare,
+        couponDiscount: s.couponDiscount,
+        payout: s.restaurantPayout,
+      })),
+      platform: {
+        ...(order.settlementBreakdown.platform || {}),
+        restaurantCommission: remainingCommission,
+      },
+      driver: {
+        ...(order.settlementBreakdown.driver || {}),
+      },
+    };
+    delete nextBreakdown.cancellation;
+    if (nextBreakdown.platform) delete nextBreakdown.platform.note;
+    if (nextBreakdown.driver) delete nextBreakdown.driver.note;
+    order.settlementBreakdown = nextBreakdown;
+    order.markModified?.('settlementBreakdown');
+    if (order.pricing) {
+      order.pricing.restaurantCommission = remainingCommission;
+    }
+  }
+
+  try {
+    await foodTransactionService.voidRestaurantTransaction(
+      order._id,
+      rid,
+      note || `${restaurantName} dropped from multi-restaurant order`,
+    );
+  } catch (err) {
+    logger.warn(
+      `Failed to void FoodTransaction for dropped restaurant ${rid} on order ${order._id}: ${err?.message || err}`,
+    );
+  }
+
   // Remove dropped restaurant items from active items list (keep for audit in statusHistory)
   const droppedItems = (order.items || []).filter(
     (it) => String(it?.restaurantId || '') === rid,
@@ -2056,6 +2337,20 @@ async function finalizeDroppedRestaurantPartialContinue(order, restaurantId, not
     logger.warn(`partial drop socket emit failed: ${err?.message || err}`);
   }
 
+  const riderId = order.dispatch?.deliveryPartnerId
+    ? String(order.dispatch.deliveryPartnerId)
+    : null;
+  const sharedRiderId = order.dispatch?.sharedPartnerId
+    ? String(order.dispatch.sharedPartnerId)
+    : null;
+  const driverTargets = [];
+  if (riderId) {
+    driverTargets.push({ ownerType: 'DELIVERY_PARTNER', ownerId: riderId });
+  }
+  if (sharedRiderId && sharedRiderId !== riderId) {
+    driverTargets.push({ ownerType: 'DELIVERY_PARTNER', ownerId: sharedRiderId });
+  }
+
   await notifyOwnersSafely(
     [{ ownerType: 'USER', ownerId: order.userId }],
     {
@@ -2067,9 +2362,25 @@ async function finalizeDroppedRestaurantPartialContinue(order, restaurantId, not
         orderMongoId: String(order._id),
         refundAmount: String(refundAmount),
         restaurantName,
+        restaurantId: rid,
       },
     },
   );
+
+  if (driverTargets.length > 0) {
+    await notifyOwnersSafely(driverTargets, {
+      title: 'Restaurant removed from order',
+      body: `${restaurantName} was removed from order #${order.order_id || order._id}. Continue with remaining pickups.`,
+      data: {
+        type: 'order_partial_restaurant_dropped',
+        orderId: String(order._id),
+        orderMongoId: String(order._id),
+        refundAmount: String(refundAmount),
+        restaurantName,
+        restaurantId: rid,
+      },
+    });
+  }
 
   enqueueOrderEvent('order_partial_restaurant_dropped', {
     orderMongoId: order._id?.toString?.(),
@@ -2079,6 +2390,68 @@ async function finalizeDroppedRestaurantPartialContinue(order, restaurantId, not
   });
 
   return order;
+}
+
+/**
+ * Admin drops one restaurant from a multi-restaurant order.
+ * Continues with remaining restaurants + partial wallet refund (same path as restaurant reject).
+ */
+export async function dropRestaurantFromOrderByAdmin(
+  orderId,
+  restaurantId,
+  adminId,
+  reason = '',
+) {
+  const identity = buildOrderIdentityFilter(orderId);
+  if (!identity) throw new ValidationError('Order id required');
+  if (!restaurantId) throw new ValidationError('Restaurant id required');
+
+  const order = await FoodOrder.findOne(identity);
+  if (!order) throw new NotFoundError('Order not found');
+
+  const terminal = [
+    'delivered',
+    'cancelled_by_user',
+    'cancelled_by_restaurant',
+    'cancelled_by_admin',
+  ];
+  if (terminal.includes(order.orderStatus)) {
+    throw new ValidationError('Order cannot be modified in its current status');
+  }
+
+  const active = getActivePickups(order);
+  const isMulti =
+    Boolean(order.isMultiRestaurant) ||
+    active.length > 1 ||
+    (Array.isArray(order.pickups) && order.pickups.length > 1);
+  if (!isMulti) {
+    throw new ValidationError(
+      'Use full order cancel for single-restaurant orders',
+    );
+  }
+
+  const rid = String(restaurantId);
+  const pickup = (order.pickups || []).find(
+    (p) => String(p.restaurantId || '') === rid && !p.permanentlyDropped,
+  );
+  if (!pickup) {
+    throw new ValidationError('Active pickup not found for this restaurant');
+  }
+
+  const restaurantName = pickup.restaurantName || 'Restaurant';
+  const note =
+    reason?.trim() ||
+    `Admin removed ${restaurantName} from multi-restaurant order`;
+
+  pushStatusHistory(order, {
+    byRole: 'ADMIN',
+    byId: adminId,
+    from: order.orderStatus,
+    to: order.orderStatus,
+    note,
+  });
+
+  return finalizeDroppedRestaurantPartialContinue(order, restaurantId, note);
 }
 
 export async function updateOrderStatusRestaurant(
@@ -2210,7 +2583,12 @@ export async function updateOrderStatusRestaurant(
 
   if (statusForMessage === "confirmed") {
     title = "Order Accepted! 🧑‍🍳";
-    body = "The restaurant has accepted your order and is starting to prepare it.";
+    const etaLabel =
+      String(order.deliveryTime || '').trim() ||
+      (Number(order.estimatedTime) > 0 ? `${Number(order.estimatedTime)} mins` : '');
+    body = etaLabel
+      ? `The restaurant has accepted your order. Estimated delivery: ${etaLabel}.`
+      : "The restaurant has accepted your order and is starting to prepare it.";
   } else if (statusForMessage === "preparing") {
     title = "Food is being prepared! 🍳";
     body = "Your food is currently being prepared by the restaurant.";
@@ -2508,6 +2886,18 @@ export async function listOrdersAvailableDelivery(deliveryPartnerId, query) {
 
 export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
   return deliveryService.acceptOrderDelivery(orderId, deliveryPartnerId);
+}
+
+export async function setPickupSequenceDelivery(
+  orderId,
+  deliveryPartnerId,
+  restaurantIds,
+) {
+  return deliveryService.setPickupSequenceDelivery(
+    orderId,
+    deliveryPartnerId,
+    restaurantIds,
+  );
 }
 
 export async function rejectOrderDelivery(orderId, deliveryPartnerId) {
@@ -3021,7 +3411,7 @@ export async function assignSecondDeliveryPartnerAdmin(orderId, deliveryPartnerI
   assertCanShareSecondDriver(order);
 
   const partner = await FoodDeliveryPartner.findById(deliveryPartnerId)
-    .select('status name phone')
+    .select('status name phone employmentType')
     .lean();
   if (!partner || partner.status !== 'approved') {
     throw new ValidationError('Delivery partner not available');
@@ -3029,15 +3419,23 @@ export async function assignSecondDeliveryPartnerAdmin(orderId, deliveryPartnerI
 
   // Split the rider earning 50/50 if the share slot was never opened.
   if (!order.dispatch?.isShared && !Number(order.sharedRiderEarning)) {
-    const totalEarning = Number(order.riderEarning || order.pricing?.deliveryFee || 0);
-    const sharedSplit = Math.round(totalEarning / 2);
+    const pool = resolveDualPayoutPool(order);
+    const sharedSplit = Math.round(pool / 2);
     order.sharedRiderEarning = sharedSplit;
-    order.riderEarning = Math.max(0, totalEarning - sharedSplit);
+    order.riderEarning = Math.max(0, pool - sharedSplit);
   }
 
   order.dispatch.sharedPartnerId = new mongoose.Types.ObjectId(deliveryPartnerId);
   order.dispatch.isShared = false; // slot filled
   order.dispatch.shareOpenedAt = null;
+
+  const primaryPartner = await FoodDeliveryPartner.findById(primaryId)
+    .select('employmentType')
+    .lean();
+  applyEmploymentAwareDualEarnings(order, {
+    primaryEmploymentType: primaryPartner?.employmentType || 'per_order',
+    secondaryEmploymentType: partner.employmentType || 'per_order',
+  });
 
   const { legs, splitMode } = buildDeliveryLegs(order, {
     primaryPartnerId: primaryId,
@@ -3072,6 +3470,7 @@ export async function assignSecondDeliveryPartnerAdmin(orderId, deliveryPartnerI
         orderId: order._id.toString(),
         orderStatus: order.orderStatus,
         dispatch: order.dispatch,
+        isDualLeg: true,
         legProgress: getLegProgress(order),
       };
       io.to(rooms.delivery(primaryId)).emit('order_shared_accepted', payload);
@@ -3082,6 +3481,20 @@ export async function assignSecondDeliveryPartnerAdmin(orderId, deliveryPartnerI
     }
   } catch (err) {
     logger.warn(`assignSecondDeliveryPartnerAdmin socket emit failed: ${err?.message || err}`);
+  }
+
+  // Push both independent handover OTPs to the customer as soon as dual-leg activates.
+  if (isDualLegActive(order)) {
+    const legOtps = getPendingLegHandoverOtps(order, { onlyAtDrop: false });
+    if (legOtps.length) {
+      emitDeliveryDropOtpToUser(order, String(legOtps[0].otp), {
+        isDualLeg: true,
+        legIndex: legOtps[0].legIndex,
+        role: legOtps[0].role,
+        partnerId: legOtps[0].partnerId,
+        legOtps,
+      });
+    }
   }
 
   await notifyOwnerSafely(
@@ -3154,6 +3567,11 @@ export async function cancelOrderByAdmin(
     note: cancelNote,
     preferWallet: refundDestination === "wallet",
   });
+  applyCancellationSettlement(order, {
+    cancelledBy: 'admin',
+    note: cancelNote,
+  });
+  pushSettlementSnapshot(order, 'admin_cancel', cancelNote);
   await order.save();
 
   const refundDetail =
@@ -3373,12 +3791,18 @@ export async function cancelOrderAdmin(orderId, adminId, reason = '') {
     note: cancelNote,
     preferWallet: true,
   });
+  applyCancellationSettlement(order, {
+    cancelledBy: 'admin',
+    note: cancelNote,
+  });
   pushSettlementSnapshot(order, 'admin_cancel', cancelNote);
   await order.save();
 
   const refundDetail =
     order.payment?.status === 'refunded' || order.payment?.refund?.status === 'processed'
-      ? ` Refund of ₹${order.pricing?.total || 0} has been initiated.`
+      ? order.payment?.refund?.destination === 'wallet'
+        ? ` ₹${order.pricing?.total || 0} has been credited to your wallet.`
+        : ` Your refund of ₹${order.pricing?.total || 0} is being processed.`
       : '';
   const userMessage = `Your order was cancelled by support.${refundDetail}`;
   const riderMessage = `Order #${order.order_id || order._id} was cancelled by admin. You are free to accept new orders.`;
@@ -3539,9 +3963,9 @@ export async function getMultiOrderSettlementReport(query = {}) {
         : null,
       primaryRestaurant: o.restaurantId
         ? {
-            name: o.restaurantId.restaurantName || o.restaurantId.name,
-            id: String(o.restaurantId._id || o.restaurantId),
-          }
+          name: o.restaurantId.restaurantName || o.restaurantId.name,
+          id: String(o.restaurantId._id || o.restaurantId),
+        }
         : null,
     };
   });
@@ -3605,7 +4029,7 @@ export async function reportOrderDelay(orderId, userId, role, reason) {
         reportedBy: role
       });
     }
-  } catch {}
+  } catch { }
 
   return order;
 }
@@ -3624,7 +4048,7 @@ export async function shareOrderDelivery(orderId, deliveryPartnerId) {
 
   const currentStatus = order.orderStatus;
   const sharedStatuses = ['accepted', 'preparing', 'ready_for_pickup', 'picked_up'];
-  
+
   if (!sharedStatuses.includes(currentStatus)) {
     throw new ValidationError(`Order in status '${currentStatus}' cannot be shared.`);
   }
@@ -3634,39 +4058,40 @@ export async function shareOrderDelivery(orderId, deliveryPartnerId) {
   }
   assertCanShareSecondDriver(order);
 
-  // F-3D: only bulk orders (item count >= configured threshold) may request a second driver.
-  // Previously this was enforced in the driver UI only, so a direct API call could split any order.
+  // Only bulk orders (item count >= configured threshold) may request a second driver.
+  // Primary opens this manually via "Find new driver" after assessing load at pickup.
   const shareSettings =
     (await FoodDeliveryBoySettings.findOne({ isActive: true }).sort({ createdAt: -1 }).lean()) ||
     (await FoodDeliveryBoySettings.findOne().sort({ createdAt: -1 }).lean());
   if (!isShareRequired(order, shareSettings || {})) {
-    throw new ValidationError('This order is not large enough to require a second delivery partner.');
+    throw new ValidationError('This order is not large enough to request a second delivery partner.');
   }
 
-  // Set sharing flags
+  if (order.dispatch?.isShared) {
+    throw new ValidationError('A second-driver search is already open for this order.');
+  }
+
+  // Set sharing flags — do NOT provisional 50/50 here.
+  // Splitting early while salary primary has riderEarning=0 freezes only half the slab
+  // into sharedRiderEarning and underpays the per-order joiner. Employment-aware split runs on join.
   order.dispatch.isShared = true;
   order.dispatch.shareOpenedAt = new Date();
   order.dispatch.sharedPartnerId = null; // Ensure it's null so another partner can join
 
-  // Split the net rider earning 50/50
-  // Fallback to delivery fee if rider earning is not pre-calculated
-  const totalEarning = Number(order.riderEarning || order.pricing?.deliveryFee || 0);
-  const sharedSplit = Math.round(totalEarning / 2);
-  order.sharedRiderEarning = sharedSplit;
-  order.riderEarning = Math.max(0, totalEarning - sharedSplit);
+  const pool = resolveDualPayoutPool(order);
 
   pushStatusHistory(order, {
     byRole: "DELIVERY_PARTNER",
     byId: deliveryPartnerId,
     from: currentStatus,
     to: currentStatus,
-    note: "Order marked as shared with other partners"
+    note: "Primary requested a second delivery partner (Find new driver)"
   });
 
   pushSettlementSnapshot(
     order,
     'share',
-    `50/50 split: primary ₹${order.riderEarning}, shared ₹${order.sharedRiderEarning}`,
+    `Second-driver search opened; slab pool ₹${pool} (employment-aware split on join)`,
   );
   await order.save();
 
@@ -3677,7 +4102,8 @@ export async function shareOrderDelivery(orderId, deliveryPartnerId) {
       const payload = buildDeliverySocketPayload(order, order.restaurantId);
       io.to('all_delivery').emit('shareable_order_available', {
         ...payload,
-        sharedFrom: deliveryPartnerId
+        sharedFrom: deliveryPartnerId,
+        shareRequired: false,
       });
     }
   } catch (err) {
@@ -3742,6 +4168,16 @@ export async function acceptSharedOrderDelivery(orderId, newPartnerId) {
   // Flow 3: the order now runs as two independent legs. Divide the work (stop-level across
   // restaurants, or item-level within one restaurant) and give each leg its own handover OTP.
   try {
+    // Salary partners get ₹0 wallet credit; per-order partners keep their share.
+    const [primaryPartner, secondaryPartner] = await Promise.all([
+      FoodDeliveryPartner.findById(oldPartnerId).select('employmentType').lean(),
+      FoodDeliveryPartner.findById(newPartnerId).select('employmentType').lean(),
+    ]);
+    applyEmploymentAwareDualEarnings(order, {
+      primaryEmploymentType: primaryPartner?.employmentType || 'per_order',
+      secondaryEmploymentType: secondaryPartner?.employmentType || 'per_order',
+    });
+
     const { legs, splitMode } = buildDeliveryLegs(order, {
       primaryPartnerId: oldPartnerId,
       secondaryPartnerId: newPartnerId,
@@ -3787,25 +4223,54 @@ export async function acceptSharedOrderDelivery(orderId, newPartnerId) {
     logger.error(`Failed to sync shared partner to transaction: ${err.message}`);
   }
 
-  // Notify both partners and user
+  // Notify both partners and user (with populated partner contact info)
+  try {
+    await order.populate([
+      { path: 'dispatch.deliveryPartnerId', select: 'name fullName phone phoneNumber profileImage' },
+      { path: 'dispatch.sharedPartnerId', select: 'name fullName phone phoneNumber profileImage' },
+    ]);
+  } catch (popErr) {
+    logger.warn(`Shared-order populate failed: ${popErr?.message || popErr}`);
+  }
+
+  // Push both independent handover OTPs to the customer as soon as dual-leg activates.
+  if (isDualLegActive(order)) {
+    const legOtps = getPendingLegHandoverOtps(order, { onlyAtDrop: false });
+    if (legOtps.length) {
+      emitDeliveryDropOtpToUser(order, String(legOtps[0].otp), {
+        isDualLeg: true,
+        legIndex: legOtps[0].legIndex,
+        role: legOtps[0].role,
+        partnerId: legOtps[0].partnerId,
+        legOtps,
+      });
+    }
+  }
+
   try {
     const io = getIO();
     if (io) {
       const payload = {
         orderId: order._id.toString(),
         orderStatus: order.orderStatus,
-        dispatch: order.dispatch
+        isDualLeg: Boolean(order.isDualLeg),
+        splitMode: order.splitMode || null,
+        legs: (order.legs || []).map((leg) => {
+          const { otp, ...rest } = leg?.toObject?.() || leg || {};
+          return { ...rest, hasOtp: Boolean(otp) };
+        }),
+        dispatch: order.dispatch,
       };
       io.to(rooms.delivery(oldPartnerId)).emit('order_shared_accepted', payload);
       io.to(rooms.delivery(newPartnerId)).emit('order_shared_accepted', payload);
       io.to(rooms.delivery(oldPartnerId)).emit('order_status_update', payload);
       io.to(rooms.delivery(newPartnerId)).emit('order_status_update', payload);
       io.to(rooms.user(order.userId)).emit('delivery_partner_updated', payload);
-      
+
       // Also notify all riders that the shareable slot is no longer available
       io.to('all_delivery').emit('order_claimed', { orderId: order._id.toString() });
     }
-  } catch (err) {}
+  } catch (err) { }
 
   await order.populate([
     { path: 'restaurantId' },
@@ -3841,7 +4306,7 @@ export async function processScheduledOrderAlerts() {
       const from = order.orderStatus;
       order.orderStatus = 'created';
       order.restaurantNotifiedForSchedule = true;
-      
+
       order.statusHistory.push({
         at: new Date(),
         byRole: 'SYSTEM',

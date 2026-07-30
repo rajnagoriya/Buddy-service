@@ -1006,14 +1006,19 @@ function Cart() {
     fetchAddons()
   }, [restaurantData, cart.length, loadingRestaurant])
 
-  // Fetch available coupons from backend (admin + restaurant)
+  // Fetch available coupons once when cart first becomes ready (not on qty changes).
+  const couponsFetchedRef = useRef(false)
   useEffect(() => {
-    const fetchCouponsForCartItems = async () => {
-      if (cart.length === 0 || !restaurantId) {
-        setAvailableCoupons([])
-        return
-      }
+    if (cart.length === 0 || !restaurantId) {
+      setAvailableCoupons([])
+      couponsFetchedRef.current = false
+      return undefined
+    }
 
+    if (couponsFetchedRef.current) return undefined
+
+    let cancelled = false
+    const fetchCouponsForCartItems = async () => {
       const cartRestaurantIds = [...new Set(
         cart.map((item) => String(item.restaurantId || item.restaurant || "")).filter(Boolean)
       )]
@@ -1021,8 +1026,9 @@ function Cart() {
 
       try {
         setLoadingCoupons(true)
-        debugLog(`[CART-COUPONS] Loading offers for cart`)
+        debugLog(`[CART-COUPONS] Loading offers for cart (once)`)
         const response = await restaurantAPI.getCouponsByItemIdPublic(cartRestaurantIds)
+        if (cancelled) return
         const list = response?.data?.data?.coupons || []
         const coupons = list
           .filter((o) => o.showInCart !== false)
@@ -1037,16 +1043,23 @@ function Cart() {
           })
           .map(mapOfferToCartCoupon)
         setAvailableCoupons(coupons)
+        couponsFetchedRef.current = true
       } catch (error) {
+        if (cancelled) return
         debugError("[CART-COUPONS] Failed to load offers:", error)
         setAvailableCoupons([])
       } finally {
-        setLoadingCoupons(false)
+        if (!cancelled) setLoadingCoupons(false)
       }
     }
 
     fetchCouponsForCartItems()
-  }, [cart, restaurantId])
+    return () => {
+      cancelled = true
+    }
+    // Only when cart becomes non-empty / restaurant is known — not on quantity updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [restaurantId, cart.length > 0])
 
   useEffect(() => {
     if (!appliedCoupon || loadingCoupons) return
@@ -1104,6 +1117,7 @@ function Cart() {
   useEffect(() => {
     if (!pricingRequestKey) {
       setPricing(null)
+      setLoadingPricing(false)
       lastPricingKeyRef.current = ""
       return undefined
     }
@@ -1114,12 +1128,15 @@ function Cart() {
 
     // Same inputs as last successful/in-flight request — skip duplicate calculate
     if (pricingRequestKey === lastPricingKeyRef.current && pricing != null) {
+      setLoadingPricing(false)
       return undefined
     }
 
     let cancelled = false
     const requestId = ++pricingRequestIdRef.current
     const keyForRequest = pricingRequestKey
+    // Disable place order as soon as cart inputs change (before debounce fires)
+    setLoadingPricing(true)
 
     const timer = setTimeout(async () => {
       if (placeOrderInFlightRef.current) return
@@ -1315,6 +1332,9 @@ function Cart() {
     ? (Number(pricing.deliveryDiscount) || 0)
     : (isFreeDeliveryCoupon(appliedCoupon) ? deliveryFee : 0)
   const customerDeliveryFee = Math.max(0, deliveryFee - deliveryDiscount)
+  const isDeliveryFreeForCustomer =
+    customerDeliveryFee === 0 &&
+    (deliveryDiscount > 0 || Number(pricing?.platformSubsidy) > 0 || deliveryFeeBreakdown?.speedSkippedBecauseFreeDelivery)
   const deliveryBaseBeforeMultiplier = deliveryFeeBreakdown?.baseFee != null
     ? Number(deliveryFeeBreakdown.baseFee)
     : deliveryFeeBeforeSpeed
@@ -1328,11 +1348,11 @@ function Cart() {
     return 0
   })()
   const hasDistanceDeliveryBreakdown =
-    deliveryFeeBreakdown?.source === "distance" &&
-    Number.isFinite(Number(deliveryFeeBreakdown?.distanceKm))
+    Number.isFinite(Number(deliveryFeeBreakdown?.distanceKm)) &&
+    (deliveryFeeBreakdown?.source === "distance" || deliveryFeeBreakdown?.source === "free")
   const deliveryFeeBreakdownText = hasDistanceDeliveryBreakdown
-    ? `Distance ${Number(deliveryFeeBreakdown.distanceKm).toFixed(1)} km`
-    : null
+    ? `Distance ${Number(deliveryFeeBreakdown.distanceKm).toFixed(1)} km${isDeliveryFreeForCustomer ? " · delivery free" : ""}`
+    : (isDeliveryFreeForCustomer ? "Delivery free on this order" : null)
 
   // Detect multi-restaurant order
   const uniqueRestaurantIds = [...new Set(cart
@@ -1356,7 +1376,7 @@ function Cart() {
     ? (pricing.packagingFee ?? 0)
     : (feeSettings.packagingFee ?? 0) * Math.max(1, uniqueRestaurantIds.length)
   const gstCharges = pricing != null ? (pricing.tax ?? 0) : Math.round(subtotal * ((feeSettings.gstRate ?? 0) / 100))
-  
+
   // Calculate discount from backend pricing or applied coupon
   const discount = (() => {
     if (pricing?.discount) {
@@ -1711,6 +1731,11 @@ function Cart() {
       return
     }
 
+    if (loadingPricing || pricing == null) {
+      toast.error("Please wait while we calculate your bill")
+      return
+    }
+
     if (!hasSavedAddress) {
       toast.error("Please choose a delivery location to continue")
       openLocationSelector()
@@ -1738,9 +1763,9 @@ function Cart() {
     const finalRestaurantId =
       resolveEntityId(
         restaurantData?.restaurantId ||
-          restaurantData?._id ||
-          cart[0]?.restaurantId ||
-          restaurantId,
+        restaurantData?._id ||
+        cart[0]?.restaurantId ||
+        restaurantId,
       ) || null
     const finalRestaurantName = restaurantData?.name || cart[0]?.restaurant || null
 
@@ -2033,7 +2058,7 @@ function Cart() {
         setCouponCode("")
         showCouponError(errorMessage)
       } else {
-        showCouponError(errorMessage)
+        toast.error(errorMessage)
       }
       releasePlaceOrderLock()
     }
@@ -2299,13 +2324,13 @@ function Cart() {
                                   && !isPlatformFirstTimeBlocked
                                 const source = coupon.sourceLabel || (coupon.createdBy === "restaurant" ? "Restaurant" : "Platform")
                                 return (
-                                    <SelectItem
+                                  <SelectItem
                                     key={coupon.code}
                                     value={coupon.code}
                                     disabled={!isEligible}
-                                    >
+                                  >
                                     {coupon.code} — {coupon.discountDisplay || `Save ${RUPEE_SYMBOL}${coupon.discount}`} ({source})
-                                    </SelectItem>
+                                  </SelectItem>
                                 )
                               })}
                             </SelectContent>
@@ -2349,21 +2374,23 @@ function Cart() {
                     {deliveryOptions.map((option) => {
                       const isSelected = deliveryOption === option.id
                       const IconComponent = option.icon
-                      const feeAmount = Math.max(0, deliveryFeeBeforeSpeed + (Number(option.feeModifier) || 0))
+                      const feeAmount = isDeliveryFreeForCustomer
+                        ? 0
+                        : Math.max(0, deliveryFeeBeforeSpeed + (Number(option.feeModifier) || 0))
 
                       return (
                         <div
                           key={option.id}
                           className={`flex items-center justify-between p-2.5 rounded-xl cursor-pointer border transition-all ${isSelected
-                              ? "border-[#16A34A] bg-[#16A34A]/5 dark:bg-[#16A34A]/10 shadow-xs"
-                              : "border-gray-100 hover:border-green-200 dark:border-gray-800 dark:hover:border-gray-700 bg-white dark:bg-[#141414]"
+                            ? "border-[#16A34A] bg-[#16A34A]/5 dark:bg-[#16A34A]/10 shadow-xs"
+                            : "border-gray-100 hover:border-green-200 dark:border-gray-800 dark:hover:border-gray-700 bg-white dark:bg-[#141414]"
                             }`}
                           onClick={() => setDeliveryOption(option.id)}
                         >
                           <div className="flex items-center gap-2.5 min-w-0">
                             <div className={`p-1.5 rounded-lg transition-colors shrink-0 ${isSelected
-                                ? "bg-[#16A34A] text-white"
-                                : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+                              ? "bg-[#16A34A] text-white"
+                              : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"
                               }`}>
                               <IconComponent className="h-3.5 w-3.5" />
                             </div>
@@ -2389,8 +2416,15 @@ function Cart() {
                                 {option.time}
                               </p>
                               <p className="text-[10px] font-semibold text-gray-400 mt-0.5 leading-none">
-                                {feeAmount === 0 ? "FREE" : `${RUPEE_SYMBOL}${feeAmount.toFixed(2)}`}
+                                {isDeliveryFreeForCustomer || feeAmount === 0
+                                  ? "FREE"
+                                  : `${RUPEE_SYMBOL}${feeAmount.toFixed(2)}`}
                               </p>
+                              {isDeliveryFreeForCustomer && (
+                                <p className="text-[9px] text-emerald-600 mt-0.5 leading-none">
+                                  ETA only
+                                </p>
+                              )}
                             </div>
                             <div className={`h-3.5 w-3.5 rounded-full border flex items-center justify-center shrink-0 ${isSelected ? "border-[#16A34A] bg-[#16A34A]" : "border-gray-300 dark:border-gray-600"
                               }`}>
@@ -2745,7 +2779,7 @@ function Cart() {
                             </span>
                           </div>
                         )}
-                        {speedFeeModifier !== 0 && selectedDeliveryOption && (
+                        {speedFeeModifier !== 0 && selectedDeliveryOption && !isDeliveryFreeForCustomer && (
                           <div className="flex justify-between text-sm">
                             <span className="text-gray-600 dark:text-gray-400">
                               {speedFeeModifier > 0
@@ -2889,10 +2923,13 @@ function Cart() {
         selectedPaymentLabel={selectedPaymentLabel}
         walletBalance={walletBalance}
         isPlacingOrder={isPlacingOrder}
+        isCalculatingPricing={loadingPricing || (hasSavedAddress && cart.length > 0 && pricing == null)}
         hasSavedAddress={hasSavedAddress}
         disabled={
           isPlacingOrder ||
           isValidating ||
+          loadingPricing ||
+          (hasSavedAddress && cart.length > 0 && pricing == null) ||
           hasClosedRestaurants ||
           (selectedPaymentMethod === "wallet" && walletBalance < total)
         }

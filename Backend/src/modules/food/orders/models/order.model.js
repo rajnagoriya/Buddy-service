@@ -70,6 +70,10 @@ const restaurantSettlementSchema = new mongoose.Schema(
         packagingFee: { type: Number, default: 0, min: 0 },
         commission: { type: Number, default: 0, min: 0 },
         commissionGST: { type: Number, default: 0, min: 0 },
+        /** Restaurant share of positive Cart Delivery Speed fee */
+        speedShare: { type: Number, default: 0, min: 0 },
+        /** Restaurant-funded coupon discount applied to this payout */
+        couponDiscount: { type: Number, default: 0, min: 0 },
         restaurantPayout: { type: Number, default: 0, min: 0 },
     },
     { _id: false }
@@ -130,10 +134,10 @@ const paymentSchema = new mongoose.Schema(
         },
         // ✅ NEW: Added refund object to track refund status without breaking existing flow
         refund: {
-            status: { 
-                type: String, 
-                enum: ['none', 'pending', 'processed', 'failed'], 
-                default: 'none' 
+            status: {
+                type: String,
+                enum: ['none', 'pending', 'processed', 'failed'],
+                default: 'none'
             },
             destination: {
                 type: String,
@@ -267,10 +271,10 @@ const pickupSchema = new mongoose.Schema(
     {
         restaurantId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodRestaurant', required: true },
         restaurantName: { type: String, default: '' },
-        status: { 
-            type: String, 
-            enum: ['pending', 'accepted', 'preparing', 'ready', 'picked_up', 'cancelled'], 
-            default: 'pending' 
+        status: {
+            type: String,
+            enum: ['pending', 'accepted', 'preparing', 'ready', 'picked_up', 'cancelled'],
+            default: 'pending'
         },
         location: {
             type: buildLocationSchema(),
@@ -425,6 +429,14 @@ const orderSchema = new mongoose.Schema(
         },
         platformRevenue: {
             type: platformRevenueSchema,
+            default: undefined,
+        },
+        /**
+         * Full who-got-what ledger for admin invoice:
+         * customer / restaurants / driver / platform / speed / costBearers
+         */
+        settlementBreakdown: {
+            type: mongoose.Schema.Types.Mixed,
             default: undefined,
         },
         /**

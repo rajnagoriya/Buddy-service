@@ -228,6 +228,26 @@ export async function acceptOrderDeliveryController(req, res, next) {
     }
 }
 
+export async function setPickupSequenceDeliveryController(req, res, next) {
+    try {
+        const deliveryPartnerId = req.user?.userId;
+        const orderId = req.params.orderId;
+        const restaurantIds =
+            req.body?.restaurantIds ||
+            req.body?.pickupSequence ||
+            req.body?.sequence ||
+            [];
+        const order = await orderService.setPickupSequenceDelivery(
+            orderId,
+            deliveryPartnerId,
+            restaurantIds,
+        );
+        return sendResponse(res, 200, 'Pickup sequence updated', { order });
+    } catch (err) {
+        next(err);
+    }
+}
+
 export async function rejectOrderDeliveryController(req, res, next) {
     try {
         const deliveryPartnerId = req.user?.userId;
@@ -406,6 +426,24 @@ export async function cancelOrderAdminController(req, res, next) {
             dto.reason || '',
         );
         return sendResponse(res, 200, 'Order cancelled by admin successfully', { order });
+    } catch (err) {
+        next(err);
+    }
+}
+
+export async function dropRestaurantFromOrderAdminController(req, res, next) {
+    try {
+        const adminId = req.user?.userId;
+        const orderId = req.params.orderId;
+        const restaurantId = req.params.restaurantId || req.body?.restaurantId;
+        const reason = String(req.body?.reason || '').trim();
+        const order = await orderService.dropRestaurantFromOrderByAdmin(
+            orderId,
+            restaurantId,
+            adminId,
+            reason,
+        );
+        return sendResponse(res, 200, 'Restaurant removed from order', { order });
     } catch (err) {
         next(err);
     }

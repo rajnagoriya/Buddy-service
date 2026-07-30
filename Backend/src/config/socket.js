@@ -225,7 +225,10 @@ export const initSocket = async (server) => {
             try {
                 const assignedOrder = await FoodOrder.findOne({
                     ...orderIdentityFilter,
-                    'dispatch.deliveryPartnerId': userId,
+                    $or: [
+                        { 'dispatch.deliveryPartnerId': userId },
+                        { 'dispatch.sharedPartnerId': userId },
+                    ],
                 }).select('_id').lean();
                 if (!assignedOrder) {
                     logDeliverySocket('Rejected update-location: partner not assigned to order', {
@@ -243,13 +246,14 @@ export const initSocket = async (server) => {
             const { getRedisClient } = await import('../config/redis.js');
             const redis = getRedisClient();
 
-            // Throttle: max one broadcast per 2s per orderId. Redis-backed (SET
-            // NX) so the limit holds across horizontally-scaled server
-            // instances - an in-memory-per-process throttle lets the effective
-            // broadcast rate scale with instance count.
+            // Throttle per order+partner so dual drivers don't block each other.
             if (redis) {
                 try {
-                    const acquired = await redis.set(`throttle:loc:${rawOrderId}`, '1', { NX: true, PX: 2000 });
+                    const acquired = await redis.set(
+                        `throttle:loc:${rawOrderId}:${userId}`,
+                        '1',
+                        { NX: true, PX: 2000 },
+                    );
                     if (!acquired) return;
                 } catch (err) {
                     logger.warn(`Location throttle check failed, proceeding without throttle: ${err.message}`);

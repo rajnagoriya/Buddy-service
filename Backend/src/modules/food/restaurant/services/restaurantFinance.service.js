@@ -6,6 +6,12 @@ import { FoodRestaurantWithdrawal } from '../models/foodRestaurantWithdrawal.mod
 import { getBalance } from '../../../../core/payments/transaction.service.js';
 import { buildPaginationMeta, buildPaginationOptions } from '../../../../utils/helpers.js';
 
+/**
+ * Statuses considered "delivered" / order completed — only these orders
+ * should generate a restaurant wallet credit.
+ */
+const DELIVERED_STATUSES = ['delivered'];
+
 function toTwoDigitYearString(dateObj) {
     const y = String(dateObj.getFullYear());
     return y.slice(-2);
@@ -18,7 +24,7 @@ function monthShort(monthIndex) {
 
 function getFixedCurrentCycleWindow(now = new Date()) {
     const startDay = 15;
-    
+
     let year = now.getFullYear();
     let month = now.getMonth();
 
@@ -64,6 +70,43 @@ function parseISODateParamEnd(v) {
     return d;
 }
 
+function restaurantInvolvedFilter(rid) {
+    return {
+        $or: [
+            { restaurantId: rid },
+            { 'restaurantSettlement.restaurantId': rid },
+            { 'pickups.restaurantId': rid },
+        ],
+    };
+}
+
+function resolveRestaurantPayoutFromOrder(order, rid) {
+    const ridStr = String(rid);
+    const settlements = Array.isArray(order?.restaurantSettlement)
+        ? order.restaurantSettlement
+        : [];
+    const settlement = settlements.find(
+        (s) => String(s?.restaurantId?._id || s?.restaurantId || '') === ridStr,
+    );
+    if (settlement) {
+        return {
+            payout: Math.max(0, Number(settlement.restaurantPayout) || 0),
+            commission: Math.max(0, Number(settlement.commission) || 0),
+            foodAmount: Math.max(0, Number(settlement.foodAmount) || 0),
+        };
+    }
+    return null;
+}
+
+function filterItemsForRestaurant(items, rid) {
+    const ridStr = String(rid);
+    const list = Array.isArray(items) ? items : [];
+    const scoped = list.filter(
+        (it) => !it?.restaurantId || String(it.restaurantId) === ridStr,
+    );
+    return scoped.length ? scoped : list;
+}
+
 export async function getRestaurantFinance(restaurantId, query = {}) {
     if (!restaurantId || !mongoose.Types.ObjectId.isValid(restaurantId)) return null;
     const rid = new mongoose.Types.ObjectId(restaurantId);
@@ -82,58 +125,99 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
     const nowWindow = getFixedCurrentCycleWindow(new Date());
 
     // Wallet balance: full ledger (not limited to settlement cycle window).
+    // The actual wallet balance is credited only after order delivery (delivery_completed event).
     const ledger = await getBalance('restaurant', String(rid));
 
-    // Unsettled orders for the live earnings list (matches withdrawable balance).
+    // Include multi-restaurant orders where this resto is in settlement/pickups,
+    // not only when it is the primary order.restaurantId.
+    const deliveredOrders = await FoodOrder.find({
+        ...restaurantInvolvedFilter(rid),
+        orderStatus: { $in: DELIVERED_STATUSES },
+    })
+        .select('_id orderId order_id createdAt items pricing deliveryState orderStatus restaurantSettlement payment restaurantId')
+        .lean();
+
+    const deliveredOrderIds = deliveredOrders.map((d) => d._id);
+    const orderById = new Map(deliveredOrders.map((d) => [String(d._id), d]));
+
+    // Prefer per-restaurant FoodTransaction rows when present (new multi-resto).
     const currentTransactions = await FoodTransaction.find({
         restaurantId: rid,
+        orderId: { $in: deliveredOrderIds },
         status: { $in: ['captured', 'authorized'] },
-        'settlement.isRestaurantSettled': { $ne: true }
+        'settlement.isRestaurantSettled': { $ne: true },
     })
-        .populate('orderId', 'orderId order_id createdAt items pricing deliveryState orderStatus')
         .sort({ createdAt: -1 })
         .lean();
 
-    const mapTxToRestaurantOrder = (tx) => {
-        const order = tx.orderId && typeof tx.orderId === 'object' ? tx.orderId : {};
-        const items = Array.isArray(order.items) ? order.items : [];
+    const txByOrderId = new Map(
+        currentTransactions.map((tx) => [String(tx.orderId), tx]),
+    );
+
+    // Build earnings list from delivered orders so legacy multi-resto orders
+    // (single primary FoodTransaction with summed share) still attribute correctly.
+    const mapOrderToRestaurantRow = (order) => {
+        const fromSettlement = resolveRestaurantPayoutFromOrder(order, rid);
+        const tx = txByOrderId.get(String(order._id));
+        const items = filterItemsForRestaurant(order.items, rid);
         const foodNames = items.map((it) => it?.name).filter(Boolean).join(', ');
         const orderTotalExclTax = Math.max(
             0,
-            Number(order?.pricing?.total ?? 0) - Number(order?.pricing?.tax ?? 0) || 0
+            Number(order?.pricing?.total ?? 0) - Number(order?.pricing?.tax ?? 0) || 0,
         );
-        const mongoId =
-            order?._id?.toString?.() ||
-            (tx.orderId && typeof tx.orderId !== 'object' ? String(tx.orderId) : '') ||
-            '';
+        const payout = fromSettlement
+            ? fromSettlement.payout
+            : Math.max(0, Number(tx?.amounts?.restaurantShare) || 0);
+        const commission = fromSettlement
+            ? fromSettlement.commission
+            : Math.max(0, Number(tx?.amounts?.restaurantCommission) || 0);
+        const foodAmount = fromSettlement?.foodAmount;
         return {
-            orderId: order?.orderId || order?.order_id || tx.orderReadableId,
-            mongoId,
-            createdAt: tx.createdAt,
+            orderId: order?.orderId || order?.order_id || tx?.orderReadableId,
+            mongoId: order?._id?.toString?.() || '',
+            createdAt: order.createdAt || tx?.createdAt,
             items,
             foodNames,
-            orderTotal: orderTotalExclTax,
-            totalAmount: tx.amounts?.totalCustomerPaid || 0,
-            payout: tx.amounts?.restaurantShare || 0,
-            commission: tx.amounts?.restaurantCommission || 0,
-            paymentMethod: tx.paymentMethod || order?.payment?.method,
-            orderStatus: order?.orderStatus || order?.deliveryState?.currentPhase || order?.deliveryState?.status,
-            status: tx.status
+            orderTotal: foodAmount != null ? foodAmount : orderTotalExclTax,
+            totalAmount: Math.max(
+                0,
+                Number(tx?.amounts?.totalCustomerPaid) ||
+                    Number(order?.pricing?.total) ||
+                    0,
+            ),
+            payout,
+            commission,
+            paymentMethod: tx?.paymentMethod || order?.payment?.method,
+            orderStatus:
+                order?.orderStatus ||
+                order?.deliveryState?.currentPhase ||
+                order?.deliveryState?.status,
+            status: tx?.status || 'captured',
         };
     };
 
-    const currentCycleOrders = currentTransactions.map(mapTxToRestaurantOrder);
+    // Only include this restaurant if it still has a settlement row / was not dropped
+    // (or is primary with no settlement array for legacy single-resto).
+    const eligibleOrders = deliveredOrders.filter((order) => {
+        const settlements = Array.isArray(order.restaurantSettlement)
+            ? order.restaurantSettlement
+            : [];
+        if (settlements.length === 0) {
+            return String(order.restaurantId) === String(rid);
+        }
+        return settlements.some(
+            (s) => String(s?.restaurantId?._id || s?.restaurantId || '') === String(rid),
+        );
+    });
 
-    // Calculate global estimated payout (all unsettled transactions)
-    const allUnsettledTransactions = await FoodTransaction.find({
-        restaurantId: rid,
-        status: { $in: ['captured', 'authorized'] },
-        'settlement.isRestaurantSettled': { $ne: true }
-    }).select('amounts.restaurantShare').lean();
+    const currentCycleOrders = eligibleOrders
+        .map(mapOrderToRestaurantRow)
+        .filter((row) => (Number(row.payout) || 0) > 0 || txByOrderId.has(row.mongoId))
+        .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
 
-    const globalEstimatedPayout = allUnsettledTransactions.reduce(
-        (sum, tx) => sum + (Number(tx.amounts?.restaurantShare) || 0),
-        0
+    const globalEstimatedPayout = currentCycleOrders.reduce(
+        (sum, row) => sum + (Number(row.payout) || 0),
+        0,
     );
 
     // Deduct all effective withdrawals from available balance.
@@ -193,26 +277,41 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
         pagination: buildPaginationMeta({ page, limit, total: 0 }),
     };
     if (startDate && endDate) {
-        const pastFilter = {
-            restaurantId: rid,
-            status: { $in: ['captured', 'authorized'] },
+        const pastOrders = await FoodOrder.find({
+            ...restaurantInvolvedFilter(rid),
+            orderStatus: { $in: DELIVERED_STATUSES },
             createdAt: { $gte: startDate, $lte: endDate },
-        };
+        })
+            .select('_id orderId order_id createdAt items pricing deliveryState orderStatus restaurantSettlement payment restaurantId')
+            .sort({ createdAt: -1 })
+            .lean();
 
-        const [pastTransactions, pastTotal] = await Promise.all([
-            FoodTransaction.find(pastFilter)
-                .populate('orderId', 'orderId order_id createdAt items pricing deliveryState orderStatus')
-                .sort({ createdAt: -1 })
-                .skip(skip)
-                .limit(limit)
-                .lean(),
-            FoodTransaction.countDocuments(pastFilter),
-        ]);
+        const pastEligible = pastOrders.filter((order) => {
+            const settlements = Array.isArray(order.restaurantSettlement)
+                ? order.restaurantSettlement
+                : [];
+            if (settlements.length === 0) {
+                return String(order.restaurantId) === String(rid);
+            }
+            return settlements.some(
+                (s) => String(s?.restaurantId?._id || s?.restaurantId || '') === String(rid),
+            );
+        });
 
-        const pastCycleOrders = pastTransactions.map(mapTxToRestaurantOrder);
+        const pastTotal = pastEligible.length;
+        const pastSlice = pastEligible.slice(skip, skip + limit);
+        const pastOrderIds = pastSlice.map((o) => o._id);
+        const pastTxs = await FoodTransaction.find({
+            restaurantId: rid,
+            orderId: { $in: pastOrderIds },
+            status: { $in: ['captured', 'authorized'] },
+        }).lean();
+        for (const tx of pastTxs) {
+            txByOrderId.set(String(tx.orderId), tx);
+        }
 
         pastCyclesResult = {
-            orders: pastCycleOrders,
+            orders: pastSlice.map(mapOrderToRestaurantRow),
             totalOrders: pastTotal,
             pagination: buildPaginationMeta({ page, limit, total: pastTotal }),
         };
@@ -235,5 +334,3 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
         pastCycles: pastCyclesResult
     };
 }
-
-

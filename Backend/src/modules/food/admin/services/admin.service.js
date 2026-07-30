@@ -26,6 +26,7 @@ import {
     logOfferAction,
 } from './offer.service.js';
 import { DeliveryBonusTransaction } from '../models/deliveryBonusTransaction.model.js';
+import { FoodDeliverySalaryPayment } from '../models/deliverySalaryPayment.model.js';
 import { FoodEarningAddon } from '../models/earningAddon.model.js';
 import { FoodEarningAddonHistory } from '../models/earningAddonHistory.model.js';
 import { FoodRestaurantCommission } from '../models/restaurantCommission.model.js';
@@ -582,7 +583,30 @@ export async function getDashboardStats(query = {}) {
                         $sum: { 
                             $cond: [DELIVERED_ORDER_STATUS_EXPR, { $ifNull: ['$platformProfit', 0] }, 0] 
                         } 
-                    }
+                    },
+                    platformSubsidyTotal: {
+                        $sum: {
+                            $cond: [
+                              DELIVERED_ORDER_STATUS_EXPR,
+                              { $ifNull: ['$pricing.platformSubsidy', 0] },
+                              0,
+                            ],
+                        },
+                    },
+                    riderPayoutTotal: {
+                        $sum: {
+                            $cond: [
+                              DELIVERED_ORDER_STATUS_EXPR,
+                              {
+                                $add: [
+                                  { $ifNull: ['$riderEarning', 0] },
+                                  { $ifNull: ['$sharedRiderEarning', 0] },
+                                ],
+                              },
+                              0,
+                            ],
+                        },
+                    },
                 }
             }
         ]),
@@ -780,6 +804,8 @@ export async function getDashboardStats(query = {}) {
         gst: { total: Number(totals.gstTotal || 0) },
         totalAdminEarnings: Number(totals.adminNetProfit || 0) + Number(totals.gstTotal || 0),
         deliveryProfit: Number(totals.adminNetProfit || 0) - Number(totals.commissionTotal || 0) - Number(totals.platformFeeTotal || 0),
+        platformSubsidy: { total: Number(totals.platformSubsidyTotal || 0) },
+        riderPayout: { total: Number(totals.riderPayoutTotal || 0) },
         restaurants: {
             total: Number(restaurantsTotal || 0),
             pendingRequests: Number(restaurantsPending || 0)
@@ -910,15 +936,21 @@ export async function getTransactionReport(query = {}) {
 
     for (const tx of transactionRows) {
         // Calculate Summary
+        // Platform/customer/rider amounts live only on the primary tx row for multi-resto orders.
+        const isPrimaryTx = tx.isPrimary !== false;
         if (tx.status === 'captured' || tx.status === 'settled' || (tx.orderId && tx.orderId.orderStatus === 'delivered')) {
-            completedTransaction += tx.amounts?.totalCustomerPaid || 0;
-            adminEarning += tx.amounts?.platformNetProfit || 0;
+            if (isPrimaryTx) {
+                completedTransaction += tx.amounts?.totalCustomerPaid || 0;
+                adminEarning += tx.amounts?.platformNetProfit || 0;
+                deliverymanEarning += tx.amounts?.riderShare || 0;
+            }
             restaurantEarning += tx.amounts?.restaurantShare || 0;
-            deliverymanEarning += tx.amounts?.riderShare || 0;
         }
         if (tx.status === 'refunded' || (tx.orderId && tx.orderId.orderStatus === 'cancelled_by_admin')) {
             // Count number of refunded transactions according to old logic or sum them
-            refundedTransaction += tx.amounts?.totalCustomerPaid || 0;
+            if (isPrimaryTx) {
+                refundedTransaction += tx.amounts?.totalCustomerPaid || 0;
+            }
         }
     }
 
@@ -2394,7 +2426,13 @@ export async function getRestaurantAnalytics(restaurantId) {
     const [restaurant, commissionDoc, orders, txRows] = await Promise.all([
         FoodRestaurant.findById(rId).lean(),
         FoodRestaurantCommission.findOne({ restaurantId: rId, status: { $ne: false } }).lean(),
-        FoodOrder.find({ restaurantId: rId }).lean(),
+        FoodOrder.find({
+            $or: [
+                { restaurantId: rId },
+                { 'restaurantSettlement.restaurantId': rId },
+                { 'pickups.restaurantId': rId },
+            ],
+        }).lean(),
         FoodTransaction.find({ restaurantId: rId })
             .populate('orderId', 'orderStatus createdAt pricing')
             .sort({ createdAt: -1 })
@@ -2411,6 +2449,7 @@ export async function getRestaurantAnalytics(restaurantId) {
     const cancelledOrders = orders.filter(o => ['cancelled_by_user', 'cancelled_by_restaurant', 'cancelled_by_admin'].includes(o.orderStatus));
 
     // Money metrics should come from the ledger (FoodTransaction), not FoodOrder.
+    // Prefer settlement payout for this restaurant when present (fixes legacy summed primary txs).
     const completedTx = (txRows || []).filter((tx) => {
         const orderStatus = tx?.orderId?.orderStatus;
         if (orderStatus) return orderStatus === 'delivered';
@@ -2419,40 +2458,72 @@ export async function getRestaurantAnalytics(restaurantId) {
 
     const sum = (arr, pick) => (arr || []).reduce((s, it) => s + (Number(pick(it)) || 0), 0);
 
-    // 1) Total order value (gross customer paid)
-    const totalRevenue = sum(completedTx, (tx) => tx?.amounts?.totalCustomerPaid ?? tx?.pricing?.total ?? tx?.orderId?.pricing?.total);
+    const restaurantShareForOrder = (order) => {
+        const settlements = Array.isArray(order?.restaurantSettlement)
+            ? order.restaurantSettlement
+            : [];
+        const row = settlements.find(
+            (s) => String(s?.restaurantId?._id || s?.restaurantId || '') === String(rId),
+        );
+        if (row) return Math.max(0, Number(row.restaurantPayout) || 0);
+        return null;
+    };
+
+    // 1) Total order value (gross customer paid) — only primary txs to avoid multi-resto double count
+    const totalRevenue = sum(
+        completedTx.filter((tx) => tx.isPrimary !== false),
+        (tx) => tx?.amounts?.totalCustomerPaid ?? tx?.pricing?.total ?? tx?.orderId?.pricing?.total,
+    );
 
     // 2) Restaurant share (payout to restaurant)
-    const restaurantEarning = sum(completedTx, (tx) => tx?.amounts?.restaurantShare);
+    const restaurantEarning = completedOrders.reduce((sumE, order) => {
+        const fromSettlement = restaurantShareForOrder(order);
+        if (fromSettlement != null) return sumE + fromSettlement;
+        const tx = completedTx.find((t) => String(t.orderId?._id || t.orderId) === String(order._id));
+        return sumE + (Number(tx?.amounts?.restaurantShare) || 0);
+    }, 0);
 
     // 3) Restaurant commission paid to admin
-    const totalCommission = sum(completedTx, (tx) => tx?.amounts?.restaurantCommission ?? tx?.pricing?.restaurantCommission);
+    const totalCommission = completedOrders.reduce((sumC, order) => {
+        const settlements = Array.isArray(order?.restaurantSettlement)
+            ? order.restaurantSettlement
+            : [];
+        const row = settlements.find(
+            (s) => String(s?.restaurantId?._id || s?.restaurantId || '') === String(rId),
+        );
+        if (row) return sumC + (Number(row.commission) || 0);
+        const tx = completedTx.find((t) => String(t.orderId?._id || t.orderId) === String(order._id));
+        return sumC + (Number(tx?.amounts?.restaurantCommission ?? tx?.pricing?.restaurantCommission) || 0);
+    }, 0);
 
     // 4) Restaurant profit (in this system, equals restaurant share)
     const restaurantProfit = restaurantEarning;
 
-    const monthlyOrdersList = orders.filter(o => {
+    const monthlyCompletedOrders = completedOrders.filter((o) => {
         const d = new Date(o.createdAt);
         return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
     });
-    const monthlyCompletedTx = completedTx.filter((tx) => {
-        const d = new Date(tx?.createdAt || tx?.orderId?.createdAt || 0);
-        return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-    });
-    const monthlyProfit = sum(monthlyCompletedTx, (tx) => tx?.amounts?.restaurantShare);
+    const monthlyProfit = monthlyCompletedOrders.reduce((sumM, order) => {
+        const fromSettlement = restaurantShareForOrder(order);
+        if (fromSettlement != null) return sumM + fromSettlement;
+        const tx = completedTx.find((t) => String(t.orderId?._id || t.orderId) === String(order._id));
+        return sumM + (Number(tx?.amounts?.restaurantShare) || 0);
+    }, 0);
 
-    const yearlyOrdersList = orders.filter(o => {
+    const yearlyCompletedOrders = completedOrders.filter((o) => {
         const d = new Date(o.createdAt);
         return d.getFullYear() === currentYear;
     });
-    const yearlyCompletedTx = completedTx.filter((tx) => {
-        const d = new Date(tx?.createdAt || tx?.orderId?.createdAt || 0);
-        return d.getFullYear() === currentYear;
-    });
-    const yearlyProfit = sum(yearlyCompletedTx, (tx) => tx?.amounts?.restaurantShare);
+    const yearlyProfit = yearlyCompletedOrders.reduce((sumY, order) => {
+        const fromSettlement = restaurantShareForOrder(order);
+        if (fromSettlement != null) return sumY + fromSettlement;
+        const tx = completedTx.find((t) => String(t.orderId?._id || t.orderId) === String(order._id));
+        return sumY + (Number(tx?.amounts?.restaurantShare) || 0);
+    }, 0);
 
     const totalOrdersCount = orders.length;
-    const avgOrderValue = completedTx.length > 0 ? totalRevenue / completedTx.length : 0;
+    const primaryCompletedTx = completedTx.filter((tx) => tx.isPrimary !== false);
+    const avgOrderValue = primaryCompletedTx.length > 0 ? totalRevenue / primaryCompletedTx.length : 0;
 
     const uniqueCustomers = new Set(orders.map(o => String(o.userId))).size;
     const customerOrderCounts = orders.reduce((acc, o) => {
@@ -2485,8 +2556,8 @@ export async function getRestaurantAnalytics(restaurantId) {
         totalCommission,
         restaurantEarning, // restaurant share
         restaurantProfit,
-        monthlyOrders: monthlyOrdersList.length,
-        yearlyOrders: yearlyOrdersList.length,
+        monthlyOrders: monthlyCompletedOrders.length,
+        yearlyOrders: yearlyCompletedOrders.length,
         averageMonthlyProfit: monthlyProfit, // Placeholder: can be improved if historical data exists
         averageYearlyProfit: yearlyProfit,   // Placeholder: can be improved if historical data exists
         status: restaurant.status === 'approved' ? 'active' : 'inactive',
@@ -4558,6 +4629,338 @@ export async function getDeliveryEarnings(query = {}) {
     };
 }
 
+function buildCreatedAtFilterFromQuery(query = {}) {
+    const createdAtFilter = {};
+    if (query.fromDate) {
+        const from = new Date(query.fromDate);
+        if (!Number.isNaN(from.getTime())) {
+            from.setHours(0, 0, 0, 0);
+            createdAtFilter.$gte = from;
+        }
+    }
+    if (query.toDate) {
+        const to = new Date(query.toDate);
+        if (!Number.isNaN(to.getTime())) {
+            to.setHours(23, 59, 59, 999);
+            createdAtFilter.$lte = to;
+        }
+    }
+
+    if (!createdAtFilter.$gte && !createdAtFilter.$lte) {
+        const period = String(query.period || 'all').trim().toLowerCase();
+        const now = new Date();
+        if (period === 'today') {
+            const start = new Date(now);
+            start.setHours(0, 0, 0, 0);
+            const end = new Date(now);
+            end.setHours(23, 59, 59, 999);
+            createdAtFilter.$gte = start;
+            createdAtFilter.$lte = end;
+        } else if (period === 'week') {
+            const start = new Date(now);
+            start.setHours(0, 0, 0, 0);
+            start.setDate(start.getDate() - start.getDay());
+            const end = new Date(start);
+            end.setDate(start.getDate() + 6);
+            end.setHours(23, 59, 59, 999);
+            createdAtFilter.$gte = start;
+            createdAtFilter.$lte = end;
+        } else if (period === 'month') {
+            const start = new Date(now.getFullYear(), now.getMonth(), 1);
+            start.setHours(0, 0, 0, 0);
+            const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+            end.setHours(23, 59, 59, 999);
+            createdAtFilter.$gte = start;
+            createdAtFilter.$lte = end;
+        }
+    }
+
+    return createdAtFilter;
+}
+
+function buildAdminRevenueSources(order = {}) {
+    const sb = order.settlementBreakdown && typeof order.settlementBreakdown === 'object'
+        ? order.settlementBreakdown
+        : {};
+    const platform = sb.platform || {};
+    const driver = sb.driver || {};
+    const speed = sb.speed || {};
+    const feeBreakdown = order.pricing?.deliveryFeeBreakdown || {};
+    const partner = order.dispatch?.deliveryPartnerId;
+    const employmentType = String(
+        driver.employmentType ||
+        partner?.employmentType ||
+        'per_order',
+    ).toLowerCase();
+    const isSalary = employmentType === 'salary';
+
+    const platformFee = Number(
+        platform.platformFee ?? order.platformRevenue?.platformFee ?? order.pricing?.platformFee ?? 0,
+    ) || 0;
+    const restaurantCommission = Number(
+        platform.restaurantCommission ??
+        order.platformRevenue?.commission ??
+        order.pricing?.restaurantCommission ??
+        0,
+    ) || 0;
+    const deliveryMarginBase = Number(
+        platform.deliveryMarginBase ?? feeBreakdown.deliveryMarginBase ?? 0,
+    ) || 0;
+    const speedShareAdmin = Math.max(
+        0,
+        Number(platform.speedShare ?? speed.admin ?? feeBreakdown.speedShareAdmin ?? 0) || 0,
+    );
+    const deliveryFee = Number(order.pricing?.deliveryFee ?? 0) || 0;
+    const riderDeserved = Number(
+        feeBreakdown.riderFee ??
+        driver.payout ??
+        order.riderEarning ??
+        0,
+    ) || 0;
+    const salaryReclaim = isSalary
+        ? Math.max(
+            0,
+            Number(platform.salaryReclaim ?? riderDeserved ?? 0) || 0,
+        )
+        : 0;
+    const freeDeliverySubsidy = Number(
+        platform.freeDeliverySubsidy ?? order.pricing?.platformSubsidy ?? 0,
+    ) || 0;
+    const adminCouponDiscount = Number(platform.adminCouponDiscount ?? 0) || 0;
+    const negativeSpeedBear = Math.max(
+        0,
+        Number(platform.negativeSpeedBear ?? 0) || 0,
+    );
+    const riderPayout = isSalary
+        ? 0
+        : Math.max(0, Number(driver.payout ?? order.riderEarning ?? 0) || 0);
+    const adminEarning = Number(platform.netProfit ?? order.platformProfit ?? 0) || 0;
+
+    // Salary: full customer delivery charge stays with admin. Per-order: only margin + admin speed share.
+    const deliveryChargeToAdmin = isSalary
+        ? deliveryFee
+        : Number((deliveryMarginBase + speedShareAdmin).toFixed(2));
+
+    return {
+        employmentType: isSalary ? 'salary' : 'per_order',
+        isSalary,
+        adminEarning,
+        riderPayout,
+        riderDeserved: isSalary ? 0 : riderPayout,
+        deliveryFee,
+        sources: {
+            platformFee,
+            restaurantCommission,
+            deliveryMarginBase,
+            speedShareAdmin,
+            salaryReclaim,
+            deliveryChargeToAdmin,
+            freeDeliverySubsidy,
+            adminCouponDiscount,
+            negativeSpeedBear,
+            distanceSlabUserCharge: Number(feeBreakdown.userCharge ?? feeBreakdown.baseFee ?? 0) || 0,
+            distanceSlabDeliveryBoyFee: Number(feeBreakdown.deliveryBoyFee ?? 0) || 0,
+            multiRestaurantSurcharge: Number(
+                feeBreakdown.isMultiRestaurant ? feeBreakdown.additionalCharge : 0,
+            ) || 0,
+            speedFeeModifier: Number(feeBreakdown.speedFeeModifier ?? speed.feeModifier ?? 0) || 0,
+            speedShareDriver: Number(feeBreakdown.speedShareDriver ?? speed.driver ?? 0) || 0,
+        },
+    };
+}
+
+/**
+ * Admin Revenue: per-order platform earning with payment-source breakdown.
+ * Salary partners → rider payout ₹0, full delivery charge attributed to admin.
+ * Per-order partners → rider gets slab + speed share + multi-resto; admin keeps the rest.
+ */
+export async function getAdminRevenue(query = {}) {
+    const page = Math.max(parseInt(query.page, 10) || 1, 1);
+    const limit = Math.max(1, Math.min(100, parseInt(query.limit, 10) || 25));
+    const skip = (page - 1) * limit;
+
+    const filter = {
+        orderStatus: 'delivered',
+    };
+
+    const createdAtFilter = buildCreatedAtFilterFromQuery(query);
+    if (createdAtFilter.$gte || createdAtFilter.$lte) {
+        filter.createdAt = createdAtFilter;
+    }
+
+    const search = String(query.search || '').trim();
+    if (search) {
+        const regex = new RegExp(search, 'i');
+        const [partners, restaurants] = await Promise.all([
+            FoodDeliveryPartner.find({
+                $or: [{ name: regex }, { phone: regex }, { email: regex }],
+            }).select('_id').lean(),
+            FoodRestaurant.find({
+                $or: [{ restaurantName: regex }, { name: regex }],
+            }).select('_id').lean(),
+        ]);
+        filter.$or = [
+            { order_id: regex },
+            { orderId: regex },
+            { 'dispatch.deliveryPartnerId': { $in: partners.map((p) => p._id) } },
+            { restaurantId: { $in: restaurants.map((r) => r._id) } },
+        ];
+    }
+
+    const employmentTypeFilter = String(query.employmentType || '').trim().toLowerCase();
+
+    const [orders, total, summaryAgg] = await Promise.all([
+        FoodOrder.find(filter)
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .select(
+                'order_id orderId orderStatus createdAt deliveredAt pricing riderEarning platformProfit platformRevenue settlementBreakdown driverSettlement dispatch.deliveryPartnerId restaurantId customerName',
+            )
+            .populate({ path: 'dispatch.deliveryPartnerId', select: 'name phone employmentType' })
+            .populate({ path: 'restaurantId', select: 'restaurantName name' })
+            .lean(),
+        FoodOrder.countDocuments(filter),
+        FoodOrder.aggregate([
+            { $match: filter },
+            {
+                $group: {
+                    _id: null,
+                    totalAdminEarning: { $sum: { $ifNull: ['$platformProfit', 0] } },
+                    totalOrders: { $sum: 1 },
+                    totalDeliveryFee: { $sum: { $ifNull: ['$pricing.deliveryFee', 0] } },
+                    totalPlatformFee: { $sum: { $ifNull: ['$pricing.platformFee', 0] } },
+                    totalCommission: { $sum: { $ifNull: ['$pricing.restaurantCommission', 0] } },
+                    totalRiderPayout: { $sum: { $ifNull: ['$riderEarning', 0] } },
+                },
+            },
+        ]),
+    ]);
+
+    let rows = orders.map((order) => {
+        const built = buildAdminRevenueSources(order);
+        const partner = order.dispatch?.deliveryPartnerId;
+        return {
+            _id: String(order._id),
+            orderId: order.order_id || order.orderId || String(order._id),
+            orderStatus: order.orderStatus,
+            createdAt: order.createdAt,
+            deliveredAt: order.deliveredAt || order.deliveryState?.deliveredAt || null,
+            restaurantName: order.restaurantId?.restaurantName || order.restaurantId?.name || 'N/A',
+            customerName: order.customerName || 'N/A',
+            deliveryPartnerName: partner?.name || 'N/A',
+            deliveryPartnerPhone: partner?.phone || '',
+            employmentType: built.employmentType,
+            isSalary: built.isSalary,
+            orderTotal: Number(order.pricing?.total || 0) || 0,
+            deliveryFee: built.deliveryFee,
+            adminEarning: built.adminEarning,
+            riderPayout: built.riderPayout,
+            sources: built.sources,
+        };
+    });
+
+    if (employmentTypeFilter === 'salary' || employmentTypeFilter === 'per_order') {
+        rows = rows.filter((r) => r.employmentType === employmentTypeFilter);
+    }
+
+    const agg = summaryAgg?.[0] || {};
+    return {
+        rows,
+        summary: {
+            totalAdminEarning: Number(agg.totalAdminEarning || 0),
+            totalOrders: Number(agg.totalOrders || total || 0),
+            totalDeliveryFee: Number(agg.totalDeliveryFee || 0),
+            totalPlatformFee: Number(agg.totalPlatformFee || 0),
+            totalCommission: Number(agg.totalCommission || 0),
+            totalRiderPayout: Number(agg.totalRiderPayout || 0),
+            averageAdminEarning:
+                Number(agg.totalOrders) > 0
+                    ? Number((Number(agg.totalAdminEarning || 0) / Number(agg.totalOrders)).toFixed(2))
+                    : 0,
+        },
+        pagination: {
+            page,
+            limit,
+            total,
+            pages: Math.ceil(total / limit) || 1,
+        },
+    };
+}
+
+export async function getAdminRevenueOrder(orderId) {
+    const raw = String(orderId || '').trim();
+    if (!raw) throw new ValidationError('Order id required');
+
+    const identity = mongoose.Types.ObjectId.isValid(raw)
+        ? { _id: new mongoose.Types.ObjectId(raw) }
+        : { $or: [{ order_id: raw }, { orderId: raw }] };
+
+    const order = await FoodOrder.findOne(identity)
+        .select(
+            'order_id orderId orderStatus createdAt deliveredAt pricing riderEarning platformProfit platformRevenue settlementBreakdown driverSettlement dispatch restaurantId customerName customerPhone payment',
+        )
+        .populate({ path: 'dispatch.deliveryPartnerId', select: 'name phone employmentType salaryAmount salaryDuration' })
+        .populate({ path: 'restaurantId', select: 'restaurantName name' })
+        .lean();
+
+    if (!order) {
+        throw new ValidationError('Order not found');
+    }
+
+    const built = buildAdminRevenueSources(order);
+    const partner = order.dispatch?.deliveryPartnerId;
+    const feeBreakdown = order.pricing?.deliveryFeeBreakdown || {};
+
+    return {
+        order: {
+            _id: String(order._id),
+            orderId: order.order_id || order.orderId || String(order._id),
+            orderStatus: order.orderStatus,
+            createdAt: order.createdAt,
+            deliveredAt: order.deliveredAt || null,
+            restaurantName: order.restaurantId?.restaurantName || order.restaurantId?.name || 'N/A',
+            customerName: order.customerName || 'N/A',
+            customerPhone: order.customerPhone || '',
+            paymentMethod: order.payment?.method || '',
+            paymentStatus: order.payment?.status || '',
+            orderTotal: Number(order.pricing?.total || 0) || 0,
+            deliveryPartner: partner
+                ? {
+                    id: String(partner._id),
+                    name: partner.name || 'N/A',
+                    phone: partner.phone || '',
+                    employmentType: partner.employmentType || built.employmentType,
+                    salaryAmount: partner.salaryAmount,
+                    salaryDuration: partner.salaryDuration,
+                }
+                : null,
+            adminEarning: built.adminEarning,
+            riderPayout: built.riderPayout,
+            employmentType: built.employmentType,
+            isSalary: built.isSalary,
+            sources: built.sources,
+            deliveryFeeBreakdown: {
+                source: feeBreakdown.source,
+                distanceKm: feeBreakdown.distanceKm,
+                userCharge: feeBreakdown.userCharge,
+                deliveryBoyFee: feeBreakdown.deliveryBoyFee,
+                isMultiRestaurant: feeBreakdown.isMultiRestaurant,
+                isSplitOrder: feeBreakdown.isSplitOrder,
+                additionalCharge: feeBreakdown.additionalCharge,
+                speedFeeModifier: feeBreakdown.speedFeeModifier,
+                speedShareAdmin: feeBreakdown.speedShareAdmin,
+                speedShareDriver: feeBreakdown.speedShareDriver,
+                riderFee: feeBreakdown.riderFee,
+                fee: feeBreakdown.fee,
+            },
+            payoutRule: built.isSalary
+                ? 'Salary partner — no per-order rider payout; full delivery charge attributed to admin.'
+                : 'Per-order partner — rider earns distance slab Delivery Boy Fee + multi-restaurant surcharge + Cart Delivery Speed driver share.',
+        },
+    };
+}
+
 // ----- Earning Addon Offers (admin) -----
 export async function getEarningAddons() {
     const list = await FoodEarningAddon.find({})
@@ -5015,13 +5418,354 @@ export async function getDeliveryPartnerById(id) {
     return detail;
 }
 
-export async function updateDeliveryPartner(id, payload) {
+export async function updateDeliveryPartner(id, payload = {}) {
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        throw new ValidationError('Invalid delivery partner ID');
+    }
+
+    const allowed = {};
+    if (payload.employmentType !== undefined) {
+        const type = String(payload.employmentType || '').trim();
+        if (!['per_order', 'salary', 'seller_base'].includes(type)) {
+            throw new ValidationError('Invalid employment type');
+        }
+        allowed.employmentType = type;
+    }
+    if (payload.salaryDuration !== undefined) {
+        const duration = String(payload.salaryDuration || '').trim();
+        if (!['weekly', 'monthly'].includes(duration)) {
+            throw new ValidationError('Invalid salary duration');
+        }
+        allowed.salaryDuration = duration;
+    }
+    if (payload.salaryAmount !== undefined) {
+        const amount = Number(payload.salaryAmount);
+        if (!Number.isFinite(amount) || amount < 0) {
+            throw new ValidationError('Salary amount must be a non-negative number');
+        }
+        allowed.salaryAmount = amount;
+    }
+    if (payload.zone !== undefined) {
+        allowed.zone = payload.zone || null;
+    }
+    if (payload.isActive !== undefined) {
+        allowed.isActive = Boolean(payload.isActive);
+    }
+    if (payload.status !== undefined) {
+        allowed.status = payload.status;
+    }
+
+    if (allowed.employmentType === 'salary' && payload.salaryAmount !== undefined) {
+        const amount = Number(payload.salaryAmount);
+        if (!Number.isFinite(amount) || amount <= 0) {
+            throw new ValidationError('Please set a salary amount greater than 0 for salary partners');
+        }
+    }
+
+    if (Object.keys(allowed).length === 0) {
+        throw new ValidationError('No valid fields to update');
+    }
+
     const partner = await FoodDeliveryPartner.findByIdAndUpdate(
         id,
-        { $set: payload },
-        { new: true, runValidators: true }
+        { $set: allowed },
+        { new: true, runValidators: true },
     ).lean();
     return partner;
+}
+
+function resolveSalaryPeriodBounds(duration, query = {}) {
+    const now = new Date();
+    if (query.fromDate || query.toDate) {
+        const start = query.fromDate ? new Date(query.fromDate) : null;
+        const end = query.toDate ? new Date(query.toDate) : null;
+        if (start && !Number.isNaN(start.getTime())) start.setHours(0, 0, 0, 0);
+        if (end && !Number.isNaN(end.getTime())) end.setHours(23, 59, 59, 999);
+        if (start && end) return { periodStart: start, periodEnd: end };
+    }
+
+    const period = String(query.period || '').trim().toLowerCase();
+    if (period === 'today') {
+        const start = new Date(now);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(now);
+        end.setHours(23, 59, 59, 999);
+        return { periodStart: start, periodEnd: end };
+    }
+
+    const useMonthly = duration === 'monthly' || period === 'month';
+    if (useMonthly) {
+        const start = new Date(now.getFullYear(), now.getMonth(), 1);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        end.setHours(23, 59, 59, 999);
+        return { periodStart: start, periodEnd: end };
+    }
+
+    // Default / weekly
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - start.getDay()); // Sunday
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    end.setHours(23, 59, 59, 999);
+    return { periodStart: start, periodEnd: end };
+}
+
+/**
+ * Salary-mode earnings summary for admin.
+ * Shows fixed salary, completed orders in period, order worth, and pay status.
+ */
+export async function getDeliverySalaryEarnings(query = {}) {
+    const page = Math.max(parseInt(query.page, 10) || 1, 1);
+    const limit = Math.max(1, Math.min(200, parseInt(query.limit, 10) || 50));
+    const skip = (page - 1) * limit;
+
+    const partnerFilter = { employmentType: 'salary' };
+    if (query.deliveryPartnerId && mongoose.Types.ObjectId.isValid(query.deliveryPartnerId)) {
+        partnerFilter._id = new mongoose.Types.ObjectId(query.deliveryPartnerId);
+    }
+    const search = String(query.search || '').trim();
+    if (search) {
+        const regex = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+        partnerFilter.$or = [{ name: regex }, { phone: regex }, { email: regex }];
+    }
+
+    const [partners, total] = await Promise.all([
+        FoodDeliveryPartner.find(partnerFilter)
+            .sort({ name: 1 })
+            .skip(skip)
+            .limit(limit)
+            .select('name phone email employmentType salaryDuration salaryAmount status createdAt')
+            .lean(),
+        FoodDeliveryPartner.countDocuments(partnerFilter),
+    ]);
+
+    const rows = [];
+    let totalSalaryCommitted = 0;
+    let totalOrdersCompleted = 0;
+    let totalOrdersWorth = 0;
+    let unpaidCount = 0;
+
+    for (const partner of partners) {
+        const duration = partner.salaryDuration === 'monthly' ? 'monthly' : 'weekly';
+        const { periodStart, periodEnd } = resolveSalaryPeriodBounds(duration, query);
+        const partnerId = partner._id;
+
+        const deliveredFilter = {
+            orderStatus: 'delivered',
+            createdAt: { $gte: periodStart, $lte: periodEnd },
+            $or: [
+                { 'dispatch.deliveryPartnerId': partnerId },
+                { 'dispatch.sharedPartnerId': partnerId },
+            ],
+        };
+
+        const [orderAgg, payment] = await Promise.all([
+            FoodOrder.aggregate([
+                { $match: deliveredFilter },
+                {
+                    $group: {
+                        _id: null,
+                        completedOrders: { $sum: 1 },
+                        ordersWorth: { $sum: { $ifNull: ['$pricing.total', 0] } },
+                    },
+                },
+            ]),
+            FoodDeliverySalaryPayment.findOne({
+                deliveryPartnerId: partnerId,
+                periodStart,
+                periodEnd,
+                status: 'paid',
+            })
+                .sort({ paidAt: -1 })
+                .lean(),
+        ]);
+
+        const completedOrders = Number(orderAgg[0]?.completedOrders || 0);
+        const ordersWorth = Number(orderAgg[0]?.ordersWorth || 0);
+        const salaryAmount = Number(partner.salaryAmount || 0);
+        const isPaid = Boolean(payment);
+
+        totalSalaryCommitted += salaryAmount;
+        totalOrdersCompleted += completedOrders;
+        totalOrdersWorth += ordersWorth;
+        if (!isPaid) unpaidCount += 1;
+
+        rows.push({
+            deliveryPartnerId: String(partnerId),
+            deliveryPartnerName: partner.name || 'N/A',
+            deliveryPartnerPhone: partner.phone || 'N/A',
+            employmentType: 'salary',
+            salaryDuration: duration,
+            salaryAmount,
+            completedOrders,
+            ordersWorth: Number(ordersWorth.toFixed(2)),
+            periodStart,
+            periodEnd,
+            paymentStatus: isPaid ? 'paid' : 'unpaid',
+            paidAt: payment?.paidAt || null,
+            paymentId: payment?._id ? String(payment._id) : null,
+            paymentAmount: payment ? Number(payment.amount || 0) : null,
+            paymentNote: payment?.note || '',
+            paymentTransactionId: payment?.transactionId || '',
+        });
+    }
+
+    return {
+        earnings: rows,
+        summary: {
+            totalSalaryPartners: total,
+            totalSalaryCommitted: Number(totalSalaryCommitted.toFixed(2)),
+            totalOrdersCompleted,
+            totalOrdersWorth: Number(totalOrdersWorth.toFixed(2)),
+            unpaidCount,
+        },
+        pagination: {
+            page,
+            limit,
+            total,
+            pages: Math.max(1, Math.ceil(total / limit)),
+        },
+    };
+}
+
+export async function getDeliverySalaryPayments(deliveryPartnerId, query = {}) {
+    if (!deliveryPartnerId || !mongoose.Types.ObjectId.isValid(deliveryPartnerId)) {
+        throw new ValidationError('Invalid delivery partner ID');
+    }
+    const page = Math.max(parseInt(query.page, 10) || 1, 1);
+    const limit = Math.max(1, Math.min(100, parseInt(query.limit, 10) || 20));
+    const skip = (page - 1) * limit;
+    const filter = { deliveryPartnerId: new mongoose.Types.ObjectId(deliveryPartnerId) };
+
+    const [docs, total] = await Promise.all([
+        FoodDeliverySalaryPayment.find(filter)
+            .sort({ paidAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .lean(),
+        FoodDeliverySalaryPayment.countDocuments(filter),
+    ]);
+
+    return {
+        payments: docs.map((p) => ({
+            id: String(p._id),
+            amount: Number(p.amount || 0),
+            salaryDuration: p.salaryDuration,
+            periodStart: p.periodStart,
+            periodEnd: p.periodEnd,
+            completedOrders: Number(p.completedOrders || 0),
+            ordersWorth: Number(p.ordersWorth || 0),
+            paidAt: p.paidAt,
+            note: p.note || '',
+            transactionId: p.transactionId || '',
+            status: p.status || 'paid',
+        })),
+        pagination: {
+            page,
+            limit,
+            total,
+            pages: Math.max(1, Math.ceil(total / limit)),
+        },
+    };
+}
+
+export async function markDeliverySalaryPaid(payload = {}, adminUser = null) {
+    const partnerId = payload.deliveryPartnerId;
+    if (!partnerId || !mongoose.Types.ObjectId.isValid(partnerId)) {
+        throw new ValidationError('deliveryPartnerId is required');
+    }
+
+    const partner = await FoodDeliveryPartner.findById(partnerId).lean();
+    if (!partner) throw new ValidationError('Delivery partner not found');
+    if (partner.employmentType !== 'salary') {
+        throw new ValidationError('Partner is not on salary employment');
+    }
+
+    const salaryAmount = Number(payload.amount ?? partner.salaryAmount ?? 0);
+    if (!Number.isFinite(salaryAmount) || salaryAmount <= 0) {
+        throw new ValidationError('Salary amount must be greater than 0');
+    }
+
+    const duration =
+        payload.salaryDuration === 'monthly' || partner.salaryDuration === 'monthly'
+            ? 'monthly'
+            : 'weekly';
+
+    let periodStart = payload.periodStart ? new Date(payload.periodStart) : null;
+    let periodEnd = payload.periodEnd ? new Date(payload.periodEnd) : null;
+    if (!periodStart || !periodEnd || Number.isNaN(periodStart.getTime()) || Number.isNaN(periodEnd.getTime())) {
+        const bounds = resolveSalaryPeriodBounds(duration, payload);
+        periodStart = bounds.periodStart;
+        periodEnd = bounds.periodEnd;
+    }
+
+    const deliveredFilter = {
+        orderStatus: 'delivered',
+        createdAt: { $gte: periodStart, $lte: periodEnd },
+        $or: [
+            { 'dispatch.deliveryPartnerId': partner._id },
+            { 'dispatch.sharedPartnerId': partner._id },
+        ],
+    };
+    const orderAgg = await FoodOrder.aggregate([
+        { $match: deliveredFilter },
+        {
+            $group: {
+                _id: null,
+                completedOrders: { $sum: 1 },
+                ordersWorth: { $sum: { $ifNull: ['$pricing.total', 0] } },
+            },
+        },
+    ]);
+
+    const completedOrders = Number(orderAgg[0]?.completedOrders || 0);
+    const ordersWorth = Number(orderAgg[0]?.ordersWorth || 0);
+    const transactionId =
+        String(payload.transactionId || '').trim() ||
+        `SAL-${String(partner._id).slice(-6).toUpperCase()}-${Date.now().toString().slice(-6)}`;
+
+    const existing = await FoodDeliverySalaryPayment.findOne({
+        deliveryPartnerId: partner._id,
+        periodStart,
+        periodEnd,
+    }).lean();
+    if (existing) {
+        throw new ValidationError('Salary for this period is already marked as paid');
+    }
+
+    const payment = await FoodDeliverySalaryPayment.create({
+        deliveryPartnerId: partner._id,
+        amount: salaryAmount,
+        salaryDuration: duration,
+        periodStart,
+        periodEnd,
+        completedOrders,
+        ordersWorth,
+        paidAt: new Date(),
+        note: String(payload.note || '').trim(),
+        transactionId,
+        createdByAdminId: adminUser?._id || adminUser?.id || null,
+        status: 'paid',
+    });
+
+    return {
+        payment: {
+            id: String(payment._id),
+            deliveryPartnerId: String(partner._id),
+            amount: payment.amount,
+            salaryDuration: payment.salaryDuration,
+            periodStart: payment.periodStart,
+            periodEnd: payment.periodEnd,
+            completedOrders: payment.completedOrders,
+            ordersWorth: payment.ordersWorth,
+            paidAt: payment.paidAt,
+            note: payment.note,
+            transactionId: payment.transactionId,
+            status: payment.status,
+        },
+    };
 }
 
 export async function getDeliverymanReviews(query = {}) {
@@ -5777,6 +6521,7 @@ export const DEFAULT_DELIVERY_SPEED_OPTIONS = [
         time: '45–55 mins',
         estimatedTime: 50,
         feeModifier: -15,
+        driverShareAmount: 0,
         description: 'Batch delivery. Lower carbon footprint.',
         icon: 'leaf',
         isEnabled: true,
@@ -5791,6 +6536,7 @@ export const DEFAULT_DELIVERY_SPEED_OPTIONS = [
         time: '25–35 mins',
         estimatedTime: 30,
         feeModifier: 0,
+        driverShareAmount: 0,
         description: 'Direct to door. Reliable & prompt partner.',
         icon: 'bike',
         isEnabled: true,
@@ -5805,6 +6551,7 @@ export const DEFAULT_DELIVERY_SPEED_OPTIONS = [
         time: '15–20 mins',
         estimatedTime: 18,
         feeModifier: 20,
+        driverShareAmount: 10,
         description: 'Direct dispatch. Priority mapping partner.',
         icon: 'zap',
         isEnabled: true,
@@ -5837,6 +6584,13 @@ export function sanitizeDeliverySpeedOptions(list) {
                 time: String(o?.time || '').trim(),
                 estimatedTime: Math.max(1, Number(o?.estimatedTime) || 30),
                 feeModifier: Number(o?.feeModifier) || 0,
+                driverShareAmount: (() => {
+                    const fee = Number(o?.feeModifier) || 0;
+                    if (fee <= 0) return 0;
+                    const raw = Number(o?.driverShareAmount);
+                    if (!Number.isFinite(raw) || raw < 0) return 0;
+                    return Math.min(fee, raw);
+                })(),
                 description: String(o?.description || '').trim(),
                 icon: ALLOWED_SPEED_ICONS.has(o?.icon) ? o.icon : 'bike',
                 isEnabled: o?.isEnabled !== false,
@@ -5881,7 +6635,6 @@ export async function getDeliveryBoySettings() {
     }
     if (!settings) {
         return {
-            adminCommissionPercentage: 0,
             weeklySalarySlabs: [],
             monthlySalarySlabs: [],
             multiOrderEnabled: true,
@@ -5898,7 +6651,7 @@ export async function getDeliveryBoySettings() {
 
 export async function upsertDeliveryBoySettings(data) {
     const updatePayload = {};
-    if (data.adminCommissionPercentage !== undefined) updatePayload.adminCommissionPercentage = Number(data.adminCommissionPercentage) || 0;
+    // adminCommissionPercentage intentionally ignored — removed from food pay model
     if (data.weeklySalarySlabs !== undefined) updatePayload.weeklySalarySlabs = data.weeklySalarySlabs;
     if (data.monthlySalarySlabs !== undefined) updatePayload.monthlySalarySlabs = data.monthlySalarySlabs;
     if (data.multiOrderEnabled !== undefined) updatePayload.multiOrderEnabled = Boolean(data.multiOrderEnabled);

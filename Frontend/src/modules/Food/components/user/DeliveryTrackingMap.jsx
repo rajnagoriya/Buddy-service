@@ -86,6 +86,8 @@ const DeliveryTrackingMap = ({
 }) => {
   const [map, setMap] = useState(null);
   const [riderLocation, setRiderLocation] = useState(null);
+  /** Dual-driver: map of partnerId → { lat, lng, heading } */
+  const [riderLocations, setRiderLocations] = useState({});
   const [currentEta, setCurrentEta] = useState(null);
   /**
    * fullRoutePath — the decoded overview_path from the baseline Directions call.
@@ -156,14 +158,41 @@ const DeliveryTrackingMap = ({
     // A. FIREBASE — primary channel for DeliveryV2 orders (position + cloud
     // polyline + eta), fallback for older-flow orders.
     const unsubs = trackingIds.map(id => subscribeOrderTracking(id, (data) => {
-      const lat = Number(data?.lat ?? data?.boy_lat);
-      const lng = Number(data?.lng ?? data?.boy_lng);
-      if (Number.isFinite(lat) && Number.isFinite(lng)) {
-        setRiderLocation(prev => ({
+      const applyLoc = (key, src) => {
+        const lat = Number(src?.lat ?? src?.boy_lat);
+        const lng = Number(src?.lng ?? src?.boy_lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+        return {
           lat,
           lng,
-          heading: Number(data?.heading ?? data?.bearing ?? prev?.heading ?? 0)
-        }));
+          heading: Number(src?.heading ?? src?.bearing ?? 0),
+        };
+      };
+
+      // Dual-driver nested riders/{partnerId} (preferred when present)
+      if (data?.riders && typeof data.riders === 'object') {
+        const next = {};
+        Object.entries(data.riders).forEach(([pid, loc]) => {
+          const parsed = applyLoc(pid, loc);
+          if (parsed) next[String(pid)] = parsed;
+        });
+        if (Object.keys(next).length) {
+          setRiderLocations(next);
+          const first = Object.values(next)[0];
+          setRiderLocation(first);
+        }
+      } else {
+        const lat = Number(data?.lat ?? data?.boy_lat);
+        const lng = Number(data?.lng ?? data?.boy_lng);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          const loc = {
+            lat,
+            lng,
+            heading: Number(data?.heading ?? data?.bearing ?? 0),
+          };
+          setRiderLocation(loc);
+          setRiderLocations((prev) => ({ ...prev, primary: loc }));
+        }
       }
 
       // Sync Cloud Polyline and ETA from driver's Firebase push
@@ -198,6 +227,7 @@ const DeliveryTrackingMap = ({
       const lat = Number(data?.lat ?? data?.boy_lat ?? data?.location?.lat ?? data?.location?.coordinates?.[1]);
       const lng = Number(data?.lng ?? data?.boy_lng ?? data?.location?.lng ?? data?.location?.coordinates?.[0]);
       if (data && matchedId && Number.isFinite(lat) && Number.isFinite(lng)) {
+        const partnerKey = String(data?.deliveryPartnerId || 'primary');
         const nextPos = {
           lat,
           lng,
@@ -215,6 +245,7 @@ const DeliveryTrackingMap = ({
         };
 
         setRiderLocation(nextPos);
+        setRiderLocations((prev) => ({ ...prev, [partnerKey]: nextPos }));
       }
     });
 
@@ -277,6 +308,17 @@ const DeliveryTrackingMap = ({
   }, [cloudPolyline, isLoaded]);
 
   const displayRiderLocation = smoothLocation || riderLocation;
+  const riderMarkerList = useMemo(() => {
+    const entries = Object.entries(riderLocations || {});
+    if (!entries.length && displayRiderLocation) {
+      return [['primary', displayRiderLocation]];
+    }
+    // Prefer smoothed position for the first / primary marker used for route split
+    return entries.map(([id, loc], idx) => {
+      if (idx === 0 && displayRiderLocation) return [id, { ...loc, ...displayRiderLocation }];
+      return [id, loc];
+    });
+  }, [riderLocations, displayRiderLocation]);
 
   const tripStatus = order?.status || order?.orderStatus || 'pending';
   const isOrderPickedUp = ['picked_up', 'out_for_delivery', 'delivered'].includes(tripStatus.toLowerCase());
@@ -525,15 +567,16 @@ const DeliveryTrackingMap = ({
           </div>
         </OverlayView>
 
-        {/* ── RIDER MARKER ── */}
-        {displayRiderLocation && (
+        {/* ── RIDER MARKER(S) — one per driver on dual orders ── */}
+        {riderMarkerList.map(([riderId, loc], idx) => (
           <OverlayView
-            position={displayRiderLocation}
+            key={`rider-${riderId}`}
+            position={loc}
             mapPaneName={OverlayView.MARKER_LAYER}
           >
             <div
               style={{
-                transform: `translate(-50%, -50%) rotate(${displayRiderLocation.heading || 0}deg)`,
+                transform: `translate(-50%, -50%) rotate(${loc.heading || 0}deg)`,
                 transition: 'transform 0.2s linear',
                 willChange: 'transform',
               }}
@@ -541,13 +584,21 @@ const DeliveryTrackingMap = ({
             >
               <img
                 src="/MapRider.png"
-                alt="Rider"
+                alt={`Rider ${idx + 1}`}
                 className="w-full h-full object-contain drop-shadow-2xl"
                 onError={(e) => { e.target.src = bikeLogo; }}
               />
+              {riderMarkerList.length > 1 && (
+                <span
+                  className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-[#16A34A] text-white text-[10px] font-bold flex items-center justify-center shadow"
+                  style={{ transform: `rotate(-${loc.heading || 0}deg)` }}
+                >
+                  {idx + 1}
+                </span>
+              )}
             </div>
           </OverlayView>
-        )}
+        ))}
       </GoogleMap>
 
       {/* LIVE ARRIVAL BADGE */}

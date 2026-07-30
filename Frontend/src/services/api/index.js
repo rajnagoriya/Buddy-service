@@ -629,6 +629,12 @@ export const adminAPI = {
       params: { limit: 30, page: 1, ...params },
       contextModule: "admin",
     }),
+  /** Cancelled orders with refund info (uses orders list API). */
+  getRefundRequests: (params = {}) =>
+    apiClient.get("/food/admin/orders", {
+      params: { limit: 1000, page: 1, status: "cancelled", ...params },
+      contextModule: "admin",
+    }),
   getOrderById: (orderId) =>
     apiClient.get(`/food/admin/orders/${String(orderId)}`, {
       contextModule: "admin",
@@ -644,6 +650,13 @@ export const adminAPI = {
       { contextModule: "admin" },
     );
   },
+  /** Drop one restaurant from a multi-restaurant order (partial refund + continue). */
+  dropRestaurantFromOrder: (orderId, restaurantId, body = {}) =>
+    apiClient.patch(
+      `/food/admin/orders/${String(orderId)}/restaurants/${String(restaurantId)}/drop`,
+      body ?? {},
+      { contextModule: "admin" },
+    ),
   getMultiOrderSettlementReport: (params = {}) =>
     apiClient.get("/food/admin/orders/settlement-report", {
       params,
@@ -787,6 +800,29 @@ export const adminAPI = {
   getDeliveryEarnings: (params = {}) =>
     apiClient.get("/food/admin/delivery/earnings", {
       params,
+      contextModule: "admin",
+    }),
+  getAdminRevenue: (params = {}) =>
+    apiClient.get("/food/admin/revenue", {
+      params,
+      contextModule: "admin",
+    }),
+  getAdminRevenueOrder: (orderId) =>
+    apiClient.get(`/food/admin/revenue/${encodeURIComponent(String(orderId || ""))}`, {
+      contextModule: "admin",
+    }),
+  getDeliverySalaryEarnings: (params = {}) =>
+    apiClient.get("/food/admin/delivery/salary-earnings", {
+      params,
+      contextModule: "admin",
+    }),
+  getDeliverySalaryPayments: (id, params = {}) =>
+    apiClient.get(`/food/admin/delivery/${String(id)}/salary-payments`, {
+      params,
+      contextModule: "admin",
+    }),
+  markDeliverySalaryPaid: (body) =>
+    apiClient.post("/food/admin/delivery/salary-payments", body ?? {}, {
       contextModule: "admin",
     }),
   addDeliveryPartnerBonus: (deliveryPartnerId, amount, reference = "") =>
@@ -1933,7 +1969,7 @@ export const deliveryAPI = {
     deliveryMeCacheTime = 0;
     try {
       localStorage.removeItem("app:isOnline");
-    } catch (_) {}
+    } catch (_) { }
     const token =
       refreshToken ||
       (typeof localStorage !== "undefined"
@@ -2149,6 +2185,13 @@ export const deliveryAPI = {
       {
         contextModule: "delivery",
       },
+    ),
+  /** Set visit order for remaining multi-restaurant pickups after accept. */
+  setPickupSequence: (orderId, restaurantIds = []) =>
+    apiClient.patch(
+      `/food/delivery/orders/${String(orderId)}/pickup-sequence`,
+      { restaurantIds },
+      { contextModule: "delivery" },
     ),
   acceptSharedOrder: (orderId) =>
     apiClient.post(
@@ -2885,12 +2928,12 @@ export const diningAPI = {
   createBooking: (payload = {}) => {
     const restaurantId = String(
       payload?.restaurantId ||
-        payload?.restaurant ||
-        payload?.restaurantRef?._id ||
-        payload?.restaurantRef?.id ||
-        payload?.restaurant?._id ||
-        payload?.restaurant?.id ||
-        "",
+      payload?.restaurant ||
+      payload?.restaurantRef?._id ||
+      payload?.restaurantRef?.id ||
+      payload?.restaurant?._id ||
+      payload?.restaurant?.id ||
+      "",
     ).trim();
 
     const dateValue = payload?.date

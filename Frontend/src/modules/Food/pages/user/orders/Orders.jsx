@@ -287,7 +287,9 @@ export default function Orders() {
               items: (order.items || []).map(item => ({
                 itemId: item.itemId || item._id || item.id,
                 name: item.name || item.foodName || 'Item',
-                variantName: item.variantName || '',
+                variantId: item.variantId || item.variant?._id || item.variant?.id || '',
+                variantName: item.variantName || item.variant?.name || '',
+                variantPrice: Number(item.variantPrice ?? item.variant?.price ?? item.price) || 0,
                 quantity: item.quantity || 1,
                 price: item.price || 0,
                 image: item.image || null,
@@ -432,15 +434,22 @@ export default function Orders() {
 
         const itemRestaurantId =
           resolveEntityId(item.restaurantId) || restaurantId
+        const unitPrice =
+          Number(item.variantPrice) > 0
+            ? Number(item.variantPrice)
+            : Number(item.price) || 0
 
         return {
           id: itemId,
           itemId,
           name: item.name || item.foodName || "Item",
-          price: Number(item.price) || 0,
+          price: unitPrice,
           image: item.image || "",
           restaurant: order.restaurant || "Restaurant",
           restaurantId: itemRestaurantId,
+          variantId: item.variantId || item.variant?._id || item.variant?.id || "",
+          variantName: item.variantName || item.variant?.name || "",
+          variantPrice: unitPrice,
           description: item.description || "",
           isVeg: item.isVeg !== false,
           quantity: Math.max(1, Number(item.quantity) || 1),

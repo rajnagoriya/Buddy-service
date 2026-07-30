@@ -2,14 +2,21 @@ import { useRef } from 'react';
 import { useDeliveryStore } from '@/modules/DeliveryV2/store/useDeliveryStore';
 import { deliveryAPI } from '@food/api';
 import { toast } from 'sonner';
+import {
+  getCurrentRiderId,
+  getMyLeg,
+  isDualLegOrder,
+  getOtherLeg,
+  getPartnerWaitMessage,
+} from '@/modules/DeliveryV2/utils/partnerIdentity';
 
 /**
  * useOrderManager - Professional hook for real-world trip lifecycle actions.
  * Connects directly to the backend API services.
  */
 export const useOrderManager = () => {
-  const { 
-    activeOrder, tripStatus, updateTripStatus, clearActiveOrder, setActiveOrder, riderLocation 
+  const {
+    activeOrder, tripStatus, updateTripStatus, clearActiveOrder, setActiveOrder, riderLocation
   } = useDeliveryStore();
 
   const resolveOrderId = (orderLike = activeOrder) =>
@@ -32,13 +39,13 @@ export const useOrderManager = () => {
     acceptOrderInFlight.current = true;
     try {
       const isShared = order.isShared || order.dispatch?.isShared;
-      const response = isShared 
+      const response = isShared
         ? await deliveryAPI.acceptSharedOrder(orderId)
         : await deliveryAPI.acceptOrder(orderId);
-      
+
       if (response?.data?.success) {
         const fullOrder = response.data.data?.order || order;
-        
+
         // Robustly determine locations from multiple possible formats (Populated API vs Socket)
         // Robustly determine locations from multiple possible formats
         const getLoc = (ref, keysLat, keysLng) => {
@@ -53,27 +60,31 @@ export const useOrderManager = () => {
           return null;
         };
 
-        // For multi-restaurant, find the next pending pickup location
+        // For multi-restaurant, find the next pending pickup location (driver sequence)
         let resLoc = null;
         if (fullOrder.isMultiRestaurant && Array.isArray(fullOrder.pickups)) {
-          const nextPickup = fullOrder.pickups.find(
-            (p) =>
-              !p.permanentlyDropped &&
-              !['picked_up', 'cancelled'].includes(String(p.status || '')),
-          );
+          const nextPickup = [...fullOrder.pickups]
+            .filter(
+              (p) =>
+                !p.permanentlyDropped &&
+                !['picked_up', 'cancelled'].includes(String(p.status || '')),
+            )
+            .sort((a, b) => (Number(a.sequence) || 0) - (Number(b.sequence) || 0))[0];
           if (nextPickup) {
-            resLoc = getLoc(nextPickup, ['latitude', 'lat'], ['longitude', 'lng']);
+            resLoc =
+              getLoc(nextPickup, ['latitude', 'lat'], ['longitude', 'lng']) ||
+              getLoc(nextPickup.location, ['latitude', 'lat'], ['longitude', 'lng']);
           }
         }
 
         // Fallback to main restaurantId or top-level keys
         if (!resLoc) {
-          resLoc = getLoc(fullOrder.restaurantId, ['latitude', 'lat'], ['longitude', 'lng']) || 
-                   getLoc(fullOrder, ['restaurant_lat', 'restaurantLat', 'latitude'], ['restaurant_lng', 'restaurantLng', 'longitude']);
+          resLoc = getLoc(fullOrder.restaurantId, ['latitude', 'lat'], ['longitude', 'lng']) ||
+            getLoc(fullOrder, ['restaurant_lat', 'restaurantLat', 'latitude'], ['restaurant_lng', 'restaurantLng', 'longitude']);
         }
-                       
-        const cusLoc = getLoc(fullOrder.deliveryAddress, ['latitude', 'lat'], ['longitude', 'lng']) || 
-                       getLoc(fullOrder, ['customer_lat', 'customerLat', 'latitude'], ['customer_lng', 'customerLng', 'longitude']);
+
+        const cusLoc = getLoc(fullOrder.deliveryAddress, ['latitude', 'lat'], ['longitude', 'lng']) ||
+          getLoc(fullOrder, ['customer_lat', 'customerLat', 'latitude'], ['customer_lng', 'customerLng', 'longitude']);
 
         setActiveOrder({
           ...fullOrder,
@@ -147,12 +158,12 @@ export const useOrderManager = () => {
     try {
       // confirmOrderId(orderId, confirmedOrderId, location, data)
       const response = await deliveryAPI.confirmOrderId(
-        orderId, 
-        activeOrder.displayOrderId || orderId, 
+        orderId,
+        activeOrder.displayOrderId || orderId,
         riderLocation || {},
         { billImageUrl }
       );
-      
+
       if (response?.data?.success) {
         const updatedOrder = response.data.data?.order;
         if (updatedOrder) {
@@ -169,11 +180,17 @@ export const useOrderManager = () => {
           };
 
           let nextRestaurantLocation = activeOrder?.restaurantLocation || null;
+          let nextPickupName = '';
           if (updatedOrder.isMultiRestaurant && Array.isArray(updatedOrder.pickups)) {
-            const nextPickup = updatedOrder.pickups.find(
-              (p) => !p.permanentlyDropped && !['picked_up', 'ready_for_handover', 'cancelled'].includes(String(p.status || '')),
-            );
+            const nextPickup = [...updatedOrder.pickups]
+              .filter(
+                (p) =>
+                  !p.permanentlyDropped &&
+                  !['picked_up', 'ready_for_handover', 'cancelled'].includes(String(p.status || '')),
+              )
+              .sort((a, b) => (Number(a.sequence) || 0) - (Number(b.sequence) || 0))[0];
             if (nextPickup) {
+              nextPickupName = nextPickup.restaurantName || '';
               nextRestaurantLocation = getLoc(nextPickup, ['latitude', 'lat'], ['longitude', 'lng'])
                 || getLoc(nextPickup.location, ['latitude', 'lat'], ['longitude', 'lng'])
                 || nextRestaurantLocation;
@@ -188,16 +205,41 @@ export const useOrderManager = () => {
             customerLocation: activeOrder?.customerLocation,
           });
 
-          // If order is still not fully 'picked_up', it means there are more pickups
+          // Dual-leg: each driver can finish their own pickup even if the other
+          // partner has not collected yet (parent may still be ready_for_pickup).
+          const riderId = getCurrentRiderId();
+          const myLeg = getMyLeg(updatedOrder, riderId);
+          const myLegCollected = Boolean(
+            myLeg && ['picked_up', 'at_drop', 'delivered'].includes(String(myLeg.status || '')),
+          );
+
           const isFullyPicked = updatedOrder.orderStatus === 'picked_up' || updatedOrder.status === 'picked_up';
-          
-          if (isFullyPicked) {
+          const waitMsg = getPartnerWaitMessage(updatedOrder, riderId);
+          const waitingOnPartnerPickup =
+            isDualLegOrder(updatedOrder) &&
+            myLegCollected &&
+            !isFullyPicked &&
+            Boolean(waitMsg);
+
+          if (waitingOnPartnerPickup) {
+            // Stay on restaurant UI with an explicit wait banner (do not jump to drop yet).
+            updateTripStatus('REACHED_PICKUP');
+            toast.info(waitMsg.body);
+          } else if (isFullyPicked || myLegCollected) {
             updateTripStatus('PICKED_UP');
-            toast.success('All items collected! Heading to Drop-off');
+            toast.success(
+              myLegCollected && !isFullyPicked
+                ? 'Your items collected! Heading to Drop-off'
+                : 'All restaurants picked up! Heading to customer',
+            );
           } else {
             // Revert to PICKING_UP to target the NEXT restaurant in the pickups array
             updateTripStatus('PICKING_UP');
-            toast.info('Pickup confirmed. Capture bill at the next restaurant.');
+            toast.success(
+              nextPickupName
+                ? `Pickup done. Next: ${nextPickupName} — reach store, then capture bill.`
+                : 'Pickup confirmed. Continue to the next restaurant.',
+            );
           }
         } else {
           updateTripStatus('PICKED_UP');
@@ -245,12 +287,18 @@ export const useOrderManager = () => {
     }
     try {
       let finalOrder = activeOrder;
-      
-      // 1. Verify OTP ONLY if not already verified in the system
-      const isAlreadyVerified = activeOrder?.deliveryVerification?.dropOtp?.verified;
-      
+
+      const riderId = getCurrentRiderId();
+      const myLeg = getMyLeg(activeOrder, riderId);
+      const isDualLeg = isDualLegOrder(activeOrder);
+
+      // Dual-leg: each driver must verify THEIR own OTP — never skip via order-level flag.
+      const isAlreadyVerified = isDualLeg
+        ? Boolean(myLeg?.otpVerified)
+        : Boolean(activeOrder?.deliveryVerification?.dropOtp?.verified);
+
       if (!isAlreadyVerified) {
-        if (!otp) {
+        if (!otp || otp === 'VERIFIED') {
           toast.error('Handover code is required');
           throw new Error('Missing OTP');
         }
@@ -262,30 +310,49 @@ export const useOrderManager = () => {
           throw new Error('Invalid OTP');
         }
       }
-      
-      // 2. Mark as complete
+
       try {
-        const completeRes = await deliveryAPI.completeDelivery(orderId, { 
-          otp: otp || 'VERIFIED', // Pass 'VERIFIED' fallback if already verified 
+        const completeRes = await deliveryAPI.completeDelivery(orderId, {
+          otp: otp && otp !== 'VERIFIED' ? otp : undefined,
           rating: 5,
-          paymentMethod: paymentMethodOverride 
+          paymentMethod: paymentMethodOverride,
         });
         if (completeRes.data?.success && completeRes.data?.data?.order) {
           finalOrder = completeRes.data.data.order;
         }
       } catch (completeErr) {
-        console.warn('Complete call failed, but proceeding since OTP is verified.', completeErr);
+        const msg =
+          completeErr?.response?.data?.error ||
+          completeErr?.response?.data?.message ||
+          completeErr?.message;
+        toast.error(msg || 'Could not complete delivery');
+        throw completeErr;
       }
-      
+
       if (finalOrder) setActiveOrder(finalOrder);
+
+      // Dual-leg: this driver's trip ends when complete succeeds so the map polyline clears.
+      const otherLeg = getOtherLeg(finalOrder, getCurrentRiderId());
+      const orderDone = String(finalOrder?.orderStatus || '') === 'delivered';
       updateTripStatus('COMPLETED');
+      if (
+        isDualLegOrder(finalOrder) &&
+        !orderDone &&
+        otherLeg &&
+        String(otherLeg.status || '') !== 'delivered'
+      ) {
+        toast.info('Your delivery is done. Waiting for your partner to finish.');
+      }
     } catch (error) {
       console.error('Completion Error:', error);
-      toast.error(
-        error?.response?.data?.error ||
+      if (!error?.response) {
+        toast.error(
+          error?.response?.data?.error ||
           error?.response?.data?.message ||
+          error?.message ||
           'Verification failed',
-      );
+        );
+      }
       throw error;
     }
   };

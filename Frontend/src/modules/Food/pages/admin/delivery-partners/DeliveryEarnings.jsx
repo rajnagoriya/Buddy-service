@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useCallback } from "react"
-import { Search, Download, ChevronDown, DollarSign, Calendar, Filter, Loader2, FileText, FileSpreadsheet, Code } from "lucide-react"
+import { Search, Download, ChevronDown, DollarSign, Calendar, Filter, Loader2, FileText, FileSpreadsheet, Code, CreditCard } from "lucide-react"
+import { useSearchParams } from "react-router-dom"
 import { adminAPI } from "@food/api"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { toast } from "sonner"
@@ -25,8 +26,12 @@ const formatDate = (dateString) => {
 }
 
 export default function DeliveryEarnings() {
+  const [searchParams] = useSearchParams()
+  const partnerFromUrl = String(searchParams.get("deliveryPartnerId") || "").trim()
+  const [earningMode, setEarningMode] = useState("per_order")
   const [searchQuery, setSearchQuery] = useState("")
   const [earnings, setEarnings] = useState([])
+  const [salaryRows, setSalaryRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, pages: 1 })
@@ -35,13 +40,31 @@ export default function DeliveryEarnings() {
     totalEarnings: 0,
     totalOrders: 0
   })
+  const [salarySummary, setSalarySummary] = useState({
+    totalSalaryPartners: 0,
+    totalSalaryCommitted: 0,
+    totalOrdersCompleted: 0,
+    totalOrdersWorth: 0,
+    unpaidCount: 0,
+  })
+  const [salaryPayingId, setSalaryPayingId] = useState("")
   const [filters, setFilters] = useState({
     period: 'all',
-    deliveryPartnerId: '',
+    deliveryPartnerId: partnerFromUrl,
     fromDate: '',
     toDate: ''
   })
   const [deliveryPartners, setDeliveryPartners] = useState([])
+
+  useEffect(() => {
+    if (!partnerFromUrl) return
+    setFilters((prev) =>
+      prev.deliveryPartnerId === partnerFromUrl
+        ? prev
+        : { ...prev, deliveryPartnerId: partnerFromUrl },
+    )
+    setPagination((prev) => ({ ...prev, page: 1 }))
+  }, [partnerFromUrl])
 
   // Fetch delivery partners for filter dropdown
   const fetchDeliveryPartners = useCallback(async () => {
@@ -71,15 +94,25 @@ export default function DeliveryEarnings() {
         ...(searchQuery.trim() && { search: searchQuery.trim() })
       }
 
-      const response = await adminAPI.getDeliveryEarnings(params)
+      const response = earningMode === "salary"
+        ? await adminAPI.getDeliverySalaryEarnings(params)
+        : await adminAPI.getDeliveryEarnings(params)
       
       if (response.data?.success) {
-        setEarnings(response.data.data.earnings || [])
-        setSummary(response.data.data.summary || {})
+        if (earningMode === "salary") {
+          setSalaryRows(response.data.data.earnings || [])
+          setSalarySummary(response.data.data.summary || {})
+          setEarnings([])
+        } else {
+          setEarnings(response.data.data.earnings || [])
+          setSummary(response.data.data.summary || {})
+          setSalaryRows([])
+        }
         setPagination(response.data.data.pagination || pagination)
       } else {
         setError(response.data?.message || "Failed to fetch earnings")
         setEarnings([])
+        setSalaryRows([])
       }
     } catch (err) {
       debugError("Error fetching earnings:", err)
@@ -87,10 +120,11 @@ export default function DeliveryEarnings() {
       setError(errorMessage)
       toast.error(errorMessage)
       setEarnings([])
+      setSalaryRows([])
     } finally {
       setLoading(false)
     }
-  }, [pagination.page, pagination.limit, filters, searchQuery])
+  }, [earningMode, pagination.page, pagination.limit, filters, searchQuery])
 
   useEffect(() => {
     fetchDeliveryPartners()
@@ -109,37 +143,89 @@ export default function DeliveryEarnings() {
     setPagination(prev => ({ ...prev, page: newPage }))
   }
 
+  const handleMarkSalaryPaid = async (row) => {
+    try {
+      if (!row?.deliveryPartnerId) return
+      setSalaryPayingId(String(row.deliveryPartnerId))
+      const res = await adminAPI.markDeliverySalaryPaid({
+        deliveryPartnerId: row.deliveryPartnerId,
+        amount: row.salaryAmount,
+        salaryDuration: row.salaryDuration,
+        periodStart: row.periodStart,
+        periodEnd: row.periodEnd,
+      })
+      if (res.data?.success) {
+        toast.success("Salary marked as paid")
+        fetchEarnings()
+      } else {
+        toast.error(res.data?.message || "Failed to mark salary as paid")
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to mark salary as paid")
+    } finally {
+      setSalaryPayingId("")
+    }
+  }
+
   const handleExport = (format) => {
-    if (earnings.length === 0) {
+    const rowsForExport = earningMode === "salary" ? salaryRows : earnings
+    if (rowsForExport.length === 0) {
       toast.info("No data to export")
       return
     }
 
-    const headers = [
-      { key: "sl", label: "SI" },
-      { key: "deliveryPartnerName", label: "Delivery Boy" },
-      { key: "deliveryPartnerPhone", label: "Phone" },
-      { key: "orderId", label: "Order ID" },
-      { key: "restaurantName", label: "Restaurant" },
-      { key: "amount", label: "Earning" },
-      { key: "orderTotal", label: "Order Total" },
-      { key: "deliveryFee", label: "Delivery Fee" },
-      { key: "orderStatus", label: "Status" },
-      { key: "createdAt", label: "Date" },
-    ]
+    const headers = earningMode === "salary"
+      ? [
+          { key: "sl", label: "SI" },
+          { key: "deliveryPartnerName", label: "Delivery Boy" },
+          { key: "deliveryPartnerPhone", label: "Phone" },
+          { key: "salaryDuration", label: "Cycle" },
+          { key: "salaryAmount", label: "Fixed Salary" },
+          { key: "completedOrders", label: "Completed Orders" },
+          { key: "ordersWorth", label: "Orders Worth" },
+          { key: "paymentStatus", label: "Payment Status" },
+          { key: "period", label: "Period" },
+        ]
+      : [
+          { key: "sl", label: "SI" },
+          { key: "deliveryPartnerName", label: "Delivery Boy" },
+          { key: "deliveryPartnerPhone", label: "Phone" },
+          { key: "orderId", label: "Order ID" },
+          { key: "restaurantName", label: "Restaurant" },
+          { key: "amount", label: "Earning" },
+          { key: "orderTotal", label: "Order Total" },
+          { key: "deliveryFee", label: "Delivery Fee" },
+          { key: "orderStatus", label: "Status" },
+          { key: "createdAt", label: "Date" },
+        ]
 
-    const data = earnings.map((earning, index) => ({
-      sl: (pagination.page - 1) * pagination.limit + index + 1,
-      deliveryPartnerName: earning.deliveryPartnerName || 'N/A',
-      deliveryPartnerPhone: earning.deliveryPartnerPhone || 'N/A',
-      orderId: earning.orderId || 'N/A',
-      restaurantName: earning.restaurantName || 'N/A',
-      amount: formatCurrency(earning.amount),
-      orderTotal: formatCurrency(earning.orderTotal),
-      deliveryFee: formatCurrency(earning.deliveryFee),
-      orderStatus: earning.orderStatus || 'N/A',
-      createdAt: formatDate(earning.createdAt)
-    }))
+    const data = rowsForExport.map((earning, index) => {
+      if (earningMode === "salary") {
+        return {
+          sl: (pagination.page - 1) * pagination.limit + index + 1,
+          deliveryPartnerName: earning.deliveryPartnerName || 'N/A',
+          deliveryPartnerPhone: earning.deliveryPartnerPhone || 'N/A',
+          salaryDuration: (earning.salaryDuration || 'weekly').toUpperCase(),
+          salaryAmount: formatCurrency(earning.salaryAmount),
+          completedOrders: earning.completedOrders || 0,
+          ordersWorth: formatCurrency(earning.ordersWorth),
+          paymentStatus: earning.paymentStatus || "unpaid",
+          period: `${formatDate(earning.periodStart)} - ${formatDate(earning.periodEnd)}`,
+        }
+      }
+      return {
+        sl: (pagination.page - 1) * pagination.limit + index + 1,
+        deliveryPartnerName: earning.deliveryPartnerName || 'N/A',
+        deliveryPartnerPhone: earning.deliveryPartnerPhone || 'N/A',
+        orderId: earning.orderId || 'N/A',
+        restaurantName: earning.restaurantName || 'N/A',
+        amount: formatCurrency(earning.amount),
+        orderTotal: formatCurrency(earning.orderTotal),
+        deliveryFee: formatCurrency(earning.deliveryFee),
+        orderStatus: earning.orderStatus || 'N/A',
+        createdAt: formatDate(earning.createdAt)
+      }
+    })
 
     switch (format) {
       case "csv":
@@ -174,7 +260,8 @@ export default function DeliveryEarnings() {
     }
   }
 
-  if (loading && earnings.length === 0) {
+  const activeRows = earningMode === "salary" ? salaryRows : earnings
+  if (loading && activeRows.length === 0) {
     return (
       <div className="p-4 lg:p-6 bg-slate-50 min-h-screen w-full max-w-full overflow-x-hidden flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
@@ -201,6 +288,28 @@ export default function DeliveryEarnings() {
               </div>
             </div>
           </div>
+          <div className="mt-4 inline-flex rounded-lg border border-slate-200 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => {
+                setEarningMode("per_order")
+                setPagination((prev) => ({ ...prev, page: 1 }))
+              }}
+              className={`px-4 py-2 text-sm font-semibold ${earningMode === "per_order" ? "bg-emerald-600 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}
+            >
+              Per Order
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setEarningMode("salary")
+                setPagination((prev) => ({ ...prev, page: 1 }))
+              }}
+              className={`px-4 py-2 text-sm font-semibold ${earningMode === "salary" ? "bg-emerald-600 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}
+            >
+              Salary
+            </button>
+          </div>
         </div>
 
         {/* Summary Cards */}
@@ -209,7 +318,9 @@ export default function DeliveryEarnings() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-slate-600 mb-1">Total Delivery Boys</p>
-                <p className="text-2xl font-bold text-slate-900">{summary.totalDeliveryPartners || 0}</p>
+                <p className="text-2xl font-bold text-slate-900">
+                  {earningMode === "salary" ? salarySummary.totalSalaryPartners || 0 : summary.totalDeliveryPartners || 0}
+                </p>
               </div>
               <div className="w-12 h-12 rounded-lg bg-blue-100 flex items-center justify-center">
                 <DollarSign className="w-6 h-6 text-blue-600" />
@@ -219,8 +330,12 @@ export default function DeliveryEarnings() {
           <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-slate-600 mb-1">Total Earnings</p>
-                <p className="text-2xl font-bold text-green-600">{formatCurrency(summary.totalEarnings || 0)}</p>
+                <p className="text-sm text-slate-600 mb-1">
+                  {earningMode === "salary" ? "Total Salary Committed" : "Total Earnings"}
+                </p>
+                <p className="text-2xl font-bold text-green-600">
+                  {formatCurrency(earningMode === "salary" ? salarySummary.totalSalaryCommitted || 0 : summary.totalEarnings || 0)}
+                </p>
               </div>
               <div className="w-12 h-12 rounded-lg bg-green-100 flex items-center justify-center">
                 <DollarSign className="w-6 h-6 text-green-600" />
@@ -230,8 +345,14 @@ export default function DeliveryEarnings() {
           <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-slate-600 mb-1">Total Orders</p>
-                <p className="text-2xl font-bold text-slate-900">{summary.totalOrders || 0}</p>
+                <p className="text-sm text-slate-600 mb-1">
+                  {earningMode === "salary" ? "Orders Worth" : "Total Orders"}
+                </p>
+                <p className="text-2xl font-bold text-slate-900">
+                  {earningMode === "salary"
+                    ? formatCurrency(salarySummary.totalOrdersWorth || 0)
+                    : summary.totalOrders || 0}
+                </p>
               </div>
               <div className="w-12 h-12 rounded-lg bg-purple-100 flex items-center justify-center">
                 <FileText className="w-6 h-6 text-purple-600" />
@@ -239,6 +360,12 @@ export default function DeliveryEarnings() {
             </div>
           </div>
         </div>
+        {earningMode === "salary" && (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 flex items-center justify-between gap-3">
+            <span>Unpaid Salary Partners: <strong>{salarySummary.unpaidCount || 0}</strong></span>
+            <span>Total Completed Orders: <strong>{salarySummary.totalOrdersCompleted || 0}</strong></span>
+          </div>
+        )}
 
         {/* Filters */}
         <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-4 mb-4">
@@ -350,18 +477,32 @@ export default function DeliveryEarnings() {
                   <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase">SI</th>
                   <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase">Delivery Boy</th>
                   <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase">Phone</th>
-                  <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase">Order ID</th>
-                  <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase">Restaurant</th>
-                  <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase">Earning</th>
-                  <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase">Order Total</th>
-                  <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase">Status</th>
-                  <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase">Date</th>
+                  {earningMode === "salary" ? (
+                    <>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase">Salary</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase">Cycle</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase">Completed Orders</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase">Orders Worth</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase">Period</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase">Payment</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase">Action</th>
+                    </>
+                  ) : (
+                    <>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase">Order ID</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase">Restaurant</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase">Earning</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase">Order Total</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase">Status</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase">Date</th>
+                    </>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {earnings.length === 0 ? (
+                {activeRows.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="px-4 py-12 text-center">
+                    <td colSpan={earningMode === "salary" ? 11 : 9} className="px-4 py-12 text-center">
                       <div className="flex flex-col items-center justify-center">
                         <p className="text-lg font-semibold text-slate-700 mb-1">No Earnings Found</p>
                         <p className="text-sm text-slate-500">No earnings match your filters</p>
@@ -369,7 +510,7 @@ export default function DeliveryEarnings() {
                     </td>
                   </tr>
                 ) : (
-                  earnings.map((earning, index) => (
+                  activeRows.map((earning, index) => (
                     <tr key={earning.transactionId || index} className="hover:bg-slate-50">
                       <td className="px-4 py-3 text-sm text-slate-700">
                         {(pagination.page - 1) * pagination.limit + index + 1}
@@ -380,30 +521,82 @@ export default function DeliveryEarnings() {
                       <td className="px-4 py-3 text-sm text-slate-700">
                         {earning.deliveryPartnerPhone || 'N/A'}
                       </td>
-                      <td className="px-4 py-3 text-sm text-blue-600 font-medium">
-                        {earning.orderId || 'N/A'}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-slate-700">
-                        {earning.restaurantName || 'N/A'}
-                      </td>
-                      <td className="px-4 py-3 text-sm font-semibold text-green-600">
-                        {formatCurrency(earning.amount)}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-slate-700">
-                        {formatCurrency(earning.orderTotal)}
-                      </td>
-                      <td className="px-4 py-3 text-sm">
-                        <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                          earning.orderStatus === 'delivered' 
-                            ? 'bg-green-100 text-green-800' 
-                            : 'bg-yellow-100 text-yellow-800'
-                        }`}>
-                          {earning.orderStatus || 'N/A'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-slate-700">
-                        {formatDate(earning.createdAt)}
-                      </td>
+                      {earningMode === "salary" ? (
+                        <>
+                          <td className="px-4 py-3 text-sm font-semibold text-emerald-700">
+                            {formatCurrency(earning.salaryAmount)}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-slate-700 capitalize">
+                            {earning.salaryDuration || "weekly"}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-slate-900 font-medium">
+                            {earning.completedOrders || 0}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-slate-700">
+                            {formatCurrency(earning.ordersWorth)}
+                          </td>
+                          <td className="px-4 py-3 text-xs text-slate-600">
+                            {formatDate(earning.periodStart)} - {formatDate(earning.periodEnd)}
+                          </td>
+                          <td className="px-4 py-3 text-sm">
+                            <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                              earning.paymentStatus === 'paid'
+                                ? 'bg-green-100 text-green-800'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}>
+                              {earning.paymentStatus === "paid" ? "Paid" : "Unpaid"}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-sm">
+                            {earning.paymentStatus === "paid" ? (
+                              <div className="text-xs text-slate-500">
+                                {earning.paidAt ? `Paid: ${formatDate(earning.paidAt)}` : "Paid"}
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleMarkSalaryPaid(earning)}
+                                disabled={salaryPayingId === String(earning.deliveryPartnerId)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 disabled:opacity-60"
+                              >
+                                {salaryPayingId === String(earning.deliveryPartnerId) ? (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  <CreditCard className="w-3 h-3" />
+                                )}
+                                Mark Paid
+                              </button>
+                            )}
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="px-4 py-3 text-sm text-blue-600 font-medium">
+                            {earning.orderId || 'N/A'}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-slate-700">
+                            {earning.restaurantName || 'N/A'}
+                          </td>
+                          <td className="px-4 py-3 text-sm font-semibold text-green-600">
+                            {formatCurrency(earning.amount)}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-slate-700">
+                            {formatCurrency(earning.orderTotal)}
+                          </td>
+                          <td className="px-4 py-3 text-sm">
+                            <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                              earning.orderStatus === 'delivered' 
+                                ? 'bg-green-100 text-green-800' 
+                                : 'bg-yellow-100 text-yellow-800'
+                            }`}>
+                              {earning.orderStatus || 'N/A'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-slate-700">
+                            {formatDate(earning.createdAt)}
+                          </td>
+                        </>
+                      )}
                     </tr>
                   ))
                 )}

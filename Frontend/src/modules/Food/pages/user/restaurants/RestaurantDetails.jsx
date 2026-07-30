@@ -10,6 +10,7 @@ import { API_BASE_URL } from "@food/api/config"
 import { toast } from "sonner"
 import useEffectiveDeliveryLocation from "@food/hooks/useEffectiveDeliveryLocation"
 import { useZone } from "@food/hooks/useZone"
+import { useAddToCartFeedback } from "@food/hooks/useAddToCartFeedback"
 import { formatDistanceFromMeters, calculateDistanceKm } from "@food/utils/restaurantDisplay"
 import {
   ArrowLeft,
@@ -155,6 +156,7 @@ function RestaurantDetailsContent() {
   const showOnlyUnder250 = searchParams.get('under250') === 'true'
   const targetDishId = useMemo(() => String(searchParams.get('dish') || '').trim(), [searchParams])
   const { addToCart, updateQuantity, removeFromCart, getCartItem, cart } = useCart()
+  const handleAddToCartFeedback = useAddToCartFeedback()
   const { vegMode, addDishFavorite, removeDishFavorite, isDishFavorite, getDishFavorites, getFavorites, addFavorite, removeFavorite, isFavorite } = useProfile()
   const { effectiveLocation: userLocation } = useEffectiveDeliveryLocation() // Respects saved-address vs current-GPS delivery mode
   const { zoneId, zone, loading: loadingZone, isOutOfService } = useZone(userLocation) // Get user's zone for zone-based filtering
@@ -1542,8 +1544,7 @@ function RestaurantDetailsContent() {
         // If incrementing quantity, trigger add animation with sourcePosition
         if (newQuantity > existingCartItem.quantity && sourcePosition) {
           const result = await addToCart(cartItem, sourcePosition)
-          if (result?.ok === false) {
-            toast.error(result.error || 'Cannot add this item to cart.')
+          if (!handleAddToCartFeedback(result, 'Cannot add this item to cart.', restaurant?.name || '')) {
             return
           }
           if (newQuantity > existingCartItem.quantity + 1) {
@@ -1562,8 +1563,7 @@ function RestaurantDetailsContent() {
         // Add to cart first (adds with quantity 1), then update to desired quantity
         // Pass sourcePosition when adding a new item
         const result = await addToCart(cartItem, sourcePosition)
-        if (result?.ok === false) {
-          toast.error(result.error || 'Cannot add this item to cart.')
+        if (!handleAddToCartFeedback(result, 'Cannot add this item to cart.', restaurant?.name || '')) {
           return
         }
         if (newQuantity > 1) {

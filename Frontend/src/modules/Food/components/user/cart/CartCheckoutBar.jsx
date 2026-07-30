@@ -7,6 +7,7 @@ export default function CartCheckoutBar({
   selectedPaymentLabel,
   walletBalance,
   isPlacingOrder,
+  isCalculatingPricing = false,
   hasSavedAddress,
   disabled,
   onOpenPayment,
@@ -66,12 +67,17 @@ export default function CartCheckoutBar({
                 <Loader2 className="h-5 w-5 animate-spin" />
                 Placing order...
               </>
+            ) : isCalculatingPricing ? (
+              <>
+                <Loader2 className="h-5 w-5 animate-spin" />
+                Calculating...
+              </>
             ) : !hasSavedAddress ? (
               "Select address"
             ) : (
               "Place order"
             )}
-            {!isPlacingOrder && <ChevronRight className="h-5 w-5" />}
+            {!isPlacingOrder && !isCalculatingPricing && <ChevronRight className="h-5 w-5" />}
           </span>
         </button>
       </div>

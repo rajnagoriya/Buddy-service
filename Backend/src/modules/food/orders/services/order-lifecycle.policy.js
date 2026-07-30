@@ -274,6 +274,10 @@ export function getTotalItemCount(orderOrItems) {
   return items.reduce((sum, it) => sum + (Number(it?.quantity) || 1), 0);
 }
 
+/**
+ * Bulk / large cart: eligible for an optional second-driver search
+ * ("Find new driver"). Does NOT mean a second driver is mandatory.
+ */
 export function isShareRequired(order, settings = {}) {
   const splitEnabled = settings?.splitOrderEnabled !== false;
   const threshold = Number(settings?.splitOrderThreshold ?? 20);
@@ -286,8 +290,8 @@ export function isSharedDriverJoined(order) {
 }
 
 /**
- * Fully locked: all active restaurants accepted + primary driver accepted,
- * and if share is required then shared partner must have joined.
+ * Fully locked: all active restaurants accepted + primary driver accepted.
+ * Second-driver share is optional and does not block the lock.
  * Not locked while any pickup is awaiting DP resend.
  */
 export function isOrderFullyLocked(order, settings = {}) {
@@ -301,7 +305,6 @@ export function isOrderFullyLocked(order, settings = {}) {
 
   if (!areAllActiveRestaurantsAccepted(order)) return false;
   if (!isPrimaryDriverAccepted(order)) return false;
-  if (isShareRequired(order, settings) && !isSharedDriverJoined(order)) return false;
   return true;
 }
 
@@ -311,8 +314,88 @@ export function isOrderFullyLocked(order, settings = {}) {
  * using `deliveryState` and never populate `legs`.
  * ------------------------------------------------------------------ */
 
+/** Normalize any partner ref (ObjectId, populated doc, plain string) to an id string. */
+export function toPartnerId(ref) {
+  if (ref == null || ref === '') return '';
+  if (typeof ref === 'object') {
+    const nested = ref._id || ref.id || ref.partnerId;
+    if (nested != null && typeof nested === 'object') {
+      return String(nested._id || nested.id || nested);
+    }
+    return String(nested || '');
+  }
+  return String(ref);
+}
+
 export function isDualLegActive(order) {
-  return Boolean(order?.isDualLeg) && Array.isArray(order?.legs) && order.legs.length > 1;
+  const hasLegs = Array.isArray(order?.legs) && order.legs.length > 1;
+  if (Boolean(order?.isDualLeg) && hasLegs) return true;
+  // Soft detect: second partner already assigned with legs persisted.
+  if (order?.dispatch?.sharedPartnerId && hasLegs) return true;
+  return false;
+}
+
+/**
+ * When a shared partner is on the order but legs were never built (failed join, legacy row),
+ * rebuild independent legs so OTP/status never collapse into the single-driver path.
+ */
+export function ensureDualLegs(order, otpFactory = () => '') {
+  if (!order) return false;
+  if (isDualLegActive(order)) return true;
+  const primaryPartnerId = toPartnerId(order.dispatch?.deliveryPartnerId);
+  const secondaryPartnerId = toPartnerId(order.dispatch?.sharedPartnerId);
+  if (!primaryPartnerId || !secondaryPartnerId) return false;
+  try {
+    const { legs, splitMode } = buildDeliveryLegs(order, {
+      primaryPartnerId,
+      secondaryPartnerId,
+      primaryEarning: order.riderEarning,
+      secondaryEarning: order.sharedRiderEarning,
+      otpFactory,
+    });
+    order.legs = legs;
+    order.splitMode = splitMode;
+    order.isDualLeg = true;
+    if (typeof order.markModified === 'function') {
+      order.markModified('legs');
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Pending (unverified) per-leg handover OTPs for the customer/admin. */
+export function getPendingLegHandoverOtps(order, { onlyAtDrop = false } = {}) {
+  return (Array.isArray(order?.legs) ? order.legs : [])
+    .filter((leg) => {
+      if (leg?.otpVerified) return false;
+      if (!String(leg?.otp || '').trim()) return false;
+      if (onlyAtDrop && String(leg?.status || '') !== 'at_drop') return false;
+      return true;
+    })
+    .map((leg) => ({
+      legIndex: leg.legIndex,
+      role: leg.role,
+      partnerId: toPartnerId(leg.partnerId) || null,
+      otp: String(leg.otp).trim(),
+      status: leg.status || null,
+      otpVerified: false,
+    }));
+}
+
+/** All per-leg OTPs (including verified) — admin monitoring. */
+export function getAllLegHandoverOtps(order) {
+  return (Array.isArray(order?.legs) ? order.legs : [])
+    .filter((leg) => String(leg?.otp || '').trim())
+    .map((leg) => ({
+      legIndex: leg.legIndex,
+      role: leg.role,
+      partnerId: toPartnerId(leg.partnerId) || null,
+      otp: String(leg.otp).trim(),
+      status: leg.status || null,
+      otpVerified: Boolean(leg.otpVerified),
+    }));
 }
 
 /** Legs still in play (a cancelled leg no longer blocks parent completion). */
@@ -322,10 +405,10 @@ export function getActiveLegs(order) {
 }
 
 export function getLegForPartner(order, partnerId) {
-  const pid = String(partnerId || '');
+  const pid = toPartnerId(partnerId);
   if (!pid) return null;
   const legs = Array.isArray(order?.legs) ? order.legs : [];
-  return legs.find((leg) => String(leg?.partnerId || '') === pid) || null;
+  return legs.find((leg) => toPartnerId(leg?.partnerId) === pid) || null;
 }
 
 /** Parent order may only be DELIVERED when every active leg is delivered. */
@@ -370,7 +453,7 @@ export function getLegProgress(order) {
     legs: active.map((leg) => ({
       legIndex: leg.legIndex,
       role: leg.role,
-      partnerId: leg.partnerId ? String(leg.partnerId) : '',
+      partnerId: toPartnerId(leg.partnerId),
       status: leg.status,
       otpVerified: Boolean(leg.otpVerified),
       restaurantIds: (leg.restaurantIds || []).map(String),
@@ -396,18 +479,22 @@ export function buildDeliveryLegs(order, {
   otpFactory = () => '',
 } = {}) {
   const now = new Date();
-  const makeLeg = (legIndex, role, partnerId, earning) => ({
-    legIndex,
-    role,
-    partnerId: partnerId || null,
-    status: 'assigned',
-    restaurantIds: [],
-    itemSplits: [],
-    otp: otpFactory(),
-    otpVerified: false,
-    earning: Math.max(0, Number(earning) || 0),
-    assignedAt: now,
-  });
+  const makeLeg = (legIndex, role, partnerId, earning) => {
+    const code = typeof otpFactory === 'function' ? String(otpFactory() || '').trim() : '';
+    return {
+      legIndex,
+      role,
+      partnerId: toPartnerId(partnerId) || null,
+      status: 'assigned',
+      restaurantIds: [],
+      itemSplits: [],
+      // Each leg gets its own OTP — never reuse a single order-level code across drivers.
+      otp: code || String(Math.floor(1000 + Math.random() * 9000)),
+      otpVerified: false,
+      earning: Math.max(0, Number(earning) || 0),
+      assignedAt: now,
+    };
+  };
 
   const legs = [
     makeLeg(0, 'primary', primaryPartnerId, primaryEarning),
@@ -605,6 +692,7 @@ export function pushSettlementSnapshot(order, event, note = '') {
     platformProfit: Number(order.platformProfit) || 0,
     driverSettlement: order.driverSettlement || null,
     platformRevenue: order.platformRevenue || null,
+    settlementBreakdown: order.settlementBreakdown || null,
     deliveryFeeBreakdown: breakdown,
     isMultiRestaurant: Boolean(order.isMultiRestaurant),
     isSplitOrder: Boolean(breakdown?.isSplitOrder),
@@ -617,4 +705,128 @@ export function pushSettlementSnapshot(order, event, note = '') {
   };
   order.settlementSnapshots.push(snap);
   return snap;
+}
+
+/**
+ * Rewrite settlement ledger for a cancelled order: full refund to customer,
+ * zero payouts for restaurant, driver, and platform.
+ */
+export function applyCancellationSettlement(order, { cancelledBy = 'system', note = '' } = {}) {
+  if (!order) return null;
+
+  const total = Number(order.pricing?.total) || 0;
+  const paymentMethod = String(order.payment?.method || 'cash').toLowerCase();
+  const paymentStatus = String(order.payment?.status || 'cod_pending').toLowerCase();
+  const refund = order.payment?.refund || {};
+  const refundStatus = String(refund.status || '').toLowerCase();
+  const isCod = paymentMethod === 'cash' || paymentMethod === 'cod';
+  const wasPaid =
+    paymentStatus === 'paid' ||
+    paymentStatus === 'refunded' ||
+    paymentMethod === 'wallet' ||
+    paymentMethod === 'razorpay';
+  const refundAmount =
+    Number(refund.amount) ||
+    (refundStatus === 'processed' || paymentStatus === 'refunded' ? total : 0);
+  const refundDestination = refund.destination || null;
+
+  const previousSb =
+    order.settlementBreakdown && typeof order.settlementBreakdown === 'object'
+      ? order.settlementBreakdown
+      : {};
+  const previousRestaurants = Array.isArray(previousSb.restaurants)
+    ? previousSb.restaurants
+    : Array.isArray(order.restaurantSettlement)
+      ? order.restaurantSettlement.map((s) => ({
+          restaurantId: s.restaurantId,
+          restaurantName: s.restaurantName,
+          foodAmount: s.foodAmount,
+          packagingFee: s.packagingFee,
+          commission: s.commission,
+          speedShare: s.speedShare,
+          couponDiscount: s.couponDiscount,
+          payout: s.restaurantPayout,
+        }))
+      : [];
+
+  const originalDriverPayout =
+    Number(previousSb.driver?.payout) ||
+    Number(order.riderEarning) ||
+    0;
+  const originalSharedPayout = Number(order.sharedRiderEarning) || 0;
+  const originalPlatformProfit =
+    Number(previousSb.platform?.netProfit) ||
+    Number(order.platformProfit) ||
+    0;
+
+  order.riderEarning = 0;
+  order.sharedRiderEarning = 0;
+  order.platformProfit = 0;
+
+  if (Array.isArray(order.restaurantSettlement)) {
+    order.restaurantSettlement = order.restaurantSettlement.map((s) => ({
+      ...(s?.toObject ? s.toObject() : s),
+      restaurantPayout: 0,
+    }));
+  }
+
+  const refundNote = (() => {
+    if (refundAmount > 0 && refundDestination === 'wallet') {
+      return `Full order amount ₹${refundAmount} credited to customer wallet`;
+    }
+    if (refundAmount > 0 && refundDestination === 'source') {
+      return `Full order amount ₹${refundAmount} refunded to original payment method`;
+    }
+    if (refundAmount > 0) {
+      return `Full order amount ₹${refundAmount} refunded to customer`;
+    }
+    if (isCod) return 'COD order — no online payment collected; nothing to refund';
+    return 'No refund applicable for this cancellation';
+  })();
+
+  order.settlementBreakdown = {
+    ...previousSb,
+    status: 'cancelled',
+    customer: {
+      ...(previousSb.customer || {}),
+      paid: total,
+      refund: refundAmount,
+      refundDestination,
+      refundStatus: refund.status || (paymentStatus === 'refunded' ? 'processed' : 'none'),
+      netCost: Math.max(0, total - refundAmount),
+      note: refundNote,
+    },
+    restaurants: previousRestaurants.map((r) => ({
+      ...r,
+      originalPayout: Number(r.payout) || 0,
+      payout: 0,
+      note: 'Order cancelled — no restaurant payout',
+    })),
+    driver: {
+      ...(previousSb.driver || {}),
+      originalPayout: originalDriverPayout,
+      originalSharedPayout,
+      payout: 0,
+      sharedPayout: 0,
+      note: 'Order cancelled — no driver payout',
+    },
+    platform: {
+      ...(previousSb.platform || {}),
+      originalNetProfit: originalPlatformProfit,
+      netProfit: 0,
+      note: 'Order cancelled — platform retains no profit',
+    },
+    cancellation: {
+      cancelledBy: String(cancelledBy || 'system'),
+      reason: note || '',
+      refundAmount,
+      refundDestination,
+      refundStatus: refund.status || (paymentStatus === 'refunded' ? 'processed' : 'none'),
+      wasPaid,
+      at: new Date(),
+    },
+    costBearers: [],
+  };
+
+  return order.settlementBreakdown;
 }

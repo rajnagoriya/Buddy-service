@@ -117,6 +117,16 @@ const DeliveryMap = memo(({ orderId, order, isVisible, fallbackCustomerCoords = 
     else if (order?.restaurantId?.location?.latitude && order?.restaurantId?.location?.longitude) {
       coords = [order.restaurantId.location.longitude, order.restaurantId.location.latitude];
     }
+    else if (Array.isArray(order?.pickups) && order.pickups.length > 0) {
+      const pickupLoc = order.pickups.find((p) =>
+        Array.isArray(p?.location?.coordinates) && p.location.coordinates.length >= 2
+      )?.location;
+      if (pickupLoc?.coordinates) {
+        coords = pickupLoc.coordinates;
+      } else if (pickupLoc?.latitude != null && pickupLoc?.longitude != null) {
+        coords = [pickupLoc.longitude, pickupLoc.latitude];
+      }
+    }
 
     const fromCoords = toPointFromGeoJSON(coords);
     if (fromCoords) return fromCoords;
@@ -127,12 +137,23 @@ const DeliveryMap = memo(({ orderId, order, isVisible, fallbackCustomerCoords = 
       return { lat: fallbackLat, lng: fallbackLng };
     }
     return null;
-  }, [order?.restaurantId, order?.restaurantLocation, order?.restaurant]);
+  }, [order?.restaurantId, order?.restaurantLocation, order?.restaurant, order?.pickups]);
 
   const customerCoords = useMemo(() => {
-    const coords = order?.address?.coordinates || order?.address?.location?.coordinates;
+    const coords =
+      order?.address?.coordinates ||
+      order?.address?.location?.coordinates ||
+      order?.deliveryAddress?.coordinates ||
+      order?.deliveryAddress?.location?.coordinates;
     const fromCoords = toPointFromGeoJSON(coords);
     if (fromCoords) return fromCoords;
+
+    const addr = order?.address || order?.deliveryAddress || {};
+    const lat = Number(addr?.location?.latitude ?? addr?.latitude ?? addr?.lat);
+    const lng = Number(addr?.location?.longitude ?? addr?.longitude ?? addr?.lng);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      return { lat, lng };
+    }
 
     if (
       fallbackCustomerCoords &&
@@ -142,7 +163,7 @@ const DeliveryMap = memo(({ orderId, order, isVisible, fallbackCustomerCoords = 
       return fallbackCustomerCoords;
     }
     return null;
-  }, [order?.address, fallbackCustomerCoords]);
+  }, [order?.address, order?.deliveryAddress, fallbackCustomerCoords]);
 
   // Delivery boy data
   const deliveryBoyData = useMemo(() => order?.deliveryPartner ? {
@@ -256,6 +277,13 @@ class MapErrorBoundary extends React.Component {
 
 const getRestaurantCoordsFromOrder = (apiOrder, fallback = null) => {
   if (
+    apiOrder?.restaurantLocation?.coordinates &&
+    Array.isArray(apiOrder.restaurantLocation.coordinates) &&
+    apiOrder.restaurantLocation.coordinates.length >= 2
+  ) {
+    return apiOrder.restaurantLocation.coordinates
+  }
+  if (
     apiOrder?.restaurantId?.location?.coordinates &&
     Array.isArray(apiOrder.restaurantId.location.coordinates) &&
     apiOrder.restaurantId.location.coordinates.length >= 2
@@ -271,6 +299,15 @@ const getRestaurantCoordsFromOrder = (apiOrder, fallback = null) => {
     apiOrder.restaurant.location.coordinates.length >= 2
   ) {
     return apiOrder.restaurant.location.coordinates
+  }
+  if (Array.isArray(apiOrder?.pickups)) {
+    for (const pickup of apiOrder.pickups) {
+      const coords = pickup?.location?.coordinates
+      if (Array.isArray(coords) && coords.length >= 2) return coords
+      if (pickup?.location?.latitude != null && pickup?.location?.longitude != null) {
+        return [pickup.location.longitude, pickup.location.latitude]
+      }
+    }
   }
   return fallback || null
 }
@@ -370,15 +407,69 @@ const transformOrderForTracking = (apiOrder, previousOrder = null, explicitResta
     total: apiOrder?.pricing?.total || previousOrder?.total || 0,
     // Backend canonical field is orderStatus; keep legacy `status` for UI compatibility.
     status: apiOrder?.orderStatus || apiOrder?.status || previousOrder?.status || 'pending',
-    deliveryPartner: apiOrder?.deliveryPartnerId ? {
-      name: apiOrder.deliveryPartnerId.name || apiOrder.deliveryPartnerId.fullName || 'Delivery Partner',
-      phone: apiOrder.deliveryPartnerId.phone || apiOrder.deliveryPartnerId.phoneNumber || '',
-      avatar: apiOrder.deliveryPartnerId.avatar || apiOrder.deliveryPartnerId.profilePicture || null
+    deliveryOption: apiOrder?.deliveryOption || previousOrder?.deliveryOption || null,
+    deliveryTime: apiOrder?.deliveryTime || previousOrder?.deliveryTime || null,
+    estimatedTime:
+      apiOrder?.estimatedTime ??
+      apiOrder?.estimatedDeliveryTime ??
+      previousOrder?.estimatedTime ??
+      null,
+    estimatedDeliveryTime:
+      apiOrder?.estimatedDeliveryTime ??
+      apiOrder?.estimatedTime ??
+      previousOrder?.estimatedDeliveryTime ??
+      null,
+    restaurantAcceptedAt:
+      apiOrder?.restaurantAcceptedAt ||
+      previousOrder?.restaurantAcceptedAt ||
+      null,
+    deliveryPartner: apiOrder?.deliveryPartnerId || apiOrder?.dispatch?.deliveryPartnerId ? {
+      name: (apiOrder.deliveryPartnerId || apiOrder.dispatch?.deliveryPartnerId)?.name
+        || (apiOrder.deliveryPartnerId || apiOrder.dispatch?.deliveryPartnerId)?.fullName
+        || 'Delivery Partner',
+      phone: (apiOrder.deliveryPartnerId || apiOrder.dispatch?.deliveryPartnerId)?.phone
+        || (apiOrder.deliveryPartnerId || apiOrder.dispatch?.deliveryPartnerId)?.phoneNumber
+        || '',
+      avatar: (apiOrder.deliveryPartnerId || apiOrder.dispatch?.deliveryPartnerId)?.avatar
+        || (apiOrder.deliveryPartnerId || apiOrder.dispatch?.deliveryPartnerId)?.profileImage
+        || null
     } : (previousOrder?.deliveryPartner || null),
     deliveryPartnerId: apiOrder?.deliveryPartnerId?._id || apiOrder?.deliveryPartnerId || apiOrder?.dispatch?.deliveryPartnerId?._id || apiOrder?.dispatch?.deliveryPartnerId || apiOrder?.assignmentInfo?.deliveryPartnerId || null,
+    // Dual-driver partners for customer UI (reuse same shape as deliveryPartner)
+    deliveryPartners: (() => {
+      const toPartner = (ref, role) => {
+        if (!ref) return null;
+        const id = ref._id || ref.id || (typeof ref === 'string' ? ref : null);
+        if (!id && !ref.name && !ref.fullName) return null;
+        return {
+          id: id ? String(id) : role,
+          role,
+          name: ref.name || ref.fullName || (role === 'shared' ? 'Partner Rider' : 'Delivery Partner'),
+          phone: ref.phone || ref.phoneNumber || '',
+          avatar: ref.avatar || ref.profileImage || null,
+        };
+      };
+      const primary = toPartner(
+        apiOrder?.dispatch?.deliveryPartnerId || apiOrder?.deliveryPartnerId,
+        'primary',
+      );
+      const shared = toPartner(apiOrder?.dispatch?.sharedPartnerId, 'shared');
+      const list = [primary, shared].filter(Boolean);
+      if (list.length) return list;
+      return previousOrder?.deliveryPartners || (previousOrder?.deliveryPartner
+        ? [{ ...previousOrder.deliveryPartner, id: previousOrder.deliveryPartnerId, role: 'primary' }]
+        : []);
+    })(),
+    isDualLeg: Boolean(apiOrder?.isDualLeg || apiOrder?.dispatch?.sharedPartnerId) || previousOrder?.isDualLeg || false,
+    legHandoverOtps: (() => {
+      const fromApi = Array.isArray(apiOrder?.legHandoverOtps) ? apiOrder.legHandoverOtps : null;
+      if (fromApi?.length) return fromApi;
+      return previousOrder?.legHandoverOtps || [];
+    })(),
     dispatch: apiOrder?.dispatch || previousOrder?.dispatch || null,
     assignmentInfo: apiOrder?.assignmentInfo || previousOrder?.assignmentInfo || null,
     tracking: apiOrder?.tracking || previousOrder?.tracking || {},
+    statusHistory: apiOrder?.statusHistory || previousOrder?.statusHistory || [],
     deliveryState: apiOrder?.deliveryState || previousOrder?.deliveryState || null,
     scheduledAt: apiOrder?.scheduledAt || previousOrder?.scheduledAt || null,
     createdAt: apiOrder?.createdAt || previousOrder?.createdAt || null,
@@ -412,19 +503,32 @@ const transformOrderForTracking = (apiOrder, previousOrder = null, explicitResta
       // Prioritize: 1. Real-time handoverOtp from current API response
       // 2. Previously preserved code in local state (from socket or earlier poll)
       // 3. Nested code field in API response (if ever present)
-      const finalCode = handoverOtp || prevDropOtp?.code || apiDropOtp?.code
+      // Dual-leg: never stash a single handover code — that couples both drivers.
+      const isDual = Boolean(apiOrder?.isDualLeg) ||
+        (Array.isArray(apiOrder?.legHandoverOtps) && apiOrder.legHandoverOtps.length > 1) ||
+        (Array.isArray(previousOrder?.legHandoverOtps) && previousOrder.legHandoverOtps.length > 1)
+      const finalCode = isDual
+        ? null
+        : (handoverOtp || prevDropOtp?.code || apiDropOtp?.code)
 
       if (finalCode || prevDropOtp?.required || apiDropOtp?.required) {
         merged.dropOtp = {
           ...(prevDropOtp || {}),
           ...(apiDropOtp || {}),
-          code: finalCode
+          ...(finalCode ? { code: finalCode } : {}),
         }
+      }
+      // Preserve multi-leg OTP codes across polls
+      if (Array.isArray(apiOrder?.legHandoverOtps) && apiOrder.legHandoverOtps.length) {
+        merged.legOtps = apiOrder.legHandoverOtps
+      } else if (Array.isArray(prevDV?.legOtps) && prevDV.legOtps.length) {
+        merged.legOtps = prevDV.legOtps
       }
       return merged
     })(),
     isMultiRestaurant: apiOrder?.isMultiRestaurant || (apiOrder?.pickups?.length > 1) || previousOrder?.isMultiRestaurant || false,
     pickups: apiOrder?.pickups || previousOrder?.pickups || [],
+    partialRefunds: apiOrder?.partialRefunds || previousOrder?.partialRefunds || [],
     cancellationReason: apiOrder?.cancellationReason || previousOrder?.cancellationReason || null,
     ratings: apiOrder?.ratings || previousOrder?.ratings || {},
     restaurantRating: apiOrder?.ratings?.restaurant?.rating || apiOrder?.restaurantRating || previousOrder?.restaurantRating || null,
@@ -514,6 +618,10 @@ const StatusBanner = ({ order }) => {
     if (status === 'finding_driver') return "Fetching a delivery partner near the restaurant... 🛵";
     if (status === 'awaiting_restaurant') return "Delivery partner assigned! Waiting for the restaurant to accept your order. 🍽️";
 
+    const speedEta =
+      String(order?.deliveryTime || '').trim() ||
+      (Number(order?.estimatedTime) > 0 ? `${Number(order.estimatedTime)} mins` : '');
+
     // Logic for delay reasons
     if (delayReason) {
       if (delayReason.toLowerCase().includes('traffic')) {
@@ -541,7 +649,16 @@ const StatusBanner = ({ order }) => {
       case 'at_drop':
         return "Our partner has arrived at your location! Please be ready. 📍";
       default:
-        if (status === 'preparing') return "The chef is preparing your delicious meal... 🍳";
+        if (status === 'confirmed') {
+          return speedEta
+            ? `Restaurant accepted your order. Estimated delivery: ${speedEta}. 🍽️`
+            : "Restaurant has accepted your order and started preparing. 🍽️";
+        }
+        if (status === 'preparing') {
+          return speedEta
+            ? `The chef is preparing your meal. Estimated delivery: ${speedEta}. 🍳`
+            : "The chef is preparing your delicious meal... 🍳";
+        }
         if (status === 'ready') return "Food is ready! Waiting for rider to start delivery. ✨";
         return "We've received your order and are processing it. 📝";
     }
@@ -611,6 +728,7 @@ export default function OrderTracking() {
   const hasDeliveryPartner = !!(order?.deliveryPartnerId || order?.deliveryPartnerName)
   const hasDeliveryRating = Number.isFinite(Number(order?.ratings?.deliveryPartner?.rating || order?.deliveryPartnerRating))
   const isOrderRated = hasRestaurantRating && (!hasDeliveryPartner || hasDeliveryRating)
+  const ratingPromptedRef = useRef(false)
 
   const handleOpenRating = () => {
     setSelectedRestaurantRating(order?.ratings?.restaurant?.rating || order?.restaurantRating || null)
@@ -638,15 +756,32 @@ export default function OrderTracking() {
       })
       
       const updatedOrderData = response?.data?.data?.order || response?.data?.order
-      if (updatedOrderData) {
-        setOrder(prev => ({
-          ...prev,
-          ...updatedOrderData,
-          ratings: updatedOrderData.ratings,
-          restaurantRating: updatedOrderData.ratings?.restaurant?.rating,
-          deliveryPartnerRating: updatedOrderData.ratings?.deliveryPartner?.rating
-        }))
+      const nextRatings = updatedOrderData?.ratings || {
+        restaurant: {
+          rating: selectedRestaurantRating,
+          comment: restaurantFeedbackText || '',
+          ratedAt: new Date().toISOString(),
+        },
+        ...(deliveryPartnerCheck
+          ? {
+              deliveryPartner: {
+                rating: selectedDeliveryRating,
+                comment: deliveryFeedbackText || '',
+                ratedAt: new Date().toISOString(),
+              },
+            }
+          : {}),
       }
+
+      setOrder((prev) => ({
+        ...prev,
+        ...(updatedOrderData || {}),
+        ratings: nextRatings,
+        restaurantRating: nextRatings?.restaurant?.rating ?? selectedRestaurantRating,
+        deliveryPartnerRating: deliveryPartnerCheck
+          ? (nextRatings?.deliveryPartner?.rating ?? selectedDeliveryRating)
+          : prev?.deliveryPartnerRating,
+      }))
 
       toast.success("Thanks for your feedback!")
       setShowRatingModal(false)
@@ -683,6 +818,44 @@ export default function OrderTracking() {
     ],
   )
 
+  // Auto-open rate restaurant + driver modal once order is delivered.
+  useEffect(() => {
+    if (orderStatus !== 'delivered' || isOrderRated || showRatingModal) return
+    if (ratingPromptedRef.current) return
+
+    const orderKey = String(order?.mongoId || order?._id || order?.id || '')
+    if (!orderKey) return
+
+    try {
+      const stored = JSON.parse(localStorage.getItem('shownRatingForOrders') || '[]')
+      if (Array.isArray(stored) && stored.includes(orderKey)) {
+        ratingPromptedRef.current = true
+        return
+      }
+      const next = Array.from(new Set([...stored, orderKey]))
+      localStorage.setItem('shownRatingForOrders', JSON.stringify(next))
+    } catch {
+      // ignore storage errors
+    }
+
+    ratingPromptedRef.current = true
+    const timer = setTimeout(() => {
+      setSelectedRestaurantRating(null)
+      setSelectedDeliveryRating(null)
+      setRestaurantFeedbackText('')
+      setDeliveryFeedbackText('')
+      setShowRatingModal(true)
+    }, 600)
+    return () => clearTimeout(timer)
+  }, [
+    orderStatus,
+    isOrderRated,
+    showRatingModal,
+    order?.mongoId,
+    order?._id,
+    order?.id,
+  ])
+
   const isDriverNotFoundCancelled = useMemo(() => {
     if (orderStatus !== 'cancelled') return false
     const reason = String(order?.cancellationReason || '').toLowerCase()
@@ -712,17 +885,21 @@ export default function OrderTracking() {
       .map((item, index) => {
         const itemId = resolveEntityId(item.itemId || item.id || item._id)
         if (!itemId) return null
+        const unitPrice =
+          Number(item.variantPrice) > 0
+            ? Number(item.variantPrice)
+            : Number(item.price) || 0
         return {
           id: itemId,
           itemId,
           name: item.name || 'Item',
-          price: Number(item.price) || 0,
+          price: unitPrice,
           image: item.image || '',
           restaurant: order.restaurant || order.restaurantName || 'Restaurant',
           restaurantId: resolveEntityId(item.restaurantId) || restaurantId,
-          variantId: item.variantId,
-          variantName: item.variantName,
-          variantPrice: item.variantPrice,
+          variantId: item.variantId || item.variant?._id || item.variant?.id || '',
+          variantName: item.variantName || item.variant?.name || '',
+          variantPrice: unitPrice,
           description: item.description || '',
           isVeg: item.isVeg !== false,
           quantity: Math.max(1, Number(item.quantity) || 1),
@@ -765,8 +942,6 @@ export default function OrderTracking() {
 
       if (!otp) return
 
-      // If the order is already loaded, match by either orderId or mongoId.
-      // Otherwise, match against the current URL param.
       const currentIds = [String(orderId)]
       if (order?.orderId) currentIds.push(String(order.orderId))
       if (order?.mongoId) currentIds.push(String(order.mongoId))
@@ -778,27 +953,46 @@ export default function OrderTracking() {
 
       if (!matches) return
 
-      // Always store so UI can render even if `order` hasn't loaded yet.
-      setSocketDropOtpCode(otp)
+      setSocketDropOtpCode(detail?.isDualLeg ? null : otp)
+
+      const incomingLegs = Array.isArray(detail?.legOtps) && detail.legOtps.length
+        ? detail.legOtps
+        : [{
+            legIndex: detail?.legIndex,
+            role: detail?.role || 'primary',
+            partnerId: detail?.partnerId || null,
+            otp,
+          }]
 
       setOrder((prev) => {
         if (!prev) return prev
         const prevDV = prev.deliveryVerification || {}
         const prevDropOtp = prevDV.dropOtp || {}
-        
-        // Only update if code actually changed to avoid render loops
-        if (prevDropOtp.code === otp) return prev;
-        
+        const prevLegs = Array.isArray(prev.legHandoverOtps) ? prev.legHandoverOtps : []
+        const byKey = new Map(
+          prevLegs.map((l) => [String(l.legIndex ?? l.partnerId ?? l.role), l]),
+        )
+        incomingLegs.forEach((l) => {
+          if (!l?.otp) return
+          byKey.set(String(l.legIndex ?? l.partnerId ?? l.role), l)
+        })
+        const mergedLegs = [...byKey.values()]
+        const isDual = Boolean(detail?.isDualLeg) || prev.isDualLeg || mergedLegs.length > 1
+
         return {
           ...prev,
+          isDualLeg: isDual,
+          legHandoverOtps: mergedLegs,
           deliveryVerification: {
             ...prevDV,
             dropOtp: {
               ...prevDropOtp,
               required: true,
               verified: false,
-              code: otp
-            }
+              // Dual-leg keeps codes only in legOtps / legHandoverOtps
+              ...(isDual ? {} : { code: otp }),
+            },
+            legOtps: mergedLegs,
           }
         }
       })
@@ -808,21 +1002,52 @@ export default function OrderTracking() {
     return () => window.removeEventListener('deliveryDropOtp', handleDeliveryDropOtp)
   }, [orderId, order])
 
-  // --- Start: Sync arrival time with Home Page logic ---
+  // --- Start: Sync arrival time with selected Delivery Speed Option ---
   const getTimeRemaining = useCallback((orderData) => {
     if (!orderData) return null;
 
-    // Use scheduled time if available, fallback to creation time
+    const status = String(orderData.status || orderData.orderStatus || '').toLowerCase()
+    const restaurantAccepted = [
+      'confirmed',
+      'accepted',
+      'preparing',
+      'ready',
+      'ready_for_pickup',
+      'picked_up',
+      'out_for_delivery',
+      'reached_drop',
+    ].includes(status)
+
+    // After restaurant accepts, count down from accept time using the selected speed option ETA.
+    const history = Array.isArray(orderData.statusHistory) ? orderData.statusHistory : []
+    const acceptHistory = [...history].reverse().find((h) =>
+      ['confirmed', 'accepted', 'preparing'].includes(String(h?.to || '').toLowerCase()),
+    )
+    const acceptAt =
+      orderData.restaurantAcceptedAt ||
+      orderData.tracking?.confirmed?.timestamp ||
+      acceptHistory?.at ||
+      null
+
     const orderTime = new Date(
-      orderData.scheduledAt || orderData.createdAt || orderData.orderDate || orderData.created_at || orderData.date || Date.now(),
+      (restaurantAccepted && acceptAt) ||
+      orderData.scheduledAt ||
+      orderData.createdAt ||
+      orderData.orderDate ||
+      orderData.created_at ||
+      orderData.date ||
+      Date.now(),
     );
 
-    // For non-scheduled orders, we add the estimated delivery time to the creation time.
-    // For scheduled orders, scheduledAt is already the target time.
-    const isScheduled = !!orderData.scheduledAt;
-    const estimatedMinutes = isScheduled 
-      ? 0 
+    const isScheduled = !!orderData.scheduledAt && !restaurantAccepted;
+    const estimatedMinutes = isScheduled
+      ? 0
       : (orderData.estimatedDeliveryTime || orderData.estimatedTime || orderData.estimated_delivery_time || 35);
+
+    // Before restaurant accepts, show the selected speed option minutes (not a countdown from create).
+    if (!restaurantAccepted && !isScheduled) {
+      return Math.max(0, Number(estimatedMinutes) || 0)
+    }
 
     const deliveryTime = new Date(orderTime.getTime() + estimatedMinutes * 60000);
     return Math.max(0, Math.floor((deliveryTime - new Date()) / 60000));
@@ -1018,8 +1243,17 @@ export default function OrderTracking() {
     ].includes(status)
   }, [order?.status])
 
+  const speedEtaLabel = useMemo(() => {
+    const label = String(order?.deliveryTime || '').trim()
+    if (label) return label
+    const mins = Number(order?.estimatedTime)
+    if (Number.isFinite(mins) && mins > 0) return `${mins} mins`
+    return null
+  }, [order?.deliveryTime, order?.estimatedTime])
+
   const acceptedAtMs = useMemo(() => {
     const timestamp =
+      order?.restaurantAcceptedAt ||
       order?.tracking?.confirmed?.timestamp ||
       order?.tracking?.preparing?.timestamp ||
       order?.updatedAt ||
@@ -1027,7 +1261,7 @@ export default function OrderTracking() {
 
     const parsed = timestamp ? new Date(timestamp).getTime() : NaN
     return Number.isFinite(parsed) ? parsed : null
-  }, [order?.tracking?.confirmed?.timestamp, order?.tracking?.preparing?.timestamp, order?.updatedAt, order?.createdAt])
+  }, [order?.restaurantAcceptedAt, order?.tracking?.confirmed?.timestamp, order?.tracking?.preparing?.timestamp, order?.updatedAt, order?.createdAt])
 
   const editWindowRemainingMs = useMemo(() => {
     if (!isAdminAccepted || !acceptedAtMs) return 0
@@ -1083,10 +1317,10 @@ export default function OrderTracking() {
     }
   };
 
-  const handleCallRider = (e) => {
+  const handleCallRider = (e, phoneOverride) => {
     if (e && e.stopPropagation) e.stopPropagation();
     
-    const rawPhone = order?.deliveryPartner?.phone || '';
+    const rawPhone = phoneOverride || order?.deliveryPartner?.phone || '';
     const cleanPhone = String(rawPhone).replace(/[^\d+]/g, '');
 
     if (!cleanPhone || cleanPhone.length < 5) {
@@ -1110,10 +1344,55 @@ export default function OrderTracking() {
   };
 
   const customerDeliveryOtp = useMemo(() => {
+    // Dual-leg uses per-leg OTPs only — never collapse into one shared code.
+    if (order?.isDualLeg || (Array.isArray(order?.legHandoverOtps) && order.legHandoverOtps.length > 1)) {
+      return null
+    }
     const codeFromOrder = order?.deliveryVerification?.dropOtp?.code
     const code = codeFromOrder ?? socketDropOtpCode
     return code ? String(code) : null
-  }, [order?.deliveryVerification?.dropOtp?.code, socketDropOtpCode])
+  }, [
+    order?.isDualLeg,
+    order?.legHandoverOtps,
+    order?.deliveryVerification?.dropOtp?.code,
+    socketDropOtpCode,
+  ])
+
+  const customerLegOtps = useMemo(() => {
+    const legs = order?.legHandoverOtps || order?.deliveryVerification?.legOtps || []
+    if (Array.isArray(legs) && legs.length) {
+      return legs.filter((l) => l?.otp).map((l) => ({
+        ...l,
+        otp: String(l.otp),
+        label:
+          l.role === 'shared' || l.role === 'secondary'
+            ? 'Partner OTP'
+            : l.role === 'primary'
+              ? 'Lead rider OTP'
+              : 'Delivery OTP',
+      }))
+    }
+    if (customerDeliveryOtp) {
+      return [{ otp: customerDeliveryOtp, role: 'primary', label: 'Delivery OTP' }]
+    }
+    return []
+  }, [order?.legHandoverOtps, order?.deliveryVerification?.legOtps, customerDeliveryOtp])
+
+  const deliveryPartnersList = useMemo(() => {
+    if (Array.isArray(order?.deliveryPartners) && order.deliveryPartners.length) {
+      return order.deliveryPartners
+    }
+    if (order?.deliveryPartnerId || order?.deliveryPartner) {
+      return [{
+        id: order.deliveryPartnerId || 'primary',
+        role: 'primary',
+        name: order.deliveryPartner?.name || 'Delivery Partner',
+        phone: order.deliveryPartner?.phone || '',
+        avatar: order.deliveryPartner?.avatar || null,
+      }]
+    }
+    return []
+  }, [order?.deliveryPartners, order?.deliveryPartnerId, order?.deliveryPartner])
 
   useEffect(() => {
     if (!isEditWindowOpen) return
@@ -1278,6 +1557,8 @@ export default function OrderTracking() {
           payment: payload.payment ?? prev?.payment,
           pricing: payload.pricing ?? prev?.pricing,
           pickups: payload.pickups ?? prev?.pickups,
+          partialRefunds: payload.partialRefunds ?? prev?.partialRefunds,
+          items: payload.items ?? prev?.items,
         }
         const transformed = transformOrderForTracking(apiPatch, prev)
         const ui = mapOrderToTrackingUiStatus(transformed)
@@ -1561,7 +1842,9 @@ export default function OrderTracking() {
     },
     awaiting_restaurant: {
       title: "Waiting for restaurant",
-      subtitle: "Delivery partner assigned — restaurant will confirm soon",
+      subtitle: speedEtaLabel
+        ? `Est. delivery ${speedEtaLabel} once restaurant accepts`
+        : "Delivery partner assigned — restaurant will confirm soon",
       color: "bg-green-600",
       iconType: 'food'
     },
@@ -1573,13 +1856,17 @@ export default function OrderTracking() {
     },
     confirmed: {
       title: "Order Confirmed",
-      subtitle: "Restaurant has accepted your order",
+      subtitle: speedEtaLabel
+        ? `Estimated delivery: ${speedEtaLabel}`
+        : (typeof estimatedTime === 'number' ? `Arriving in ${estimatedTime} mins` : "Restaurant has accepted your order"),
       color: "bg-green-600",
       iconType: 'food'
     },
     preparing: {
       title: "Food is being prepared",
-      subtitle: typeof estimatedTime === 'number' ? `Arriving in ${estimatedTime} mins` : "Cooking your meal",
+      subtitle: speedEtaLabel
+        ? `Estimated delivery: ${speedEtaLabel}`
+        : (typeof estimatedTime === 'number' ? `Arriving in ${estimatedTime} mins` : "Cooking your meal"),
       color: "bg-green-600",
       iconType: 'food'
     },
@@ -1845,16 +2132,91 @@ export default function OrderTracking() {
       <div className="max-w-4xl mx-auto px-4 md:px-6 lg:px-8 py-4 md:py-6 space-y-4 md:space-y-6 pb-24 md:pb-32">
         {/* Cancellation window removed as per user request to hide immediately after acceptance */}
 
-        {customerDeliveryOtp && orderStatus !== 'delivered' && orderStatus !== 'cancelled' && (
+        {!isDeliveredOrder && orderStatus !== 'cancelled' && !isScheduledOrder && (speedEtaLabel || typeof estimatedTime === 'number') && (
           <motion.div
-            className="bg-blue-50 dark:bg-blue-900/10 rounded-xl p-4 shadow-sm border border-blue-100 dark:border-blue-900/30"
+            className="bg-white dark:bg-[#1a1a1a] rounded-xl p-4 shadow-sm border border-green-100 dark:border-green-900/40"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.15 }}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-full bg-green-50 dark:bg-green-950/40 flex items-center justify-center shrink-0">
+                <Clock className="w-6 h-6 text-[#16A34A]" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400">
+                  {order?.deliveryOption ? `${order.deliveryOption} · Estimated delivery` : 'Estimated delivery'}
+                </p>
+                <p className="text-xl font-extrabold text-gray-900 dark:text-white leading-tight mt-0.5">
+                  {speedEtaLabel || `${estimatedTime} mins`}
+                </p>
+                {['confirmed', 'preparing', 'ready', 'on_way', 'at_pickup', 'at_drop'].includes(orderStatus) &&
+                  typeof estimatedTime === 'number' && (
+                  <p className="text-sm text-[#16A34A] font-semibold mt-0.5">
+                    Arriving in ~{estimatedTime} min{estimatedTime === 1 ? '' : 's'}
+                  </p>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {customerLegOtps.length > 0 && orderStatus !== 'delivered' && orderStatus !== 'cancelled' && (
+          <motion.div
+            className="bg-blue-50 dark:bg-blue-900/10 rounded-xl p-4 shadow-sm border border-blue-100 dark:border-blue-900/30 space-y-3"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.28 }}
           >
-            <p className="text-xs font-semibold text-blue-700 dark:text-blue-400 uppercase tracking-wide">Delivery OTP</p>
-            <p className="text-2xl font-extrabold text-blue-900 dark:text-blue-200 mt-1 tracking-widest">{customerDeliveryOtp}</p>
-            <p className="text-xs text-blue-700 dark:text-blue-400 mt-1">Share this 4-digit OTP with your delivery partner at drop-off.</p>
+            <p className="text-xs font-semibold text-blue-700 dark:text-blue-400 uppercase tracking-wide">
+              {customerLegOtps.length > 1 ? 'Delivery OTPs' : 'Delivery OTP'}
+            </p>
+            <div className={customerLegOtps.length > 1 ? 'grid grid-cols-1 sm:grid-cols-2 gap-3' : ''}>
+              {customerLegOtps.map((leg, idx) => {
+                const partner = deliveryPartnersList.find(
+                  (p) =>
+                    (leg.partnerId && String(p.id) === String(leg.partnerId)) ||
+                    ((leg.role === 'shared' || leg.role === 'secondary') && p.role === 'shared') ||
+                    (leg.role === 'primary' && p.role === 'primary'),
+                ) || deliveryPartnersList[idx]
+                const roleLabel =
+                  partner?.role === 'shared' || leg.role === 'shared' || leg.role === 'secondary'
+                    ? 'Partner rider'
+                    : partner?.role === 'primary' || leg.role === 'primary'
+                      ? 'Lead rider'
+                      : `Rider ${idx + 1}`
+                return (
+                  <div
+                    key={`otp-${leg.legIndex ?? leg.partnerId ?? idx}`}
+                    className="bg-white/70 dark:bg-black/20 rounded-lg p-3 border border-blue-100/80 dark:border-blue-900/40"
+                  >
+                    <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">
+                      OTP for {partner?.name || roleLabel}
+                    </p>
+                    <p className="text-[11px] text-blue-700/80 dark:text-blue-300/80 mt-0.5">
+                      {roleLabel}
+                      {partner?.phone ? ` · ${partner.phone}` : ''}
+                    </p>
+                    <p className="text-2xl font-extrabold text-blue-900 dark:text-blue-200 mt-1 tracking-widest">{leg.otp}</p>
+                    {partner?.phone ? (
+                      <button
+                        type="button"
+                        onClick={(e) => handleCallRider(e, partner.phone)}
+                        className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-blue-700 dark:text-blue-300"
+                      >
+                        <Phone className="w-3.5 h-3.5" />
+                        Call {partner.name?.split(' ')[0] || 'rider'}
+                      </button>
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
+            <p className="text-xs text-blue-700 dark:text-blue-400">
+              {customerLegOtps.length > 1
+                ? 'Share each OTP only with the matching delivery partner named above.'
+                : 'Share this 4-digit OTP with your delivery partner at drop-off.'}
+            </p>
           </motion.div>
         )}
 
@@ -1932,14 +2294,18 @@ export default function OrderTracking() {
               </div>
               <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100">Enjoyed your food?</h3>
               <p className="text-sm text-gray-500 dark:text-gray-400 mt-2 mb-6 max-w-[280px]">
-                Rate your experience with <span className="font-semibold text-gray-700 dark:text-gray-300">{order?.restaurant}</span> and help us improve!
+                Rate <span className="font-semibold text-gray-700 dark:text-gray-300">{order?.restaurant || "the restaurant"}</span>
+                {hasDeliveryPartner
+                  ? ` and ${order?.deliveryPartnerName || "your delivery partner"}`
+                  : ""}{" "}
+                to help us improve!
               </p>
               
               <Button 
                 onClick={handleOpenRating}
                 className="w-full max-w-[200px] bg-[#16A34A] hover:bg-[#15803D] text-white font-bold h-12 rounded-xl border-none shadow-lg shadow-[#16A34A]/20"
               >
-                Rate Order
+                Rate Restaurant & Driver
               </Button>
             </div>
           </motion.div>
@@ -2013,39 +2379,63 @@ export default function OrderTracking() {
           </motion.div>
         )}
 
-        {/* Delivery Partner Info */}
-        {order?.deliveryPartnerId && (
+        {/* Delivery Partner Info — one or two riders */}
+        {deliveryPartnersList.length > 0 && (
           <motion.div
             className="bg-white dark:bg-[#1a1a1a] rounded-xl shadow-sm overflow-hidden"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.55 }}
           >
-            <div className="flex items-center gap-3 p-4 border-b border-dashed border-gray-200 dark:border-gray-800">
-              <div className="w-12 h-12 rounded-full bg-blue-50 dark:bg-blue-900/20 overflow-hidden flex items-center justify-center flex-shrink-0 border border-blue-100 dark:border-blue-900/30 p-1">
-                {order.deliveryPartner?.avatar ? (
-                  <img src={order.deliveryPartner.avatar} alt="Rider" className="w-full h-full object-cover" />
-                ) : (
-                  <div 
-                    dangerouslySetInnerHTML={{ __html: RIDER_BIKE_SVG.replace(/width="\d+"/, 'width="100%"').replace(/height="\d+"/, 'height="100%"') }} 
-                    className="w-full h-full p-1" 
-                  />
-                )}
-              </div>
-              <div className="flex-1">
-                <p className="font-semibold text-gray-900 dark:text-gray-100">{order.deliveryPartner?.name || 'Delivery Partner'}</p>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {orderStatus === 'delivered' ? 'Delivered your order' : 'Your delivery partner is arriving'}
+            {deliveryPartnersList.length > 1 && (
+              <div className="px-4 pt-3">
+                <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">
+                  2 delivery partners on this order
                 </p>
               </div>
-              <motion.button
-                className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center"
-                onClick={handleCallRider}
-                whileTap={{ scale: 0.9 }}
+            )}
+            {deliveryPartnersList.map((partner, idx) => (
+              <div
+                key={partner.id || idx}
+                className={`flex items-center gap-3 p-4 ${idx < deliveryPartnersList.length - 1 || order?.note ? 'border-b border-dashed border-gray-200 dark:border-gray-800' : ''}`}
               >
-                <Phone className="w-5 h-5 text-blue-600" />
-              </motion.button>
-            </div>
+                <div className="w-12 h-12 rounded-full bg-blue-50 dark:bg-blue-900/20 overflow-hidden flex items-center justify-center flex-shrink-0 border border-blue-100 dark:border-blue-900/30 p-1 relative">
+                  {partner.avatar ? (
+                    <img src={partner.avatar} alt="Rider" className="w-full h-full object-cover" />
+                  ) : (
+                    <div
+                      dangerouslySetInnerHTML={{ __html: RIDER_BIKE_SVG.replace(/width="\d+"/, 'width="100%"').replace(/height="\d+"/, 'height="100%"') }}
+                      className="w-full h-full p-1"
+                    />
+                  )}
+                  {deliveryPartnersList.length > 1 && (
+                    <span className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center">
+                      {idx + 1}
+                    </span>
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-gray-900 dark:text-gray-100 truncate">{partner.name}</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    {orderStatus === 'delivered'
+                      ? 'Delivered your order'
+                      : deliveryPartnersList.length > 1
+                        ? (partner.role === 'shared' ? 'Partner rider' : 'Lead rider')
+                        : 'Your delivery partner is arriving'}
+                  </p>
+                  {partner.phone ? (
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{partner.phone}</p>
+                  ) : null}
+                </div>
+                <motion.button
+                  className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center"
+                  onClick={(e) => handleCallRider(e, partner.phone)}
+                  whileTap={{ scale: 0.9 }}
+                >
+                  <Phone className="w-5 h-5 text-blue-600" />
+                </motion.button>
+              </div>
+            ))}
             {order?.note && (
               <div className="bg-blue-50/50 dark:bg-blue-900/10 p-3 mx-4 mb-4 rounded-lg flex items-start gap-2 border border-blue-100 dark:border-blue-900/20">
                 <MessageSquare className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
@@ -2179,6 +2569,33 @@ export default function OrderTracking() {
         </motion.div>
 
         {/* Restaurant Section */}
+        {Array.isArray(order.partialRefunds) && order.partialRefunds.length > 0 ? (
+          <motion.div
+            className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl p-4"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            <p className="text-xs font-bold uppercase tracking-wider text-amber-800 dark:text-amber-200 mb-2">
+              Partial refunds
+            </p>
+            <div className="space-y-1.5">
+              {order.partialRefunds.map((entry, idx) => (
+                <div
+                  key={`${entry.restaurantId || idx}-${entry.at || idx}`}
+                  className="flex items-center justify-between gap-2 text-sm text-amber-900 dark:text-amber-100"
+                >
+                  <span>
+                    {entry.restaurantName || 'Restaurant'} cancelled
+                    {entry.status === 'failed' ? ' (refund pending)' : ''}
+                  </span>
+                  <span className="font-semibold">
+                    ₹{Number(entry.amount || 0).toFixed(0)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        ) : null}
         {(order.pickups && order.pickups.length > 0 ? order.pickups : [{
           restaurantName: order.restaurant,
           restaurantAddress: order.restaurantAddress,
@@ -2186,7 +2603,11 @@ export default function OrderTracking() {
         }]).map((pickup, pIdx) => (
           <motion.div
             key={`pickup-card-${pIdx}`}
-            className="bg-white dark:bg-[#1a1a1a] rounded-xl shadow-sm overflow-hidden"
+            className={`bg-white dark:bg-[#1a1a1a] rounded-xl shadow-sm overflow-hidden ${
+              pickup.permanentlyDropped || String(pickup.status || '').toLowerCase() === 'cancelled'
+                ? 'opacity-75'
+                : ''
+            }`}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.75 + (pIdx * 0.05) }}
@@ -2199,8 +2620,11 @@ export default function OrderTracking() {
                 />
               </div>
               <div className="flex-1">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                    <p className="font-semibold text-gray-900 dark:text-gray-100">{pickup.restaurantName || order.restaurant}</p>
+                   {(pickup.permanentlyDropped || String(pickup.status || '').toLowerCase() === 'cancelled') && (
+                     <span className="bg-rose-100 text-rose-700 text-[8px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider">Cancelled</span>
+                   )}
                    {pickup.status === 'picked_up' && (
                      <span className="bg-green-100 text-green-700 text-[8px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider">Picked</span>
                    )}
@@ -2593,7 +3017,7 @@ export default function OrderTracking() {
           <DialogHeader className="mb-2">
             <DialogTitle className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
               <Star className="w-6 h-6 text-[#16A34A] fill-[#16A34A]" />
-              Rate your Experience
+              Rate restaurant & driver
             </DialogTitle>
           </DialogHeader>
 

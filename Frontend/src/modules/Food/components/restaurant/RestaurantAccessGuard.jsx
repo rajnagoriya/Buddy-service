@@ -9,10 +9,27 @@ export function invalidateRestaurantAccessGuardCache() {
   // Kept for callers that invalidate on auth change; session context handles reload.
 }
 
-function resolveRedirect(onboarding, mode, pathname, locationState = {}) {
-  const status = resolveRestaurantOnboardingStatus(onboarding);
+function buildSessionPayload(onboarding, restaurant) {
+  return {
+    ...(onboarding || {}),
+    // Prefer live restaurant account fields so approved outlets are not
+    // bounced back to onboarding by a stale onboardingStatus.
+    status: restaurant?.status ?? onboarding?.status,
+    isActive: restaurant?.isActive ?? onboarding?.isActive,
+    rejectionReason: restaurant?.rejectionReason ?? onboarding?.rejectionReason,
+    bannedAt: restaurant?.bannedAt ?? onboarding?.bannedAt,
+    onboardingStatus:
+      onboarding?.onboardingStatus || restaurant?.onboardingStatus || null,
+    currentStep: onboarding?.currentStep ?? restaurant?.currentStep,
+    rejectionStep: onboarding?.rejectionStep,
+    adminRemarks: onboarding?.adminRemarks || restaurant?.rejectionReason,
+  };
+}
+
+function resolveRedirect(sessionPayload, mode, pathname, locationState = {}) {
+  const status = resolveRestaurantOnboardingStatus(sessionPayload);
   const currentStep =
-    onboarding?.rejectionStep || onboarding?.currentStep || 1;
+    sessionPayload?.rejectionStep || sessionPayload?.currentStep || 1;
 
   if (status === "APPROVED") {
     if (mode === "onboarding" || pathname === "/food/restaurant/pending-verification") {
@@ -64,7 +81,7 @@ export default function RestaurantAccessGuard({ children, mode = "dashboard" }) 
   const location = useLocation();
   const { onboarding, restaurant, loading, error } = useRestaurantSession();
 
-  const logoutBanned = () => {
+  const logoutAndGoLogin = (state = {}) => {
     clearModuleAuth("restaurant");
     invalidateRestaurantSession();
     window.dispatchEvent(new Event("restaurantAuthChanged"));
@@ -72,13 +89,16 @@ export default function RestaurantAccessGuard({ children, mode = "dashboard" }) 
       <Navigate
         to="/food/restaurant/login"
         replace
-        state={{
-          banned: true,
-          message: "Your restaurant account has been banned. Please contact support.",
-        }}
+        state={state}
       />
     );
   };
+
+  const logoutBanned = () =>
+    logoutAndGoLogin({
+      banned: true,
+      message: "Your restaurant account has been banned. Please contact support.",
+    });
 
   if (!isModuleAuthenticated("restaurant")) {
     return (
@@ -94,11 +114,40 @@ export default function RestaurantAccessGuard({ children, mode = "dashboard" }) 
     return <Loader />;
   }
 
+  // Auth expired / invalid: clear tokens and send to login — do NOT treat as onboarding.
+  if (error?.response?.status === 401) {
+    return logoutAndGoLogin({
+      from: location.pathname + location.search,
+      message: "Session expired. Please log in again.",
+    });
+  }
+
   if (error?.response?.status === 403) {
     return logoutBanned();
   }
 
-  const sessionPayload = { ...onboarding, status: restaurant?.status, rejectionReason: restaurant?.rejectionReason, bannedAt: restaurant?.bannedAt };
+  // Network / transient errors: stay put with last known data if we have it;
+  // never send an authenticated approved restaurant to onboarding on a failed fetch.
+  const sessionPayload = buildSessionPayload(onboarding, restaurant);
+  const hasSession = Boolean(restaurant || onboarding);
+
+  if (error && !hasSession) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-3 p-6 text-center">
+        <p className="text-sm text-slate-600">
+          Couldn’t load your restaurant session. Check your connection and try again.
+        </p>
+        <button
+          type="button"
+          className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-semibold"
+          onClick={() => window.location.reload()}
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
   const banned =
     isRestaurantBanned(restaurant) ||
     isRestaurantBanned(sessionPayload) ||
@@ -109,14 +158,14 @@ export default function RestaurantAccessGuard({ children, mode = "dashboard" }) 
   }
 
   const redirectTo = resolveRedirect(
-    onboarding,
+    sessionPayload,
     mode,
     location.pathname,
     location.state,
   );
 
   if (redirectTo) {
-    const status = resolveRestaurantOnboardingStatus(onboarding);
+    const status = resolveRestaurantOnboardingStatus(sessionPayload);
     return (
       <Navigate
         to={redirectTo}
@@ -125,9 +174,14 @@ export default function RestaurantAccessGuard({ children, mode = "dashboard" }) 
           status === "REJECTED"
             ? {
                 isRejected: true,
-                rejectionReason: onboarding?.adminRemarks || onboarding?.rejectionReason || "",
+                rejectionReason:
+                  sessionPayload?.adminRemarks ||
+                  sessionPayload?.rejectionReason ||
+                  "",
                 rejectionStep:
-                  onboarding?.rejectionStep || onboarding?.currentStep || 1,
+                  sessionPayload?.rejectionStep ||
+                  sessionPayload?.currentStep ||
+                  1,
               }
             : undefined
         }

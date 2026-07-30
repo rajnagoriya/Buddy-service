@@ -185,12 +185,23 @@ const buildOnboardingLikeDataFromRestaurant = (restaurant) => {
 export const resolveRestaurantOnboardingStatus = (restaurant) => {
   if (!restaurant) return "NOT_STARTED"
   if (isRestaurantBanned(restaurant)) return "BANNED"
+
+  // Canonical account status wins over a stale onboardingStatus field.
+  // Approved restaurants must never be sent back to the wizard.
+  const accountStatus = String(restaurant?.status || "").toLowerCase()
+  if (accountStatus === "approved" || restaurant?.isActive === true) {
+    return "APPROVED"
+  }
+  if (accountStatus === "banned") return "BANNED"
+  if (accountStatus === "rejected") return "REJECTED"
+
   const explicit = String(restaurant?.onboardingStatus || "").toUpperCase()
   if (explicit === "BANNED") return "BANNED"
-  if (explicit) return explicit
-  if (restaurant?.status === "approved") return "APPROVED"
-  if (restaurant?.status === "banned") return "BANNED"
-  if (restaurant?.status === "rejected") return "REJECTED"
+  if (explicit === "APPROVED") return "APPROVED"
+  if (explicit === "REJECTED") return "REJECTED"
+  if (explicit === "SUBMITTED" || explicit === "UNDER_REVIEW") return explicit
+  if (explicit === "IN_PROGRESS" || explicit === "NOT_STARTED") return explicit
+
   if (restaurant?.submittedAt || restaurant?.pendingUpdateReason === "New Registration") {
     return "SUBMITTED"
   }

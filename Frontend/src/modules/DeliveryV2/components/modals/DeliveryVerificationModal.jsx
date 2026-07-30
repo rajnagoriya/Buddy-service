@@ -9,6 +9,14 @@ import { useDeliveryStore } from '@/modules/DeliveryV2/store/useDeliveryStore';
 import { deliveryAPI } from '@food/api';
 import { toast } from 'sonner';
 import { ActionSlider } from '@/modules/DeliveryV2/components/ui/ActionSlider';
+import {
+  getCurrentRiderId,
+  getMyLeg,
+  isDualLegOrder,
+  resolveCoDriver,
+  toPartnerId,
+  getPartnerWaitMessage,
+} from '@/modules/DeliveryV2/utils/partnerIdentity';
 
 const Backdrop = ({ onClose }) => (
   <motion.div 
@@ -55,17 +63,23 @@ const OtpModal = ({ order, onVerified, onClose }) => {
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
   const [isOtpVerified, setIsOtpVerified] = useState(false);
   const inputRefs = [useRef(), useRef(), useRef(), useRef()];
+  const currentRiderId = getCurrentRiderId();
+  const myLeg = getMyLeg(order, currentRiderId);
+  const isDualLeg = isDualLegOrder(order);
+  // Dual-leg: each driver verifies only THEIR leg OTP — never the shared order-level flag.
+  const isAlreadyVerified = isDualLeg
+    ? Boolean(myLeg?.otpVerified)
+    : Boolean(order?.deliveryVerification?.dropOtp?.verified);
 
   useEffect(() => {
-    const savedCode = order?.deliveryVerification?.dropOtp?.code;
-    if (savedCode && String(savedCode).length === 4) {
-      setOtp(String(savedCode).split(''));
+    if (isAlreadyVerified) {
+      setIsOtpVerified(true);
     }
     const timer = setTimeout(() => {
       inputRefs[0].current?.focus();
     }, 500);
     return () => clearTimeout(timer);
-  }, [order?.deliveryVerification?.dropOtp?.code]);
+  }, [isAlreadyVerified]);
 
   const orderId = order.orderId || order._id || 'ORD';
 
@@ -89,7 +103,7 @@ const OtpModal = ({ order, onVerified, onClose }) => {
       const res = await deliveryAPI.verifyDropOtp(orderId, otpString);
       if (res?.data?.success) {
         setIsOtpVerified(true);
-        setTimeout(() => onVerified(otpString), 600);
+        setTimeout(() => onVerified(otpString, res.data?.data?.order), 600);
       }
     } catch (err) {
       toast.error(
@@ -102,8 +116,6 @@ const OtpModal = ({ order, onVerified, onClose }) => {
       setIsVerifyingOtp(false);
     }
   };
-
-  const isAlreadyVerified = order?.deliveryVerification?.dropOtp?.verified;
 
   return (
     <div className="fixed inset-0 z-[2000] p-0 sm:p-4 flex items-end justify-center pointer-events-none">
@@ -120,7 +132,9 @@ const OtpModal = ({ order, onVerified, onClose }) => {
              </div>
              <div>
                <h2 className="text-xl font-bold text-gray-900">Handover Code</h2>
-               <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Step 1 of Verification</p>
+               <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
+                 {isDualLeg ? 'Your delivery OTP · Step 1' : 'Step 1 of Verification'}
+               </p>
              </div>
            </div>
            <button onClick={onClose} className="p-2 bg-gray-50 rounded-full text-gray-400 hover:text-gray-600"><X className="w-5 h-5"/></button>
@@ -128,18 +142,26 @@ const OtpModal = ({ order, onVerified, onClose }) => {
 
         <DeliveryInstructionsPanel note={order?.note} />
 
+        {isDualLeg && (
+          <div className="mb-4 rounded-2xl bg-indigo-50 border border-indigo-100 px-4 py-3">
+            <p className="text-[11px] font-bold text-indigo-800 leading-snug">
+              Ask the customer for <span className="underline">your</span> OTP only — each driver has a separate code.
+            </p>
+          </div>
+        )}
+
         <div className="flex justify-center gap-2.5 sm:gap-3 mb-6 sm:mb-8">
           {otp.map((digit, i) => (
             <input
               key={i}
               ref={inputRefs[i]}
               type="number"
-              disabled={isOtpVerified}
+              disabled={isOtpVerified || isAlreadyVerified}
               value={digit}
               onChange={(e) => handleOtpChange(i, e.target.value)}
               onKeyDown={(e) => handleKeyDown(i, e)}
               className={`w-12 sm:w-14 h-16 sm:h-18 bg-gray-50 border-2 rounded-2xl text-center text-2xl sm:text-3xl font-bold transition-all ${
-                isOtpVerified ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-200 focus:border-green-600 text-gray-700'
+                isOtpVerified || isAlreadyVerified ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-200 focus:border-green-600 text-gray-700'
               }`}
             />
           ))}
@@ -150,7 +172,7 @@ const OtpModal = ({ order, onVerified, onClose }) => {
           label={isVerifyingOtp ? "Verifying..." : isAlreadyVerified ? "Code already verified ✓" : "Slide to Verify OTP"} 
           successLabel="Verified!"
           disabled={otp.some(d => !d) || isVerifyingOtp || isOtpVerified || isAlreadyVerified}
-          onConfirm={verifyOtp}
+          onConfirm={isAlreadyVerified ? async () => onVerified('VERIFIED') : verifyOtp}
           color="bg-gray-900"
         />
       </motion.div>
@@ -167,43 +189,45 @@ const PaymentModal = ({ order, otpString, onComplete, onClose }) => {
   const [isSyncing, setIsSyncing] = useState(false);
   const pollingRef = useRef(null);
   const { profile } = useDeliveryStore();
-  // Get rider ID: delivery_user localStorage is most reliable (has actual partner _id)
-  const getCurrentRiderId = () => {
-    try {
-      const stored = localStorage.getItem('delivery_user');
-      if (stored) {
-        const user = JSON.parse(stored);
-        const id = user?._id || user?.id || user?.partnerId;
-        if (id) return String(id);
-      }
-    } catch {}
-    try {
-      const token = localStorage.getItem('delivery_accessToken');
-      if (!token) return null;
-      const payload = JSON.parse(atob(token.split('.')[1]));
-      return String(payload?.userId || payload?.id || payload?.sub || '');
-    } catch { return null; }
-  };
   const currentRiderId = getCurrentRiderId();
-  const primaryId = order.dispatch?.deliveryPartnerId?._id || order.dispatch?.deliveryPartnerId;
-  const secondaryId = order.dispatch?.sharedPartnerId?._id || order.dispatch?.sharedPartnerId;
-  
-  const isPrimaryRider = Boolean(currentRiderId) && String(primaryId || '') === String(currentRiderId);
-  const isSharedRider = Boolean(currentRiderId) && String(secondaryId || '') === String(currentRiderId);
-  const isSharedOrder = Boolean(order.dispatch?.isShared || secondaryId);
+  const primaryId = toPartnerId(order.dispatch?.deliveryPartnerId);
+  const secondaryId = toPartnerId(order.dispatch?.sharedPartnerId);
 
-  // effectiveIsPrimary: primary if matched, OR if not a shared order (solo rider).
-  // Do NOT treat as primary just because IDs are unknown — that breaks cash restriction.
-  const effectiveIsPrimary = isPrimaryRider || !isSharedOrder;
+  const isPrimaryRider = Boolean(currentRiderId) && primaryId === String(currentRiderId);
+  const isSharedRider = Boolean(currentRiderId) && secondaryId === String(currentRiderId);
+  const partnerJoined = Boolean(secondaryId);
+  const isDualLeg = isDualLegOrder(order) && partnerJoined;
+  // Searching alone is not a dual-driver delivery yet
+  const isShared = partnerJoined;
+
+  const otherPartner = resolveCoDriver(order, currentRiderId);
+  const waitMessage = getPartnerWaitMessage(order, currentRiderId);
+
+  const handleCallPartner = () => {
+    const phone = otherPartner?.phoneNumber || otherPartner?.phone;
+    if (phone) window.open(`tel:${phone}`);
+    else toast.error('Partner phone number not available');
+  };
 
   const orderId = order._id || order.orderId || 'ORD';
   const amountToCollect = order.pricing?.total || order.amountToCollect || 0;
-  const isShared = !!(order.dispatch?.isShared || order.dispatch?.sharedPartnerId);
-  const isSplitConfirmed = !!order.deliveryState?.isSplitConfirmed;
-  
-  const totalDeliveryFee = Number(order.pricing?.deliveryFee || 0);
-  const primaryShare = isShared ? totalDeliveryFee / 2 : totalDeliveryFee;
-  const sharedShare = isShared ? totalDeliveryFee / 2 : 0;
+  const isSplitConfirmed = !!order.deliveryState?.isSplitConfirmed || isDualLeg;
+
+  // Always show driver earnings (even when customer delivery fee is free / admin-borne)
+  const isSalaryPartner =
+    profile?.employmentType === 'salary' ||
+    order.earningDisplayMode === 'salary' ||
+    order.employmentType === 'salary' ||
+    (isSharedRider
+      ? order.settlementBreakdown?.driver?.sharedEmploymentType === 'salary'
+      : order.settlementBreakdown?.driver?.employmentType === 'salary');
+  const primaryShare = Number(order.riderEarning || 0) || 0;
+  const sharedShare = Number(order.sharedRiderEarning || 0) || 0;
+  const myEarning = isSalaryPartner
+    ? 0
+    : isSharedRider
+      ? sharedShare
+      : primaryShare;
   const [isConfirmingSplit, setIsConfirmingSplit] = useState(false);
 
   const handleConfirmSplit = async () => {
@@ -303,6 +327,65 @@ const PaymentModal = ({ order, otpString, onComplete, onClose }) => {
 
           <DeliveryInstructionsPanel note={order?.note} />
 
+          {/* Always show this driver's payout (incl. when customer delivery is free) */}
+          <div className="mb-6 rounded-2xl border border-emerald-100 bg-emerald-50 p-4 flex items-center justify-between">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700">
+                {isSalaryPartner ? 'Status' : 'Your Payout'}
+              </p>
+              <p className="text-[11px] font-medium text-emerald-800/80 mt-0.5">
+                {isSalaryPartner
+                  ? 'You are on salary — no per-order payout'
+                  : Number(order.pricing?.deliveryDiscount || order.pricing?.platformSubsidy || 0) > 0
+                    ? 'Customer delivery free · admin bears delivery cost'
+                    : 'Delivery earning for this trip'}
+              </p>
+            </div>
+            {isSalaryPartner ? (
+              <p className="text-sm font-black text-emerald-900 text-right">On salary</p>
+            ) : (
+              <p className="text-xl font-black text-emerald-900">₹{Number(myEarning || 0).toFixed(0)}</p>
+            )}
+          </div>
+
+          {/* Mutual contact once second driver has joined */}
+          {partnerJoined && otherPartner && (
+            <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 flex items-center gap-3 mb-6">
+              <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 shrink-0">
+                <Users className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] font-bold text-indigo-700 uppercase tracking-widest mb-0.5">
+                  Delivery Partner
+                </p>
+                <p className="text-xs font-bold text-indigo-900 truncate">
+                  {otherPartner.fullName || otherPartner.name || 'Delivery Partner'}
+                </p>
+              </div>
+              <button
+                onClick={handleCallPartner}
+                className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center text-white shadow-lg active:scale-95 transition-all shrink-0"
+                title="Call partner"
+              >
+                <PhoneCall className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          {waitMessage && (
+            <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 flex gap-3 items-start mb-6">
+              <Loader2 className="w-5 h-5 text-amber-600 animate-spin shrink-0 mt-0.5" />
+              <div>
+                <p className="text-[10px] font-bold text-amber-700 uppercase tracking-widest mb-1">
+                  {waitMessage.title}
+                </p>
+                <p className="text-xs font-medium text-amber-900 leading-tight">
+                  {waitMessage.body}
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Earnings Split Section */}
           {isShared && (
             <div className={`p-5 rounded-3xl border-2 transition-all mb-6 ${isSplitConfirmed ? 'bg-emerald-50 border-emerald-100' : 'bg-indigo-50 border-indigo-100 shadow-lg'}`}>
@@ -314,7 +397,11 @@ const PaymentModal = ({ order, otpString, onComplete, onClose }) => {
                   <div>
                     <h4 className={`text-xs font-black uppercase tracking-wider ${isSplitConfirmed ? 'text-emerald-900' : 'text-indigo-900'}`}>Earnings Split</h4>
                     <p className={`text-[10px] font-bold ${isSplitConfirmed ? 'text-emerald-600' : 'text-indigo-600'}`}>
-                      {isSplitConfirmed ? 'Confirmation Received ✓' : 'Manual Confirmation Required'}
+                      {isDualLeg
+                        ? 'Equal split · each driver completes independently'
+                        : isSplitConfirmed
+                          ? 'Confirmation Received ✓'
+                          : 'Manual Confirmation Required'}
                     </p>
                   </div>
                 </div>
@@ -332,8 +419,8 @@ const PaymentModal = ({ order, otpString, onComplete, onClose }) => {
                 </div>
               </div>
 
-              {!isSplitConfirmed ? (
-                effectiveIsPrimary ? (
+              {!isDualLeg && !isSplitConfirmed ? (
+                isPrimaryRider ? (
                   <button 
                     onClick={handleConfirmSplit}
                     disabled={isConfirmingSplit}
@@ -371,67 +458,71 @@ const PaymentModal = ({ order, otpString, onComplete, onClose }) => {
 
               {!isPaid && (
                 <div className="space-y-3">
-                  <button 
-                    onClick={handleQrSelection}
-                    disabled={isGeneratingQr}
-                    className={`w-full py-3.5 sm:py-4 border-2 rounded-2xl font-bold text-[11px] sm:text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${
-                      !isCashPayment && paymentStatus === 'pending'
-                        ? 'bg-amber-100 border-amber-400 text-amber-900 shadow-inner'
-                        : 'bg-white border-amber-200 text-amber-800'
-                    }`}
-                  >
-                    {isGeneratingQr ? <Loader2 className="w-4 h-4 animate-spin" /> : <QrCode className="w-5 h-5" />}
-                    {paymentStatus === 'pending' && !isCashPayment ? 'QR Active - Waiting...' : 'Show Payment QR'}
-                  </button>
-
-                  {!effectiveIsPrimary && isSharedRider && isShared ? (
+                  {/* Dual-leg shared rider: primary collects customer cash; they still complete their own delivery */}
+                  {isDualLeg && isSharedRider ? (
                     <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 flex gap-3 items-start">
                       <Info className="w-5 h-5 text-indigo-500 shrink-0" />
                       <p className="text-[11px] font-bold text-indigo-700 leading-tight">
-                        CASH COLLECTION RESTRICTED. <br/>
-                        Only the primary partner ({order.dispatch?.deliveryPartnerId?.fullName || order.dispatch?.deliveryPartnerId?.name || 'the lead rider'}) can collect cash.
+                        Primary partner collects customer payment. Complete your own delivery with OTP below — you can call your partner anytime.
                       </p>
                     </div>
                   ) : (
-                    <button 
-                      onClick={handleCashSelection}
-                      className={`w-full py-3.5 sm:py-4 border-2 rounded-2xl font-bold text-[11px] sm:text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${
-                        isCashPayment
-                          ? 'bg-amber-600 border-amber-600 text-white shadow-lg'
-                          : 'bg-white border-amber-200 text-amber-800'
-                      }`}
-                    >
-                      <DollarSign className="w-5 h-5" />
-                      Cash Payment
-                    </button>
+                    <>
+                      <button 
+                        onClick={handleQrSelection}
+                        disabled={isGeneratingQr}
+                        className={`w-full py-3.5 sm:py-4 border-2 rounded-2xl font-bold text-[11px] sm:text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${
+                          !isCashPayment && paymentStatus === 'pending'
+                            ? 'bg-amber-100 border-amber-400 text-amber-900 shadow-inner'
+                            : 'bg-white border-amber-200 text-amber-800'
+                        }`}
+                      >
+                        {isGeneratingQr ? <Loader2 className="w-4 h-4 animate-spin" /> : <QrCode className="w-5 h-5" />}
+                        {paymentStatus === 'pending' && !isCashPayment ? 'QR Active - Waiting...' : 'Show Payment QR'}
+                      </button>
+
+                      <button 
+                        onClick={handleCashSelection}
+                        className={`w-full py-3.5 sm:py-4 border-2 rounded-2xl font-bold text-[11px] sm:text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${
+                          isCashPayment
+                            ? 'bg-amber-600 border-amber-600 text-white shadow-lg'
+                            : 'bg-white border-amber-200 text-amber-800'
+                        }`}
+                      >
+                        <DollarSign className="w-5 h-5" />
+                        Cash Payment
+                      </button>
+                    </>
                   )}
                 </div>
               )}
           </div>
 
-          {/* If the driver collects physical cash, they can directly slide this, bypassing QR. Unless cash is selected or it's paid, lock slider. */}
-          {(!isCashPayment || effectiveIsPrimary || !isShared) ? (
-            <ActionSlider 
-              key="action-payment"
-              label={isCashPayment ? "Slide to Confirm Cash" : "Slide to Complete Order"} 
-              successLabel="Delivered! ✓"
-              disabled={(!isPaid && !isCashPayment) || (isShared && !isSplitConfirmed)}
-              onConfirm={async () => {
-                  try {
-                      await onComplete(otpString, isCashPayment ? 'cash' : 'qr');
-                  } catch (e) {
-                      throw e;
-                  }
-              }}
-              color="bg-green-600"
-            />
-          ) : (
-            <div className="bg-gray-100 rounded-2xl p-4 text-center">
-              <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">
-                Waiting for Primary to Confirm Cash
-              </p>
-            </div>
-          )}
+          {/* Both drivers complete independently on dual-leg */}
+          <ActionSlider 
+            key="action-payment"
+            label={
+              isDualLeg && isSharedRider
+                ? "Slide to Complete Your Delivery"
+                : isCashPayment
+                  ? "Slide to Confirm Cash"
+                  : "Slide to Complete Order"
+            }
+            successLabel="Delivered! ✓"
+            disabled={
+              isDualLeg && isSharedRider
+                ? false
+                : ((!isPaid && !isCashPayment) || (isShared && !isDualLeg && !isSplitConfirmed))
+            }
+            onConfirm={async () => {
+                try {
+                    await onComplete(otpString, isCashPayment ? 'cash' : 'qr');
+                } catch (e) {
+                    throw e;
+                }
+            }}
+            color="bg-green-600"
+          />
         </motion.div>
       </div>
 
@@ -481,7 +572,13 @@ const PaymentModal = ({ order, otpString, onComplete, onClose }) => {
 };
 
 export const DeliveryVerificationModal = ({ order, onComplete, onClose }) => {
-  const alreadyVerified = !!order?.deliveryVerification?.dropOtp?.verified;
+  const currentRiderId = getCurrentRiderId();
+  const myLeg = getMyLeg(order, currentRiderId);
+  const isDualLeg = isDualLegOrder(order);
+  // Dual-leg: only skip OTP if THIS driver's leg is already verified
+  const alreadyVerified = isDualLeg
+    ? Boolean(myLeg?.otpVerified)
+    : !!order?.deliveryVerification?.dropOtp?.verified;
   const paymentMethod = (
     order?.paymentMethod ||
     order?.payment?.method ||
@@ -490,8 +587,6 @@ export const DeliveryVerificationModal = ({ order, onComplete, onClose }) => {
     'cod'
   ).toLowerCase();
   const isCod = ['cash', 'cod', 'cash_on_delivery', 'razorpay_qr'].includes(paymentMethod);
-  const { profile } = useDeliveryStore();
-  const currentRiderId = profile?._id || profile?.id;
 
   // Determine initial step: skip OTP if already verified
   const [step, setStep] = useState(() => {
@@ -501,15 +596,20 @@ export const DeliveryVerificationModal = ({ order, onComplete, onClose }) => {
     return 'otp';
   });
   const [verifiedOtp, setVerifiedOtp] = useState(() => {
-    if (alreadyVerified) {
-      return order.deliveryVerification?.dropOtp?.code || 'VERIFIED';
-    }
+    if (alreadyVerified) return 'VERIFIED';
     return '';
   });
 
-  const handleOtpVerified = (otpValue) => {
-    setVerifiedOtp(otpValue);
-    // After OTP is verified: COD → show payment panel, Online → show complete button
+  const handleOtpVerified = (otpValue, updatedOrder) => {
+    setVerifiedOtp(otpValue || 'VERIFIED');
+    if (updatedOrder) {
+      try {
+        useDeliveryStore.getState().setActiveOrder?.({
+          ...(useDeliveryStore.getState().activeOrder || order),
+          ...updatedOrder,
+        });
+      } catch {}
+    }
     setStep(isCod ? 'payment' : 'complete');
   };
 

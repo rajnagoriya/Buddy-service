@@ -17,6 +17,11 @@ const deliverySpeedOptionSchema = new mongoose.Schema(
         time: { type: String, default: '', trim: true },
         estimatedTime: { type: Number, default: 30, min: 1 },
         feeModifier: { type: Number, default: 0 },
+        /**
+         * Of a positive feeModifier, how much goes to the driver (₹).
+         * Admin gets the remainder. Ignored when feeModifier <= 0 (admin bears).
+         */
+        driverShareAmount: { type: Number, default: 0, min: 0 },
         description: { type: String, default: '', trim: true },
         icon: { type: String, enum: ['bike', 'leaf', 'zap', 'truck', 'clock'], default: 'bike' },
         isEnabled: { type: Boolean, default: true },

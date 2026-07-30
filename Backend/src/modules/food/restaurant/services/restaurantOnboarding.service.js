@@ -87,15 +87,19 @@ const hasSubmittedProfile = (doc) => {
 export const resolveOnboardingStatus = (doc) => {
   if (!doc) return "NOT_STARTED";
   if (isRestaurantBanned(doc)) return "BANNED";
+
+  // Canonical account status wins over a stale onboardingStatus (e.g. IN_PROGRESS
+  // left behind after admin approval).
+  if (doc.status === "approved" || doc.isActive === true) return "APPROVED";
+  if (doc.status === "banned") return "BANNED";
+  if (doc.status === "rejected") return "REJECTED";
+
   if (
     doc.onboardingStatus &&
     ONBOARDING_STATUSES.has(doc.onboardingStatus)
   ) {
     return doc.onboardingStatus;
   }
-  if (doc.status === "approved") return "APPROVED";
-  if (doc.status === "banned") return "BANNED";
-  if (doc.status === "rejected") return "REJECTED";
   if (hasSubmittedProfile(doc)) return "SUBMITTED";
   if (doc.status === "pending") return "IN_PROGRESS";
   return "NOT_STARTED";

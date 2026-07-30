@@ -34,11 +34,14 @@ import {
   getNextPickup,
   getPickupProgress,
   isDualLegActive,
+  ensureDualLegs,
   getLegForPartner,
   getNextPickupForLeg,
   getActiveLegs,
   areAllLegsDelivered,
   getLegProgress,
+  getPendingLegHandoverOtps,
+  toPartnerId,
 } from './order-lifecycle.policy.js';
 import {
   buildOrderIdentityFilter,
@@ -52,11 +55,12 @@ import {
   pushStatusHistory,
   sanitizeOrderForExternal,
   isStatusAdvance,
-  buildDeliverySocketPayload,
+  resolveRiderPayoutAmount,
   SHARE_TIMEOUT_MS,
   PICKUP_GEOFENCE_METERS,
   DROP_GEOFENCE_METERS,
   RIDER_LOCATION_STALE_MS,
+  applyEmploymentAwareDualEarnings,
 } from './order.helpers.js';
 import { haversineMeters } from '../../../../core/location/haversine.util.js';
 
@@ -139,120 +143,129 @@ async function getPartnerCashCapacity(deliveryPartnerId) {
   const [ordersAgg, cashAgg, bonusAgg, depositsAgg, withdrawalsAgg] = await Promise.all([
     // 1. Earnings aggregation
     FoodOrder.aggregate([
-      { 
-          $match: { 
-              $and: [
-                  {
-                      $or: [
-                          { 'dispatch.deliveryPartnerId': partnerObjectId }, 
-                          { 'dispatch.sharedPartnerId': partnerObjectId }
-                      ]
-                  },
-                  { orderStatus: 'delivered' }
+      {
+        $match: {
+          $and: [
+            {
+              $or: [
+                { 'dispatch.deliveryPartnerId': partnerObjectId },
+                { 'dispatch.sharedPartnerId': partnerObjectId }
               ]
-          } 
+            },
+            { orderStatus: 'delivered' }
+          ]
+        }
       },
-      { 
-          $group: { 
-              _id: null, 
-              totalEarned: { 
-                  $sum: { 
-                      $cond: [
-                          { $eq: ["$dispatch.deliveryPartnerId", partnerObjectId] },
-                          { 
-                              $cond: [
-                                  { $gt: [{ $ifNull: ["$riderEarning", 0] }, 0] },
-                                  "$riderEarning",
-                                  { $ifNull: ["$pricing.deliveryFee", 0] }
-                              ]
-                          },
-                          { $ifNull: ["$sharedRiderEarning", 0] }
-                      ]
-                  } 
-              }
-          } 
+      {
+        $group: {
+          _id: null,
+          totalEarned: {
+            $sum: {
+              $cond: [
+                { $eq: ["$dispatch.deliveryPartnerId", partnerObjectId] },
+                {
+                  $ifNull: [
+                    "$riderEarning",
+                    {
+                      $ifNull: [
+                        "$pricing.deliveryFeeBreakdown.riderFee",
+                        {
+                          $ifNull: [
+                            "$settlementBreakdown.driver.payout",
+                            { $ifNull: ["$pricing.deliveryFeeBreakdown.deliveryBoyFee", 0] },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+                { $ifNull: ["$sharedRiderEarning", 0] }
+              ]
+            }
+          }
+        }
       }
     ]),
     // 2. Cash aggregation (Active orders included)
     FoodOrder.aggregate([
-      { 
-          $match: { 
-              $and: [
-                  {
-                      $or: [
-                          { 'dispatch.deliveryPartnerId': partnerObjectId }, 
-                          { 'dispatch.sharedPartnerId': partnerObjectId }
-                      ]
-                  },
-                  {
-                      orderStatus: { 
-                          $in: [
-                              'confirmed', 'preparing', 'ready_for_pickup', 'reached_pickup', 'picked_up', 'reached_drop', 'delivered', 'completed',
-                              'CONFIRMED', 'PREPARING', 'READY_FOR_PICKUP', 'REACHED_PICKUP', 'PICKED_UP', 'REACHED_DROP', 'DELIVERED', 'COMPLETED'
-                          ] 
-                      }
-                  },
-                  {
-                      $or: [
-                          { 'payment.method': { $in: ['cash', 'cod', 'CASH', 'COD'] } },
-                          { 'paymentMethod': { $in: ['cash', 'cod', 'CASH', 'COD'] } },
-                          { 
-                              $and: [
-                                  { 'payment.method': { $exists: false } },
-                                  { 'paymentMethod': { $exists: false } }
-                              ]
-                          }
-                      ]
-                  }
+      {
+        $match: {
+          $and: [
+            {
+              $or: [
+                { 'dispatch.deliveryPartnerId': partnerObjectId },
+                { 'dispatch.sharedPartnerId': partnerObjectId }
               ]
-          } 
-      },
-      { 
-          $group: { 
-              _id: null, 
-              actualCashCollected: { 
-                  $sum: { 
-                      $cond: [
-                          { $in: ["$orderStatus", ["delivered", "completed", "DELIVERED", "COMPLETED"]] },
-                          { 
-                              $cond: [
-                                  { $gt: [{ $ifNull: ["$amountToCollect", 0] }, 0] }, 
-                                  "$amountToCollect",
-                                  { 
-                                      $cond: [
-                                          { $gt: [{ $ifNull: ["$payment.amountDue", 0] }, 0] },
-                                          "$payment.amountDue",
-                                          { $ifNull: ["$pricing.total", { $ifNull: ["$totalAmount", 0] }] }
-                                      ]
-                                  }
-                              ]
-                          },
-                          0
-                      ]
-                  } 
-              },
-              pendingCashLiability: { 
-                  $sum: { 
-                      $cond: [
-                          { $not: { $in: ["$orderStatus", ["delivered", "completed", "DELIVERED", "COMPLETED"]] } },
-                          { 
-                              $cond: [
-                                  { $gt: [{ $ifNull: ["$amountToCollect", 0] }, 0] }, 
-                                  "$amountToCollect",
-                                  { 
-                                      $cond: [
-                                          { $gt: [{ $ifNull: ["$payment.amountDue", 0] }, 0] },
-                                          "$payment.amountDue",
-                                          { $ifNull: ["$pricing.total", { $ifNull: ["$totalAmount", 0] }] }
-                                      ]
-                                  }
-                              ]
-                          },
-                          0
-                      ]
-                  } 
+            },
+            {
+              orderStatus: {
+                $in: [
+                  'confirmed', 'preparing', 'ready_for_pickup', 'reached_pickup', 'picked_up', 'reached_drop', 'delivered', 'completed',
+                  'CONFIRMED', 'PREPARING', 'READY_FOR_PICKUP', 'REACHED_PICKUP', 'PICKED_UP', 'REACHED_DROP', 'DELIVERED', 'COMPLETED'
+                ]
               }
-          } 
+            },
+            {
+              $or: [
+                { 'payment.method': { $in: ['cash', 'cod', 'CASH', 'COD'] } },
+                { 'paymentMethod': { $in: ['cash', 'cod', 'CASH', 'COD'] } },
+                {
+                  $and: [
+                    { 'payment.method': { $exists: false } },
+                    { 'paymentMethod': { $exists: false } }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          actualCashCollected: {
+            $sum: {
+              $cond: [
+                { $in: ["$orderStatus", ["delivered", "completed", "DELIVERED", "COMPLETED"]] },
+                {
+                  $cond: [
+                    { $gt: [{ $ifNull: ["$amountToCollect", 0] }, 0] },
+                    "$amountToCollect",
+                    {
+                      $cond: [
+                        { $gt: [{ $ifNull: ["$payment.amountDue", 0] }, 0] },
+                        "$payment.amountDue",
+                        { $ifNull: ["$pricing.total", { $ifNull: ["$totalAmount", 0] }] }
+                      ]
+                    }
+                  ]
+                },
+                0
+              ]
+            }
+          },
+          pendingCashLiability: {
+            $sum: {
+              $cond: [
+                { $not: { $in: ["$orderStatus", ["delivered", "completed", "DELIVERED", "COMPLETED"]] } },
+                {
+                  $cond: [
+                    { $gt: [{ $ifNull: ["$amountToCollect", 0] }, 0] },
+                    "$amountToCollect",
+                    {
+                      $cond: [
+                        { $gt: [{ $ifNull: ["$payment.amountDue", 0] }, 0] },
+                        "$payment.amountDue",
+                        { $ifNull: ["$pricing.total", { $ifNull: ["$totalAmount", 0] }] }
+                      ]
+                    }
+                  ]
+                },
+                0
+              ]
+            }
+          }
+        }
       }
     ]),
     // 3. Bonuses
@@ -311,6 +324,13 @@ function emitOrderUpdate(order, deliveryPartnerId, options = {}) {
     if (io) {
       const dv =
         order.deliveryVerification?.toObject?.() || order.deliveryVerification;
+      // Never broadcast secret OTPs. Presence + otpVerified only.
+      const publicLegs = Array.isArray(order.legs)
+        ? order.legs.map((leg) => {
+            const { otp, ...rest } = leg?.toObject?.() || leg || {};
+            return { ...rest, hasOtp: Boolean(otp), otpVerified: Boolean(rest.otpVerified) };
+          })
+        : [];
       const payload = {
         orderMongoId: order._id?.toString?.(),
         orderId: order._id.toString(),
@@ -319,6 +339,8 @@ function emitOrderUpdate(order, deliveryPartnerId, options = {}) {
         deliveryVerification: dv,
         pickups: order.pickups || [],
         pickupProgress: getPickupProgress(order),
+        isDualLeg: isDualLegActive(order),
+        legs: publicLegs,
         legProgress: getLegProgress(order),
         dispatch: order.dispatch || null,
         isMultiRestaurant: Boolean(order.isMultiRestaurant),
@@ -329,7 +351,8 @@ function emitOrderUpdate(order, deliveryPartnerId, options = {}) {
         order.dispatch?.sharedPartnerId,
       ]
         .filter(Boolean)
-        .map((id) => String(id));
+        .map((id) => toPartnerId(id))
+        .filter(Boolean);
       for (const riderId of [...new Set(riderIds)]) {
         io.to(rooms.delivery(riderId)).emit('order_status_update', payload);
       }
@@ -438,8 +461,7 @@ async function syncRazorpayQrPayment(orderDoc) {
     link = await fetchRazorpayPaymentLink(paymentLinkId);
   } catch (error) {
     logger.warn(
-      `Razorpay payment-link fetch failed for ${paymentLinkId}: ${
-        error?.message || error
+      `Razorpay payment-link fetch failed for ${paymentLinkId}: ${error?.message || error
       }`,
     );
     return orderDoc.payment;
@@ -607,15 +629,15 @@ export async function listOrdersAvailableDelivery(deliveryPartnerId, query) {
 
   const filter = partnerCapacity.hasCapacity
     ? {
-        $or: [
-          {
-            'dispatch.status': 'unassigned',
-            orderStatus: { $in: ['confirmed', 'preparing', 'ready_for_pickup'] },
-          },
-          shareableFilter,
-          activeOwnOrderFilter,
-        ],
-      }
+      $or: [
+        {
+          'dispatch.status': 'unassigned',
+          orderStatus: { $in: ['confirmed', 'preparing', 'ready_for_pickup'] },
+        },
+        shareableFilter,
+        activeOwnOrderFilter,
+      ],
+    }
     : activeOwnOrderFilter;
 
   const [docs, total] = await Promise.all([
@@ -639,40 +661,41 @@ export async function listOrdersAvailableDelivery(deliveryPartnerId, query) {
     : [];
   const txByOrderId = new Map(txRows.map((t) => [String(t.orderId), t]));
 
+  const partner = await FoodDeliveryPartner.findById(deliveryPartnerId)
+    .select('employmentType')
+    .lean();
+  const employmentType = partner?.employmentType || 'per_order';
+  const isSalaryPartner = employmentType === 'salary';
+  const earningDisplayMode = isSalaryPartner ? 'salary' : 'per_order';
+
   const enriched = (docs || []).map((doc) => {
     const tx = txByOrderId.get(String(doc?._id)) || null;
     const pricing = tx?.pricing || doc.pricing;
-    const riderEarning = (() => {
-      const candidates = [
-        doc?.riderEarning,
-        pricing?.deliveryFeeBreakdown?.riderFee,
-        pricing?.deliveryFeeBreakdown?.deliveryBoyFee,
-      ];
-      for (const value of candidates) {
-        const n = Number(value);
-        if (Number.isFinite(n) && n > 0) return n;
-      }
-      for (const value of candidates) {
-        const n = Number(value);
-        if (Number.isFinite(n) && n >= 0) return n;
-      }
-      return 0;
-    })();
+    const orderForPayout = {
+      ...doc,
+      pricing,
+      riderEarning: isSalaryPartner ? 0 : doc?.riderEarning,
+    };
+    const riderEarning = isSalaryPartner
+      ? 0
+      : resolveRiderPayoutAmount(orderForPayout);
     const base = tx
       ? {
-          ...doc,
-          paymentMethod: tx.payment?.method || tx.paymentMethod || doc.paymentMethod,
-          payment: tx.payment || doc.payment,
-          pricing,
-          amounts: tx.amounts || doc.amounts,
-          transactionStatus: tx.status || doc.transactionStatus,
-        }
+        ...doc,
+        paymentMethod: tx.payment?.method || tx.paymentMethod || doc.paymentMethod,
+        payment: tx.payment || doc.payment,
+        pricing,
+        amounts: tx.amounts || doc.amounts,
+        transactionStatus: tx.status || doc.transactionStatus,
+      }
       : { ...doc, pricing };
     return {
       ...base,
       riderEarning,
       earnings: riderEarning,
       deliveryBoyFee: Number(pricing?.deliveryFeeBreakdown?.deliveryBoyFee ?? riderEarning) || 0,
+      employmentType,
+      earningDisplayMode,
     };
   });
 
@@ -689,7 +712,7 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
   const partnerId = new mongoose.Types.ObjectId(deliveryPartnerId);
 
   let existingOrder = await FoodOrder.findOne(identity)
-    .select('pricing payment dispatch orderStatus')
+    .select('pricing payment dispatch orderStatus riderEarning platformProfit settlementBreakdown')
     .lean();
 
   if (!existingOrder) {
@@ -802,23 +825,64 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
   };
 
   const deliveryPartner = await FoodDeliveryPartner.findById(partnerId).lean();
-  const settings = await FoodDeliveryBoySettings.findOne().lean();
 
   const isSalary = deliveryPartner?.employmentType === 'salary';
   const baseRiderEarning = Number(existingOrder.riderEarning) || 0;
-  
-  let finalRiderEarning = baseRiderEarning;
-  if (isSalary) {
-    finalRiderEarning = 0;
-  } else {
-    const adminComm = Number(settings?.adminCommissionPercentage) || 0;
-    finalRiderEarning = Math.max(0, baseRiderEarning - (baseRiderEarning * (adminComm / 100)));
-  }
+
+  // Per-order: keep frozen Delivery Boy Fee (+ speed share). Salary: no order-level earning.
+  // Admin commission % removed from food accept path.
+  const finalRiderEarning = isSalary ? 0 : baseRiderEarning;
 
   const basePlatformProfit = Number(existingOrder.platformProfit) || 0;
-  // If rider earning decreased, platform profit increases by that difference
   const earningDifference = baseRiderEarning - finalRiderEarning;
-  const newPlatformProfit = Math.max(0, basePlatformProfit + earningDifference);
+  const newPlatformProfit = Number((basePlatformProfit + earningDifference).toFixed(2));
+
+  const existingBreakdown = existingOrder.settlementBreakdown && typeof existingOrder.settlementBreakdown === 'object'
+    ? existingOrder.settlementBreakdown
+    : null;
+  const nextSettlementBreakdown = existingBreakdown
+    ? {
+      ...existingBreakdown,
+      driver: {
+        ...(existingBreakdown.driver || {}),
+        payout: finalRiderEarning,
+        employmentType: isSalary ? 'salary' : (deliveryPartner?.employmentType || 'per_order'),
+        note: isSalary
+          ? 'Partner is on salary; order-level rider earning is ₹0'
+          : (existingBreakdown.driver?.note || 'Per-order Delivery Boy Fee'),
+      },
+      platform: {
+        ...(existingBreakdown.platform || {}),
+        netProfit: newPlatformProfit,
+        salaryReclaim: isSalary ? baseRiderEarning : 0,
+      },
+      ...(isSalary
+        ? {
+          costBearers: [
+            ...((existingBreakdown.costBearers || []).filter(
+              (c) => String(c?.type || '') !== 'salary_reclaim',
+            )),
+            {
+              type: 'salary_reclaim',
+              bearer: 'admin',
+              amount: baseRiderEarning,
+              note: 'Salary partner — delivery charge retained by admin (no per-order rider payout)',
+            },
+          ],
+        }
+        : {}),
+    }
+    : undefined;
+
+  const nextDriverSettlement = existingOrder.driverSettlement && typeof existingOrder.driverSettlement === 'object'
+    ? {
+      ...existingOrder.driverSettlement,
+      driverPayout: finalRiderEarning,
+      deliveryFee: isSalary
+        ? Number(existingOrder.pricing?.deliveryFee || 0) || 0
+        : existingOrder.driverSettlement.deliveryFee,
+    }
+    : undefined;
 
   const order = await FoodOrder.findOneAndUpdate(
     {
@@ -849,6 +913,8 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
         'dispatch.acceptedAt': now,
         riderEarning: finalRiderEarning,
         platformProfit: newPlatformProfit,
+        ...(nextSettlementBreakdown ? { settlementBreakdown: nextSettlementBreakdown } : {}),
+        ...(nextDriverSettlement ? { driverSettlement: nextDriverSettlement } : {}),
         'dispatch.offeredTo.$[acceptedOffer].action': 'accepted',
       },
       $push: {
@@ -914,61 +980,17 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
 
   const responseOrder = sanitizeOrderForExternal(order);
 
-  // Bulk orders: auto-open share slot so a 2nd driver can join (required before complete)
+  // Settlement snapshot only — bulk/split second-driver search is opt-in via
+  // "Find new driver" after the primary assesses the load at pickup.
   try {
     pushSettlementSnapshot(
       order,
       'accept',
       `Rider accepted; riderEarning=₹${Number(order.riderEarning) || 0}`,
     );
-
-    const boySettings =
-      (await FoodDeliveryBoySettings.findOne({ isActive: true }).sort({ createdAt: -1 }).lean()) ||
-      (await FoodDeliveryBoySettings.findOne().sort({ createdAt: -1 }).lean());
-    if (
-      isShareRequired(order, boySettings || {}) &&
-      !order.dispatch?.sharedPartnerId &&
-      !order.dispatch?.isShared
-    ) {
-      const totalEarning = Number(order.riderEarning || order.pricing?.deliveryFee || 0);
-      const sharedSplit = Math.round(totalEarning / 2);
-      order.dispatch.isShared = true;
-      order.dispatch.shareOpenedAt = new Date();
-      order.sharedRiderEarning = sharedSplit;
-      order.riderEarning = Math.max(0, totalEarning - sharedSplit);
-      pushStatusHistory(order, {
-        byRole: 'SYSTEM',
-        byId: deliveryPartnerId,
-        from: order.orderStatus,
-        to: order.orderStatus,
-        note: 'Bulk order auto-opened for second delivery partner (share required)',
-      });
-      pushSettlementSnapshot(
-        order,
-        'share',
-        `Auto-share bulk: primary ₹${order.riderEarning}, shared ₹${order.sharedRiderEarning}`,
-      );
-      await order.save();
-      Object.assign(responseOrder, sanitizeOrderForExternal(order));
-
-      try {
-        const io = getIO();
-        if (io) {
-          const payload = buildDeliverySocketPayload(order, order.restaurantId);
-          io.to('all_delivery').emit('shareable_order_available', {
-            ...payload,
-            sharedFrom: deliveryPartnerId,
-            shareRequired: true,
-          });
-        }
-      } catch (sockErr) {
-        logger.warn(`Auto-share socket emit failed: ${sockErr?.message || sockErr}`);
-      }
-    } else {
-      await order.save();
-    }
-  } catch (shareErr) {
-    logger.warn(`Accept settlement / auto-share failed: ${shareErr?.message || shareErr}`);
+    await order.save();
+  } catch (acceptErr) {
+    logger.warn(`Accept settlement snapshot failed: ${acceptErr?.message || acceptErr}`);
   }
 
   void (async () => {
@@ -1015,8 +1037,7 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
       await foodTransactionService.updateTransactionRider(order._id, deliveryPartnerId);
     } catch (error) {
       logger.error(
-        `Error updating delivery rider transaction for ${order._id}: ${
-          error?.message || error
+        `Error updating delivery rider transaction for ${order._id}: ${error?.message || error
         }`,
       );
     }
@@ -1056,11 +1077,11 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
         // Notify EVERY active pickup restaurant with THEIR scoped status (not aggregate)
         const pickupRestaurantIdsForSocket = Array.isArray(order.pickups)
           ? [...new Set(
-              order.pickups
-                .filter((p) => isActivePickup(p))
-                .map((p) => String(p?.restaurantId || ''))
-                .filter(Boolean),
-            )]
+            order.pickups
+              .filter((p) => isActivePickup(p))
+              .map((p) => String(p?.restaurantId || ''))
+              .filter(Boolean),
+          )]
           : [];
         const restaurantTargets = pickupRestaurantIdsForSocket.length
           ? pickupRestaurantIdsForSocket
@@ -1106,11 +1127,11 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
 
       const pickupRestaurantIds = Array.isArray(order.pickups)
         ? [...new Set(
-            order.pickups
-              .filter((p) => isActivePickup(p))
-              .map((p) => String(p?.restaurantId || ''))
-              .filter(Boolean),
-          )]
+          order.pickups
+            .filter((p) => isActivePickup(p))
+            .map((p) => String(p?.restaurantId || ''))
+            .filter(Boolean),
+        )]
         : [];
 
       if (pickupRestaurantIds.length > 0) {
@@ -1150,8 +1171,7 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
       }
     } catch (error) {
       logger.error(
-        `Error notifying delivery acceptance for ${order._id}: ${
-          error?.message || error
+        `Error notifying delivery acceptance for ${order._id}: ${error?.message || error
         }`,
       );
     }
@@ -1168,13 +1188,127 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
   return responseOrder;
 }
 
+/**
+ * After accept, driver chooses visit order for active multi-restaurant pickups.
+ * Body: ordered restaurantId[] covering every non-dropped pickup that is not yet picked_up.
+ * Already picked_up stops keep their sequence and stay before remaining stops.
+ */
+export async function setPickupSequenceDelivery(
+  orderId,
+  deliveryPartnerId,
+  restaurantIds = [],
+) {
+  const identity = buildOrderIdentityFilter(orderId);
+  if (!identity) throw new ValidationError('Order id required');
+
+  const order = await FoodOrder.findOne(identity);
+  if (!order) throw new NotFoundError('Order not found');
+
+  const partnerId = String(deliveryPartnerId);
+  const isPrimary =
+    String(order.dispatch?.deliveryPartnerId || '') === partnerId;
+  const isShared =
+    String(order.dispatch?.sharedPartnerId || '') === partnerId;
+  if (!isPrimary && !isShared) {
+    throw new ForbiddenError('Not your order');
+  }
+  if (!order.dispatch?.deliveryPartnerId) {
+    throw new ValidationError('Accept the order before setting pickup sequence');
+  }
+
+  const active = (order.pickups || []).filter(
+    (p) => !p.permanentlyDropped && String(p.status || '') !== 'cancelled',
+  );
+  if (active.length < 2) {
+    throw new ValidationError('Pickup sequence only applies to multi-restaurant orders');
+  }
+
+  const remaining = active.filter(
+    (p) => String(p.status || '') !== 'picked_up',
+  );
+  if (remaining.length === 0) {
+    throw new ValidationError('All restaurants already picked up');
+  }
+
+  const orderedIds = (Array.isArray(restaurantIds) ? restaurantIds : [])
+    .map((id) => String(id || '').trim())
+    .filter(Boolean);
+  if (orderedIds.length !== remaining.length) {
+    throw new ValidationError(
+      `Provide exactly ${remaining.length} restaurant id(s) for remaining pickups`,
+    );
+  }
+
+  const remainingById = new Map(
+    remaining.map((p) => [String(p.restaurantId || ''), p]),
+  );
+  const seen = new Set();
+  for (const rid of orderedIds) {
+    if (seen.has(rid)) {
+      throw new ValidationError('Duplicate restaurant in pickup sequence');
+    }
+    seen.add(rid);
+    if (!remainingById.has(rid)) {
+      throw new ValidationError(`Restaurant ${rid} is not an active remaining pickup`);
+    }
+  }
+
+  const alreadyPicked = active
+    .filter((p) => String(p.status || '') === 'picked_up')
+    .sort((a, b) => (Number(a.sequence) || 0) - (Number(b.sequence) || 0));
+
+  let seq = 0;
+  for (const p of alreadyPicked) {
+    p.sequence = seq++;
+  }
+  for (const rid of orderedIds) {
+    remainingById.get(rid).sequence = seq++;
+  }
+  order.markModified('pickups');
+
+  pushStatusHistory(order, {
+    byRole: 'DELIVERY_PARTNER',
+    byId: deliveryPartnerId,
+    from: order.orderStatus,
+    to: order.orderStatus,
+    note: `Driver set pickup sequence: ${orderedIds.join(' → ')}`,
+  });
+
+  await order.save();
+
+  try {
+    const io = getIO();
+    if (io) {
+      const payload = {
+        orderMongoId: order._id?.toString?.(),
+        orderId: order._id.toString(),
+        orderStatus: order.orderStatus,
+        pickups: order.pickups,
+        type: 'pickup_sequence_updated',
+        title: 'Pickup sequence updated',
+        message: 'Driver updated restaurant visit order',
+      };
+      io.to(rooms.user(order.userId)).emit('order_status_update', payload);
+      io.to(rooms.delivery(partnerId)).emit('order_status_update', payload);
+      for (const p of active) {
+        const rid = String(p.restaurantId || '');
+        if (rid) io.to(rooms.restaurant(rid)).emit('order_status_update', payload);
+      }
+    }
+  } catch (err) {
+    logger.warn(`setPickupSequence socket emit failed: ${err?.message || err}`);
+  }
+
+  return sanitizeOrderForExternal(order);
+}
+
 export async function rejectOrderDelivery(orderId, deliveryPartnerId) {
   const identity = buildOrderIdentityFilter(orderId);
   if (!identity) throw new ValidationError('Order id required');
 
   const isObjectId = mongoose.Types.ObjectId.isValid(orderId);
   let order = await FoodOrder.findOne(identity).select('+deliveryOtp');
-  
+
   if (!order) {
     const Order = mongoose.model('Order');
     let qcOrder = await Order.findOne(identity);
@@ -1185,7 +1319,7 @@ export async function rejectOrderDelivery(orderId, deliveryPartnerId) {
         (item) => String(item.partnerId) === String(deliveryPartnerId) && item.action === 'offered'
       );
       if (offer) offer.action = 'rejected';
-      
+
       qcOrder.dispatch.status = 'unassigned';
       qcOrder.dispatch.deliveryPartnerId = undefined;
       qcOrder.dispatch.assignedAt = undefined;
@@ -1322,6 +1456,7 @@ export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId) {
 
   // Anti-spoof geofence against the stop the driver is actually due at (sequence-aware, and
   // scoped to this driver's own leg once the order is running dual-leg).
+  ensureDualLegs(order, generateFourDigitDeliveryOtp);
   const callerLeg = isDualLegActive(order) ? getLegForPartner(order, deliveryPartnerId) : null;
   const nextStop = callerLeg ? getNextPickupForLeg(order, callerLeg) : getNextPickup(order);
   let pickupCoords = nextStop?.location?.coordinates || null;
@@ -1334,6 +1469,46 @@ export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId) {
   // Waiting state: the driver arrived before the food was marked ready. Derived from the single
   // source of truth so single- and multi-restaurant orders are both handled correctly.
   const isWaitingForFood = getPickupProgress(order).isWaitingForFood;
+
+  // Dual-leg: never short-circuit on parent phase — each driver must mark their own arrival.
+  if (callerLeg) {
+    if (['at_pickup', 'picked_up', 'at_drop', 'delivered'].includes(String(callerLeg.status || ''))) {
+      emitOrderUpdate(order, deliveryPartnerId, { sendMilestonePush: false });
+      return sanitizeOrderForExternal(order);
+    }
+    const from = order.deliveryState?.status || order.deliveryState?.currentPhase || order.orderStatus;
+    callerLeg.status = 'at_pickup';
+    callerLeg.reachedPickupAt = callerLeg.reachedPickupAt || new Date();
+    order.markModified('legs');
+    // Parent phase is informational only; trip UI derives from each driver's leg.
+    if (!order.deliveryState?.reachedPickupAt) {
+      order.deliveryState = {
+        ...(order.deliveryState?.toObject?.() || order.deliveryState || {}),
+        currentPhase: 'at_pickup',
+        status: isWaitingForFood ? 'waiting_for_food' : 'reached_pickup',
+        reachedPickupAt: new Date(),
+      };
+    }
+    pushStatusHistory(order, {
+      byRole: 'DELIVERY_PARTNER',
+      byId: deliveryPartnerId,
+      from,
+      to: 'reached_pickup',
+      note: isWaitingForFood
+        ? `Leg ${callerLeg.legIndex} reached ${nextStop?.restaurantName || 'pickup'} — waiting for food`
+        : `Leg ${callerLeg.legIndex} reached pickup (independent of partner)`,
+    });
+    await order.save();
+    emitOrderUpdate(order, deliveryPartnerId);
+    enqueueOrderEvent('leg_reached_pickup', {
+      orderMongoId: order._id?.toString?.(),
+      orderId: order._id.toString(),
+      deliveryPartnerId,
+      legIndex: callerLeg.legIndex,
+      legProgress: getLegProgress(order),
+    });
+    return sanitizeOrderForExternal(order);
+  }
 
   const currentPhase = order.deliveryState?.currentPhase || '';
   const currentStatus = order.deliveryState?.status || '';
@@ -1348,11 +1523,6 @@ export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId) {
     status: isWaitingForFood ? 'waiting_for_food' : 'reached_pickup',
     reachedPickupAt: order.deliveryState?.reachedPickupAt || new Date(),
   };
-  if (callerLeg) {
-    callerLeg.status = 'at_pickup';
-    callerLeg.reachedPickupAt = callerLeg.reachedPickupAt || new Date();
-    order.markModified('legs');
-  }
   pushStatusHistory(order, {
     byRole: 'DELIVERY_PARTNER',
     byId: deliveryPartnerId,
@@ -1378,9 +1548,8 @@ export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId) {
       [{ ownerType: 'RESTAURANT', ownerId: order.restaurantId }],
       {
         title: 'Rider arrived!',
-        body: `${partner?.name || 'The delivery partner'} has arrived at ${
-          restaurant?.restaurantName || 'your restaurant'
-        } to pick up Order #${order._id.toString()}.`,
+        body: `${partner?.name || 'The delivery partner'} has arrived at ${restaurant?.restaurantName || 'your restaurant'
+          } to pick up Order #${order._id.toString()}.`,
         data: {
           type: 'rider_arrived',
           orderId: String(order._id.toString()),
@@ -1391,8 +1560,7 @@ export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId) {
     );
   } catch (error) {
     logger.error(
-      `Error notifying restaurant about rider arrival for ${order._id}: ${
-        error?.message || error
+      `Error notifying restaurant about rider arrival for ${order._id}: ${error?.message || error
       }`,
     );
   }
@@ -1426,7 +1594,7 @@ export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImag
     if (!isPrimary) {
       throw new ForbiddenError('Not your order');
     }
-    
+
     const prePickup = ['DELIVERY_ASSIGNED', 'PICKUP_READY'];
     if (!prePickup.includes(order.workflowStatus)) {
       throw new ValidationError('Invalid state for pickup confirmation');
@@ -1469,6 +1637,7 @@ export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImag
   }
 
   // Under dual-leg each driver collects their own leg; otherwise only the primary may confirm.
+  ensureDualLegs(order, generateFourDigitDeliveryOtp);
   const pickupLeg = isDualLegActive(order) ? getLegForPartner(order, deliveryPartnerId) : null;
   if (isShared && !isPrimary && !pickupLeg) {
     throw new ForbiddenError('Only the primary partner can confirm order pickup.');
@@ -1532,7 +1701,7 @@ export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImag
         billImageUrl: null,
         lastPickupBillImageUrl: billImageUrl || null,
       };
-      
+
       // We mark this history entry as a partial pickup
       pushStatusHistory(order, {
         byRole: 'DELIVERY_PARTNER',
@@ -1606,7 +1775,7 @@ export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImag
     }
 
     if (!isStatusAdvance(from, nextStatus)) {
-        throw new ValidationError(`Order is already at status '${from}'. Cannot re-mark as '${nextStatus}'.`);
+      throw new ValidationError(`Order is already at status '${from}'. Cannot re-mark as '${nextStatus}'.`);
     }
     order.orderStatus = nextStatus;
     // Keep single-restaurant pickup row in sync so restaurant-scoped reads see the handover.
@@ -1663,7 +1832,7 @@ export async function confirmReachedDropDelivery(orderId, deliveryPartnerId) {
     if (!isPrimary) {
       throw new ForbiddenError('Not your order');
     }
-    
+
     if (order.workflowStatus !== 'OUT_FOR_DELIVERY') {
       throw new ValidationError('Order not ready for OTP');
     }
@@ -1717,16 +1886,14 @@ export async function confirmReachedDropDelivery(orderId, deliveryPartnerId) {
     return resOrder;
   }
 
-  const isPrimary = order.dispatch?.deliveryPartnerId?.toString() === deliveryPartnerId.toString();
-  const isShared = order.dispatch?.sharedPartnerId?.toString() === deliveryPartnerId.toString();
+  const isPrimary = toPartnerId(order.dispatch?.deliveryPartnerId) === toPartnerId(deliveryPartnerId);
+  const isShared = toPartnerId(order.dispatch?.sharedPartnerId) === toPartnerId(deliveryPartnerId);
   if (!isPrimary && !isShared) {
     throw new ForbiddenError('Not your order');
   }
 
-  if (order.deliveryVerification?.dropOtp?.verified) {
-    emitOrderUpdate(order, deliveryPartnerId);
-    return sanitizeOrderForExternal(order);
-  }
+  // Repair dual-leg if second driver is present but legs were never built.
+  ensureDualLegs(order, generateFourDigitDeliveryOtp);
 
   // Anti-spoof geofence: rider must be near the customer to request the drop OTP.
   await assertRiderAtTarget(
@@ -1737,8 +1904,12 @@ export async function confirmReachedDropDelivery(orderId, deliveryPartnerId) {
   );
 
   // Dual-leg: each leg is verified independently with its OWN handover OTP.
-  const dropLeg = isDualLegActive(order) ? getLegForPartner(order, deliveryPartnerId) : null;
-  if (dropLeg) {
+  // Do NOT short-circuit on order-level dropOtp.verified — that flag is only for single-driver.
+  if (isDualLegActive(order)) {
+    const dropLeg = getLegForPartner(order, deliveryPartnerId);
+    if (!dropLeg) {
+      throw new ForbiddenError('No delivery leg assigned to you on this shared order');
+    }
     if (dropLeg.otpVerified) {
       emitOrderUpdate(order, deliveryPartnerId, { sendMilestonePush: false });
       return sanitizeOrderForExternal(order);
@@ -1747,6 +1918,7 @@ export async function confirmReachedDropDelivery(orderId, deliveryPartnerId) {
     dropLeg.status = 'at_drop';
     dropLeg.reachedDropAt = dropLeg.reachedDropAt || new Date();
     order.markModified('legs');
+    // Parent phase reflects "someone is at drop"; each leg still has its own OTP/status.
     order.deliveryState = {
       ...(order.deliveryState?.toObject?.() || order.deliveryState || {}),
       currentPhase: 'at_drop',
@@ -1755,7 +1927,15 @@ export async function confirmReachedDropDelivery(orderId, deliveryPartnerId) {
     };
     await order.save();
 
-    emitDeliveryDropOtpToUser(order, String(dropLeg.otp || '').trim());
+    const pendingLegOtps = getPendingLegHandoverOtps(order, { onlyAtDrop: false });
+
+    emitDeliveryDropOtpToUser(order, String(dropLeg.otp || '').trim(), {
+      legIndex: dropLeg.legIndex,
+      role: dropLeg.role,
+      partnerId: toPartnerId(deliveryPartnerId),
+      isDualLeg: true,
+      legOtps: pendingLegOtps,
+    });
     emitOrderUpdate(order, deliveryPartnerId);
     enqueueOrderEvent('leg_reached_drop', {
       orderMongoId: order._id?.toString?.(),
@@ -1764,6 +1944,11 @@ export async function confirmReachedDropDelivery(orderId, deliveryPartnerId) {
       legIndex: dropLeg.legIndex,
       legProgress: getLegProgress(order),
     });
+    return sanitizeOrderForExternal(order);
+  }
+
+  if (order.deliveryVerification?.dropOtp?.verified) {
+    emitOrderUpdate(order, deliveryPartnerId);
     return sanitizeOrderForExternal(order);
   }
 
@@ -1869,7 +2054,7 @@ export async function confirmSplitDelivery(orderId, deliveryPartnerId) {
 
   await order.save();
   emitOrderUpdate(order, deliveryPartnerId);
-  
+
   return sanitizeOrderForExternal(order);
 }
 
@@ -1889,7 +2074,7 @@ export async function verifyDropOtpDelivery(orderId, deliveryPartnerId, otp) {
     if (!isPrimary) {
       throw new ForbiddenError('Not your order');
     }
-    
+
     if (order.workflowStatus !== 'OUT_FOR_DELIVERY') {
       throw new ValidationError('Invalid state for OTP verification');
     }
@@ -1934,8 +2119,8 @@ export async function verifyDropOtpDelivery(orderId, deliveryPartnerId, otp) {
     return { order: resOrder };
   }
 
-  const isPrimary = order.dispatch?.deliveryPartnerId?.toString() === deliveryPartnerId.toString();
-  const isShared = order.dispatch?.sharedPartnerId?.toString() === deliveryPartnerId.toString();
+  const isPrimary = toPartnerId(order.dispatch?.deliveryPartnerId) === toPartnerId(deliveryPartnerId);
+  const isShared = toPartnerId(order.dispatch?.sharedPartnerId) === toPartnerId(deliveryPartnerId);
   if (!isPrimary && !isShared) {
     throw new ForbiddenError('Not your order');
   }
@@ -1943,9 +2128,15 @@ export async function verifyDropOtpDelivery(orderId, deliveryPartnerId, otp) {
   const otpStr = normalizeOtpValue(otp);
   if (!otpStr) throw new ValidationError('OTP is required');
 
+  // Repair dual-leg if shared partner exists but legs were never built.
+  ensureDualLegs(order, generateFourDigitDeliveryOtp);
+
   // Dual-leg: verify THIS driver's leg OTP; the other leg is unaffected.
-  const verifyLeg = isDualLegActive(order) ? getLegForPartner(order, deliveryPartnerId) : null;
-  if (verifyLeg) {
+  if (isDualLegActive(order)) {
+    const verifyLeg = getLegForPartner(order, deliveryPartnerId);
+    if (!verifyLeg) {
+      throw new ForbiddenError('No delivery leg assigned to you on this shared order');
+    }
     if (verifyLeg.otpVerified) {
       return { order: sanitizeOrderForExternal(order) };
     }
@@ -1956,6 +2147,7 @@ export async function verifyDropOtpDelivery(orderId, deliveryPartnerId, otp) {
     }
     verifyLeg.otpVerified = true;
     order.markModified('legs');
+    // Never flip order-level dropOtp.verified here — that would mark the other driver done.
     await order.save();
 
     emitOrderUpdate(order, deliveryPartnerId, { sendMilestonePush: false });
@@ -2121,7 +2313,11 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
 
   // 0. Dual-leg: this driver completes THEIR leg only. The parent order can never be closed by
   //    a single driver — it is DELIVERED only once every active leg is delivered.
+  ensureDualLegs(order, generateFourDigitDeliveryOtp);
   const completeLeg = isDualLegActive(order) ? getLegForPartner(order, deliveryPartnerId) : null;
+  if (isDualLegActive(order) && !completeLeg) {
+    throw new ForbiddenError('No delivery leg assigned to you on this shared order');
+  }
   if (completeLeg) {
     if (String(completeLeg.status || '') === 'delivered') {
       return sanitizeOrderForExternal(order); // idempotent re-submit
@@ -2165,7 +2361,21 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
       return sanitizeOrderForExternal(order);
     }
 
-    // Final leg — satisfy the legacy single-driver gates below (per-leg OTPs already verified,
+    // Final leg — re-apply salary/per-order payouts so wallets never credit salary partners.
+    try {
+      const [primaryPartner, sharedPartner] = await Promise.all([
+        FoodDeliveryPartner.findById(order.dispatch?.deliveryPartnerId).select('employmentType').lean(),
+        FoodDeliveryPartner.findById(order.dispatch?.sharedPartnerId).select('employmentType').lean(),
+      ]);
+      applyEmploymentAwareDualEarnings(order, {
+        primaryEmploymentType: primaryPartner?.employmentType || 'per_order',
+        secondaryEmploymentType: sharedPartner?.employmentType || 'per_order',
+      });
+    } catch (earnErr) {
+      logger.warn(`Employment-aware dual earnings failed: ${earnErr?.message || earnErr}`);
+    }
+
+    // Satisfy the legacy single-driver gates below (per-leg OTPs already verified,
     // and the legs themselves ARE the split) so settlement runs exactly once.
     if (!order.deliveryVerification) order.deliveryVerification = {};
     order.deliveryVerification.dropOtp = {
@@ -2208,7 +2418,7 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
   const from = order.orderStatus;
   const nextStatus = 'delivered';
   if (!isStatusAdvance(from, nextStatus)) {
-      throw new ValidationError(`Order is already at status '${from}'. Cannot re-mark as '${nextStatus}'.`);
+    throw new ValidationError(`Order is already at status '${from}'. Cannot re-mark as '${nextStatus}'.`);
   }
   // 4A: adjacency guard — 'delivered' may only follow 'picked_up'. Closes the rank-only hole
   // where ready_for_pickup → delivered (skipping pickup) was accepted because 80 > 40.
@@ -2224,55 +2434,58 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
   const boySettings =
     (await FoodDeliveryBoySettings.findOne({ isActive: true }).sort({ createdAt: -1 }).lean()) ||
     (await FoodDeliveryBoySettings.findOne().sort({ createdAt: -1 }).lean());
+  // Bulk second-driver is optional: primary may complete alone unless they opened a
+  // share slot that is still waiting within SHARE_TIMEOUT_MS.
   if (isShareRequired(order, boySettings || {}) && !isSharedDriverJoined(order)) {
-    // Solo-complete fallback: if the share slot has been open past SHARE_TIMEOUT_MS with no
-    // second partner joining, let the primary complete alone with the full earning restored.
-    // Guarantees a bulk order can never get permanently stuck at completion.
     const shareOpenedAt = order.dispatch?.shareOpenedAt
       ? new Date(order.dispatch.shareOpenedAt).getTime()
       : null;
+    const shareWasOpened =
+      Boolean(order.dispatch?.isShared) || shareOpenedAt != null;
     const shareTimedOut =
       shareOpenedAt != null && Date.now() - shareOpenedAt >= SHARE_TIMEOUT_MS;
 
-    if (!shareTimedOut) {
+    if (shareWasOpened && !shareTimedOut) {
       throw new ValidationError(
-        'This is a bulk order and requires a second delivery partner. Share the order and wait for a partner to join before completing.',
+        'Waiting for a second delivery partner. If no one joins, you can complete alone after the search times out.',
       );
     }
 
-    const restoredEarning =
-      Number(order.riderEarning || 0) + Number(order.sharedRiderEarning || 0);
-    order.riderEarning = restoredEarning;
-    order.sharedRiderEarning = 0;
-    order.dispatch.isShared = false;
-    order.dispatch.shareOpenedAt = null;
-    pushStatusHistory(order, {
-      byRole: 'SYSTEM',
-      byId: deliveryPartnerId,
-      from: order.orderStatus,
-      to: order.orderStatus,
-      note: `No second partner joined within ${Math.round(
-        SHARE_TIMEOUT_MS / 60000,
-      )} min; primary completing solo with full earning ₹${restoredEarning}.`,
-    });
-    try {
-      await notifyOwnersSafely(
-        [{ ownerType: 'ADMIN', ownerId: 'GLOBAL' }],
-        {
-          title: 'Bulk order completed solo',
-          body: `Order #${order.order_id || order._id} had no second driver join in time; the primary partner is completing it alone.`,
-          data: {
-            type: 'bulk_solo_complete',
-            orderId: order._id.toString(),
-            orderMongoId: order._id?.toString?.() || '',
+    if (shareWasOpened) {
+      const restoredEarning =
+        Number(order.riderEarning || 0) + Number(order.sharedRiderEarning || 0);
+      order.riderEarning = restoredEarning;
+      order.sharedRiderEarning = 0;
+      order.dispatch.isShared = false;
+      order.dispatch.shareOpenedAt = null;
+      pushStatusHistory(order, {
+        byRole: 'SYSTEM',
+        byId: deliveryPartnerId,
+        from: order.orderStatus,
+        to: order.orderStatus,
+        note: `No second partner joined within ${Math.round(
+          SHARE_TIMEOUT_MS / 60000,
+        )} min; primary completing solo with full earning ₹${restoredEarning}.`,
+      });
+      try {
+        await notifyOwnersSafely(
+          [{ ownerType: 'ADMIN', ownerId: 'GLOBAL' }],
+          {
+            title: 'Bulk order completed solo',
+            body: `Order #${order.order_id || order._id} had no second driver join in time; the primary partner is completing it alone.`,
+            data: {
+              type: 'bulk_solo_complete',
+              orderId: order._id.toString(),
+              orderMongoId: order._id?.toString?.() || '',
+            },
           },
-        },
-      );
-    } catch (err) {
-      logger.warn(`Bulk solo-complete admin alert failed: ${err?.message || err}`);
+        );
+      } catch (err) {
+        logger.warn(`Bulk solo-complete admin alert failed: ${err?.message || err}`);
+      }
     }
   }
-  
+
   // 2. Financial Context Resolution
   const tx = await FoodTransaction.findOne({ orderId: order._id }).lean();
   const prevPayStatus = String(tx?.payment?.status || order?.payment?.status || 'cod_pending');
@@ -2335,8 +2548,8 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
   // 5. Update Financial Ledger (FoodTransaction)
   // This triggers the sync back to FoodOrder.payment.method which updates the Rider's Cash Limit (if cash) or Pocket (always).
   const ledgerKind =
-    finalPayMethod === 'cash' 
-      ? 'cod_marked_paid_on_delivery' 
+    finalPayMethod === 'cash'
+      ? 'cod_marked_paid_on_delivery'
       : (finalPayMethod === 'razorpay_qr' ? 'cod_collect_qr_settled' : 'payment_snapshot_sync');
 
   await foodTransactionService.updateTransactionStatus(order._id, ledgerKind, {
@@ -2368,15 +2581,20 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
         io.to(rooms.delivery(order.dispatch.sharedPartnerId)).emit('order_earnings_split', splitPayload);
       }
     }
-  } catch (err) {}
+  } catch (err) { }
 
   emitOrderUpdate(order, deliveryPartnerId);
-  
+
   enqueueOrderEvent('delivery_completed', {
     orderMongoId: order._id?.toString?.(),
     orderId: order.orderId || order._id.toString(),
     deliveryPartnerId,
+    restaurantId: order.restaurantId?._id?.toString?.() || order.restaurantId?.toString?.(),
+    riderEarning: Number(order.riderEarning) || 0,
+    sharedRiderEarning: Number(order.sharedRiderEarning) || 0,
+    platformProfit: Number(order.platformProfit) || 0,
     payMethod: finalPayMethod,
+    paymentMethod: finalPayMethod,
     prevPayStatus,
     paymentStatus: 'paid'
   });
@@ -2403,7 +2621,7 @@ export async function updateOrderStatusDelivery(orderId, deliveryPartnerId, orde
     if (!isPrimary) {
       throw new ForbiddenError('Not your order');
     }
-    
+
     order.orderStatus = orderStatus;
     order.status = orderStatus;
     await order.save();
@@ -2418,7 +2636,7 @@ export async function updateOrderStatusDelivery(orderId, deliveryPartnerId, orde
 
   const from = order.orderStatus;
   if (!isStatusAdvance(from, orderStatus)) {
-      throw new ValidationError(`Current order status '${from}' is further ahead than '${orderStatus}'. Order cannot be moved backwards.`);
+    throw new ValidationError(`Current order status '${from}' is further ahead than '${orderStatus}'. Order cannot be moved backwards.`);
   }
   order.orderStatus = orderStatus;
   pushStatusHistory(order, {

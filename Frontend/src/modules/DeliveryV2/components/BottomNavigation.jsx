@@ -23,6 +23,7 @@ const debugError = (...args) => {}
 
 export default function BottomNavigation() {
   const navigate = useNavigate()
+  const [isHidden, setIsHidden] = useState(false)
   const location = useLocation()
   const [profileImage, setProfileImage] = useState(null)
   const [imageError, setImageError] = useState(false)
@@ -81,10 +82,19 @@ export default function BottomNavigation() {
 
     window.addEventListener('deliveryProfileRefresh', handleProfileRefresh)
     
+    const handleHideNav = () => setIsHidden(true)
+    const handleShowNav = () => setIsHidden(false)
+    window.addEventListener('hideDeliveryBottomNav', handleHideNav)
+    window.addEventListener('showDeliveryBottomNav', handleShowNav)
+    
     return () => {
       window.removeEventListener('deliveryProfileRefresh', handleProfileRefresh)
+      window.removeEventListener('hideDeliveryBottomNav', handleHideNav)
+      window.removeEventListener('showDeliveryBottomNav', handleShowNav)
     }
   }, [])
+
+  if (isHidden) return null;
 
   return (
     <div

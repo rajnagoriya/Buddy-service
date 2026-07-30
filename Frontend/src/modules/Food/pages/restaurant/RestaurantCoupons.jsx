@@ -342,11 +342,10 @@ export default function RestaurantCoupons() {
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                  activeTab === tab.id
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${activeTab === tab.id
                     ? "bg-slate-900 text-white"
                     : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                }`}
+                  }`}
               >
                 {tab.label}
                 {tab.id === "pending" && tabCounts.pending > 0 && (
@@ -561,79 +560,78 @@ export default function RestaurantCoupons() {
                 {filteredOffers.map((offer) => {
                   const isAdminPaused = offer.status === "paused" && offer.pausedBy === "admin"
                   return (
-                  <tr key={offer.offerId}>
-                    <td className="px-4 py-3 font-mono text-sm">{offer.couponCode}</td>
-                    <td className="px-4 py-3 text-sm">{discountLabel(offer)}{Number(offer.minOrderValue) > 0 ? ` · Min ₹${offer.minOrderValue}` : ""}</td>
-                    <td className="px-4 py-3 text-sm">{offer.usedCount || 0}{offer.usageLimit ? ` / ${offer.usageLimit}` : ""}</td>
-                    <td className="px-4 py-3 text-sm">
-                      <span className={`font-medium capitalize ${statusClass(offer)}`}>{statusLabel(offer)}</span>
-                      {offer.approvalStatus === "rejected" && offer.rejectionReason && (
-                        <p className="mt-1 max-w-[200px] truncate text-[11px] text-red-600" title={offer.rejectionReason}>
-                          {offer.rejectionReason}
-                        </p>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-sm">
-                      {offer.approvalStatus === "approved" && !isOfferExpired(offer) ? (
-                        <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${
-                            offer.status === "active"
-                              ? "bg-green-50 text-green-700 border-green-200"
-                              : "bg-amber-50 text-amber-700 border-amber-200"
-                          }`}
-                        >
-                          {offer.status === "active" ? "Active" : offer.pausedBy === "admin" ? "Paused by admin" : "Paused"}
-                        </span>
-                      ) : (
-                        <span className="text-slate-400">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <button type="button" className="p-1.5 rounded-lg hover:bg-slate-100"><MoreVertical className="w-4 h-4 text-slate-600" /></button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-44">
-                          <DropdownMenuItem onClick={() => { setSelectedOffer(offer); setViewOpen(true) }}><Eye className="w-4 h-4 mr-2" />View</DropdownMenuItem>
-                          {!isAdminPaused && (
-                            <DropdownMenuItem onClick={() => handleEdit(offer)}><Pencil className="w-4 h-4 mr-2" />Edit</DropdownMenuItem>
-                          )}
-                          <DropdownMenuItem onClick={() => navigate(`/food/restaurant/coupons/${offer.offerId}/analytics`)}><BarChart3 className="w-4 h-4 mr-2" />Analytics</DropdownMenuItem>
-                          {offer.approvalStatus === "rejected" && (
-                            <DropdownMenuItem
-                              onClick={() => handleReapply(offer.offerId)}
-                              disabled={reapplyingId === offer.offerId}
-                            >
-                              <RefreshCw className="w-4 h-4 mr-2" />
-                              {reapplyingId === offer.offerId ? "Resubmitting..." : "Reapply for approval"}
-                            </DropdownMenuItem>
-                          )}
-                          {offer.approvalStatus === "approved" && (
-                            isAdminPaused ? (
-                              <DropdownMenuItem disabled className="text-amber-700 opacity-100">
-                                <Pause className="w-4 h-4 mr-2" />
-                                Paused by admin
-                              </DropdownMenuItem>
-                            ) : (
-                              <DropdownMenuItem onClick={() => handleToggleStatus(offer)}>
-                                {offer.status === "active" ? <Pause className="w-4 h-4 mr-2" /> : <Play className="w-4 h-4 mr-2" />}
-                                {offer.status === "active" ? "Pause" : "Resume"}
-                              </DropdownMenuItem>
-                            )
-                          )}
-                          {!isAdminPaused && (
-                          <DropdownMenuItem
-                            onClick={() => handleDelete(offer.offerId)}
-                            disabled={deletingId === offer.offerId}
-                            className="text-red-600"
+                    <tr key={offer.offerId}>
+                      <td className="px-4 py-3 font-mono text-sm">{offer.couponCode}</td>
+                      <td className="px-4 py-3 text-sm">{discountLabel(offer)}{Number(offer.minOrderValue) > 0 ? ` · Min ₹${offer.minOrderValue}` : ""}</td>
+                      <td className="px-4 py-3 text-sm">{offer.usedCount || 0}{offer.usageLimit ? ` / ${offer.usageLimit}` : ""}</td>
+                      <td className="px-4 py-3 text-sm">
+                        <span className={`font-medium capitalize ${statusClass(offer)}`}>{statusLabel(offer)}</span>
+                        {offer.approvalStatus === "rejected" && offer.rejectionReason && (
+                          <p className="mt-1 max-w-[200px] truncate text-[11px] text-red-600" title={offer.rejectionReason}>
+                            {offer.rejectionReason}
+                          </p>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        {offer.approvalStatus === "approved" && !isOfferExpired(offer) ? (
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${offer.status === "active"
+                                ? "bg-green-50 text-green-700 border-green-200"
+                                : "bg-amber-50 text-amber-700 border-amber-200"
+                              }`}
                           >
-                            <Trash2 className="w-4 h-4 mr-2" />Delete
-                          </DropdownMenuItem>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </td>
-                  </tr>
+                            {offer.status === "active" ? "Active" : offer.pausedBy === "admin" ? "Paused by admin" : "Paused"}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button type="button" className="p-1.5 rounded-lg hover:bg-slate-100"><MoreVertical className="w-4 h-4 text-slate-600" /></button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-44">
+                            <DropdownMenuItem onClick={() => { setSelectedOffer(offer); setViewOpen(true) }}><Eye className="w-4 h-4 mr-2" />View</DropdownMenuItem>
+                            {!isAdminPaused && (
+                              <DropdownMenuItem onClick={() => handleEdit(offer)}><Pencil className="w-4 h-4 mr-2" />Edit</DropdownMenuItem>
+                            )}
+                            <DropdownMenuItem onClick={() => navigate(`/food/restaurant/coupons/${offer.offerId}/analytics`)}><BarChart3 className="w-4 h-4 mr-2" />Analytics</DropdownMenuItem>
+                            {offer.approvalStatus === "rejected" && (
+                              <DropdownMenuItem
+                                onClick={() => handleReapply(offer.offerId)}
+                                disabled={reapplyingId === offer.offerId}
+                              >
+                                <RefreshCw className="w-4 h-4 mr-2" />
+                                {reapplyingId === offer.offerId ? "Resubmitting..." : "Reapply for approval"}
+                              </DropdownMenuItem>
+                            )}
+                            {offer.approvalStatus === "approved" && (
+                              isAdminPaused ? (
+                                <DropdownMenuItem disabled className="text-amber-700 opacity-100">
+                                  <Pause className="w-4 h-4 mr-2" />
+                                  Paused by admin
+                                </DropdownMenuItem>
+                              ) : (
+                                <DropdownMenuItem onClick={() => handleToggleStatus(offer)}>
+                                  {offer.status === "active" ? <Pause className="w-4 h-4 mr-2" /> : <Play className="w-4 h-4 mr-2" />}
+                                  {offer.status === "active" ? "Pause" : "Resume"}
+                                </DropdownMenuItem>
+                              )
+                            )}
+                            {!isAdminPaused && (
+                              <DropdownMenuItem
+                                onClick={() => handleDelete(offer.offerId)}
+                                disabled={deletingId === offer.offerId}
+                                className="text-red-600"
+                              >
+                                <Trash2 className="w-4 h-4 mr-2" />Delete
+                              </DropdownMenuItem>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </td>
+                    </tr>
                   )
                 })}
               </tbody>

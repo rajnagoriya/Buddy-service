@@ -67,9 +67,9 @@ export default function DriverLogin() {
     } catch (err) {
       toast.error(
         err?.response?.data?.message ||
-          err?.response?.data?.error ||
-          err?.message ||
-          "Failed to send OTP",
+        err?.response?.data?.error ||
+        err?.message ||
+        "Failed to send OTP",
       );
     } finally {
       submitting.current = false;
@@ -163,29 +163,29 @@ export default function DriverLogin() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0c1410] flex flex-col font-['Poppins'] sm:items-center sm:justify-center">
-      <div className="sm:w-[420px] sm:rounded-[2.5rem] sm:shadow-2xl sm:overflow-hidden flex flex-col h-full w-full max-w-full bg-[#0c1410] sm:bg-[#0c1410]">
+    <div className="min-h-screen bg-gray-50 flex flex-col font-['Poppins'] sm:items-center sm:justify-center">
+      <div className="sm:w-[420px] sm:rounded-[2.5rem] sm:shadow-2xl sm:overflow-hidden flex flex-col h-full w-full max-w-full bg-white sm:bg-white border-0 sm:border border-gray-100">
         {/* Top hero */}
-        <div className="relative w-full overflow-hidden bg-gradient-to-br from-[#1f3a23] via-[#2a4e2f] to-[#3a6b41] pt-6 pb-14 flex-shrink-0">
-          <div className="absolute -top-10 -right-10 w-72 h-72 bg-[#6ab35a]/20 rounded-full blur-3xl pointer-events-none" />
-          <div className="absolute bottom-[-40px] -left-12 w-72 h-72 bg-[#fff]/5 rounded-full blur-3xl pointer-events-none" />
+        <div className="relative w-full overflow-hidden bg-gradient-to-br from-green-600 via-green-700 to-green-800 pt-6 pb-14 flex-shrink-0">
+          <div className="absolute -top-10 -right-10 w-72 h-72 bg-gray-200 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute bottom-[-40px] -left-12 w-72 h-72 bg-black/10 rounded-full blur-3xl pointer-events-none" />
 
           <div className="relative z-10 px-6">
             <div className="flex items-center gap-2 mb-8">
               <div className="w-9 h-9 rounded-xl bg-white flex items-center justify-center shadow-md">
-                <span className="text-[#2a4e2f] font-black text-xl leading-none">B</span>
+                <span className="text-green-700 font-black text-xl leading-none">B</span>
               </div>
               <span className="font-black text-white text-lg tracking-tight">Buddy Partner</span>
             </div>
 
-            <p className="uppercase text-[11px] text-[#9bc78a] font-bold tracking-[0.25em] mb-2">
+            <p className="uppercase text-[11px] text-green-200 font-bold tracking-[0.25em] mb-2">
               Drive · Deliver · Earn
             </p>
             <h1 className="text-white text-[30px] leading-[1.15] font-extrabold tracking-tight mb-2">
               One partner account.<br />
-              Food orders <span className="text-[#c8f085]">and</span> Taxi rides.
+              Food orders <span className="text-green-300">and</span> Taxi rides.
             </h1>
-            <p className="text-[#cfe3c6] text-[13px] font-medium max-w-[290px]">
+            <p className="text-green-50 text-[13px] font-medium max-w-[290px]">
               Sign in once to receive both food deliveries and taxi rides — switch
               modes any time, never both at once.
             </p>
@@ -193,12 +193,12 @@ export default function DriverLogin() {
         </div>
 
         {/* Form sheet */}
-        <div className="flex-1 bg-[#0c1410] -mt-6 relative z-20 rounded-t-[2rem] border-t border-white/5">
+        <div className="flex-1 bg-white -mt-6 relative z-20 rounded-t-[2rem] border-t border-gray-100 shadow-[0_-4px_20px_rgba(0,0,0,0.02)]">
           <div className="px-7 pt-8 pb-4">
-            <h2 className="text-white text-[28px] font-black tracking-tight mb-1">
+            <h2 className="text-gray-900 text-[28px] font-black tracking-tight mb-1">
               Partner Sign In
             </h2>
-            <p className="text-[#7e9579] text-[14px] font-medium mb-8">
+            <p className="text-gray-500 text-[14px] font-medium mb-8">
               {step === 1 ? "We'll send a 4-digit OTP" : "Enter the OTP we just sent"}
             </p>
 
@@ -213,15 +213,15 @@ export default function DriverLogin() {
                   className="space-y-6"
                 >
                   <div>
-                    <label className="text-[#aac09f] text-[12px] font-bold uppercase tracking-widest mb-2 block">
+                    <label className="text-gray-500 text-[12px] font-bold uppercase tracking-widest mb-2 block">
                       Mobile Number
                     </label>
-                    <div className="flex items-center bg-white/5 border border-white/10 rounded-2xl focus-within:border-[#88c170] transition-all overflow-hidden h-14">
+                    <div className="flex items-center bg-gray-50 border border-gray-200 rounded-2xl focus-within:border-green-600 focus-within:ring-2 focus-within:ring-green-600/10 transition-all overflow-hidden h-14">
                       <div className="flex items-center gap-1.5 px-4 h-full text-white">
-                        <span className="font-bold text-[15px]">+91</span>
-                        <ChevronDown className="w-4 h-4 text-white/50" strokeWidth={3} />
+                        <span className="font-bold text-[15px] text-black">+91</span>
+                        <ChevronDown className="w-4 h-4 text-black" strokeWidth={3} />
                       </div>
-                      <div className="w-px h-6 bg-white/10" />
+                      <div className="w-px h-6 bg-gray-200" />
                       <input
                         type="tel"
                         required
@@ -229,7 +229,7 @@ export default function DriverLogin() {
                         value={phone}
                         onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
                         maxLength={10}
-                        className="flex-1 px-4 h-full bg-transparent outline-none text-white font-bold placeholder:text-white/30 text-[15px]"
+                        className="flex-1 px-4 h-full bg-transparent outline-none text-gray-900 font-bold placeholder:text-gray-400 text-[15px]"
                         placeholder="Registered partner number"
                       />
                     </div>
@@ -238,7 +238,7 @@ export default function DriverLogin() {
                   <button
                     type="submit"
                     disabled={loading || phone.length < 10}
-                    className="w-full h-14 bg-[#88c170] hover:bg-[#7eb463] disabled:bg-white/10 disabled:text-white/30 text-[#0c1410] rounded-2xl font-extrabold text-[16px] shadow-lg shadow-[#88c170]/10 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                    className="w-full h-14 bg-green-600 hover:bg-green-700 disabled:bg-gray-200 disabled:text-white/30 text-white rounded-2xl font-extrabold text-[16px] shadow-lg shadow-green-600/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
                   >
                     {loading ? (
                       <Loader2 className="w-5 h-5 animate-spin" />
@@ -260,7 +260,7 @@ export default function DriverLogin() {
                   className="space-y-6"
                 >
                   <div>
-                    <label className="text-[#aac09f] text-[12px] font-bold uppercase tracking-widest mb-2 block">
+                    <label className="text-gray-500 text-[12px] font-bold uppercase tracking-widest mb-2 block">
                       Enter OTP
                     </label>
                     <div className="flex justify-between gap-3">
@@ -295,7 +295,7 @@ export default function DriverLogin() {
                               }
                             }
                           }}
-                          className="w-full h-14 text-center text-2xl font-bold bg-white/5 border border-white/10 focus:border-[#88c170] focus:ring-2 focus:ring-[#88c170]/20 rounded-2xl outline-none text-white transition-all"
+                          className="w-full h-14 text-center text-2xl font-bold bg-gray-50 border border-gray-200 focus:border-green-600 focus:ring-2 focus:ring-green-600/20 rounded-2xl outline-none text-gray-900 transition-all"
                           placeholder="•"
                         />
                       ))}
@@ -303,11 +303,11 @@ export default function DriverLogin() {
                   </div>
 
                   <div className="flex flex-col items-center gap-2">
-                    <div className="text-[13px] font-semibold text-white/60">
+                    <div className="text-[13px] font-semibold text-gray-500">
                       {resendTimer > 0 ? (
-                        <>Resend in <span className="text-[#88c170]">{formatResendTimer(resendTimer)}</span></>
+                        <>Resend in <span className="text-green-600">{formatResendTimer(resendTimer)}</span></>
                       ) : (
-                        <button type="button" onClick={handleResend} className="text-[#88c170] hover:underline">
+                        <button type="button" onClick={handleResend} className="text-green-600 hover:underline">
                           Resend OTP
                         </button>
                       )}
@@ -315,7 +315,7 @@ export default function DriverLogin() {
                     <button
                       type="button"
                       onClick={() => { setStep(1); setOtp(""); }}
-                      className="text-[12px] text-white/40 hover:text-white/70 transition-colors"
+                      className="text-[12px] text-gray-400 hover:text-gray-600 transition-colors"
                     >
                       Edit phone number
                     </button>
@@ -324,7 +324,7 @@ export default function DriverLogin() {
                   <button
                     type="submit"
                     disabled={loading || otp.length < 4}
-                    className="w-full h-14 bg-[#88c170] hover:bg-[#7eb463] disabled:bg-white/10 disabled:text-white/30 text-[#0c1410] rounded-2xl font-extrabold text-[16px] shadow-lg shadow-[#88c170]/10 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                    className="w-full h-14 bg-green-600 hover:bg-green-700 disabled:bg-gray-200 disabled:text-white/30 text-white rounded-2xl font-extrabold text-[16px] shadow-lg shadow-green-600/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
                   >
                     {loading ? (
                       <Loader2 className="w-5 h-5 animate-spin" />
@@ -340,31 +340,31 @@ export default function DriverLogin() {
             </AnimatePresence>
           </div>
 
-          <div className="mt-auto px-7 py-6 border-t border-white/5">
+          <div className="mt-auto px-7 py-6 border-t border-gray-100 shadow-[0_-4px_20px_rgba(0,0,0,0.02)]">
             <div className="grid grid-cols-3 gap-3 mb-5">
               {[
                 { Icon: Bike, label: "Food" },
                 { Icon: Car, label: "Taxi" },
                 { Icon: IndianRupee, label: "Earnings" },
               ].map(({ Icon, label }) => (
-                <div key={label} className="rounded-2xl bg-white/5 border border-white/5 p-3 text-center">
-                  <Icon className="w-5 h-5 text-[#88c170] mx-auto mb-1" />
-                  <div className="text-[10px] text-white/60 font-bold uppercase tracking-wider">{label}</div>
+                <div key={label} className="rounded-2xl bg-white/5 border border-gray-100 shadow-[0_-4px_20px_rgba(0,0,0,0.02)] p-3 text-center">
+                  <Icon className="w-5 h-5 text-green-600 mx-auto mb-1" />
+                  <div className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">{label}</div>
                 </div>
               ))}
             </div>
-            <div className="flex items-center justify-center gap-2 text-[10px] text-white/40 font-medium">
+            <div className="flex items-center justify-center gap-2 text-[10px] text-gray-400 font-medium">
               <ShieldCheck className="w-3.5 h-3.5" />
               <span>
                 By continuing you accept the&nbsp;
-                <Link to="/food/delivery/terms" className="text-[#88c170] font-bold">
+                <Link to="/food/delivery/terms" className="text-green-600 font-bold">
                   Partner Terms
                 </Link>
               </span>
             </div>
-            <div className="text-center mt-3 text-[11px] text-white/40">
+            <div className="text-center mt-3 text-[11px] text-gray-400">
               Looking to order instead?{" "}
-              <Link to="/user/auth/login" className="text-[#88c170] font-bold">
+              <Link to="/user/auth/login" className="text-green-600 font-bold">
                 Sign in as a Customer
               </Link>
             </div>
@@ -373,7 +373,7 @@ export default function DriverLogin() {
       </div>
 
       {/* Decorative sparkle (top right) */}
-      <Sparkles className="absolute top-6 right-6 w-5 h-5 text-white/30 hidden sm:block" />
+      <Sparkles className="absolute top-6 right-6 w-5 h-5 text-gray-300 hidden sm:block" />
     </div>
   );
 }

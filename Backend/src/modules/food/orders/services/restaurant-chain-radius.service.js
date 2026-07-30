@@ -107,6 +107,9 @@ export async function validateRestaurantChainForItems(
     ? Number(maxKm)
     : await getChainRadiusKm();
   const restaurantIds = getRestaurantIdsInCartOrder(items);
+  if (restaurantIds.length > 2) {
+    throw new ValidationError('You can only select items from up to 2 restaurants.');
+  }
   if (restaurantIds.length <= 1) {
     return { valid: true, restaurantIds };
   }
