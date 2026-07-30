@@ -314,8 +314,88 @@ export function isOrderFullyLocked(order, settings = {}) {
  * using `deliveryState` and never populate `legs`.
  * ------------------------------------------------------------------ */
 
+/** Normalize any partner ref (ObjectId, populated doc, plain string) to an id string. */
+export function toPartnerId(ref) {
+  if (ref == null || ref === '') return '';
+  if (typeof ref === 'object') {
+    const nested = ref._id || ref.id || ref.partnerId;
+    if (nested != null && typeof nested === 'object') {
+      return String(nested._id || nested.id || nested);
+    }
+    return String(nested || '');
+  }
+  return String(ref);
+}
+
 export function isDualLegActive(order) {
-  return Boolean(order?.isDualLeg) && Array.isArray(order?.legs) && order.legs.length > 1;
+  const hasLegs = Array.isArray(order?.legs) && order.legs.length > 1;
+  if (Boolean(order?.isDualLeg) && hasLegs) return true;
+  // Soft detect: second partner already assigned with legs persisted.
+  if (order?.dispatch?.sharedPartnerId && hasLegs) return true;
+  return false;
+}
+
+/**
+ * When a shared partner is on the order but legs were never built (failed join, legacy row),
+ * rebuild independent legs so OTP/status never collapse into the single-driver path.
+ */
+export function ensureDualLegs(order, otpFactory = () => '') {
+  if (!order) return false;
+  if (isDualLegActive(order)) return true;
+  const primaryPartnerId = toPartnerId(order.dispatch?.deliveryPartnerId);
+  const secondaryPartnerId = toPartnerId(order.dispatch?.sharedPartnerId);
+  if (!primaryPartnerId || !secondaryPartnerId) return false;
+  try {
+    const { legs, splitMode } = buildDeliveryLegs(order, {
+      primaryPartnerId,
+      secondaryPartnerId,
+      primaryEarning: order.riderEarning,
+      secondaryEarning: order.sharedRiderEarning,
+      otpFactory,
+    });
+    order.legs = legs;
+    order.splitMode = splitMode;
+    order.isDualLeg = true;
+    if (typeof order.markModified === 'function') {
+      order.markModified('legs');
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Pending (unverified) per-leg handover OTPs for the customer/admin. */
+export function getPendingLegHandoverOtps(order, { onlyAtDrop = false } = {}) {
+  return (Array.isArray(order?.legs) ? order.legs : [])
+    .filter((leg) => {
+      if (leg?.otpVerified) return false;
+      if (!String(leg?.otp || '').trim()) return false;
+      if (onlyAtDrop && String(leg?.status || '') !== 'at_drop') return false;
+      return true;
+    })
+    .map((leg) => ({
+      legIndex: leg.legIndex,
+      role: leg.role,
+      partnerId: toPartnerId(leg.partnerId) || null,
+      otp: String(leg.otp).trim(),
+      status: leg.status || null,
+      otpVerified: false,
+    }));
+}
+
+/** All per-leg OTPs (including verified) — admin monitoring. */
+export function getAllLegHandoverOtps(order) {
+  return (Array.isArray(order?.legs) ? order.legs : [])
+    .filter((leg) => String(leg?.otp || '').trim())
+    .map((leg) => ({
+      legIndex: leg.legIndex,
+      role: leg.role,
+      partnerId: toPartnerId(leg.partnerId) || null,
+      otp: String(leg.otp).trim(),
+      status: leg.status || null,
+      otpVerified: Boolean(leg.otpVerified),
+    }));
 }
 
 /** Legs still in play (a cancelled leg no longer blocks parent completion). */
@@ -325,10 +405,10 @@ export function getActiveLegs(order) {
 }
 
 export function getLegForPartner(order, partnerId) {
-  const pid = String(partnerId || '');
+  const pid = toPartnerId(partnerId);
   if (!pid) return null;
   const legs = Array.isArray(order?.legs) ? order.legs : [];
-  return legs.find((leg) => String(leg?.partnerId || '') === pid) || null;
+  return legs.find((leg) => toPartnerId(leg?.partnerId) === pid) || null;
 }
 
 /** Parent order may only be DELIVERED when every active leg is delivered. */
@@ -373,7 +453,7 @@ export function getLegProgress(order) {
     legs: active.map((leg) => ({
       legIndex: leg.legIndex,
       role: leg.role,
-      partnerId: leg.partnerId ? String(leg.partnerId) : '',
+      partnerId: toPartnerId(leg.partnerId),
       status: leg.status,
       otpVerified: Boolean(leg.otpVerified),
       restaurantIds: (leg.restaurantIds || []).map(String),
@@ -399,18 +479,22 @@ export function buildDeliveryLegs(order, {
   otpFactory = () => '',
 } = {}) {
   const now = new Date();
-  const makeLeg = (legIndex, role, partnerId, earning) => ({
-    legIndex,
-    role,
-    partnerId: partnerId || null,
-    status: 'assigned',
-    restaurantIds: [],
-    itemSplits: [],
-    otp: otpFactory(),
-    otpVerified: false,
-    earning: Math.max(0, Number(earning) || 0),
-    assignedAt: now,
-  });
+  const makeLeg = (legIndex, role, partnerId, earning) => {
+    const code = typeof otpFactory === 'function' ? String(otpFactory() || '').trim() : '';
+    return {
+      legIndex,
+      role,
+      partnerId: toPartnerId(partnerId) || null,
+      status: 'assigned',
+      restaurantIds: [],
+      itemSplits: [],
+      // Each leg gets its own OTP — never reuse a single order-level code across drivers.
+      otp: code || String(Math.floor(1000 + Math.random() * 9000)),
+      otpVerified: false,
+      earning: Math.max(0, Number(earning) || 0),
+      assignedAt: now,
+    };
+  };
 
   const legs = [
     makeLeg(0, 'primary', primaryPartnerId, primaryEarning),

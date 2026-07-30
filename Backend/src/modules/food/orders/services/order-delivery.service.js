@@ -34,11 +34,14 @@ import {
   getNextPickup,
   getPickupProgress,
   isDualLegActive,
+  ensureDualLegs,
   getLegForPartner,
   getNextPickupForLeg,
   getActiveLegs,
   areAllLegsDelivered,
   getLegProgress,
+  getPendingLegHandoverOtps,
+  toPartnerId,
 } from './order-lifecycle.policy.js';
 import {
   buildOrderIdentityFilter,
@@ -57,6 +60,7 @@ import {
   PICKUP_GEOFENCE_METERS,
   DROP_GEOFENCE_METERS,
   RIDER_LOCATION_STALE_MS,
+  applyEmploymentAwareDualEarnings,
 } from './order.helpers.js';
 import { haversineMeters } from '../../../../core/location/haversine.util.js';
 
@@ -320,6 +324,13 @@ function emitOrderUpdate(order, deliveryPartnerId, options = {}) {
     if (io) {
       const dv =
         order.deliveryVerification?.toObject?.() || order.deliveryVerification;
+      // Never broadcast secret OTPs. Presence + otpVerified only.
+      const publicLegs = Array.isArray(order.legs)
+        ? order.legs.map((leg) => {
+            const { otp, ...rest } = leg?.toObject?.() || leg || {};
+            return { ...rest, hasOtp: Boolean(otp), otpVerified: Boolean(rest.otpVerified) };
+          })
+        : [];
       const payload = {
         orderMongoId: order._id?.toString?.(),
         orderId: order._id.toString(),
@@ -328,6 +339,8 @@ function emitOrderUpdate(order, deliveryPartnerId, options = {}) {
         deliveryVerification: dv,
         pickups: order.pickups || [],
         pickupProgress: getPickupProgress(order),
+        isDualLeg: isDualLegActive(order),
+        legs: publicLegs,
         legProgress: getLegProgress(order),
         dispatch: order.dispatch || null,
         isMultiRestaurant: Boolean(order.isMultiRestaurant),
@@ -338,7 +351,8 @@ function emitOrderUpdate(order, deliveryPartnerId, options = {}) {
         order.dispatch?.sharedPartnerId,
       ]
         .filter(Boolean)
-        .map((id) => String(id));
+        .map((id) => toPartnerId(id))
+        .filter(Boolean);
       for (const riderId of [...new Set(riderIds)]) {
         io.to(rooms.delivery(riderId)).emit('order_status_update', payload);
       }
@@ -1442,6 +1456,7 @@ export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId) {
 
   // Anti-spoof geofence against the stop the driver is actually due at (sequence-aware, and
   // scoped to this driver's own leg once the order is running dual-leg).
+  ensureDualLegs(order, generateFourDigitDeliveryOtp);
   const callerLeg = isDualLegActive(order) ? getLegForPartner(order, deliveryPartnerId) : null;
   const nextStop = callerLeg ? getNextPickupForLeg(order, callerLeg) : getNextPickup(order);
   let pickupCoords = nextStop?.location?.coordinates || null;
@@ -1454,6 +1469,46 @@ export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId) {
   // Waiting state: the driver arrived before the food was marked ready. Derived from the single
   // source of truth so single- and multi-restaurant orders are both handled correctly.
   const isWaitingForFood = getPickupProgress(order).isWaitingForFood;
+
+  // Dual-leg: never short-circuit on parent phase — each driver must mark their own arrival.
+  if (callerLeg) {
+    if (['at_pickup', 'picked_up', 'at_drop', 'delivered'].includes(String(callerLeg.status || ''))) {
+      emitOrderUpdate(order, deliveryPartnerId, { sendMilestonePush: false });
+      return sanitizeOrderForExternal(order);
+    }
+    const from = order.deliveryState?.status || order.deliveryState?.currentPhase || order.orderStatus;
+    callerLeg.status = 'at_pickup';
+    callerLeg.reachedPickupAt = callerLeg.reachedPickupAt || new Date();
+    order.markModified('legs');
+    // Parent phase is informational only; trip UI derives from each driver's leg.
+    if (!order.deliveryState?.reachedPickupAt) {
+      order.deliveryState = {
+        ...(order.deliveryState?.toObject?.() || order.deliveryState || {}),
+        currentPhase: 'at_pickup',
+        status: isWaitingForFood ? 'waiting_for_food' : 'reached_pickup',
+        reachedPickupAt: new Date(),
+      };
+    }
+    pushStatusHistory(order, {
+      byRole: 'DELIVERY_PARTNER',
+      byId: deliveryPartnerId,
+      from,
+      to: 'reached_pickup',
+      note: isWaitingForFood
+        ? `Leg ${callerLeg.legIndex} reached ${nextStop?.restaurantName || 'pickup'} — waiting for food`
+        : `Leg ${callerLeg.legIndex} reached pickup (independent of partner)`,
+    });
+    await order.save();
+    emitOrderUpdate(order, deliveryPartnerId);
+    enqueueOrderEvent('leg_reached_pickup', {
+      orderMongoId: order._id?.toString?.(),
+      orderId: order._id.toString(),
+      deliveryPartnerId,
+      legIndex: callerLeg.legIndex,
+      legProgress: getLegProgress(order),
+    });
+    return sanitizeOrderForExternal(order);
+  }
 
   const currentPhase = order.deliveryState?.currentPhase || '';
   const currentStatus = order.deliveryState?.status || '';
@@ -1468,11 +1523,6 @@ export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId) {
     status: isWaitingForFood ? 'waiting_for_food' : 'reached_pickup',
     reachedPickupAt: order.deliveryState?.reachedPickupAt || new Date(),
   };
-  if (callerLeg) {
-    callerLeg.status = 'at_pickup';
-    callerLeg.reachedPickupAt = callerLeg.reachedPickupAt || new Date();
-    order.markModified('legs');
-  }
   pushStatusHistory(order, {
     byRole: 'DELIVERY_PARTNER',
     byId: deliveryPartnerId,
@@ -1587,6 +1637,7 @@ export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImag
   }
 
   // Under dual-leg each driver collects their own leg; otherwise only the primary may confirm.
+  ensureDualLegs(order, generateFourDigitDeliveryOtp);
   const pickupLeg = isDualLegActive(order) ? getLegForPartner(order, deliveryPartnerId) : null;
   if (isShared && !isPrimary && !pickupLeg) {
     throw new ForbiddenError('Only the primary partner can confirm order pickup.');
@@ -1835,16 +1886,14 @@ export async function confirmReachedDropDelivery(orderId, deliveryPartnerId) {
     return resOrder;
   }
 
-  const isPrimary = order.dispatch?.deliveryPartnerId?.toString() === deliveryPartnerId.toString();
-  const isShared = order.dispatch?.sharedPartnerId?.toString() === deliveryPartnerId.toString();
+  const isPrimary = toPartnerId(order.dispatch?.deliveryPartnerId) === toPartnerId(deliveryPartnerId);
+  const isShared = toPartnerId(order.dispatch?.sharedPartnerId) === toPartnerId(deliveryPartnerId);
   if (!isPrimary && !isShared) {
     throw new ForbiddenError('Not your order');
   }
 
-  if (order.deliveryVerification?.dropOtp?.verified) {
-    emitOrderUpdate(order, deliveryPartnerId);
-    return sanitizeOrderForExternal(order);
-  }
+  // Repair dual-leg if second driver is present but legs were never built.
+  ensureDualLegs(order, generateFourDigitDeliveryOtp);
 
   // Anti-spoof geofence: rider must be near the customer to request the drop OTP.
   await assertRiderAtTarget(
@@ -1855,8 +1904,12 @@ export async function confirmReachedDropDelivery(orderId, deliveryPartnerId) {
   );
 
   // Dual-leg: each leg is verified independently with its OWN handover OTP.
-  const dropLeg = isDualLegActive(order) ? getLegForPartner(order, deliveryPartnerId) : null;
-  if (dropLeg) {
+  // Do NOT short-circuit on order-level dropOtp.verified — that flag is only for single-driver.
+  if (isDualLegActive(order)) {
+    const dropLeg = getLegForPartner(order, deliveryPartnerId);
+    if (!dropLeg) {
+      throw new ForbiddenError('No delivery leg assigned to you on this shared order');
+    }
     if (dropLeg.otpVerified) {
       emitOrderUpdate(order, deliveryPartnerId, { sendMilestonePush: false });
       return sanitizeOrderForExternal(order);
@@ -1865,6 +1918,7 @@ export async function confirmReachedDropDelivery(orderId, deliveryPartnerId) {
     dropLeg.status = 'at_drop';
     dropLeg.reachedDropAt = dropLeg.reachedDropAt || new Date();
     order.markModified('legs');
+    // Parent phase reflects "someone is at drop"; each leg still has its own OTP/status.
     order.deliveryState = {
       ...(order.deliveryState?.toObject?.() || order.deliveryState || {}),
       currentPhase: 'at_drop',
@@ -1873,24 +1927,12 @@ export async function confirmReachedDropDelivery(orderId, deliveryPartnerId) {
     };
     await order.save();
 
-    const pendingLegOtps = (order.legs || [])
-      .filter(
-        (leg) =>
-          String(leg?.status || '') === 'at_drop' &&
-          !leg?.otpVerified &&
-          String(leg?.otp || '').trim(),
-      )
-      .map((leg) => ({
-        legIndex: leg.legIndex,
-        role: leg.role,
-        partnerId: leg.partnerId ? String(leg.partnerId) : null,
-        otp: String(leg.otp).trim(),
-      }));
+    const pendingLegOtps = getPendingLegHandoverOtps(order, { onlyAtDrop: false });
 
     emitDeliveryDropOtpToUser(order, String(dropLeg.otp || '').trim(), {
       legIndex: dropLeg.legIndex,
       role: dropLeg.role,
-      partnerId: deliveryPartnerId,
+      partnerId: toPartnerId(deliveryPartnerId),
       isDualLeg: true,
       legOtps: pendingLegOtps,
     });
@@ -1902,6 +1944,11 @@ export async function confirmReachedDropDelivery(orderId, deliveryPartnerId) {
       legIndex: dropLeg.legIndex,
       legProgress: getLegProgress(order),
     });
+    return sanitizeOrderForExternal(order);
+  }
+
+  if (order.deliveryVerification?.dropOtp?.verified) {
+    emitOrderUpdate(order, deliveryPartnerId);
     return sanitizeOrderForExternal(order);
   }
 
@@ -2072,8 +2119,8 @@ export async function verifyDropOtpDelivery(orderId, deliveryPartnerId, otp) {
     return { order: resOrder };
   }
 
-  const isPrimary = order.dispatch?.deliveryPartnerId?.toString() === deliveryPartnerId.toString();
-  const isShared = order.dispatch?.sharedPartnerId?.toString() === deliveryPartnerId.toString();
+  const isPrimary = toPartnerId(order.dispatch?.deliveryPartnerId) === toPartnerId(deliveryPartnerId);
+  const isShared = toPartnerId(order.dispatch?.sharedPartnerId) === toPartnerId(deliveryPartnerId);
   if (!isPrimary && !isShared) {
     throw new ForbiddenError('Not your order');
   }
@@ -2081,9 +2128,15 @@ export async function verifyDropOtpDelivery(orderId, deliveryPartnerId, otp) {
   const otpStr = normalizeOtpValue(otp);
   if (!otpStr) throw new ValidationError('OTP is required');
 
+  // Repair dual-leg if shared partner exists but legs were never built.
+  ensureDualLegs(order, generateFourDigitDeliveryOtp);
+
   // Dual-leg: verify THIS driver's leg OTP; the other leg is unaffected.
-  const verifyLeg = isDualLegActive(order) ? getLegForPartner(order, deliveryPartnerId) : null;
-  if (verifyLeg) {
+  if (isDualLegActive(order)) {
+    const verifyLeg = getLegForPartner(order, deliveryPartnerId);
+    if (!verifyLeg) {
+      throw new ForbiddenError('No delivery leg assigned to you on this shared order');
+    }
     if (verifyLeg.otpVerified) {
       return { order: sanitizeOrderForExternal(order) };
     }
@@ -2094,6 +2147,7 @@ export async function verifyDropOtpDelivery(orderId, deliveryPartnerId, otp) {
     }
     verifyLeg.otpVerified = true;
     order.markModified('legs');
+    // Never flip order-level dropOtp.verified here — that would mark the other driver done.
     await order.save();
 
     emitOrderUpdate(order, deliveryPartnerId, { sendMilestonePush: false });
@@ -2259,7 +2313,11 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
 
   // 0. Dual-leg: this driver completes THEIR leg only. The parent order can never be closed by
   //    a single driver — it is DELIVERED only once every active leg is delivered.
+  ensureDualLegs(order, generateFourDigitDeliveryOtp);
   const completeLeg = isDualLegActive(order) ? getLegForPartner(order, deliveryPartnerId) : null;
+  if (isDualLegActive(order) && !completeLeg) {
+    throw new ForbiddenError('No delivery leg assigned to you on this shared order');
+  }
   if (completeLeg) {
     if (String(completeLeg.status || '') === 'delivered') {
       return sanitizeOrderForExternal(order); // idempotent re-submit
@@ -2303,7 +2361,21 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
       return sanitizeOrderForExternal(order);
     }
 
-    // Final leg — satisfy the legacy single-driver gates below (per-leg OTPs already verified,
+    // Final leg — re-apply salary/per-order payouts so wallets never credit salary partners.
+    try {
+      const [primaryPartner, sharedPartner] = await Promise.all([
+        FoodDeliveryPartner.findById(order.dispatch?.deliveryPartnerId).select('employmentType').lean(),
+        FoodDeliveryPartner.findById(order.dispatch?.sharedPartnerId).select('employmentType').lean(),
+      ]);
+      applyEmploymentAwareDualEarnings(order, {
+        primaryEmploymentType: primaryPartner?.employmentType || 'per_order',
+        secondaryEmploymentType: sharedPartner?.employmentType || 'per_order',
+      });
+    } catch (earnErr) {
+      logger.warn(`Employment-aware dual earnings failed: ${earnErr?.message || earnErr}`);
+    }
+
+    // Satisfy the legacy single-driver gates below (per-leg OTPs already verified,
     // and the legs themselves ARE the split) so settlement runs exactly once.
     if (!order.deliveryVerification) order.deliveryVerification = {};
     order.deliveryVerification.dropOtp = {

@@ -357,6 +357,11 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
               full.dispatch?.deliveryPartnerId?.phone ||
               full.dispatch?.deliveryPartnerId?.phoneNumber,
             orderOtp: full.deliveryOtp || order.orderOtp || order.deliveryOtp,
+            legHandoverOtps: Array.isArray(full.legHandoverOtps)
+              ? full.legHandoverOtps
+              : order.legHandoverOtps,
+            isDualLeg: Boolean(full.isDualLeg || order.isDualLeg),
+            legs: Array.isArray(full.legs) ? full.legs : order.legs,
             address:
               full.deliveryAddress ||
               full.address ||
@@ -816,7 +821,34 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
                     : formatDateTime(data?.createdAt)
                 }
               />
-              {data?.orderOtp || data?.deliveryOtp ? (
+              {Array.isArray(data?.legHandoverOtps) && data.legHandoverOtps.length > 0 ? (
+                <div className="md:col-span-2 space-y-2">
+                  <p className="text-[11px] font-semibold text-orange-600 uppercase tracking-wider flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    {data.legHandoverOtps.length > 1 ? "Per-driver handover OTPs" : "Handover OTP"}
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {data.legHandoverOtps.map((leg, idx) => (
+                      <div
+                        key={`admin-otp-${leg.legIndex ?? leg.partnerId ?? idx}`}
+                        className="rounded-lg border border-orange-100 bg-orange-50/60 px-3 py-2"
+                      >
+                        <p className="text-[10px] font-semibold text-orange-700 uppercase tracking-wider">
+                          {leg.role === "secondary" || leg.role === "shared"
+                            ? "Second rider"
+                            : leg.role === "primary"
+                              ? "Lead rider"
+                              : `Rider ${idx + 1}`}
+                          {leg.otpVerified ? " · verified" : ""}
+                        </p>
+                        <p className="text-lg font-bold text-slate-950 tracking-[0.2em]">
+                          {leg.otp}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : data?.orderOtp || data?.deliveryOtp ? (
                 <div className="space-y-0.5">
                   <p className="text-[11px] font-semibold text-orange-600 uppercase tracking-wider flex items-center gap-1">
                     <CheckCircle2 className="w-3.5 h-3.5" />
@@ -1295,7 +1327,11 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
               )}
               <PriceRow
                 label="Delivery Charge"
-                value={data?.deliveryCharge ?? pricing.deliveryFee}
+                value={
+                  Number(data?.deliveryCharge) > 0
+                    ? data.deliveryCharge
+                    : pricing.deliveryFee
+                }
                 freeLabel={<span className="text-emerald-600">Free delivery</span>}
               />
               {deliveryBreakdown ? (
@@ -1316,6 +1352,20 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
                     <div className="flex justify-between">
                       <span>Distance fee</span>
                       <span>{money(deliveryBreakdown.distanceFee)}</span>
+                    </div>
+                  )}
+                  {(Number(deliveryBreakdown.additionalCharge) > 0 ||
+                    Number(deliveryBreakdown.multiRestaurantCharge) > 0 ||
+                    Boolean(deliveryBreakdown.isMultiRestaurant)) && (
+                    <div className="flex justify-between text-orange-700">
+                      <span>Multi-restaurant charge</span>
+                      <span>
+                        {money(
+                          deliveryBreakdown.additionalCharge ??
+                            deliveryBreakdown.multiRestaurantCharge ??
+                            0,
+                        )}
+                      </span>
                     </div>
                   )}
                   {deliveryBreakdown.speedFeeModifier != null &&
@@ -1358,11 +1408,21 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
                       </div>
                     )}
                   {deliveryBreakdown.isMultiRestaurant ? (
-                    <p className="text-[11px] text-orange-600">Multi-restaurant delivery pricing</p>
+                    <p className="text-[11px] text-orange-600">
+                      Multi-restaurant delivery pricing
+                      {Number(deliveryBreakdown.additionalCharge) > 0
+                        ? ` (includes ${money(deliveryBreakdown.additionalCharge)} multi charge)`
+                        : ""}
+                    </p>
                   ) : null}
                   {deliveryBreakdown.source ? (
                     <p className="text-[11px]">Source: {deliveryBreakdown.source}</p>
                   ) : null}
+                </div>
+              ) : isMulti ? (
+                <div className="ml-3 pl-3 border-l-2 border-orange-200 text-xs text-orange-700">
+                  Multi-restaurant order — delivery charge includes multi-pickup surcharge
+                  when configured.
                 </div>
               ) : null}
               <PriceRow
@@ -1471,31 +1531,42 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
             open={openSections.settlementLedger}
             onToggle={toggleSection}
             badge={
-              data?.settlementBreakdown?.status === "cancelled" || cancellationInfo
+              data?.settlementBreakdown?.status === "cancelled" ||
+              cancellationInfo?.isFullCancel
                 ? `Refund ${money(
                     data?.settlementBreakdown?.customer?.refund ??
                       cancellationInfo?.refundAmount ??
                       data?.pricing?.total ??
                       data?.totalAmount,
                   )}`
-                : data?.settlementBreakdown?.platform?.netProfit != null
-                  ? `Platform ${money(data.settlementBreakdown.platform.netProfit)}`
-                  : money(data?.platformProfit)
+                : cancellationInfo?.partialRefunds?.length
+                  ? `Partial ${money(cancellationInfo.refundAmount)}`
+                  : data?.settlementBreakdown?.platform?.netProfit != null
+                    ? `Platform ${money(data.settlementBreakdown.platform.netProfit)}`
+                    : money(data?.platformProfit)
             }
           >
             {(() => {
               const sb = data?.settlementBreakdown
-              const isCancelledSettlement =
-                sb?.status === "cancelled" ||
-                Boolean(cancellationInfo) ||
-                String(data?.orderStatus || data?.status || "")
-                  .toLowerCase()
-                  .includes("cancelled")
+              const orderStatusLower = String(data?.orderStatus || data?.status || "").toLowerCase()
               const cancelLedger = sb?.cancellation || null
+              const partialRefunds = Array.isArray(data?.partialRefunds)
+                ? data.partialRefunds
+                : cancellationInfo?.partialRefunds || []
+              const partialRefundTotal = partialRefunds.reduce(
+                (sum, entry) => sum + (Number(entry?.amount) || 0),
+                0,
+              )
+              const isFullOrderCancelled =
+                Boolean(cancellationInfo?.isFullCancel) ||
+                (orderStatusLower.includes("cancelled") && partialRefunds.length === 0)
+              // Only show the reversed/cancelled ledger for FULL order cancel.
+              // Partial restaurant drops must use the live settlement (remaining restos + driver + platform).
+              const isCancelledSettlement = Boolean(isFullOrderCancelled)
               const customerRefund =
                 sb?.customer?.refund ??
                 cancelLedger?.refundAmount ??
-                cancellationInfo?.refundAmount ??
+                (isFullOrderCancelled ? cancellationInfo?.refundAmount : null) ??
                 null
               const customerPaid = sb?.customer?.paid ?? pricing.total
 
@@ -1629,18 +1700,22 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
               // Only treat as salary when employmentType is explicitly salary.
               // Do not infer from note text — create-time notes mention "Salary partners…" for all orders.
               const isSalary = sb?.driver?.employmentType === "salary"
+              // Prefer live restaurantSettlement after partial drops (more accurate than a stale ledger).
+              const restaurantsFromSettlement = (data?.restaurantSettlement || []).map((s) => ({
+                restaurantName: s.restaurantName,
+                foodAmount: s.foodAmount,
+                packagingFee: s.packagingFee,
+                commission: s.commission,
+                speedShare: s.speedShare,
+                couponDiscount: s.couponDiscount,
+                payout: s.restaurantPayout,
+              }))
               const restaurants =
-                Array.isArray(sb?.restaurants) && sb.restaurants.length
-                  ? sb.restaurants
-                  : (data?.restaurantSettlement || []).map((s) => ({
-                      restaurantName: s.restaurantName,
-                      foodAmount: s.foodAmount,
-                      packagingFee: s.packagingFee,
-                      commission: s.commission,
-                      speedShare: s.speedShare,
-                      couponDiscount: s.couponDiscount,
-                      payout: s.restaurantPayout,
-                    }))
+                restaurantsFromSettlement.length > 0
+                  ? restaurantsFromSettlement
+                  : Array.isArray(sb?.restaurants) && sb.restaurants.length
+                    ? sb.restaurants
+                    : []
               const speed = sb?.speed || {
                 feeModifier: deliveryBreakdown?.speedFeeModifier,
                 admin: deliveryBreakdown?.speedShareAdmin,
@@ -1651,11 +1726,41 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
 
               return (
                 <div className="space-y-4 text-sm">
+                  {partialRefunds.length > 0 ? (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3 space-y-2">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-amber-800">
+                        Partial restaurant drop — order continues
+                      </p>
+                      <p className="text-xs text-amber-900">
+                        {money(partialRefundTotal)} refunded to customer wallet for removed
+                        restaurant(s). Remaining restaurants, driver, and platform keep their
+                        settlement for the continuing order.
+                      </p>
+                      {partialRefunds.map((entry, idx) => (
+                        <div
+                          key={`${entry.restaurantId || idx}-${entry.at || idx}`}
+                          className="flex flex-wrap items-center justify-between gap-2 text-xs text-amber-900"
+                        >
+                          <span>
+                            {entry.restaurantName || `Restaurant ${idx + 1}`} cancelled
+                          </span>
+                          <span className="font-semibold">{money(entry.amount)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                   <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 space-y-2">
                     <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
                       Customer paid
                     </p>
                     <PriceRow label="Order total" value={sb?.customer?.paid ?? pricing.total} />
+                    {partialRefundTotal > 0 ? (
+                      <PriceRow
+                        label="Partial refunds (wallet)"
+                        value={partialRefundTotal}
+                        negative
+                      />
+                    ) : null}
                     <PriceRow
                       label="Food subtotal"
                       value={
@@ -1674,6 +1779,12 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
                       label="Delivery paid"
                       value={sb?.customer?.deliveryPaid ?? Math.max(0, Number(pricing.deliveryFee || 0) - Number(pricing.deliveryDiscount || 0))}
                     />
+                    {Number(deliveryBreakdown?.additionalCharge) > 0 ? (
+                      <div className="ml-2 flex justify-between text-[11px] text-orange-700">
+                        <span>Includes multi-restaurant charge</span>
+                        <span>{money(deliveryBreakdown.additionalCharge)}</span>
+                      </div>
+                    ) : null}
                     {(Number(sb?.customer?.tax ?? data?.vatTax ?? pricing.tax) > 0) && (
                       <PriceRow
                         label="GST (on food)"
@@ -1930,21 +2041,30 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
                       Dual-leg status
                     </p>
                     <div className="space-y-2">
-                      {data.legs.map((leg, idx) => (
-                        <div
-                          key={leg.legIndex ?? idx}
-                          className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs flex flex-wrap gap-3 justify-between"
-                        >
-                          <span className="font-semibold text-slate-700">
-                            Leg {(leg.legIndex ?? idx) + 1} · {leg.role || "driver"}
-                          </span>
-                          <span className="text-slate-600">
-                            {humanizeStatus(leg.status || "pending")}
-                            {leg.otpVerified ? " · OTP ✓" : ""}
-                            {leg.earning != null ? ` · ${money(leg.earning)}` : ""}
-                          </span>
-                        </div>
-                      ))}
+                      {data.legs.map((leg, idx) => {
+                        const matchingOtp = Array.isArray(data?.legHandoverOtps)
+                          ? data.legHandoverOtps.find(
+                              (o) =>
+                                Number(o.legIndex) === Number(leg.legIndex) ||
+                                String(o.partnerId || '') === String(leg.partnerId || ''),
+                            )
+                          : null
+                        return (
+                          <div
+                            key={leg.legIndex ?? idx}
+                            className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs flex flex-wrap gap-3 justify-between"
+                          >
+                            <span className="font-semibold text-slate-700">
+                              Leg {(leg.legIndex ?? idx) + 1} · {leg.role || "driver"}
+                            </span>
+                            <span className="text-slate-600">
+                              {humanizeStatus(leg.status || "pending")}
+                              {leg.otpVerified || matchingOtp?.otpVerified ? " · OTP ✓" : matchingOtp?.otp ? ` · OTP ${matchingOtp.otp}` : ""}
+                              {leg.earning != null ? ` · ${money(leg.earning)}` : ""}
+                            </span>
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
                 )}

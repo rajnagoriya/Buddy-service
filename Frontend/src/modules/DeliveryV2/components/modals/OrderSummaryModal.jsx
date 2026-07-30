@@ -1,35 +1,53 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { CheckCircle, ArrowRight, Wallet, Star } from 'lucide-react';
+import { CheckCircle, ArrowRight, Wallet, Star, Loader2 } from 'lucide-react';
+import {
+  getCurrentRiderId,
+  getPartnerWaitMessage,
+  resolveMyEarning,
+  toPartnerId,
+} from '@/modules/DeliveryV2/utils/partnerIdentity';
 
 /**
  * Post-delivery success screen.
  * Salary partners: "Order completed" only (no payout amount).
  * Per-order partners: show actual rider earning (never customer deliveryFee).
+ * Dual-leg: if partner still outstanding, show waiting state.
  */
 export const OrderSummaryModal = ({ order, onDone, riderProfile }) => {
+  const riderId = getCurrentRiderId();
+  const isSharedRider =
+    toPartnerId(riderId) &&
+    toPartnerId(riderId) === toPartnerId(order?.dispatch?.sharedPartnerId);
+
   const isSalaryPartner =
     order?.earningDisplayMode === 'salary' ||
     order?.employmentType === 'salary' ||
-    order?.settlementBreakdown?.driver?.employmentType === 'salary' ||
+    (isSharedRider
+      ? order?.settlementBreakdown?.driver?.sharedEmploymentType === 'salary'
+      : order?.settlementBreakdown?.driver?.employmentType === 'salary') ||
     riderProfile?.employmentType === 'salary';
 
-  const earnings = (() => {
-    if (isSalaryPartner) return 0;
-    const candidates = [
-      order?.earnings,
-      order?.riderEarning,
-      order?.deliveryBoyFee,
-      order?.pricing?.deliveryFeeBreakdown?.riderFee,
-      order?.pricing?.deliveryFeeBreakdown?.deliveryBoyFee,
-      order?.settlementBreakdown?.driver?.payout,
-    ];
-    for (const value of candidates) {
-      const n = Number(value);
-      if (Number.isFinite(n) && n > 0) return n;
-    }
-    return 0;
-  })();
+  const waitMsg = getPartnerWaitMessage(order, riderId);
+  const waitingForPartner = Boolean(waitMsg) && String(order?.orderStatus || '') !== 'delivered';
+
+  const earnings = isSalaryPartner
+    ? 0
+    : resolveMyEarning(order, riderId, false) || (() => {
+        const candidates = [
+          order?.earnings,
+          isSharedRider ? order?.sharedRiderEarning : order?.riderEarning,
+          order?.deliveryBoyFee,
+          order?.pricing?.deliveryFeeBreakdown?.riderFee,
+          order?.pricing?.deliveryFeeBreakdown?.deliveryBoyFee,
+          order?.settlementBreakdown?.driver?.payout,
+        ];
+        for (const value of candidates) {
+          const n = Number(value);
+          if (Number.isFinite(n) && n > 0) return n;
+        }
+        return 0;
+      })();
 
   return (
     <div className="fixed inset-0 z-[1000] bg-green-500 overflow-y-auto">
@@ -44,14 +62,35 @@ export const OrderSummaryModal = ({ order, onDone, riderProfile }) => {
           </div>
 
           <h1 className="text-white text-4xl sm:text-5xl font-bold mb-2 tracking-tight">
-            {isSalaryPartner ? 'Order Completed' : 'Well Done!'}
+            {waitingForPartner
+              ? 'Your part is done'
+              : isSalaryPartner
+                ? 'Order Completed'
+                : 'Well Done!'}
           </h1>
           <p className="text-white/90 text-base sm:text-lg mb-8 sm:mb-12">
-            Trip completed successfully.
+            {waitingForPartner
+              ? waitMsg.body
+              : 'Trip completed successfully.'}
           </p>
 
           <div className="bg-white rounded-3xl p-5 sm:p-8 mb-8 sm:mb-12 shadow-2xl text-gray-900 border border-white/20">
-            {isSalaryPartner ? (
+            {waitingForPartner ? (
+              <>
+                <div className="flex items-center justify-center gap-2 mb-3">
+                  <Loader2 className="w-4 h-4 text-amber-500 animate-spin" />
+                  <p className="text-gray-400 text-xs font-bold uppercase tracking-widest">
+                    {waitMsg.title}
+                  </p>
+                </div>
+                <p className="text-gray-950 text-xl sm:text-2xl font-bold mb-2 tracking-tight">
+                  Waiting for second driver
+                </p>
+                <p className="text-sm text-gray-500 font-medium">
+                  {waitMsg.body}
+                </p>
+              </>
+            ) : isSalaryPartner ? (
               <>
                 <div className="flex items-center justify-center gap-2 mb-3">
                   <Star className="w-4 h-4 text-orange-400 fill-orange-400" />

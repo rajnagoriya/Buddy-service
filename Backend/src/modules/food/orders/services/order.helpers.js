@@ -63,6 +63,154 @@ import { haversineKm } from '../../../../core/location/haversine.util.js';
 export { haversineKm };
 
 /**
+ * Total payout pool that can be split between two drivers.
+ * Includes salary-reclaimed amounts so a per-order second driver still gets a fair share.
+ */
+export function resolveDualPayoutPool(order) {
+  if (!order) return 0;
+  const assigned =
+    Math.max(0, Number(order.riderEarning) || 0) +
+    Math.max(0, Number(order.sharedRiderEarning) || 0);
+
+  const reclaim = Math.max(
+    0,
+    Number(order.settlementBreakdown?.platform?.salaryReclaim || 0) || 0,
+  );
+
+  const costReclaim = (order.settlementBreakdown?.costBearers || []).find(
+    (c) => String(c?.type || '') === 'salary_reclaim',
+  );
+  const costReclaimAmt =
+    costReclaim && Number(costReclaim.amount) > 0 ? Number(costReclaim.amount) : 0;
+
+  const breakdown = order.pricing?.deliveryFeeBreakdown || {};
+  const fee = Math.max(
+    0,
+    Number(breakdown.riderFee ?? breakdown.deliveryBoyFee ?? 0) || 0,
+  );
+
+  // Use the largest known slab. A provisional 50/50 after salary-zeroing
+  // (e.g. rider=0 + shared=15) must not shrink a ₹30 pool to ₹15.
+  return Math.max(assigned, reclaim, costReclaimAmt, fee);
+}
+
+/**
+ * Apply earnings by each partner's employment type (same rule as solo / without split):
+ * - salary → ₹0 wallet; unpaid slab share → admin (salaryReclaim / platformProfit)
+ * - per_order → slab share credited to wallet
+ *
+ * Pool is always the configured delivery-boy fee from pricing/slabs (never customer charge).
+ * - both per_order → 50/50 of that fee
+ * - mixed → full configured fee to the per-order partner; salary gets ₹0 (admin keeps unpaid share)
+ * - both salary → both ₹0; full fee → admin
+ */
+export function applyEmploymentAwareDualEarnings(order, {
+  primaryEmploymentType = 'per_order',
+  secondaryEmploymentType = 'per_order',
+} = {}) {
+  if (!order?.dispatch?.sharedPartnerId) return order;
+
+  const pool = resolveDualPayoutPool(order);
+  const primarySalary = primaryEmploymentType === 'salary';
+  const secondarySalary = secondaryEmploymentType === 'salary';
+
+  const perOrderCount = (primarySalary ? 0 : 1) + (secondarySalary ? 0 : 1);
+  let nextPrimary = 0;
+  let nextShared = 0;
+
+  if (perOrderCount === 2) {
+    const half = Math.round(pool / 2);
+    nextPrimary = Math.max(0, pool - half);
+    nextShared = half;
+  } else if (perOrderCount === 1) {
+    // Same as solo for the earning partner: they get the full configured slab.
+    if (!primarySalary) nextPrimary = pool;
+    if (!secondarySalary) nextShared = pool;
+  }
+  // both salary → both ₹0; reclaim = full pool → admin
+
+  const reclaim = Math.max(0, pool - (nextPrimary + nextShared));
+
+  const prevAssigned =
+    Math.max(0, Number(order.riderEarning) || 0) +
+    Math.max(0, Number(order.sharedRiderEarning) || 0);
+  const nextAssigned = nextPrimary + nextShared;
+  const platformDelta = prevAssigned - nextAssigned;
+  if (platformDelta !== 0) {
+    order.platformProfit = Number(
+      ((Number(order.platformProfit) || 0) + platformDelta).toFixed(2),
+    );
+  }
+
+  order.riderEarning = nextPrimary;
+  order.sharedRiderEarning = nextShared;
+
+  const existingBreakdown =
+    order.settlementBreakdown && typeof order.settlementBreakdown === 'object'
+      ? order.settlementBreakdown
+      : {};
+  const nextCostBearers = [
+    ...((existingBreakdown.costBearers || []).filter(
+      (c) => String(c?.type || '') !== 'salary_reclaim',
+    )),
+    ...(reclaim > 0
+      ? [
+          {
+            type: 'salary_reclaim',
+            bearer: 'admin',
+            amount: reclaim,
+            note: 'Salary partner — delivery slab share retained by admin (no wallet credit)',
+          },
+        ]
+      : []),
+  ];
+  order.settlementBreakdown = {
+    ...existingBreakdown,
+    driver: {
+      ...(existingBreakdown.driver || {}),
+      payout: nextPrimary,
+      sharedPayout: nextShared,
+      employmentType: primarySalary ? 'salary' : 'per_order',
+      sharedEmploymentType: secondarySalary ? 'salary' : 'per_order',
+      note: [
+        primarySalary
+          ? 'Primary on salary — ₹0 wallet (share retained by admin)'
+          : `Primary per-order wallet ₹${nextPrimary}`,
+        secondarySalary
+          ? 'Shared on salary — ₹0 wallet (share retained by admin)'
+          : `Shared per-order wallet ₹${nextShared}`,
+        perOrderCount === 2
+          ? 'Both per-order — 50/50 of configured slab'
+          : perOrderCount === 1
+            ? 'Mixed employment — full configured slab to per-order partner; salary ₹0'
+            : `Both on salary — full configured slab ₹${reclaim} retained by admin`,
+      ]
+        .filter(Boolean)
+        .join('; '),
+    },
+    platform: {
+      ...(existingBreakdown.platform || {}),
+      netProfit: Number(order.platformProfit) || 0,
+      salaryReclaim: reclaim,
+    },
+    costBearers: nextCostBearers,
+  };
+
+  if (Array.isArray(order.legs) && order.legs.length) {
+    for (const leg of order.legs) {
+      const role = String(leg?.role || '');
+      if (role === 'primary') leg.earning = nextPrimary;
+      if (role === 'secondary' || role === 'shared') leg.earning = nextShared;
+    }
+    if (typeof order.markModified === 'function') order.markModified('legs');
+  }
+  if (typeof order.markModified === 'function') {
+    order.markModified('settlementBreakdown');
+  }
+  return order;
+}
+
+/**
  * Single source of truth for what the driver is paid on an order.
  * NEVER use customer `pricing.deliveryFee` here — that is the customer charge
  * (userCharge + speed + multi), not the rider payout.

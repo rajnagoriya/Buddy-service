@@ -2,6 +2,13 @@ import { useRef } from 'react';
 import { useDeliveryStore } from '@/modules/DeliveryV2/store/useDeliveryStore';
 import { deliveryAPI } from '@food/api';
 import { toast } from 'sonner';
+import {
+  getCurrentRiderId,
+  getMyLeg,
+  isDualLegOrder,
+  getOtherLeg,
+  getPartnerWaitMessage,
+} from '@/modules/DeliveryV2/utils/partnerIdentity';
 
 /**
  * useOrderManager - Professional hook for real-world trip lifecycle actions.
@@ -200,28 +207,25 @@ export const useOrderManager = () => {
 
           // Dual-leg: each driver can finish their own pickup even if the other
           // partner has not collected yet (parent may still be ready_for_pickup).
-          const getRiderId = () => {
-            try {
-              const stored = localStorage.getItem('delivery_user');
-              if (stored) {
-                const user = JSON.parse(stored);
-                const id = user?._id || user?.id || user?.partnerId;
-                if (id) return String(id);
-              }
-            } catch { }
-            return null;
-          };
-          const riderId = getRiderId();
-          const myLeg = riderId && Array.isArray(updatedOrder.legs)
-            ? updatedOrder.legs.find((leg) => String(leg?.partnerId || '') === riderId)
-            : null;
+          const riderId = getCurrentRiderId();
+          const myLeg = getMyLeg(updatedOrder, riderId);
           const myLegCollected = Boolean(
             myLeg && ['picked_up', 'at_drop', 'delivered'].includes(String(myLeg.status || '')),
           );
 
           const isFullyPicked = updatedOrder.orderStatus === 'picked_up' || updatedOrder.status === 'picked_up';
+          const waitMsg = getPartnerWaitMessage(updatedOrder, riderId);
+          const waitingOnPartnerPickup =
+            isDualLegOrder(updatedOrder) &&
+            myLegCollected &&
+            !isFullyPicked &&
+            Boolean(waitMsg);
 
-          if (isFullyPicked || myLegCollected) {
+          if (waitingOnPartnerPickup) {
+            // Stay on restaurant UI with an explicit wait banner (do not jump to drop yet).
+            updateTripStatus('REACHED_PICKUP');
+            toast.info(waitMsg.body);
+          } else if (isFullyPicked || myLegCollected) {
             updateTripStatus('PICKED_UP');
             toast.success(
               myLegCollected && !isFullyPicked
@@ -284,21 +288,9 @@ export const useOrderManager = () => {
     try {
       let finalOrder = activeOrder;
 
-      const getRiderId = () => {
-        try {
-          const stored = localStorage.getItem('delivery_user');
-          if (stored) {
-            const user = JSON.parse(stored);
-            return String(user?._id || user?.id || user?.partnerId || '');
-          }
-        } catch { }
-        return '';
-      };
-      const riderId = getRiderId();
-      const myLeg = riderId && Array.isArray(activeOrder?.legs)
-        ? activeOrder.legs.find((leg) => String(leg?.partnerId || '') === riderId)
-        : null;
-      const isDualLeg = Boolean(activeOrder?.isDualLeg) && Array.isArray(activeOrder?.legs) && activeOrder.legs.length > 1;
+      const riderId = getCurrentRiderId();
+      const myLeg = getMyLeg(activeOrder, riderId);
+      const isDualLeg = isDualLegOrder(activeOrder);
 
       // Dual-leg: each driver must verify THEIR own OTP — never skip via order-level flag.
       const isAlreadyVerified = isDualLeg
@@ -338,7 +330,19 @@ export const useOrderManager = () => {
       }
 
       if (finalOrder) setActiveOrder(finalOrder);
+
+      // Dual-leg: this driver's trip ends when complete succeeds so the map polyline clears.
+      const otherLeg = getOtherLeg(finalOrder, getCurrentRiderId());
+      const orderDone = String(finalOrder?.orderStatus || '') === 'delivered';
       updateTripStatus('COMPLETED');
+      if (
+        isDualLegOrder(finalOrder) &&
+        !orderDone &&
+        otherLeg &&
+        String(otherLeg.status || '') !== 'delivered'
+      ) {
+        toast.info('Your delivery is done. Waiting for your partner to finish.');
+      }
     } catch (error) {
       console.error('Completion Error:', error);
       if (!error?.response) {

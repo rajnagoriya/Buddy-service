@@ -9,6 +9,14 @@ import { useDeliveryStore } from '@/modules/DeliveryV2/store/useDeliveryStore';
 import { deliveryAPI } from '@food/api';
 import { toast } from 'sonner';
 import { ActionSlider } from '@/modules/DeliveryV2/components/ui/ActionSlider';
+import {
+  getCurrentRiderId,
+  getMyLeg,
+  isDualLegOrder,
+  resolveCoDriver,
+  toPartnerId,
+  getPartnerWaitMessage,
+} from '@/modules/DeliveryV2/utils/partnerIdentity';
 
 const Backdrop = ({ onClose }) => (
   <motion.div 
@@ -50,30 +58,6 @@ const DeliveryInstructionsPanel = ({ note }) => {
   )
 }
 
-const getCurrentRiderId = () => {
-  try {
-    const stored = localStorage.getItem('delivery_user');
-    if (stored) {
-      const user = JSON.parse(stored);
-      const id = user?._id || user?.id || user?.partnerId;
-      if (id) return String(id);
-    }
-  } catch {}
-  try {
-    const token = localStorage.getItem('delivery_accessToken');
-    if (!token) return null;
-    const payload = JSON.parse(atob(token.split('.')[1]));
-    return String(payload?.userId || payload?.id || payload?.sub || '');
-  } catch {
-    return null;
-  }
-};
-
-const getMyLeg = (order, riderId) => {
-  if (!riderId || !Array.isArray(order?.legs)) return null;
-  return order.legs.find((leg) => String(leg?.partnerId || '') === String(riderId)) || null;
-};
-
 const OtpModal = ({ order, onVerified, onClose }) => {
   const [otp, setOtp] = useState(['', '', '', '']);
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
@@ -81,7 +65,7 @@ const OtpModal = ({ order, onVerified, onClose }) => {
   const inputRefs = [useRef(), useRef(), useRef(), useRef()];
   const currentRiderId = getCurrentRiderId();
   const myLeg = getMyLeg(order, currentRiderId);
-  const isDualLeg = Boolean(order?.isDualLeg) && Array.isArray(order?.legs) && order.legs.length > 1;
+  const isDualLeg = isDualLegOrder(order);
   // Dual-leg: each driver verifies only THEIR leg OTP — never the shared order-level flag.
   const isAlreadyVerified = isDualLeg
     ? Boolean(myLeg?.otpVerified)
@@ -205,49 +189,19 @@ const PaymentModal = ({ order, otpString, onComplete, onClose }) => {
   const [isSyncing, setIsSyncing] = useState(false);
   const pollingRef = useRef(null);
   const { profile } = useDeliveryStore();
-  // Get rider ID: delivery_user localStorage is most reliable (has actual partner _id)
-  const getCurrentRiderId = () => {
-    try {
-      const stored = localStorage.getItem('delivery_user');
-      if (stored) {
-        const user = JSON.parse(stored);
-        const id = user?._id || user?.id || user?.partnerId;
-        if (id) return String(id);
-      }
-    } catch {}
-    try {
-      const token = localStorage.getItem('delivery_accessToken');
-      if (!token) return null;
-      const payload = JSON.parse(atob(token.split('.')[1]));
-      return String(payload?.userId || payload?.id || payload?.sub || '');
-    } catch { return null; }
-  };
   const currentRiderId = getCurrentRiderId();
-  const primaryId = order.dispatch?.deliveryPartnerId?._id || order.dispatch?.deliveryPartnerId;
-  const secondaryId = order.dispatch?.sharedPartnerId?._id || order.dispatch?.sharedPartnerId;
-  
-  const isPrimaryRider = Boolean(currentRiderId) && String(primaryId || '') === String(currentRiderId);
-  const isSharedRider = Boolean(currentRiderId) && String(secondaryId || '') === String(currentRiderId);
+  const primaryId = toPartnerId(order.dispatch?.deliveryPartnerId);
+  const secondaryId = toPartnerId(order.dispatch?.sharedPartnerId);
+
+  const isPrimaryRider = Boolean(currentRiderId) && primaryId === String(currentRiderId);
+  const isSharedRider = Boolean(currentRiderId) && secondaryId === String(currentRiderId);
   const partnerJoined = Boolean(secondaryId);
-  const isDualLeg = Boolean(order.isDualLeg) && partnerJoined;
+  const isDualLeg = isDualLegOrder(order) && partnerJoined;
   // Searching alone is not a dual-driver delivery yet
   const isShared = partnerJoined;
 
-  const asPartner = (ref) => {
-    if (!ref) return null;
-    if (typeof ref === 'object') return ref;
-    return { _id: ref };
-  };
-  const otherPartner = (() => {
-    if (!partnerJoined) return null;
-    const primary = asPartner(order.dispatch?.deliveryPartnerId);
-    const secondary = asPartner(order.dispatch?.sharedPartnerId);
-    if (isSharedRider) return primary;
-    if (isPrimaryRider) return secondary;
-    if (currentRiderId && String(primary?._id || primary) === String(currentRiderId)) return secondary;
-    if (currentRiderId && String(secondary?._id || secondary) === String(currentRiderId)) return primary;
-    return secondary || primary;
-  })();
+  const otherPartner = resolveCoDriver(order, currentRiderId);
+  const waitMessage = getPartnerWaitMessage(order, currentRiderId);
 
   const handleCallPartner = () => {
     const phone = otherPartner?.phoneNumber || otherPartner?.phone;
@@ -261,22 +215,19 @@ const PaymentModal = ({ order, otpString, onComplete, onClose }) => {
 
   // Always show driver earnings (even when customer delivery fee is free / admin-borne)
   const isSalaryPartner =
+    profile?.employmentType === 'salary' ||
     order.earningDisplayMode === 'salary' ||
     order.employmentType === 'salary' ||
-    order.settlementBreakdown?.driver?.employmentType === 'salary' ||
-    profile?.employmentType === 'salary';
-  const primaryShare = isSalaryPartner
+    (isSharedRider
+      ? order.settlementBreakdown?.driver?.sharedEmploymentType === 'salary'
+      : order.settlementBreakdown?.driver?.employmentType === 'salary');
+  const primaryShare = Number(order.riderEarning || 0) || 0;
+  const sharedShare = Number(order.sharedRiderEarning || 0) || 0;
+  const myEarning = isSalaryPartner
     ? 0
-    : Number(
-        order.riderEarning ??
-          order.pricing?.deliveryFeeBreakdown?.riderFee ??
-          order.pricing?.deliveryFeeBreakdown?.deliveryBoyFee ??
-          0,
-      );
-  const sharedShare = isSalaryPartner ? 0 : Number(order.sharedRiderEarning || 0);
-  const myEarning = isSharedRider
-    ? sharedShare || Math.round((primaryShare + sharedShare) / 2)
-    : primaryShare;
+    : isSharedRider
+      ? sharedShare
+      : primaryShare;
   const [isConfirmingSplit, setIsConfirmingSplit] = useState(false);
 
   const handleConfirmSplit = async () => {
@@ -418,6 +369,20 @@ const PaymentModal = ({ order, otpString, onComplete, onClose }) => {
               >
                 <PhoneCall className="w-4 h-4" />
               </button>
+            </div>
+          )}
+
+          {waitMessage && (
+            <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 flex gap-3 items-start mb-6">
+              <Loader2 className="w-5 h-5 text-amber-600 animate-spin shrink-0 mt-0.5" />
+              <div>
+                <p className="text-[10px] font-bold text-amber-700 uppercase tracking-widest mb-1">
+                  {waitMessage.title}
+                </p>
+                <p className="text-xs font-medium text-amber-900 leading-tight">
+                  {waitMessage.body}
+                </p>
+              </div>
             </div>
           )}
 
@@ -609,7 +574,7 @@ const PaymentModal = ({ order, otpString, onComplete, onClose }) => {
 export const DeliveryVerificationModal = ({ order, onComplete, onClose }) => {
   const currentRiderId = getCurrentRiderId();
   const myLeg = getMyLeg(order, currentRiderId);
-  const isDualLeg = Boolean(order?.isDualLeg) && Array.isArray(order?.legs) && order.legs.length > 1;
+  const isDualLeg = isDualLegOrder(order);
   // Dual-leg: only skip OTP if THIS driver's leg is already verified
   const alreadyVerified = isDualLeg
     ? Boolean(myLeg?.otpVerified)

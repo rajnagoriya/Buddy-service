@@ -12,6 +12,14 @@ import { toast } from 'sonner';
 import { openCamera } from "@food/utils/imageUploadUtils";
 import { Share2, Users, PhoneCall } from 'lucide-react';
 import { useDeliveryStore } from '@/modules/DeliveryV2/store/useDeliveryStore';
+import {
+  getCurrentRiderId,
+  resolveCoDriver,
+  toPartnerId,
+  getPartnerWaitMessage,
+  getMyLeg,
+  isDualLegOrder,
+} from '@/modules/DeliveryV2/utils/partnerIdentity';
 
 /**
  * PickupActionModal - Unified White/Green Theme with Slider Actions.
@@ -202,28 +210,12 @@ export const PickupActionModal = ({
   };
 
   // Get rider ID: delivery_user localStorage is most reliable (has actual partner _id)
-  const getCurrentRiderId = () => {
-    try {
-      const stored = localStorage.getItem('delivery_user');
-      if (stored) {
-        const user = JSON.parse(stored);
-        const id = user?._id || user?.id || user?.partnerId;
-        if (id) return String(id);
-      }
-    } catch { }
-    try {
-      const token = localStorage.getItem('delivery_accessToken');
-      if (!token) return null;
-      const payload = JSON.parse(atob(token.split('.')[1]));
-      return String(payload?.userId || payload?.id || payload?.sub || '');
-    } catch { return null; }
-  };
   const currentRiderId = getCurrentRiderId();
-  const primaryId = order.dispatch?.deliveryPartnerId?._id || order.dispatch?.deliveryPartnerId;
-  const secondaryId = order.dispatch?.sharedPartnerId?._id || order.dispatch?.sharedPartnerId;
+  const primaryId = toPartnerId(order.dispatch?.deliveryPartnerId);
+  const secondaryId = toPartnerId(order.dispatch?.sharedPartnerId);
 
-  const isPrimaryRider = Boolean(currentRiderId) && String(primaryId || '') === String(currentRiderId);
-  const isSharedRider = Boolean(currentRiderId) && String(secondaryId || '') === String(currentRiderId);
+  const isPrimaryRider = Boolean(currentRiderId) && primaryId === String(currentRiderId);
+  const isSharedRider = Boolean(currentRiderId) && secondaryId === String(currentRiderId);
   // Partner actually joined (not just "searching")
   const partnerJoined = Boolean(secondaryId);
   const isSearchingPartner = Boolean(order.dispatch?.isShared) && !partnerJoined;
@@ -231,24 +223,13 @@ export const PickupActionModal = ({
   // completes pickup independently. Backend still validates ownership.
   const canActOnPickup = true;
 
-  const asPartner = (ref) => {
-    if (!ref) return null;
-    if (typeof ref === 'object') return ref;
-    return { _id: ref };
-  };
-
   // Contact only after the second driver has accepted — resolve the *other* driver
-  const otherPartner = (() => {
-    if (!partnerJoined) return null;
-    const primary = asPartner(order.dispatch?.deliveryPartnerId);
-    const secondary = asPartner(order.dispatch?.sharedPartnerId);
-    if (isSharedRider) return primary;
-    if (isPrimaryRider) return secondary;
-    // ID mismatch fallback: show the partner that is not the current rider
-    if (currentRiderId && String(primary?._id || primary) === String(currentRiderId)) return secondary;
-    if (currentRiderId && String(secondary?._id || secondary) === String(currentRiderId)) return primary;
-    return secondary || primary;
-  })();
+  const otherPartner = resolveCoDriver(order, currentRiderId);
+  const waitMessage = getPartnerWaitMessage(order, currentRiderId);
+  const myLeg = getMyLeg(order, currentRiderId);
+  const myAlreadyPicked = ['picked_up', 'at_drop', 'delivered'].includes(
+    String(myLeg?.status || ''),
+  );
 
   const handleCallPartner = () => {
     const phone = otherPartner?.phoneNumber || otherPartner?.phone;
@@ -257,7 +238,16 @@ export const PickupActionModal = ({
   };
 
   const isAtPickup = status === 'REACHED_PICKUP';
-  const hasReachedPickup = order.deliveryState?.status === 'reached_pickup' || order.deliveryState?.currentPhase === 'at_pickup';
+  // Dual-leg: each driver must reach independently — never use parent deliveryState
+  // (first arriver would unlock bill/pickup for the partner who is still en route).
+  const myLegStatus = String(myLeg?.status || '');
+  const hasReachedPickup = isDualLegOrder(order)
+    ? ['at_pickup', 'picked_up', 'at_drop', 'delivered'].includes(myLegStatus) ||
+      status === 'REACHED_PICKUP' ||
+      myAlreadyPicked
+    : order.deliveryState?.status === 'reached_pickup' ||
+      order.deliveryState?.currentPhase === 'at_pickup' ||
+      status === 'REACHED_PICKUP';
   const isPending = order.orderStatus === 'created';
 
   const totalQuantity = React.useMemo(() => {
@@ -578,10 +568,43 @@ export const PickupActionModal = ({
                   </div>
                   <div className="flex-1">
                     <p className="text-[10px] font-bold text-amber-700 uppercase tracking-widest mb-1">
-                      Finding a driver…
+                      Waiting for second driver
                     </p>
                     <p className="text-xs font-medium text-amber-900 leading-tight">
-                      Searching for another driver. You can keep picking up — if none joins, complete alone after the search times out.
+                      Waiting for another driver to accept. You can keep picking up — if none joins, complete alone after the search times out.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Partner joined but this driver is ahead — wait for their action */}
+              {!isSearchingPartner && waitMessage && (
+                <div className={`rounded-2xl p-4 flex gap-3 items-start mt-2 border ${
+                  waitMessage.role === 'need_my_pickup' || waitMessage.role === 'need_my_arrival'
+                    ? 'bg-orange-50 border-orange-100'
+                    : 'bg-amber-50 border-amber-100'
+                }`}>
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
+                    waitMessage.role === 'need_my_pickup' || waitMessage.role === 'need_my_arrival'
+                      ? 'bg-orange-100 text-orange-600'
+                      : 'bg-amber-100 text-amber-600'
+                  }`}>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  </div>
+                  <div className="flex-1">
+                    <p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${
+                      waitMessage.role === 'need_my_pickup' || waitMessage.role === 'need_my_arrival'
+                        ? 'text-orange-700'
+                        : 'text-amber-700'
+                    }`}>
+                      {waitMessage.title}
+                    </p>
+                    <p className={`text-xs font-medium leading-tight ${
+                      waitMessage.role === 'need_my_pickup' || waitMessage.role === 'need_my_arrival'
+                        ? 'text-orange-900'
+                        : 'text-amber-900'
+                    }`}>
+                      {waitMessage.body}
                     </p>
                   </div>
                 </div>
@@ -602,7 +625,7 @@ export const PickupActionModal = ({
                         {otherPartner.fullName || otherPartner.name || 'Delivery Partner'}
                       </p>
                       <p className="text-[10px] font-medium text-indigo-600 mt-0.5">
-                        Delivery amount will be split equally. Complete your pickup independently.
+                        Complete your pickup. Pay follows each driver’s employment (per-order / salary).
                       </p>
                     </div>
                     <button
@@ -616,21 +639,28 @@ export const PickupActionModal = ({
                 </div>
               )}
 
-              <div>
-                <p className={`text-center text-[10px] font-bold uppercase tracking-widest mb-3 ${billImageUploaded ? 'text-green-600' : 'text-gray-400'}`}>
-                  {billImageUploaded ? "Check the restaurant logo - Swipe to pick up" : "Capture bill to unlock swipe"}
-                </p>
-                {canActOnPickup && (
-                  <ActionSlider
-                    key="action-pickup"
-                    label="Slide to Pick Up"
-                    successLabel="Picked Up!"
-                    disabled={!billImageUploaded}
-                    onConfirm={() => onPickedUp(billImageUrl)}
-                    color="bg-orange-500"
-                  />
-                )}
-              </div>
+              {myAlreadyPicked ? (
+                <div className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl bg-amber-100 text-amber-800 font-bold text-[11px] sm:text-xs uppercase tracking-widest mt-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Waiting for other driver to accept / slide pickup</span>
+                </div>
+              ) : (
+                <div>
+                  <p className={`text-center text-[10px] font-bold uppercase tracking-widest mb-3 ${billImageUploaded ? 'text-green-600' : 'text-gray-400'}`}>
+                    {billImageUploaded ? "Check the restaurant logo - Swipe to pick up" : "Capture bill to unlock swipe"}
+                  </p>
+                  {canActOnPickup && (
+                    <ActionSlider
+                      key="action-pickup"
+                      label="Slide to Pick Up"
+                      successLabel="Picked Up!"
+                      disabled={!billImageUploaded}
+                      onConfirm={() => onPickedUp(billImageUrl)}
+                      color="bg-orange-500"
+                    />
+                  )}
+                </div>
+              )}
             </div>
           )}
 

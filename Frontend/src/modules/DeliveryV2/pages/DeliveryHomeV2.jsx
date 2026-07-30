@@ -16,6 +16,11 @@ import { PickupActionModal } from '@/modules/DeliveryV2/components/modals/Pickup
 import { PickupSequenceModal } from '@/modules/DeliveryV2/components/modals/PickupSequenceModal';
 import { DeliveryVerificationModal } from '@/modules/DeliveryV2/components/modals/DeliveryVerificationModal';
 import { OrderSummaryModal } from '@/modules/DeliveryV2/components/modals/OrderSummaryModal';
+import {
+  getCurrentRiderId,
+  getPartnerWaitMessage,
+  tripStatusFromMyLeg,
+} from '@/modules/DeliveryV2/utils/partnerIdentity';
 import ActionSlider from '@/modules/DeliveryV2/components/ui/ActionSlider';
 
 // Sub Pages
@@ -28,7 +33,7 @@ import {
   Bell, HelpCircle, AlertTriangle,
   Wallet, History, User as UserIcon, LayoutGrid,
   Plus, Minus, Navigation2, Target, Play, CheckCircle2, Clock, ChevronDown,
-  Contact, Package
+  Contact, Package, Loader2
 } from 'lucide-react';
 
 import { getHaversineDistance, calculateETA, calculateHeading } from '@/modules/DeliveryV2/utils/geo';
@@ -475,6 +480,12 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
   // 1. Trip sync — mount once + slow watchdog via refs (avoids /orders/current render loops)
   const applyServerTrip = useCallback((serverData) => {
     if (!serverData) {
+      // After this driver completed, backend returns no active trip for them (dual leg done).
+      // Keep the summary modal; only clear the map route.
+      if (tripStatusRef.current === 'COMPLETED') {
+        clearTripMapState();
+        return;
+      }
       clearLiveTripUiRef.current?.();
       return;
     }
@@ -524,23 +535,37 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
     const currentPhase = serverData.deliveryState?.currentPhase;
     const { tripStatus: existingTripStatus } = useDeliveryStore.getState();
 
-    let nextTripStatus = null;
-    if (['delivered', 'completed'].includes(backendStatus)) {
-      nextTripStatus = 'COMPLETED';
-    } else if (currentPhase === 'at_drop' || ['reached_drop'].includes(backendStatus)) {
-      nextTripStatus = 'REACHED_DROP';
-    } else if (['picked_up', 'delivering'].includes(backendStatus)) {
-      nextTripStatus = 'PICKED_UP';
-    } else if (currentPhase === 'at_pickup' || ['reached_pickup'].includes(backendStatus)) {
-      nextTripStatus = 'REACHED_PICKUP';
-    } else if (['confirmed', 'preparing', 'ready_for_pickup', 'accepted', 'created'].includes(backendStatus)) {
-      nextTripStatus = 'PICKING_UP';
+    // Dual-leg: each driver's UI follows THEIR leg — never the other driver's arrival/pickup.
+    const legTripStatus = tripStatusFromMyLeg(syncedOrder, getCurrentRiderId());
+    let nextTripStatus = legTripStatus;
+    if (!nextTripStatus) {
+      if (['delivered', 'completed'].includes(backendStatus)) {
+        nextTripStatus = 'COMPLETED';
+      } else if (currentPhase === 'at_drop' || ['reached_drop'].includes(backendStatus)) {
+        nextTripStatus = 'REACHED_DROP';
+      } else if (['picked_up', 'delivering'].includes(backendStatus)) {
+        nextTripStatus = 'PICKED_UP';
+      } else if (currentPhase === 'at_pickup' || ['reached_pickup'].includes(backendStatus)) {
+        nextTripStatus = 'REACHED_PICKUP';
+      } else if (['confirmed', 'preparing', 'ready_for_pickup', 'accepted', 'created'].includes(backendStatus)) {
+        nextTripStatus = 'PICKING_UP';
+      }
+    }
+
+    // Never revive an active route after this driver finished the trip.
+    if (existingTripStatus === 'COMPLETED') {
+      if (nextTripStatus && nextTripStatus !== 'COMPLETED') return;
+      clearTripMapState(syncedOrder?._id || syncedOrder?.orderId);
+      return;
     }
 
     if (nextTripStatus && nextTripStatus !== existingTripStatus) {
       updateTripStatus(nextTripStatus);
     }
-  }, [setActiveOrder, updateTripStatus]);
+    if (nextTripStatus === 'COMPLETED') {
+      clearTripMapState(syncedOrder?._id || syncedOrder?.orderId);
+    }
+  }, [setActiveOrder, updateTripStatus, clearTripMapState]);
 
   useEffect(() => {
     applyServerTripRef.current = applyServerTrip;
@@ -995,6 +1020,11 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
               applyServerTripRef.current?.(trip);
               return;
             }
+            // No active trip for this rider (e.g. dual leg already delivered) — clear map only.
+            if (tripStatusRef.current === 'COMPLETED') {
+              clearTripMapState();
+              return;
+            }
             // Fallback soft-merge if current endpoint briefly returns null
             const latest = useDeliveryStore.getState().activeOrder;
             if (!latest) return;
@@ -1007,11 +1037,32 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                 : latest.dispatch,
               pickups: orderStatusUpdate.pickups || latest.pickups,
               deliveryState: orderStatusUpdate.deliveryState || latest.deliveryState,
+              deliveryVerification:
+                orderStatusUpdate.deliveryVerification || latest.deliveryVerification,
+              isDualLeg: orderStatusUpdate.isDualLeg ?? latest.isDualLeg,
+              legs: orderStatusUpdate.legs || latest.legs,
+              legProgress: orderStatusUpdate.legProgress || latest.legProgress,
               restaurantRejectionCount:
                 orderStatusUpdate.restaurantRejectionCount ?? latest.restaurantRejectionCount,
             });
+            const merged = {
+              ...latest,
+              isDualLeg: orderStatusUpdate.isDualLeg ?? latest.isDualLeg,
+              legs: orderStatusUpdate.legs || latest.legs,
+              orderStatus: orderStatusUpdate.orderStatus || latest.orderStatus,
+              deliveryState: orderStatusUpdate.deliveryState || latest.deliveryState,
+            };
+            const fromLeg = tripStatusFromMyLeg(merged, getCurrentRiderId());
+            if (fromLeg && tripStatusRef.current !== 'COMPLETED') updateTripStatus(fromLeg);
+            if (fromLeg === 'COMPLETED' || tripStatusRef.current === 'COMPLETED') {
+              clearTripMapState();
+            }
           })
           .catch(() => {
+            if (tripStatusRef.current === 'COMPLETED') {
+              clearTripMapState();
+              return;
+            }
             const latest = useDeliveryStore.getState().activeOrder;
             if (!latest) return;
             setActiveOrder({
@@ -1021,13 +1072,28 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
               dispatch: orderStatusUpdate.dispatch
                 ? { ...(latest.dispatch || {}), ...orderStatusUpdate.dispatch }
                 : latest.dispatch,
+              isDualLeg: orderStatusUpdate.isDualLeg ?? latest.isDualLeg,
+              legs: orderStatusUpdate.legs || latest.legs,
+              legProgress: orderStatusUpdate.legProgress || latest.legProgress,
+              deliveryVerification:
+                orderStatusUpdate.deliveryVerification || latest.deliveryVerification,
             });
+            const merged = {
+              ...latest,
+              isDualLeg: orderStatusUpdate.isDualLeg ?? latest.isDualLeg,
+              legs: orderStatusUpdate.legs || latest.legs,
+            };
+            const fromLeg = tripStatusFromMyLeg(merged, getCurrentRiderId());
+            if (fromLeg && tripStatusRef.current !== 'COMPLETED') updateTripStatus(fromLeg);
+            if (fromLeg === 'COMPLETED' || tripStatusRef.current === 'COMPLETED') {
+              clearTripMapState();
+            }
           });
       }
 
       clearOrderStatusUpdate();
     }
-  }, [orderStatusUpdate, clearOrderStatusUpdate, setActiveOrder, clearLiveTripUi]);
+  }, [orderStatusUpdate, clearOrderStatusUpdate, setActiveOrder, clearLiveTripUi, clearTripMapState, updateTripStatus]);
 
   // Handle Real-time Admin Notifications
   useEffect(() => {
@@ -1549,6 +1615,23 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                             </div>
                           </div>
                         )}
+                        {(() => {
+                          const waitMsg = getPartnerWaitMessage(activeOrder, getCurrentRiderId());
+                          if (!waitMsg) return null;
+                          return (
+                            <div className="w-full bg-amber-50 border border-amber-100 rounded-2xl p-4 mb-4 flex gap-3 items-start mx-1">
+                              <Loader2 className="w-5 h-5 text-amber-600 animate-spin shrink-0 mt-0.5" />
+                              <div>
+                                <p className="text-[10px] font-bold text-amber-700 uppercase tracking-widest mb-1">
+                                  {waitMsg.title}
+                                </p>
+                                <p className="text-xs font-medium text-amber-900 leading-tight">
+                                  {waitMsg.body}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })()}
                         <ActionSlider label="Slide to Arrive" successLabel="Arrived ✓" disabled={!isWithinRange} onConfirm={reachDrop} color="bg-[#ACC8A2]" />
                       </div>
                     ) : (

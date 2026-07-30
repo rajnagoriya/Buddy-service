@@ -503,13 +503,19 @@ const transformOrderForTracking = (apiOrder, previousOrder = null, explicitResta
       // Prioritize: 1. Real-time handoverOtp from current API response
       // 2. Previously preserved code in local state (from socket or earlier poll)
       // 3. Nested code field in API response (if ever present)
-      const finalCode = handoverOtp || prevDropOtp?.code || apiDropOtp?.code
+      // Dual-leg: never stash a single handover code — that couples both drivers.
+      const isDual = Boolean(apiOrder?.isDualLeg) ||
+        (Array.isArray(apiOrder?.legHandoverOtps) && apiOrder.legHandoverOtps.length > 1) ||
+        (Array.isArray(previousOrder?.legHandoverOtps) && previousOrder.legHandoverOtps.length > 1)
+      const finalCode = isDual
+        ? null
+        : (handoverOtp || prevDropOtp?.code || apiDropOtp?.code)
 
       if (finalCode || prevDropOtp?.required || apiDropOtp?.required) {
         merged.dropOtp = {
           ...(prevDropOtp || {}),
           ...(apiDropOtp || {}),
-          code: finalCode
+          ...(finalCode ? { code: finalCode } : {}),
         }
       }
       // Preserve multi-leg OTP codes across polls
@@ -947,7 +953,7 @@ export default function OrderTracking() {
 
       if (!matches) return
 
-      setSocketDropOtpCode(otp)
+      setSocketDropOtpCode(detail?.isDualLeg ? null : otp)
 
       const incomingLegs = Array.isArray(detail?.legOtps) && detail.legOtps.length
         ? detail.legOtps
@@ -971,10 +977,11 @@ export default function OrderTracking() {
           byKey.set(String(l.legIndex ?? l.partnerId ?? l.role), l)
         })
         const mergedLegs = [...byKey.values()]
+        const isDual = Boolean(detail?.isDualLeg) || prev.isDualLeg || mergedLegs.length > 1
 
         return {
           ...prev,
-          isDualLeg: Boolean(detail?.isDualLeg) || prev.isDualLeg || mergedLegs.length > 1,
+          isDualLeg: isDual,
           legHandoverOtps: mergedLegs,
           deliveryVerification: {
             ...prevDV,
@@ -982,7 +989,8 @@ export default function OrderTracking() {
               ...prevDropOtp,
               required: true,
               verified: false,
-              code: otp
+              // Dual-leg keeps codes only in legOtps / legHandoverOtps
+              ...(isDual ? {} : { code: otp }),
             },
             legOtps: mergedLegs,
           }
@@ -1336,10 +1344,19 @@ export default function OrderTracking() {
   };
 
   const customerDeliveryOtp = useMemo(() => {
+    // Dual-leg uses per-leg OTPs only — never collapse into one shared code.
+    if (order?.isDualLeg || (Array.isArray(order?.legHandoverOtps) && order.legHandoverOtps.length > 1)) {
+      return null
+    }
     const codeFromOrder = order?.deliveryVerification?.dropOtp?.code
     const code = codeFromOrder ?? socketDropOtpCode
     return code ? String(code) : null
-  }, [order?.deliveryVerification?.dropOtp?.code, socketDropOtpCode])
+  }, [
+    order?.isDualLeg,
+    order?.legHandoverOtps,
+    order?.deliveryVerification?.dropOtp?.code,
+    socketDropOtpCode,
+  ])
 
   const customerLegOtps = useMemo(() => {
     const legs = order?.legHandoverOtps || order?.deliveryVerification?.legOtps || []
@@ -1347,7 +1364,12 @@ export default function OrderTracking() {
       return legs.filter((l) => l?.otp).map((l) => ({
         ...l,
         otp: String(l.otp),
-        label: l.role === 'shared' ? 'Partner OTP' : 'Rider OTP',
+        label:
+          l.role === 'shared' || l.role === 'secondary'
+            ? 'Partner OTP'
+            : l.role === 'primary'
+              ? 'Lead rider OTP'
+              : 'Delivery OTP',
       }))
     }
     if (customerDeliveryOtp) {
@@ -2154,25 +2176,45 @@ export default function OrderTracking() {
                 const partner = deliveryPartnersList.find(
                   (p) =>
                     (leg.partnerId && String(p.id) === String(leg.partnerId)) ||
-                    (leg.role === 'shared' && p.role === 'shared') ||
+                    ((leg.role === 'shared' || leg.role === 'secondary') && p.role === 'shared') ||
                     (leg.role === 'primary' && p.role === 'primary'),
-                )
+                ) || deliveryPartnersList[idx]
+                const roleLabel =
+                  partner?.role === 'shared' || leg.role === 'shared' || leg.role === 'secondary'
+                    ? 'Partner rider'
+                    : partner?.role === 'primary' || leg.role === 'primary'
+                      ? 'Lead rider'
+                      : `Rider ${idx + 1}`
                 return (
                   <div
                     key={`otp-${leg.legIndex ?? leg.partnerId ?? idx}`}
                     className="bg-white/70 dark:bg-black/20 rounded-lg p-3 border border-blue-100/80 dark:border-blue-900/40"
                   >
                     <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">
-                      {partner?.name || leg.label || `Rider ${idx + 1}`}
+                      OTP for {partner?.name || roleLabel}
+                    </p>
+                    <p className="text-[11px] text-blue-700/80 dark:text-blue-300/80 mt-0.5">
+                      {roleLabel}
+                      {partner?.phone ? ` · ${partner.phone}` : ''}
                     </p>
                     <p className="text-2xl font-extrabold text-blue-900 dark:text-blue-200 mt-1 tracking-widest">{leg.otp}</p>
+                    {partner?.phone ? (
+                      <button
+                        type="button"
+                        onClick={(e) => handleCallRider(e, partner.phone)}
+                        className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-blue-700 dark:text-blue-300"
+                      >
+                        <Phone className="w-3.5 h-3.5" />
+                        Call {partner.name?.split(' ')[0] || 'rider'}
+                      </button>
+                    ) : null}
                   </div>
                 )
               })}
             </div>
             <p className="text-xs text-blue-700 dark:text-blue-400">
               {customerLegOtps.length > 1
-                ? 'Share each OTP with the matching delivery partner at drop-off.'
+                ? 'Share each OTP only with the matching delivery partner named above.'
                 : 'Share this 4-digit OTP with your delivery partner at drop-off.'}
             </p>
           </motion.div>
@@ -2381,6 +2423,9 @@ export default function OrderTracking() {
                         ? (partner.role === 'shared' ? 'Partner rider' : 'Lead rider')
                         : 'Your delivery partner is arriving'}
                   </p>
+                  {partner.phone ? (
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{partner.phone}</p>
+                  ) : null}
                 </div>
                 <motion.button
                   className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center"
