@@ -148,44 +148,44 @@ const GodsEye = () => {
   }, [markers, zones]);
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6 lg:p-8 font-sans animate-in fade-in duration-500">
+    <div className="min-h-screen bg-gray-50/50 p-6 font-sans">
       
       {/* Header Block */}
       <div className="mb-6">
-        <div className="flex items-center gap-1.5 text-xs text-gray-400 mb-2">
+        <div className="flex items-center gap-1.5 text-xs text-gray-400 mb-1">
           <span>Map</span>
           <ChevronRight size={12} />
-          <span className="text-gray-700">God's Eye</span>
+          <span className="text-gray-700 font-medium">God&apos;s Eye</span>
         </div>
         <div className="flex items-center justify-between">
-          <h1 className="text-xl font-semibold text-gray-900">God's Eye</h1>
+          <h1 className="text-lg font-bold text-gray-900">God&apos;s Eye</h1>
           <button 
              onClick={() => navigate('/admin/dashboard')}
-             className="flex items-center gap-2 px-4 py-2 text-sm text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+             className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors shadow-sm"
           >
-            <ArrowLeft size={16} /> Back
+            <ArrowLeft size={14} /> Back
           </button>
         </div>
       </div>
 
-      <div className="space-y-8">
+      <div className="space-y-6">
         
-        {/* Filters Section (Card Pattern) */}
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden animate-in slide-in-from-top-4 duration-700">
-           <div className="px-8 py-5 border-b border-gray-100 flex items-center justify-between bg-gray-50/30">
-              <div className="flex items-center gap-3">
-                 <div className="w-9 h-9 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center shadow-sm">
-                    <Filter size={18} />
+        {/* Filters Section */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+           <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+              <div className="flex items-center gap-2.5">
+                 <div className="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-lg flex items-center justify-center">
+                    <Filter size={15} />
                  </div>
-                 <h3 className="text-sm font-black text-gray-900 uppercase tracking-[0.1em]">Fleet Filtration</h3>
+                 <h3 className="text-sm font-bold text-gray-900">Fleet Filtration</h3>
               </div>
-              {loading && <RefreshCw size={16} className="text-indigo-400 animate-spin" />}
+              {loading && <RefreshCw size={14} className="text-indigo-600 animate-spin" />}
            </div>
            
-           <div className="p-8">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+           <div className="p-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                  {/* Driver Select */}
-                 <div className="space-y-2">
+                 <div className="space-y-1.5">
                     <label className={labelClass}>Drivers</label>
                     <div className="relative group">
                        <select value={driverMode} onChange={e => setDriverMode(e.target.value)} className={inputClass}>
@@ -193,12 +193,12 @@ const GodsEye = () => {
                           <option value="online">Online Only</option>
                           <option value="on-ride">On Active Ride</option>
                        </select>
-                       <User size={14} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 group-hover:text-indigo-500 transition-colors pointer-events-none" />
+                       <User size={14} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                     </div>
                  </div>
 
                  {/* Vehicle Select */}
-                 <div className="space-y-2">
+                 <div className="space-y-1.5">
                     <label className={labelClass}>Vehicle Types</label>
                     <div className="relative group">
                        <select value={vehicleType} onChange={e => setVehicleType(e.target.value)} className={inputClass}>
@@ -207,39 +207,39 @@ const GodsEye = () => {
                           <option value="bike">Bikes Only</option>
                           <option value="auto">Autos Only</option>
                        </select>
-                       <Car size={14} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 group-hover:text-indigo-500 transition-colors pointer-events-none" />
+                       <Car size={14} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                     </div>
                  </div>
 
                  {/* Refresh Select */}
-                 <div className="space-y-2">
-                    <label className={labelClass}>Refresh Method *</label>
+                 <div className="space-y-1.5">
+                    <label className={labelClass}>Refresh Method</label>
                     <div className="relative group">
                        <select value={refreshMethod} onChange={e => setRefreshMethod(e.target.value)} className={inputClass}>
                           <option value="automatic">Automatic (30s)</option>
                           <option value="manual">Manual Refresh</option>
                        </select>
-                       <Clock size={14} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 group-hover:text-indigo-500 transition-colors pointer-events-none" />
+                       <Clock size={14} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                     </div>
                  </div>
               </div>
 
-              <div className="flex items-center gap-3 mt-8 pt-8 border-t border-gray-50">
-                 <button onClick={fetchMapData} className="px-8 py-3 bg-[#00BFA5] text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-[#00BFA5]/20 hover:scale-[1.02] transition-all">
+              <div className="flex items-center gap-3 mt-6 pt-6 border-t border-gray-100">
+                 <button onClick={fetchMapData} className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-medium transition-colors shadow-sm">
                     Apply Grid
                  </button>
-                 <button onClick={() => { setDriverMode('all'); setVehicleType('all'); }} className="px-8 py-3 bg-rose-500 text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-rose-100 hover:scale-[1.02] transition-all">
-                    Reset Deck
+                 <button onClick={() => { setDriverMode('all'); setVehicleType('all'); }} className="px-5 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-medium transition-colors">
+                    Reset Filter
                  </button>
               </div>
            </div>
         </div>
 
         {/* Map Canvas */}
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden p-2">
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden p-1.5">
            <div className="rounded-lg overflow-hidden relative">
               {loadError ? (
-                 <div className="h-[400px] flex items-center justify-center bg-gray-50 uppercase font-semibold text-rose-500">Maps Load Failed</div>
+                 <div className="h-[400px] flex items-center justify-center bg-gray-50 text-xs font-medium text-rose-600">Maps Load Failed</div>
               ) : HAS_VALID_GOOGLE_MAPS_KEY && isLoaded ? (
                  <GoogleMap
                     mapContainerStyle={MAP_CONTAINER_STYLE} center={mapCenter} zoom={12} options={mapOptions}
@@ -258,22 +258,22 @@ const GodsEye = () => {
 
                     {selectedMarker && (
                        <InfoWindow position={selectedMarker.pos} onCloseClick={() => setSelectedMarker(null)}>
-                          <div className="p-3 bg-white min-w-[200px]">
-                             <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">{selectedMarker.type}</p>
-                             <p className="text-sm font-black text-gray-900 mb-2">{selectedMarker.title}</p>
+                          <div className="p-2.5 bg-white min-w-[180px]">
+                             <span className="text-xs font-medium text-gray-500 block mb-0.5">{selectedMarker.type}</span>
+                             <p className="text-sm font-bold text-gray-900 mb-1.5">{selectedMarker.title}</p>
                              {selectedMarker.phone && (
-                                <p className="text-[11px] font-semibold text-slate-500 mb-1">{selectedMarker.phone}</p>
+                                <p className="text-xs text-gray-600 mb-1">{selectedMarker.phone}</p>
                              )}
                              {selectedMarker.vehicleNumber && (
-                                <p className="text-[11px] font-semibold text-slate-500 mb-1">Vehicle: {selectedMarker.vehicleNumber}</p>
+                                <p className="text-xs text-gray-600 mb-1">Vehicle: {selectedMarker.vehicleNumber}</p>
                              )}
                              {selectedMarker.city && (
-                                <p className="text-[11px] font-semibold text-slate-500 mb-1">City: {selectedMarker.city}</p>
+                                <p className="text-xs text-gray-600 mb-1">City: {selectedMarker.city}</p>
                              )}
                              {selectedMarker.zoneName && (
-                                <p className="text-[11px] font-semibold text-slate-500 mb-2">Zone: {selectedMarker.zoneName}</p>
+                                <p className="text-xs text-gray-600 mb-2">Zone: {selectedMarker.zoneName}</p>
                              )}
-                             <div className="flex items-center gap-2">
+                             <div className="flex items-center gap-1.5">
                                 <div className={`w-2 h-2 rounded-full ${
                                   selectedMarker.status === 'On Ride'
                                     ? 'bg-amber-500'
@@ -281,17 +281,17 @@ const GodsEye = () => {
                                       ? 'bg-emerald-500'
                                       : 'bg-slate-400'
                                 }`} />
-                                <span className="text-[11px] font-bold text-gray-600">{selectedMarker.status}</span>
+                                <span className="text-xs font-medium text-gray-700">{selectedMarker.status}</span>
                              </div>
                           </div>
                        </InfoWindow>
                     )}
                  </GoogleMap>
               ) : (
-                 <div className="h-[400px] bg-slate-100 flex items-center justify-center">
-                    <div className="text-center space-y-4">
-                       <MapIcon size={40} className="mx-auto text-gray-300" />
-                       <p className="text-xs font-black text-gray-300 uppercase tracking-[0.3em]">Command Grid Offline</p>
+                 <div className="h-[400px] bg-gray-50 flex items-center justify-center">
+                    <div className="text-center space-y-3">
+                       <MapIcon size={32} className="mx-auto text-gray-300" />
+                       <p className="text-xs font-medium text-gray-400">Command Grid Offline</p>
                     </div>
                  </div>
               )}
@@ -299,22 +299,22 @@ const GodsEye = () => {
         </div>
 
         {/* Status Deck */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 pb-12">
-           <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm flex items-center gap-4">
-              <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center shrink-0 shadow-sm"><Activity size={22} /></div>
-              <div><p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-0.5">Fleet Connectivity</p><p className="text-xl font-black text-gray-900 tracking-tight leading-none">{onlineDriversCount} Online</p></div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pb-8">
+           <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center gap-3.5">
+              <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-lg flex items-center justify-center shrink-0"><Activity size={18} /></div>
+              <div><span className="block text-xs font-medium text-gray-500 mb-0.5">Fleet Connectivity</span><span className="text-base font-bold text-gray-900">{onlineDriversCount} Online</span></div>
            </div>
-           <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm flex items-center gap-4">
-              <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center shrink-0 shadow-sm"><Navigation size={22} /></div>
-              <div><p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-0.5">Active Pockets</p><p className="text-xl font-black text-gray-900 tracking-tight leading-none">{zones.length} Localities</p></div>
+           <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center gap-3.5">
+              <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center shrink-0"><Navigation size={18} /></div>
+              <div><span className="block text-xs font-medium text-gray-500 mb-0.5">Active Pockets</span><span className="text-base font-bold text-gray-900">{zones.length} Localities</span></div>
            </div>
-           <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm flex items-center gap-4">
-              <div className="w-12 h-12 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center shrink-0 shadow-sm"><MousePointer2 size={22} /></div>
-              <div><p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-0.5">Incoming Feed</p><p className="text-xl font-black text-amber-600 tracking-tight leading-none">{activeRideDriversCount} On Ride</p></div>
+           <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center gap-3.5">
+              <div className="w-10 h-10 bg-amber-50 text-amber-600 rounded-lg flex items-center justify-center shrink-0"><MousePointer2 size={18} /></div>
+              <div><span className="block text-xs font-medium text-gray-500 mb-0.5">Incoming Feed</span><span className="text-base font-bold text-amber-600">{activeRideDriversCount} On Ride</span></div>
            </div>
-           <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm flex items-center gap-4 border-l-4 border-l-indigo-500">
-              <div className="w-12 h-12 bg-indigo-600 text-white rounded-xl flex items-center justify-center shrink-0 shadow-lg shadow-indigo-100"><Search size={22} /></div>
-              <div><p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-0.5">Precision</p><p className="text-xl font-black text-gray-900 tracking-tight leading-none">{markers.length} Visible</p></div>
+           <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center gap-3.5 border-l-4 border-l-indigo-600">
+              <div className="w-10 h-10 bg-indigo-600 text-white rounded-lg flex items-center justify-center shrink-0 shadow-sm"><Search size={18} /></div>
+              <div><span className="block text-xs font-medium text-gray-500 mb-0.5">Precision</span><span className="text-base font-bold text-gray-900">{markers.length} Visible</span></div>
            </div>
         </div>
 

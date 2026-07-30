@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Home, Clock, Map, User } from 'lucide-react';
+import { Home, Clock, Map, User, Car, Utensils } from 'lucide-react';
 import { useSettings, normalizeAssetUrl } from '../../../shared/context/SettingsContext';
 import busIcon from '../../../assets/3d images/AutoCab/bus.png';
 
@@ -21,6 +21,18 @@ const isEnabledFlag = (value) => {
 const BottomNavbar = () => {
   const navigate = useNavigate();
   const { pathname } = useLocation();
+  const [showHomeDropup, setShowHomeDropup] = useState(false);
+  const dropupRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropupRef.current && !dropupRef.current.contains(event.target)) {
+        setShowHomeDropup(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   if (
     pathname.includes('/admin') ||
@@ -66,18 +78,59 @@ const BottomNavbar = () => {
     <nav className="fixed bottom-0 left-0 right-0 z-[100] mx-auto w-full max-w-lg px-4 pb-[max(env(safe-area-inset-bottom),16px)] pt-2 pointer-events-none">
       <div className="flex items-center justify-around overflow-visible rounded-[32px] border border-white/40 bg-white/85 px-2 py-2 shadow-[0_20px_40px_rgba(0,0,0,0.12)] backdrop-blur-2xl pointer-events-auto relative">
         {navItems.map(({ icon: Icon, imageIcon, label, path }) => {
+          const isHomeTab = label === 'Ride';
           const isActive =
             path === '/taxi/user'
               ? pathname === path
               : pathname === path || pathname.startsWith(`${path}/`);
 
           return (
-            <button
-              key={label}
-              type="button"
-              onClick={() => navigate(path)}
-              className="flex-1 flex flex-col items-center justify-center py-1.5 relative z-10 outline-none tap-highlight-transparent group"
+            <div 
+              key={label} 
+              className="flex-1 flex flex-col items-center justify-center relative"
+              ref={isHomeTab ? dropupRef : null}
             >
+              <AnimatePresence>
+                {isHomeTab && showHomeDropup && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                    transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+                    className="absolute bottom-[calc(100%+16px)] left-1/2 -translate-x-1/2 w-48 bg-white rounded-[20px] shadow-[0_8px_30px_rgba(0,0,0,0.12)] border border-slate-100 overflow-hidden z-[110]"
+                  >
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); setShowHomeDropup(false); navigate('/taxi/user'); }}
+                      className="w-full flex items-center px-4 py-3.5 hover:bg-slate-50 active:bg-slate-100 transition-colors border-b border-slate-100"
+                    >
+                      <div className="w-9 h-9 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center mr-3 shrink-0">
+                        <Car size={18} strokeWidth={2.5} />
+                      </div>
+                      <span className="text-[13px] font-bold text-slate-800 tracking-tight">Taxi Homepage</span>
+                    </button>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); setShowHomeDropup(false); navigate('/food/user'); }}
+                      className="w-full flex items-center px-4 py-3.5 hover:bg-slate-50 active:bg-slate-100 transition-colors"
+                    >
+                      <div className="w-9 h-9 rounded-full bg-orange-50 text-orange-500 flex items-center justify-center mr-3 shrink-0">
+                        <Utensils size={18} strokeWidth={2.5} />
+                      </div>
+                      <span className="text-[13px] font-bold text-slate-800 tracking-tight">Food Homepage</span>
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+              <button
+                type="button"
+                onClick={() => {
+                  if (isHomeTab) {
+                    setShowHomeDropup((prev) => !prev);
+                  } else {
+                    navigate(path);
+                  }
+                }}
+                className="w-full flex flex-col items-center justify-center py-1.5 relative z-10 outline-none tap-highlight-transparent group"
+              >
               <div className="relative flex flex-col items-center">
                 {/* Active Sliding Background Pill */}
                 <AnimatePresence>
@@ -154,7 +207,8 @@ const BottomNavbar = () => {
                   />
                 )}
               </div>
-            </button>
+              </button>
+            </div>
           );
         })}
       </div>

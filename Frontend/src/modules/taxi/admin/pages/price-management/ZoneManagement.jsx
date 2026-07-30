@@ -27,7 +27,6 @@ import {
   DrawingManager,
   Circle,
   Polygon,
-  Autocomplete,
 } from "@react-google-maps/api";
 import { useAppGoogleMapsLoader } from "../../utils/googleMaps";
 import { adminService } from "../../services/adminService";
@@ -58,11 +57,14 @@ const ZoneManagement = ({ mode: initialMode = "list" }) => {
   const [autocomplete, setAutocomplete] = useState(null);
   const [countryBoundaryPaths, setCountryBoundaryPaths] = useState([]);
   const [boundaryLoading, setBoundaryLoading] = useState(false);
+  const [mapLoaded, setMapLoaded] = useState(false);
   const mapRef = useRef(null);
   const polygonRef = useRef(null);
   const polygonListenersRef = useRef([]);
   const circleRef = useRef(null);
   const circleListenersRef = useRef([]);
+  const drawingManagerRef = useRef(null);
+  const [dmError, setDmError] = useState("");
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('English');
   const [currentPage, setCurrentPage] = useState(1);
@@ -268,17 +270,94 @@ const ZoneManagement = ({ mode: initialMode = "list" }) => {
     circleRef.current = null;
   }, []);
 
-  const onPlaceChanged = () => {
-    if (autocomplete !== null) {
-      const place = autocomplete.getPlace();
-      if (place.geometry) {
-        const loc = {
-          lat: place.geometry.location.lat(),
-          lng: place.geometry.location.lng()
-        };
-        setMapCenter(loc);
-        mapRef.current?.panTo(loc);
+  useEffect(() => {
+    if (!mapLoaded || !window.google?.maps?.drawing || !mapRef.current) return;
+    
+    try {
+      if (drawingManagerRef.current) {
+        drawingManagerRef.current.setMap(null);
       }
+      
+      const dm = new window.google.maps.drawing.DrawingManager({
+        drawingControl: true,
+        drawingControlOptions: {
+          position: window.google.maps.ControlPosition.TOP_CENTER,
+          drawingModes: [
+            window.google.maps.drawing.OverlayType.POLYGON,
+            window.google.maps.drawing.OverlayType.CIRCLE,
+          ],
+        },
+        polygonOptions: {
+          fillColor: '#4f46e5',
+          fillOpacity: 0.15,
+          strokeColor: '#4f46e5',
+          strokeWeight: 2,
+          editable: true,
+        },
+        circleOptions: {
+          fillColor: '#0f766e',
+          fillOpacity: 0.12,
+          strokeColor: '#0f766e',
+          strokeWeight: 2,
+          editable: true,
+        },
+      });
+
+      dm.setMap(mapRef.current);
+      drawingManagerRef.current = dm;
+
+      const polyListener = window.google.maps.event.addListener(dm, 'polygoncomplete', (polygon) => {
+        onPolygonComplete(polygon);
+        dm.setDrawingMode(null);
+      });
+      const circleListener = window.google.maps.event.addListener(dm, 'circlecomplete', (circle) => {
+        onCircleComplete(circle);
+        dm.setDrawingMode(null);
+      });
+
+      return () => {
+        window.google.maps.event.removeListener(polyListener);
+        window.google.maps.event.removeListener(circleListener);
+        dm.setMap(null);
+        drawingManagerRef.current = null;
+      };
+    } catch (err) {
+      console.error("DrawingManager init error:", err);
+      setDmError(err.toString());
+    }
+  }, [mapLoaded]); // Run once map is loaded
+
+  useEffect(() => {
+    if (drawingManagerRef.current && window.google?.maps?.drawing) {
+      if (boundaryMode === 'polygon') {
+        drawingManagerRef.current.setDrawingMode(window.google.maps.drawing.OverlayType.POLYGON);
+      } else if (boundaryMode === 'circle') {
+        drawingManagerRef.current.setDrawingMode(window.google.maps.drawing.OverlayType.CIRCLE);
+      } else {
+        drawingManagerRef.current.setDrawingMode(null);
+      }
+    }
+  }, [boundaryMode, mapLoaded]);
+
+  const handleMapSearch = (e) => {
+    if (e.key === 'Enter' && e.target.value.trim()) {
+      e.preventDefault();
+      if (!window.google?.maps?.Geocoder) return;
+      const geocoder = new window.google.maps.Geocoder();
+      geocoder.geocode({ address: e.target.value.trim() }, (results, status) => {
+        if (status === 'OK' && results[0]) {
+          const loc = {
+            lat: results[0].geometry.location.lat(),
+            lng: results[0].geometry.location.lng()
+          };
+          setMapCenter(loc);
+          if (results[0].geometry.viewport) {
+            mapRef.current?.fitBounds(results[0].geometry.viewport);
+          } else {
+            mapRef.current?.setZoom(15);
+          }
+        }
+      });
     }
   };
 
@@ -316,7 +395,7 @@ const ZoneManagement = ({ mode: initialMode = "list" }) => {
         : await adminService.createZone(payload);
       if (res.success) {
         resetForm();
-        navigate("/admin/pricing/zone");
+        navigate("/taxi/admin/price-management/zones");
         fetchData();
       } else {
         alert(res.message || "Operation failed");
@@ -638,7 +717,7 @@ const ZoneManagement = ({ mode: initialMode = "list" }) => {
               <div className="flex items-center justify-between">
                 <h1 className="text-xl font-semibold text-gray-900">{editingId ? 'Edit Market Zone' : 'Add Market Zone'}</h1>
                 <button
-                  onClick={() => navigate("/admin/pricing/zone")}
+                  onClick={() => navigate("/taxi/admin/price-management/zones")}
                   className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors shadow-sm"
                 >
                   <ArrowLeft size={14} /> Back
@@ -760,7 +839,7 @@ const ZoneManagement = ({ mode: initialMode = "list" }) => {
                     {editingId ? 'Update Zone' : 'Save'}
                   </button>
                   <button
-                    onClick={() => navigate("/admin/pricing/zone")}
+                    onClick={() => navigate("/taxi/admin/price-management/zones")}
                     className="w-full py-3 bg-gray-50 text-gray-600 border border-gray-200 rounded-lg text-sm font-medium hover:bg-gray-100 transition-colors"
                   >
                     Cancel
@@ -776,17 +855,12 @@ const ZoneManagement = ({ mode: initialMode = "list" }) => {
                       <div className="flex h-12 w-full items-center gap-3 rounded-2xl border border-gray-200 bg-white px-4 shadow-sm">
                         <Search className="text-gray-400" size={18} />
                         {isLoaded ? (
-                          <Autocomplete
-                            onLoad={a => setAutocomplete(a)}
-                            onPlaceChanged={onPlaceChanged}
-                            className="flex-1"
-                          >
-                            <input
-                              type="text"
-                              placeholder="Search for a city or zone"
-                              className="w-full bg-transparent text-sm font-semibold text-gray-800 outline-none placeholder:text-gray-400"
-                            />
-                          </Autocomplete>
+                          <input
+                            type="text"
+                            placeholder="Search for a city or zone (Press Enter)"
+                            onKeyDown={handleMapSearch}
+                            className="w-full bg-transparent text-sm font-semibold text-gray-800 outline-none placeholder:text-gray-400"
+                          />
                         ) : (
                           <input
                             type="text"
@@ -819,11 +893,16 @@ const ZoneManagement = ({ mode: initialMode = "list" }) => {
 
                   <div className="h-[620px] p-2">
                     {isLoaded ? (
-                      <div className="w-full h-full rounded-lg overflow-hidden relative">
+                      <div className="relative h-[600px] w-full rounded-2xl overflow-hidden shadow-sm border border-gray-100">
+                        {dmError && (
+                          <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-red-600 text-white px-4 py-2 rounded-lg shadow-lg z-[2000]">
+                            Error: {dmError}
+                          </div>
+                        )}
                         <GoogleMap
                           mapContainerStyle={{ width: '100%', height: '100%' }}
                           center={mapCenter} zoom={12}
-                          onLoad={m => { mapRef.current = m; }}
+                          onLoad={m => { mapRef.current = m; setMapLoaded(true); }}
                           options={{
                             mapTypeId: 'roadmap',
                             disableDefaultUI: false,
@@ -833,34 +912,11 @@ const ZoneManagement = ({ mode: initialMode = "list" }) => {
                             fullscreenControl: true
                           }}
                         >
-                          <DrawingManager
-                            onPolygonComplete={onPolygonComplete}
-                            options={{
-                              drawingControl: true,
-                              drawingControlOptions: {
-                                position: window.google.maps.ControlPosition.TOP_RIGHT,
-                                drawingModes: [
-                                  window.google.maps.drawing.OverlayType.POLYGON,
-                                  window.google.maps.drawing.OverlayType.CIRCLE,
-                                ],
-                              },
-                              polygonOptions: {
-                                fillColor: '#4f46e5',
-                                fillOpacity: 0.15,
-                                strokeColor: '#4f46e5',
-                                strokeWeight: 2,
-                                editable: true,
-                              },
-                              circleOptions: {
-                                fillColor: '#0f766e',
-                                fillOpacity: 0.12,
-                                strokeColor: '#0f766e',
-                                strokeWeight: 2,
-                                editable: true,
-                              },
-                            }}
-                            onCircleComplete={onCircleComplete}
-                          />
+                          {!window.google?.maps?.drawing && (
+                            <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-red-50 text-red-600 px-4 py-2 rounded-lg shadow-sm border border-red-200 text-sm font-medium z-[1000]">
+                              Drawing tools not loaded. Please refresh the page.
+                            </div>
+                          )}
                           {boundaryMode === 'polygon' && polygonCoords.length > 0 && (
                             <Polygon
                               paths={polygonCoords}

@@ -122,7 +122,7 @@ export const adminService = {
   getVehicleTypes: (transportType) => api.get(`/admin/types/vehicle-types/list${transportType ? `?transport_type=${transportType}` : ''}`),
   getVehicleTypeById: (id) => api.get(`/admin/types/vehicle-types/${id}`),
   getRideModules: () => api.get('/common/ride_modules'),
-  getLocationVehicleTypes: (locationId, transportType) => api.get(`/types/${locationId}?transport_type=${transportType}`),
+  getLocationVehicleTypes: (locationId, transportType) => api.get(`/admin/types/vehicle-types/list${transportType ? `?transport_type=${transportType}` : ''}`),
 
   /**
    * Owner Management

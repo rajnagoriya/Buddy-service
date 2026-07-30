@@ -124,7 +124,7 @@ const ServiceConfig = () => {
       if (!selLocId) return;
       try {
         const token = localStorage.getItem('adminToken') || '';
-        const res = await fetch(`${globalThis.__LEGACY_BACKEND_ORIGIN__}/api/v1/types/${selLocId}`, {
+        const res = await fetch(`${globalThis.__LEGACY_BACKEND_ORIGIN__}/api/v1/taxi/admin/types/vehicle-types/list`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         const data = await res.json();

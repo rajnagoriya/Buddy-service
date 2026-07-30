@@ -54,16 +54,33 @@ export const configureTaxiSocketServer = (httpServer) => {
   setSupportChatServer(io);
 
   io.on('connection', async (socket) => {
-    const identity = socket.auth;
+    const identity = { ...socket.auth };
+
+    let isDriver = identity.role === 'driver';
+    let driverId = isDriver ? identity.sub : null;
+
+    if (identity.role === 'buddy') {
+      const driver = await Driver.findOne({ identityId: identity.sub });
+      if (driver) {
+        driverId = String(driver._id);
+        isDriver = true;
+        // Patch socket.auth so downstream handlers (locationUpdate, acceptRide) see role='driver' and sub=driverId
+        socket.auth.role = 'driver';
+        socket.auth.sub = driverId;
+        identity.role = 'driver';
+        identity.sub = driverId;
+        socket.join(`driver:${driverId}`);
+      }
+    }
 
     addSocketSubscriptions(socket, { role: identity.role, entityId: identity.sub });
 
     socket.join(getSupportParticipantRoom(identity.role, identity.sub));
     socket.join(getSupportRoleRoom(identity.role));
 
-    if (identity.role === 'driver') {
-      await Driver.findByIdAndUpdate(identity.sub, { socketId: socket.id });
-      notifyLateAvailableDriver(identity.sub).catch((error) => {
+    if (isDriver && driverId) {
+      await Driver.findByIdAndUpdate(driverId, { socketId: socket.id });
+      notifyLateAvailableDriver(driverId).catch((error) => {
         console.error('Failed to notify late-available driver on socket connect', error);
       });
     }
