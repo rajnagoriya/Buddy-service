@@ -142,6 +142,19 @@ export function isModuleAuthenticated(module) {
 }
 
 /**
+ * True when a recoverable session exists (valid access token, or refresh token to renew it).
+ * Use this to avoid treating an expired access JWT as a full logout.
+ */
+export function hasModuleSession(module) {
+  if (isModuleAuthenticated(module)) return true;
+  const refresh = getModuleRefreshToken(module);
+  if (!refresh) return false;
+  // Refresh tokens are opaque in some setups; if JWT-shaped, respect expiry.
+  if (refresh.split(".").length === 3 && isTokenExpired(refresh)) return false;
+  return true;
+}
+
+/**
  * Clear authentication data for a specific module
  * @param {string} module - Module name (admin, restaurant, delivery, user)
  */

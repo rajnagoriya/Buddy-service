@@ -14,7 +14,9 @@ import {
   assertOnboardingContactUniqueness,
   normalizeRestaurantPhone,
   mapDuplicateKeyError,
+  isPointInPolygon,
 } from "./restaurantCreation.service.js";
+import { FoodZone } from "../../admin/models/zone.model.js";
 import { isRestaurantBanned } from "../utils/restaurantBan.util.js";
 import {
   getOutletTimingsForRestaurant,
@@ -316,6 +318,26 @@ export const saveOnboardingStep = async (restaurantId, stepNumber, payload, file
       payload.zoneId && mongoose.Types.ObjectId.isValid(String(payload.zoneId).trim())
         ? new mongoose.Types.ObjectId(String(payload.zoneId).trim())
         : undefined;
+
+    if (!zoneId) {
+      throw new ValidationError("Pin your restaurant location inside a service zone on the map");
+    }
+    if (latNum === null || lngNum === null) {
+      throw new ValidationError("Please select your restaurant location on the map");
+    }
+
+    const zone = await FoodZone.findById(zoneId).lean();
+    if (!zone || zone.isActive === false) {
+      throw new ValidationError("Selected service zone is invalid or inactive");
+    }
+    if (Array.isArray(zone.coordinates) && zone.coordinates.length >= 3) {
+      const isInside = isPointInPolygon(latNum, lngNum, zone.coordinates);
+      if (!isInside) {
+        throw new ValidationError(
+          "Restaurant location is outside the selected service zone. Move the pin inside the zone.",
+        );
+      }
+    }
 
     restaurant.restaurantName =
       String(payload.restaurantName || "").trim() || restaurant.restaurantName;

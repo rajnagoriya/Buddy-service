@@ -7,7 +7,7 @@ import {
   useState,
 } from "react"
 import { restaurantAPI } from "@food/api"
-import { isModuleAuthenticated } from "@food/utils/auth"
+import { hasModuleSession, isModuleAuthenticated } from "@food/utils/auth"
 import {
   extractOnboardingPayload,
   extractRestaurantPayload,
@@ -27,7 +27,7 @@ export function invalidateRestaurantSession() {
 }
 
 async function loadSessionOnce() {
-  if (!isModuleAuthenticated("restaurant")) {
+  if (!isModuleAuthenticated("restaurant") && !hasModuleSession("restaurant")) {
     return { restaurant: null, onboarding: null }
   }
   if (!sessionLoadPromise) {
@@ -54,7 +54,7 @@ export function RestaurantSessionProvider({ children }) {
   const [error, setError] = useState(null)
 
   const loadSession = useCallback(async ({ force = false } = {}) => {
-    if (!isModuleAuthenticated("restaurant")) {
+    if (!isModuleAuthenticated("restaurant") && !hasModuleSession("restaurant")) {
       setRestaurant(null)
       setOnboarding(null)
       setError(null)

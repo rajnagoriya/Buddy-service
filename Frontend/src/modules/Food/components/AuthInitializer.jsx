@@ -1,53 +1,63 @@
 import { useEffect, useState } from 'react';
-import { isModuleAuthenticated, getModuleToken } from '@food/utils/auth';
+import {
+  getModuleToken,
+  getModuleRefreshToken,
+  isTokenExpired,
+} from '@food/utils/auth';
+import { refreshModuleAccessToken } from '@food/api/axios';
 import Loader from './Loader';
 
+const AUTH_MODULES = ['user', 'restaurant', 'delivery', 'admin'];
+
 /**
- * AuthInitializer - Recovers auth state from localStorage on app initialization
- * Ensures tokens are validated before any protected routes render
- * This prevents redirect loops when refreshing protected pages
+ * AuthInitializer - Recovers auth state from localStorage on app initialization.
+ * Silently refreshes expired access tokens when a refresh token is still valid,
+ * so restaurant/delivery sessions survive app close without forcing login again.
  */
 export default function AuthInitializer({ children }) {
-  const [isInitialized, setIsInitialized] = useState(false);
   const [isRehydrating, setIsRehydrating] = useState(true);
 
   useEffect(() => {
-    // Simulate hydration of auth state from localStorage
-    // This ensures localStorage is fully available before route checks
+    let cancelled = false;
+
     const initializeAuth = async () => {
       try {
-        // Check all module tokens to ensure they're properly loaded from localStorage
-        const modules = ['user', 'restaurant', 'delivery', 'admin'];
-        
-        modules.forEach(module => {
-          const token = getModuleToken(module);
-          // If token exists, validate it's accessible
-          if (token && typeof token === 'string') {
-            // Token is valid and accessible from localStorage
-          }
-        });
-        
-        // Mark initialization as complete - localStorage is now fully hydrated
-        setIsInitialized(true);
+        await Promise.all(
+          AUTH_MODULES.map(async (module) => {
+            const accessToken = getModuleToken(module);
+            const refreshToken = getModuleRefreshToken(module);
+
+            if (accessToken && !isTokenExpired(accessToken)) {
+              return;
+            }
+
+            if (!refreshToken) {
+              return;
+            }
+
+            // Access missing/expired but refresh present → renew before routes render
+            await refreshModuleAccessToken(module);
+          }),
+        );
       } catch (error) {
         console.warn('Auth initialization error:', error);
-        // Even on error, allow app to continue
-        setIsInitialized(true);
       } finally {
-        setIsRehydrating(false);
+        if (!cancelled) {
+          setIsRehydrating(false);
+        }
       }
     };
 
-    // Use setTimeout to ensure this happens after React hydration
     const timer = setTimeout(initializeAuth, 0);
-    return () => clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, []);
 
-  // Show loader while rehydrating auth state on app initialization
   if (isRehydrating) {
     return <Loader />;
   }
 
   return children;
 }
-

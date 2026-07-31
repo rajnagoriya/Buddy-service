@@ -5,7 +5,7 @@ import { ValidationError, ConflictError } from "../../../../core/auth/errors.js"
 
 export const DRAFT_PLACEHOLDER_NAME = "__DRAFT__";
 
-const isPointInPolygon = (lat, lng, polygon = []) => {
+export const isPointInPolygon = (lat, lng, polygon = []) => {
   if (!Array.isArray(polygon) || polygon.length < 3) return false;
   const x = Number(lat);
   const y = Number(lng);

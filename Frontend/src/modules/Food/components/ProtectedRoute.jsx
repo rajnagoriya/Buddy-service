@@ -1,5 +1,5 @@
 import { Navigate, useLocation } from "react-router-dom";
-import { isModuleAuthenticated } from "@food/utils/auth";
+import { hasModuleSession, isModuleAuthenticated } from "@food/utils/auth";
 
 /**
  * Role-based Protected Route Component
@@ -13,7 +13,10 @@ export default function ProtectedRoute({ children, requiredRole, loginPath = "/u
     return children;
   }
 
-  const isAuthenticated = isModuleAuthenticated(requiredRole);
+  // Prefer a usable access token; also accept recoverable sessions (refresh token present)
+  // so we don't bounce to login while AuthInitializer renews an expired access JWT.
+  const isAuthenticated =
+    isModuleAuthenticated(requiredRole) || hasModuleSession(requiredRole);
 
   // If not authenticated for this module, redirect to login
   if (!isAuthenticated) {

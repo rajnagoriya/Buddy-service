@@ -1,6 +1,6 @@
 import { Navigate, useLocation } from "react-router-dom";
 import Loader from "@food/components/Loader";
-import { clearModuleAuth, isModuleAuthenticated } from "@food/utils/auth";
+import { clearModuleAuth, hasModuleSession, isModuleAuthenticated } from "@food/utils/auth";
 import { useRestaurantSession, invalidateRestaurantSession } from "@food/context/RestaurantSessionContext";
 import { resolveRestaurantOnboardingStatus } from "@food/utils/onboardingUtils";
 import { isRestaurantBanned } from "@food/utils/restaurantBan";
@@ -102,7 +102,7 @@ export default function RestaurantAccessGuard({ children, mode = "dashboard" }) 
       message: "Your restaurant account has been banned. Please contact support.",
     });
 
-  if (!isModuleAuthenticated("restaurant")) {
+  if (!isModuleAuthenticated("restaurant") && !hasModuleSession("restaurant")) {
     return (
       <Navigate
         to="/food/restaurant/login"

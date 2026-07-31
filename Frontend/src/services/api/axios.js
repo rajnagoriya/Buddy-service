@@ -157,7 +157,63 @@ function onRefreshFailed(module) {
 
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent("authRefreshFailed", { detail: { module } }));
+    if (module === "restaurant") {
+      window.dispatchEvent(new Event("restaurantAuthChanged"));
+    }
   }
+}
+
+/**
+ * Proactively refresh an expired access token using the stored refresh token.
+ * Used on app startup so guards don't bounce users to login before any API call.
+ * @param {string} module
+ * @returns {Promise<string|null>} new access token or null
+ */
+export async function refreshModuleAccessToken(module) {
+  if (!module) return null;
+  const refreshToken = getRefreshToken(module);
+  if (!refreshToken) return null;
+
+  const state = getRefreshState(module);
+  if (state.isRefreshing) {
+    return new Promise((resolve) => {
+      subscribeToRefresh(module, (newToken) => resolve(newToken || null));
+    });
+  }
+
+  state.isRefreshing = true;
+  try {
+    const refreshUrl = baseURL
+      ? `${baseURL}/food/auth/refresh-token`
+      : "/api/v1/food/auth/refresh-token";
+    const { data } = await axios.post(refreshUrl, { refreshToken }, { timeout: 10000 });
+    const newAccessToken = data?.data?.accessToken || data?.accessToken;
+    const newRefreshToken = data?.data?.refreshToken || data?.refreshToken;
+    if (newAccessToken) {
+      try {
+        localStorage.setItem(`${module}_accessToken`, newAccessToken);
+        localStorage.setItem(`${module}_authenticated`, "true");
+        if (newRefreshToken && typeof newRefreshToken === "string") {
+          localStorage.setItem(`${module}_refreshToken`, newRefreshToken);
+        }
+        window.dispatchEvent(
+          new CustomEvent("authRefreshed", {
+            detail: { module, token: newAccessToken },
+          }),
+        );
+      } catch (_) {}
+      onRefreshed(newAccessToken, module);
+      return newAccessToken;
+    }
+  } catch (_) {
+    onRefreshFailed(module);
+    return null;
+  } finally {
+    state.isRefreshing = false;
+  }
+
+  onRefreshFailed(module);
+  return null;
 }
 
 apiClient.interceptors.request.use(
