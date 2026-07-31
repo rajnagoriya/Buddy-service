@@ -89,8 +89,9 @@ export const resolveOnboardingStatus = (doc) => {
   if (isRestaurantBanned(doc)) return "BANNED";
 
   // Canonical account status wins over a stale onboardingStatus (e.g. IN_PROGRESS
-  // left behind after admin approval).
-  if (doc.status === "approved" || doc.isActive === true) return "APPROVED";
+  // left behind after admin approval). Do NOT use isActive here — drafts default
+  // isActive: true (outlet operational flag), which is not admin approval.
+  if (doc.status === "approved" || doc.approvedAt) return "APPROVED";
   if (doc.status === "banned") return "BANNED";
   if (doc.status === "rejected") return "REJECTED";
 

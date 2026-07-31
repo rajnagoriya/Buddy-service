@@ -188,8 +188,10 @@ export const resolveRestaurantOnboardingStatus = (restaurant) => {
 
   // Canonical account status wins over a stale onboardingStatus field.
   // Approved restaurants must never be sent back to the wizard.
+  // Do NOT use isActive — drafts default isActive: true (outlet online flag),
+  // which is not the same as admin approval.
   const accountStatus = String(restaurant?.status || "").toLowerCase()
-  if (accountStatus === "approved" || restaurant?.isActive === true) {
+  if (accountStatus === "approved" || restaurant?.approvedAt) {
     return "APPROVED"
   }
   if (accountStatus === "banned") return "BANNED"
@@ -222,8 +224,6 @@ export const isRestaurantOnboardingComplete = (restaurant) => {
   ) {
     return true
   }
-
-  if (restaurant?.isActive === true) return true
 
   if (status === "SUBMITTED" || status === "UNDER_REVIEW") return true
 

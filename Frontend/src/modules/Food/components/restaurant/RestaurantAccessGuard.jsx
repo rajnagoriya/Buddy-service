@@ -14,7 +14,9 @@ function buildSessionPayload(onboarding, restaurant) {
     ...(onboarding || {}),
     // Prefer live restaurant account fields so approved outlets are not
     // bounced back to onboarding by a stale onboardingStatus.
+    // approvedAt is the reliable approval signal; isActive is outlet online/offline only.
     status: restaurant?.status ?? onboarding?.status,
+    approvedAt: restaurant?.approvedAt ?? onboarding?.approvedAt,
     isActive: restaurant?.isActive ?? onboarding?.isActive,
     rejectionReason: restaurant?.rejectionReason ?? onboarding?.rejectionReason,
     bannedAt: restaurant?.bannedAt ?? onboarding?.bannedAt,

@@ -222,7 +222,7 @@ export default function RestaurantOTP() {
           const onboardingStatus = String(data?.onboardingStatus || "").toUpperCase()
           const accountApproved =
             String(restaurant?.status || "").toLowerCase() === "approved" ||
-            restaurant?.isActive === true ||
+            Boolean(restaurant?.approvedAt) ||
             onboardingStatus === "APPROVED"
 
           // Never send an already-approved restaurant back into the wizard.
