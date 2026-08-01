@@ -109,16 +109,18 @@ export function RestaurantSessionProvider({ children }) {
 
     window.addEventListener("restaurantAuthChanged", onAuthChange)
     window.addEventListener("restaurantSessionInvalidated", onSessionInvalidated)
-    window.addEventListener("storage", (e) => {
-      if (e.key === "restaurant_accessToken" || e.key === null) {
+    const onStorage = (e) => {
+      if (e.key === "restaurant_accessToken" || e.key === "restaurant_refreshToken" || e.key === null) {
         onAuthChange()
       }
-    })
+    }
+    window.addEventListener("storage", onStorage)
 
     return () => {
       cancelled = true
       window.removeEventListener("restaurantAuthChanged", onAuthChange)
       window.removeEventListener("restaurantSessionInvalidated", onSessionInvalidated)
+      window.removeEventListener("storage", onStorage)
     }
   }, [loadSession])
 

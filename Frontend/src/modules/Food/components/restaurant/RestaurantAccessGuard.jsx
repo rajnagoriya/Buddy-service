@@ -116,12 +116,29 @@ export default function RestaurantAccessGuard({ children, mode = "dashboard" }) 
     return <Loader />;
   }
 
-  // Auth expired / invalid: clear tokens and send to login — do NOT treat as onboarding.
+  // Auth expired / invalid: only hard-logout when there is no recoverable session.
+  // Transient 401s (or a refresh still in progress) should not bounce partners to login.
   if (error?.response?.status === 401) {
-    return logoutAndGoLogin({
-      from: location.pathname + location.search,
-      message: "Session expired. Please log in again.",
-    });
+    if (!hasModuleSession("restaurant") && !isModuleAuthenticated("restaurant")) {
+      return logoutAndGoLogin({
+        from: location.pathname + location.search,
+        message: "Session expired. Please log in again.",
+      });
+    }
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-3 p-6 text-center">
+        <p className="text-sm text-slate-600">
+          Couldn’t refresh your restaurant session. Check your connection and try again.
+        </p>
+        <button
+          type="button"
+          className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-semibold"
+          onClick={() => window.location.reload()}
+        >
+          Retry
+        </button>
+      </div>
+    );
   }
 
   if (error?.response?.status === 403) {

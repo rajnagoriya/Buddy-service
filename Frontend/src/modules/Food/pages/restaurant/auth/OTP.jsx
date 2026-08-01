@@ -204,11 +204,16 @@ export default function RestaurantOTP() {
       }
 
       const accessToken = data?.accessToken || data?.token
+      const refreshToken =
+        data?.refreshToken ||
+        data?.tokens?.refreshToken ||
+        response?.data?.refreshToken ||
+        null
       const restaurant = data?.user ?? data?.restaurant
 
       if (accessToken && restaurant) {
         loginSucceeded = true
-        setRestaurantAuthData("restaurant", accessToken, restaurant, data?.refreshToken)
+        setRestaurantAuthData("restaurant", accessToken, restaurant, refreshToken)
         window.dispatchEvent(new Event("restaurantAuthChanged"))
         sessionStorage.removeItem("restaurantAuthData")
         toast.success("Verification successful!")

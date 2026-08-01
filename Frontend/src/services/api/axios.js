@@ -22,6 +22,22 @@ const apiClient = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
+function isPublicFoodRestaurantUrl(normalized = "") {
+  // Consumer/catalog endpoints live under /food/restaurant/* but must NOT use
+  // the partner restaurant session (and must never wipe it on 401).
+  if (!normalized.includes("/food/restaurant")) return false;
+  if (normalized.includes("/public")) return true;
+  if (
+    /\/food\/restaurant\/restaurants(\/|\?|$)/.test(normalized) ||
+    /\/food\/restaurant\/offers(\?|$)/.test(normalized) ||
+    /\/food\/restaurant\/delivery-speed-options(\?|$)/.test(normalized) ||
+    /\/food\/restaurant\/categories(\/|\?|$)/.test(normalized)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 function getModuleFromUrl(url = "") {
   const u = typeof url === "string" ? url : (url?.url || "");
   if (!u) return "user";
@@ -53,8 +69,13 @@ function getModuleFromUrl(url = "") {
     normalized.includes("/auth/delivery") || 
     normalized.includes("/delivery/")
   ) return "delivery";
+
+  // Public consumer restaurant catalog APIs → user module
+  if (isPublicFoodRestaurantUrl(normalized)) {
+    return "user";
+  }
   
-  // Restaurant detection - Catch all restaurant-specific functional and auth routes
+  // Restaurant partner detection - authenticated partner panel routes only
   if (
     normalized.includes("/food/restaurant/") || 
     normalized.includes("/auth/restaurant") || 
@@ -266,6 +287,7 @@ apiClient.interceptors.response.use(
     // OTP / login endpoints return 401 for invalid/missing OTP — never treat as
     // session expiry or run refresh (that can clear a just-issued login).
     const requestUrl = String(original?.url || "");
+    const normalizedRequestUrl = requestUrl.toLowerCase();
     if (
       /\/(request-otp|verify-otp|login|register)(\?|$)/i.test(requestUrl) ||
       /\/auth\/(user|restaurant|delivery)\/(request-otp|verify-otp)/i.test(requestUrl) ||
@@ -274,11 +296,23 @@ apiClient.interceptors.response.use(
       return Promise.reject(err);
     }
 
+    // Public consumer catalog calls must never wipe a partner restaurant session.
+    if (isPublicFoodRestaurantUrl(normalizedRequestUrl)) {
+      return Promise.reject(err);
+    }
+
     const refreshToken = getRefreshToken(module);
     if (!refreshToken) {
-      clearModuleAuth(module);
-      if (module === "restaurant" && typeof window !== "undefined") {
-        window.dispatchEvent(new Event("restaurantAuthChanged"));
+      // Only clear when this request was actually using that module's session.
+      // Avoid wiping restaurant/delivery auth because of unrelated 401s.
+      const hadModuleAccessToken = Boolean(
+        original?.headers?.Authorization || getAccessToken({ ...original, contextModule: module })
+      );
+      if (hadModuleAccessToken) {
+        clearModuleAuth(module);
+        if (module === "restaurant" && typeof window !== "undefined") {
+          window.dispatchEvent(new Event("restaurantAuthChanged"));
+        }
       }
       return Promise.reject(err);
     }
@@ -306,9 +340,14 @@ apiClient.interceptors.response.use(
       const refreshUrl = baseURL ? `${baseURL}/food/auth/refresh-token` : "/api/v1/food/auth/refresh-token";
       const { data } = await axios.post(refreshUrl, { refreshToken }, { timeout: 10000 });
       const newAccessToken = data?.data?.accessToken || data?.accessToken;
+      const newRefreshToken = data?.data?.refreshToken || data?.refreshToken;
       if (newAccessToken) {
         try {
           localStorage.setItem(`${module}_accessToken`, newAccessToken);
+          localStorage.setItem(`${module}_authenticated`, "true");
+          if (newRefreshToken && typeof newRefreshToken === "string") {
+            localStorage.setItem(`${module}_refreshToken`, newRefreshToken);
+          }
           // Dispatch a custom event specifically for the module that refreshed
           window.dispatchEvent(new CustomEvent("authRefreshed", { 
             detail: { module, token: newAccessToken } 

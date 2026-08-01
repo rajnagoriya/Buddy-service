@@ -747,8 +747,9 @@ export const adminAPI = {
   /** Public categories (user app) - zone-aware */
   getPublicCategories: (params = {}, config = {}) =>
     apiClient.get("/food/restaurant/categories/public", {
-      params: params ?? {},
       ...config,
+      params: params ?? {},
+      contextModule: "user",
     }),
 
   /** Offers & Coupons (admin) */
@@ -1204,16 +1205,25 @@ export const restaurantAPI = {
     });
   },
   /** Public Offers for users (global/selected restaurant) */
-  getPublicOffers: () => apiClient.get("/food/restaurant/offers"),
+  getPublicOffers: () =>
+    apiClient.get("/food/restaurant/offers", { contextModule: "user" }),
   getRestaurantPageOffers: (restaurantId) =>
-    apiClient.get(`/food/restaurant/restaurants/${String(restaurantId)}/offers`),
+    apiClient.get(`/food/restaurant/restaurants/${String(restaurantId)}/offers`, {
+      contextModule: "user",
+    }),
   getDeliverySpeedOptions: (config = {}) =>
-    apiClient.get("/food/restaurant/delivery-speed-options", config),
+    apiClient.get("/food/restaurant/delivery-speed-options", {
+      ...config,
+      contextModule: "user",
+    }),
   getPublicCheckoutSettings: (config = {}) =>
-    apiClient.get("/food/restaurant/checkout-settings/public", config),
+    apiClient.get("/food/restaurant/checkout-settings/public", {
+      ...config,
+      contextModule: "user",
+    }),
   /** Backward-compat helper used by Cart: returns coupons array for an item by adapting public offers */
   getCouponsByItemIdPublic: (restaurantIds, _itemId) =>
-    apiClient.get("/food/restaurant/offers").then((res) => {
+    apiClient.get("/food/restaurant/offers", { contextModule: "user" }).then((res) => {
       const list = res?.data?.data?.allOffers || res?.data?.allOffers || [];
       const idList = Array.isArray(restaurantIds)
         ? restaurantIds.map((id) => String(id || "")).filter(Boolean)
