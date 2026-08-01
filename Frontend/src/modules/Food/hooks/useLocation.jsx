@@ -37,6 +37,9 @@ let globalReverseGeocodeLastSuccess = null
 // then rely on localStorage/DB. Live watching is enabled only via explicit user action.
 const AUTO_START_LIVE_WATCH = false
 
+// Deduplicate auto GPS fetch across many components that mount `useLocation()`.
+let globalAutoLocationFetchStarted = false
+
 const reverseGeocodeDirect = async (latitude, longitude) => {
   const now = Date.now()
   const movedMeters = geoDistanceMeters(
@@ -1499,91 +1502,79 @@ export function useLocation() {
     // The background fetch will set the location, or we'll use the cached/DB location
     // Only set fallback if we have no location after all attempts
 
-    // Request fresh location in BACKGROUND (non-blocking)
-    // CRITICAL FIX: Only auto-request if permission is ALREADY granted
-    // This prevents "Requests geolocation permission on page load" warning
+    // Auto-fetch current GPS location once when the app opens.
+    // Skip only when the user has already denied geolocation.
     const checkPermissionAndStart = async () => {
       try {
-        let permissionGranted = false;
+        if (globalAutoLocationFetchStarted) {
+          setLoading(false)
+          return
+        }
+        // Claim immediately so concurrent hook mounts don't all prompt GPS.
+        globalAutoLocationFetchStarted = true
+
+        let permissionDenied = false
 
         if (navigator.permissions && navigator.permissions.query) {
           try {
-            const result = await navigator.permissions.query({ name: 'geolocation' });
-            if (result.state === 'granted') {
-              permissionGranted = true;
-            } else {
-              debugLog(`?? Geolocation permission is '${result.state}' - Waiting for user action (avoiding prompt on load)`);
+            const result = await navigator.permissions.query({ name: "geolocation" })
+            permissionDenied = result.state === "denied"
+            if (result.state === "granted") {
+              setPermissionGranted(true)
             }
           } catch (permErr) {
-            debugWarn("?? Permission query failed:", permErr);
+            debugWarn("Permission query failed:", permErr)
           }
-        } else {
-          // Fallback for browsers without permissions API - assume not granted to be safe
-          debugLog("?? Permissions API not available - Skipping auto-start");
         }
 
-        // If permission NOT granted, and we don't have a specific user request (this is page load),
-        // we should SKIP automatic fetching/watching to allow the user to choose when to enable it.
-        // UNLESS we already have a valid initial location from localStorage/DB, in which case we might want to refresh?
-        // Actually, even then, we shouldn't prompt.
-        if (!permissionGranted) {
-          // If we have an initial location, we are fine (it's displayed).
-          // If we don't, we show "Select Location".
-          // In either case, we avoid the PROMPT.
-          // Ensure loading is false so UI doesn't hang
-          setLoading(false);
-          return;
+        if (permissionDenied) {
+          globalAutoLocationFetchStarted = false
+          setLoading(false)
+          return
         }
 
-        debugLog("?? Permission granted! Fetching/Watching location...", shouldForceRefresh ? "(FORCE REFRESH)" : "");
+        if (!navigator.geolocation) {
+          globalAutoLocationFetchStarted = false
+          setLoading(false)
+          return
+        }
 
-        // Only fetch once on initial app open if we have no stored coordinates yet.
-        // Do not keep re-geocoding just because the address text is placeholder.
-        const shouldFetch = shouldForceRefresh || !hasInitialLocation
+        debugLog(
+          "Auto-fetching current location on app open...",
+          shouldForceRefresh || !hasInitialLocation ? "(needed)" : "(refresh)",
+        )
 
-        if (shouldFetch) {
-          debugLog("?? Fetching location - shouldForceRefresh:", shouldForceRefresh, "hasInitialLocation:", hasInitialLocation)
-          getLocation(true, shouldForceRefresh) // forceFresh = true if cached location is incomplete
-            .then((location) => {
-              if (location &&
-                location.formattedAddress !== "Select location" &&
-                location.city !== "Current Location") {
-                debugLog("? Fresh location fetched:", location)
-                debugLog("? Location details:", {
-                  formattedAddress: location?.formattedAddress,
-                  address: location?.address,
-                  city: location?.city,
-                  state: location?.state,
-                  area: location?.area
-                })
-                // CRITICAL: Update state with fresh location so PageNavbar displays it
-                setLocation(location)
-                setPermissionGranted(true)
-                if (AUTO_START_LIVE_WATCH) startWatchingLocation()
-              } else {
-                // Placeholder result means reverse-geocode failed or was unavailable.
-                // Requirement: no more automatic retries; user can trigger manual refresh.
-                debugWarn("?? Location fetch returned placeholder; not retrying automatically")
-              }
-            })
-            .catch((err) => {
-              debugWarn("?? Background location fetch failed (using cached):", err.message)
-              // Don't auto-start live watching; keep cached/localStorage behavior.
+        getLocation(true, true)
+          .then((nextLocation) => {
+            if (
+              nextLocation &&
+              nextLocation.formattedAddress !== "Select location" &&
+              nextLocation.city !== "Current Location"
+            ) {
+              setLocation(nextLocation)
+              setPermissionGranted(true)
               if (AUTO_START_LIVE_WATCH) startWatchingLocation()
-            })
-        } else {
-          // We have a valid location; no need to start live watching.
-          if (AUTO_START_LIVE_WATCH) startWatchingLocation()
-        }
+            } else {
+              debugWarn("Location fetch returned placeholder; not retrying automatically")
+            }
+          })
+          .catch((err) => {
+            debugWarn("Background location fetch failed (using cached):", err.message)
+            // Allow a later remount to retry if this attempt failed.
+            globalAutoLocationFetchStarted = false
+            if (AUTO_START_LIVE_WATCH) startWatchingLocation()
+          })
+          .finally(() => {
+            setLoading(false)
+          })
       } catch (err) {
-        debugError("Error in checkPermissionAndStart:", err);
-        setLoading(false);
+        globalAutoLocationFetchStarted = false
+        debugError("Error in checkPermissionAndStart:", err)
+        setLoading(false)
       }
-    };
+    }
 
-    // Always check permission state on startup.
-    // This does NOT trigger browser prompt by itself; it only auto-fetches when permission is already granted.
-    checkPermissionAndStart();
+    checkPermissionAndStart()
 
     // Cleanup timeout and watcher
     return () => {

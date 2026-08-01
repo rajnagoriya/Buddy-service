@@ -171,11 +171,11 @@ export default function DriverLogin() {
           <div className="absolute bottom-[-40px] -left-12 w-72 h-72 bg-black/10 rounded-full blur-3xl pointer-events-none" />
 
           <div className="relative z-10 px-6">
-            <div className="flex items-center gap-2 mb-8">
-              <div className="w-9 h-9 rounded-xl bg-white flex items-center justify-center shadow-md">
-                <span className="text-green-700 font-black text-xl leading-none">B</span>
+            <div className="mb-8 flex items-center gap-2 select-none" aria-hidden="true">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white shadow-md">
+                <span className="text-xl font-black leading-none text-green-700">B</span>
               </div>
-              <span className="font-black text-white text-lg tracking-tight">Buddy Partner</span>
+              <span className="text-lg font-black tracking-tight text-white">Buddy Partner</span>
             </div>
 
             <p className="uppercase text-[11px] text-green-200 font-bold tracking-[0.25em] mb-2">

@@ -1,9 +1,83 @@
 import { useState, useRef, useEffect } from "react";
-import { Info, Phone, Upload, X, Loader2 } from "lucide-react";
+import { Info, Phone, Upload, X, Loader2, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { adminAPI } from "@food/api";
 import { setCachedSettings, updateFavicon, updateTitle } from "@food/utils/businessSettings";
-import { EMAIL_REGEX } from "@/shared/utils/emailValidation";
+import { validateEmail } from "@/shared/utils/emailValidation";
+
+const PHONE_REGEX = /^\d{10}$/;
+const PINCODE_REGEX = /^\d{6}$/;
+const STATE_REGEX = /^[A-Za-z][A-Za-z\s.'-]{1,49}$/;
+const COMPANY_NAME_REGEX = /^[A-Za-z0-9][A-Za-z0-9\s.&'\-,]{1,49}$/;
+const ADDRESS_REGEX = /^[A-Za-z0-9][A-Za-z0-9\s.,#'\-()/&]{4,249}$/;
+
+const normalizePhoneDigits = (value) => String(value || "").replace(/\D/g, "").slice(0, 10);
+const normalizePincode = (value) => String(value || "").replace(/\D/g, "").slice(0, 6);
+const normalizeState = (value) =>
+  String(value || "")
+    .replace(/[^A-Za-z\s.'-]/g, "")
+    .replace(/\s+/g, " ")
+    .slice(0, 50);
+const normalizeCompanyName = (value) =>
+  String(value || "")
+    .replace(/[^A-Za-z0-9\s.&'\-,]/g, "")
+    .replace(/\s+/g, " ")
+    .slice(0, 50);
+const normalizeEmail = (value) => String(value || "").replace(/\s/g, "").slice(0, 100);
+const normalizeAddress = (value) =>
+  String(value || "")
+    .replace(/[^A-Za-z0-9\s.,#'\-()/&]/g, "")
+    .replace(/\s+/g, " ")
+    .slice(0, 250);
+
+const getCompanyNameError = (value) => {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "Company name is required";
+  if (trimmed.length < 2) return "Company name must be at least 2 characters";
+  if (!COMPANY_NAME_REGEX.test(trimmed)) {
+    return "Company name can only contain letters, numbers, spaces, and . & ' - ,";
+  }
+  return "";
+};
+
+const getEmailError = (value) => {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "Email is required";
+  return validateEmail(trimmed);
+};
+
+const getAddressError = (value) => {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+  if (trimmed.length < 5) return "Address must be at least 5 characters";
+  if (!ADDRESS_REGEX.test(trimmed)) {
+    return "Address contains invalid characters";
+  }
+  return "";
+};
+
+const getPhoneError = (value) => {
+  const digits = normalizePhoneDigits(value);
+  if (!digits) return "Phone number is required";
+  if (!PHONE_REGEX.test(digits)) return "Phone number must be exactly 10 digits";
+  return "";
+};
+
+const getStateError = (value) => {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+  if (trimmed.length < 2) return "State must be at least 2 characters";
+  if (!STATE_REGEX.test(trimmed)) return "State must contain letters only";
+  return "";
+};
+
+const getPincodeError = (value) => {
+  const digits = normalizePincode(value);
+  if (!digits) return "";
+  if (!PINCODE_REGEX.test(digits)) return "Pincode must be exactly 6 digits";
+  return "";
+};
+
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -29,6 +103,7 @@ export default function BusinessSetup() {
     pincode: "",
     region: "",
   });
+  const [fieldErrors, setFieldErrors] = useState({});
 
   // Fetch business settings on mount
   useEffect(() => {
@@ -43,15 +118,16 @@ export default function BusinessSetup() {
 
       if (settings) {
         setFormData({
-          companyName: settings.companyName || "",
-          email: settings.email || "",
+          companyName: normalizeCompanyName(settings.companyName || ""),
+          email: normalizeEmail(settings.email || ""),
           phoneCountryCode: settings.phone?.countryCode || "+91",
-          phoneNumber: settings.phone?.number || "",
-          address: settings.address || "",
-          state: settings.state || "",
-          pincode: settings.pincode || "",
+          phoneNumber: normalizePhoneDigits(settings.phone?.number || ""),
+          address: normalizeAddress(settings.address || ""),
+          state: normalizeState(settings.state || ""),
+          pincode: normalizePincode(settings.pincode || ""),
           region: settings.region || "India",
         });
+        setFieldErrors({});
 
         // Set logo and favicon previews if they exist
         if (settings.logo?.url) {
@@ -74,41 +150,58 @@ export default function BusinessSetup() {
       ...prev,
       [field]: value,
     }));
+    setFieldErrors((prev) => ({
+      ...prev,
+      [field]: "",
+    }));
   };
+
+  const handleFieldBlur = (field) => {
+    const validators = {
+      companyName: getCompanyNameError,
+      email: getEmailError,
+      address: getAddressError,
+      phoneNumber: getPhoneError,
+      state: getStateError,
+      pincode: getPincodeError,
+    };
+    const validate = validators[field];
+    if (!validate) return;
+
+    setFieldErrors((prev) => ({
+      ...prev,
+      [field]: validate(formData[field]),
+    }));
+  };
+
+  const inputErrorClass = (field) =>
+    fieldErrors[field]
+      ? "border-red-400 focus:ring-red-500 focus:border-red-500"
+      : "border-slate-300 focus:ring-blue-500 focus:border-blue-500";
 
   const handleSave = async () => {
     try {
-      // Validate required fields
-      if (!formData.companyName.trim()) {
-        toast.error("Company name is required");
-        return;
-      }
-      if (formData.companyName.trim().length < 2) {
-        toast.error("Company name must be at least 2 characters long");
-        return;
-      }
+      const companyNameError = getCompanyNameError(formData.companyName);
+      const emailError = getEmailError(formData.email);
+      const addressError = getAddressError(formData.address);
+      const phoneError = getPhoneError(formData.phoneNumber);
+      const stateError = getStateError(formData.state);
+      const pincodeError = getPincodeError(formData.pincode);
 
-      if (!formData.email.trim()) {
-        toast.error("Email is required");
-        return;
-      }
-      if (!EMAIL_REGEX.test(formData.email.trim())) {
-        toast.error("Please enter a valid email address");
-        return;
-      }
+      const nextErrors = {
+        companyName: companyNameError,
+        email: emailError,
+        address: addressError,
+        phoneNumber: phoneError,
+        state: stateError,
+        pincode: pincodeError,
+      };
+      const firstError =
+        companyNameError || emailError || phoneError || addressError || stateError || pincodeError;
 
-      if (!formData.phoneNumber.trim()) {
-        toast.error("Phone number is required");
-        return;
-      }
-      const phoneRegex = /^\d{7,15}$/;
-      if (!phoneRegex.test(formData.phoneNumber.trim())) {
-        toast.error("Please enter a valid phone number (7-15 digits)");
-        return;
-      }
-
-      if (formData.pincode.trim() && !/^\d{4,10}$/.test(formData.pincode.trim())) {
-        toast.error("Please enter a valid pincode (4-10 digits)");
+      if (firstError) {
+        setFieldErrors(nextErrors);
+        toast.error(firstError);
         return;
       }
 
@@ -169,6 +262,7 @@ export default function BusinessSetup() {
     fetchBusinessSettings();
     setLogoFile(null);
     setFaviconFile(null);
+    setFieldErrors({});
     if (logoInputRef.current) {
       logoInputRef.current.value = "";
     }
@@ -229,9 +323,13 @@ export default function BusinessSetup() {
                   placeholder="Enter Your Company Name"
                   value={formData.companyName}
                   maxLength={50}
-                  onChange={(e) => handleInputChange("companyName", e.target.value)}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  onChange={(e) => handleInputChange("companyName", normalizeCompanyName(e.target.value))}
+                  onBlur={() => handleFieldBlur("companyName")}
+                  className={`w-full px-3 py-2 text-xs border rounded-lg bg-white focus:outline-none focus:ring-2 ${inputErrorClass("companyName")}`}
                 />
+                {fieldErrors.companyName && (
+                  <p className="mt-1 text-[11px] text-red-500">{fieldErrors.companyName}</p>
+                )}
               </div>
 
               <div>
@@ -243,9 +341,13 @@ export default function BusinessSetup() {
                   placeholder="Enter Your Email"
                   value={formData.email}
                   maxLength={100}
-                  onChange={(e) => handleInputChange("email", e.target.value)}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  onChange={(e) => handleInputChange("email", normalizeEmail(e.target.value))}
+                  onBlur={() => handleFieldBlur("email")}
+                  className={`w-full px-3 py-2 text-xs border rounded-lg bg-white focus:outline-none focus:ring-2 ${inputErrorClass("email")}`}
                 />
+                {fieldErrors.email && (
+                  <p className="mt-1 text-[11px] text-red-500">{fieldErrors.email}</p>
+                )}
               </div>
 
               <div>
@@ -270,27 +372,27 @@ export default function BusinessSetup() {
                     <select
                       value={formData.phoneCountryCode}
                       onChange={(e) => handleInputChange("phoneCountryCode", e.target.value)}
-                      className="w-full pl-8 pr-6 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none"
+                      className="w-full pl-8 pr-7 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none"
                     >
                       <option value="+91">+91 (IN)</option>
                     </select>
                     <Phone className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 pointer-events-none">
-                      ?
-                    </span>
+                    <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
                   </div>
                   <input
-                    type="text"
-                    placeholder="Enter Your Phone Number"
+                    type="tel"
+                    inputMode="numeric"
+                    placeholder="Enter 10-digit phone number"
                     value={formData.phoneNumber}
-                    maxLength={15}
-                    onChange={(e) => {
-                      const val = e.target.value.replace(/\D/g, "");
-                      handleInputChange("phoneNumber", val);
-                    }}
-                    className="flex-1 px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    maxLength={10}
+                    onChange={(e) => handleInputChange("phoneNumber", normalizePhoneDigits(e.target.value))}
+                    onBlur={() => handleFieldBlur("phoneNumber")}
+                    className={`flex-1 px-3 py-2 text-xs border rounded-lg bg-white focus:outline-none focus:ring-2 ${inputErrorClass("phoneNumber")}`}
                   />
                 </div>
+                {fieldErrors.phoneNumber && (
+                  <p className="mt-1 text-[11px] text-red-500">{fieldErrors.phoneNumber}</p>
+                )}
               </div>
 
               <div className="md:col-span-2">
@@ -299,12 +401,16 @@ export default function BusinessSetup() {
                 </label>
                 <textarea
                   rows={2}
-                  placeholder="Enter Your Addresss"
+                  placeholder="Enter Your Address"
                   value={formData.address}
                   maxLength={250}
-                  onChange={(e) => handleInputChange("address", e.target.value)}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
+                  onChange={(e) => handleInputChange("address", normalizeAddress(e.target.value))}
+                  onBlur={() => handleFieldBlur("address")}
+                  className={`w-full px-3 py-2 text-xs border rounded-lg bg-white focus:outline-none focus:ring-2 resize-none ${inputErrorClass("address")}`}
                 />
+                {fieldErrors.address && (
+                  <p className="mt-1 text-[11px] text-red-500">{fieldErrors.address}</p>
+                )}
               </div>
 
               <div>
@@ -316,9 +422,13 @@ export default function BusinessSetup() {
                   placeholder="Enter Your State"
                   value={formData.state}
                   maxLength={50}
-                  onChange={(e) => handleInputChange("state", e.target.value)}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  onChange={(e) => handleInputChange("state", normalizeState(e.target.value))}
+                  onBlur={() => handleFieldBlur("state")}
+                  className={`w-full px-3 py-2 text-xs border rounded-lg bg-white focus:outline-none focus:ring-2 ${inputErrorClass("state")}`}
                 />
+                {fieldErrors.state && (
+                  <p className="mt-1 text-[11px] text-red-500">{fieldErrors.state}</p>
+                )}
               </div>
 
               <div>
@@ -327,15 +437,17 @@ export default function BusinessSetup() {
                 </label>
                 <input
                   type="text"
-                  placeholder="Enter Your Pincode"
+                  inputMode="numeric"
+                  placeholder="Enter 6-digit pincode"
                   value={formData.pincode}
-                  maxLength={10}
-                  onChange={(e) => {
-                    const val = e.target.value.replace(/\D/g, "");
-                    handleInputChange("pincode", val);
-                  }}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  maxLength={6}
+                  onChange={(e) => handleInputChange("pincode", normalizePincode(e.target.value))}
+                  onBlur={() => handleFieldBlur("pincode")}
+                  className={`w-full px-3 py-2 text-xs border rounded-lg bg-white focus:outline-none focus:ring-2 ${inputErrorClass("pincode")}`}
                 />
+                {fieldErrors.pincode && (
+                  <p className="mt-1 text-[11px] text-red-500">{fieldErrors.pincode}</p>
+                )}
               </div>
             </div>
 

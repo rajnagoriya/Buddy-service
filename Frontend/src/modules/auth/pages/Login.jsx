@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Link, useLocation, useNavigate } from "react-router-dom"
 import {
+  ArrowLeft,
   ArrowRight,
   Loader2,
   Utensils,
@@ -14,10 +15,8 @@ import {
   User,
 } from "lucide-react"
 import { toast } from "sonner"
-import { setAuthData } from "@food/utils/auth"
 import logoImage from "@/assets/logo.png"
-import { userAPI, identityAPI, persistUserIdentitySession } from "@food/api"
-import heroImage from "@/assets/login_hero_3d.png" 
+import { userAPI, identityAPI, persistUserIdentitySession } from "@food/api" 
 import {
   Dialog,
   DialogContent,
@@ -218,24 +217,45 @@ export default function UnifiedOTPFastLogin() {
       toast.error("Please enter your name")
       return
     }
+    if (submitting.current || isUpdatingName) return
+    submitting.current = true
 
     try {
       setIsUpdatingName(true)
       if (pendingVerify) {
-        const response = await identityAPI.verifyOtp(
-          pendingVerify.phone,
-          "USER",
-          pendingVerify.otp,
-          {
+        const runVerify = () =>
+          identityAPI.verifyOtp(pendingVerify.phone, "USER", pendingVerify.otp, {
             name: newName.trim(),
             fcmToken: pendingVerify.fcmToken,
             platform: pendingVerify.platform,
-          },
-        )
+          })
+
+        let response
+        try {
+          response = await runVerify()
+        } catch (firstErr) {
+          const firstMsg = String(
+            firstErr?.response?.data?.message ||
+              firstErr?.response?.data?.error ||
+              "",
+          )
+          // Rare leftover race: phone row exists from a prior partial attempt.
+          // Retry once so first-time signup still completes with tokens.
+          if (/already registered/i.test(firstMsg)) {
+            response = await runVerify()
+          } else {
+            throw firstErr
+          }
+        }
+
         const data = response?.data?.data || response?.data || {}
         const accessToken = data.accessToken
         const refreshToken = data.refreshToken || null
         const user = data.user || data.identity || {}
+
+        if (!accessToken) {
+          throw new Error("Login failed. Please try again.")
+        }
 
         persistUserIdentitySession({
           accessToken,
@@ -282,8 +302,11 @@ export default function UnifiedOTPFastLogin() {
       toast.error(msg)
     } finally {
       setIsUpdatingName(false)
+      submitting.current = false
     }
   }
+
+  const [keyboardOpen, setKeyboardOpen] = useState(false)
 
   useEffect(() => {
     if (step !== 2 || resendTimer <= 0) return
@@ -293,6 +316,51 @@ export default function UnifiedOTPFastLogin() {
     return () => clearInterval(intervalId)
   }, [step, resendTimer])
 
+  // Flutter/WebView: when keyboard opens, hide hero so it doesn't sit above the keyboard.
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined
+
+    const updateFromViewport = () => {
+      const vv = window.visualViewport
+      if (!vv) return
+      const inset = Math.max(0, window.innerHeight - vv.height - (vv.offsetTop || 0))
+      setKeyboardOpen(inset > 100)
+    }
+
+    // Fallback for wrappers that don't shrink visualViewport: hide hero while
+    // a text field is focused (keyboard is almost certainly open).
+    const onFocusIn = (e) => {
+      const t = e.target
+      if (!(t instanceof HTMLElement)) return
+      if (!t.matches("input, textarea, select")) return
+      if (window.matchMedia("(min-width: 640px)").matches) return
+      setKeyboardOpen(true)
+      window.setTimeout(() => {
+        t.scrollIntoView({ block: "center", behavior: "smooth" })
+      }, 250)
+    }
+    const onFocusOut = () => {
+      window.setTimeout(() => {
+        const active = document.activeElement
+        if (active && active.matches?.("input, textarea, select")) return
+        updateFromViewport()
+        if (!window.visualViewport) setKeyboardOpen(false)
+      }, 150)
+    }
+
+    updateFromViewport()
+    window.visualViewport?.addEventListener("resize", updateFromViewport)
+    window.visualViewport?.addEventListener("scroll", updateFromViewport)
+    document.addEventListener("focusin", onFocusIn)
+    document.addEventListener("focusout", onFocusOut)
+    return () => {
+      window.visualViewport?.removeEventListener("resize", updateFromViewport)
+      window.visualViewport?.removeEventListener("scroll", updateFromViewport)
+      document.removeEventListener("focusin", onFocusIn)
+      document.removeEventListener("focusout", onFocusOut)
+    }
+  }, [])
+
   const formatResendTimer = (seconds) => {
     const mins = Math.floor(seconds / 60)
     const secs = seconds % 60
@@ -300,75 +368,104 @@ export default function UnifiedOTPFastLogin() {
   }
 
   return (
-    <div className="min-h-screen min-h-dvh bg-gray-50 flex flex-col font-[family-name:var(--font-poppins)] sm:justify-center sm:items-center sm:p-4 md:p-6">
-      <div className="w-full h-full min-h-screen min-h-dvh sm:min-h-0 sm:h-auto sm:max-w-[420px] md:max-w-[440px] sm:bg-white sm:rounded-[2.5rem] sm:shadow-2xl sm:overflow-hidden sm:relative flex flex-col max-w-full">
-        {/* Hero banner */}
-        <div className="relative w-full overflow-hidden bg-gradient-to-br from-primary via-[#15803d] to-[#166534] pt-4 pb-28 sm:pb-32 flex-shrink-0 min-h-[300px] sm:min-h-[340px]">
-          <div className="absolute top-[-30%] left-[-20%] w-[140%] h-[120%] bg-gradient-to-br from-white/25 via-white/10 to-transparent rounded-br-[50%] z-0" />
+    <div
+      className={`flex flex-col bg-gray-50 font-[family-name:var(--font-poppins)] sm:min-h-dvh sm:items-center sm:justify-center sm:overflow-auto sm:p-4 md:p-6 ${
+        keyboardOpen
+          ? "h-auto min-h-0 overflow-y-auto"
+          : "h-dvh max-h-dvh overflow-hidden sm:h-auto sm:max-h-none"
+      }`}
+    >
+      <div
+        className={`flex w-full max-w-full flex-col sm:max-w-[420px] sm:rounded-[2.5rem] sm:bg-white sm:shadow-2xl md:max-w-[440px] ${
+          keyboardOpen ? "min-h-0" : "h-full min-h-0 overflow-hidden sm:h-auto sm:max-h-[min(760px,100dvh)]"
+        }`}
+      >
+        {/* Hero — collapse when keyboard is open so it hides behind/under the keyboard */}
+        <div
+          className={`relative w-full shrink-0 overflow-hidden bg-gradient-to-br from-primary via-[#15803d] to-[#166534] transition-[max-height,opacity,padding] duration-200 ${
+            keyboardOpen
+              ? "pointer-events-none max-h-0 opacity-0 py-0"
+              : "max-h-[420px] opacity-100 pb-3 pt-[max(0.5rem,env(safe-area-inset-top))]"
+          }`}
+          aria-hidden={keyboardOpen}
+        >
+          <div className="absolute top-[-30%] left-[-20%] z-0 h-[120%] w-[140%] rounded-br-[50%] bg-gradient-to-br from-white/25 via-white/10 to-transparent" />
 
-          <div className="px-5 sm:px-6 pt-4 pb-2 relative z-10 flex flex-col justify-between h-full">
-            <div className="max-w-[58%] sm:max-w-[55%]">
-              <div className="mb-5 sm:mb-6 flex items-center gap-2">
-                <img
-                  src={logoImage}
-                  alt="Buddy Service"
-                  className="w-9 h-9 rounded-xl object-contain bg-white shadow-md p-0.5"
-                />
-                <span className="font-black text-white text-base sm:text-lg tracking-tight">
-                  Buddy Service
+          <button
+            type="button"
+            onClick={() => navigate("/")}
+            className="absolute left-4 top-[max(0.5rem,env(safe-area-inset-top))] z-20 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/25 bg-white/15 text-white shadow-sm backdrop-blur-sm transition hover:bg-white/25 sm:left-5"
+            aria-label="Go back to home"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </button>
+
+          <div className="relative z-10 flex flex-col items-center px-4 pb-2 pt-9 text-center sm:px-5 sm:pt-10">
+            <button
+              type="button"
+              onClick={() => navigate("/")}
+              className="mb-1.5 flex flex-col items-center gap-1 transition hover:opacity-90"
+              aria-label="Go to home"
+            >
+              <img
+                src={logoImage}
+                alt="Buddy Service"
+                className="h-9 w-9 rounded-xl bg-white object-contain p-0.5 shadow-md sm:h-10 sm:w-10"
+              />
+              <span className="text-sm font-black tracking-tight text-white sm:text-base">
+                Buddy Service
+              </span>
+            </button>
+
+            <h1 className="mb-3 text-[22px] font-extrabold leading-tight tracking-tight text-white sm:mb-3.5 sm:text-[24px]">
+              One App. Everything You Need.
+            </h1>
+
+            <div className="flex w-full items-center rounded-2xl border border-white/20 bg-white/15 px-2 py-2 shadow-lg backdrop-blur-md sm:rounded-3xl sm:px-3 sm:py-2.5">
+              <div className="flex flex-1 flex-col items-center gap-1">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white shadow-sm sm:h-10 sm:w-10">
+                  <Utensils className="h-4 w-4 text-primary sm:h-5 sm:w-5" strokeWidth={2} />
+                </div>
+                <span className="text-[9px] font-semibold text-white sm:text-[10px]">Food</span>
+              </div>
+
+              <div className="h-6 w-px bg-white/20" />
+
+              <div className="flex flex-1 flex-col items-center gap-1">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white shadow-sm sm:h-10 sm:w-10">
+                  <ShoppingBag className="h-4 w-4 text-primary sm:h-5 sm:w-5" strokeWidth={2} />
+                </div>
+                <span className="text-center text-[9px] font-semibold leading-tight text-white sm:text-[10px]">
+                  Quick
+                  <br />
+                  Commerce
                 </span>
               </div>
 
-              <h1 className="text-[30px] sm:text-[34px] md:text-4xl font-extrabold text-white leading-[1.15] mb-2 tracking-tight">
-                One App.
-                <br />
-                Everything
-                <br />
-                You Need.
-              </h1>
-            </div>
-          </div>
+              <div className="h-6 w-px bg-white/20" />
 
-          
-
-          {/* Service pills */}
-          <div className="absolute bottom-5 sm:bottom-6 left-4 right-4 sm:left-6 sm:right-6 z-10 bg-white/15 backdrop-blur-md rounded-3xl p-3 sm:p-4 flex items-center shadow-lg border border-white/20">
-            <div className="flex-1 flex flex-col items-center gap-1.5 sm:gap-2">
-              <div className="w-11 h-11 sm:w-[50px] sm:h-[50px] bg-white rounded-2xl flex items-center justify-center shadow-sm">
-                <Utensils className="w-5 h-5 sm:w-6 sm:h-6 text-primary" strokeWidth={2} />
+              <div className="flex flex-1 flex-col items-center gap-1">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white shadow-sm sm:h-10 sm:w-10">
+                  <Car className="h-4 w-4 text-primary sm:h-5 sm:w-5" strokeWidth={2} />
+                </div>
+                <span className="text-[9px] font-semibold text-white sm:text-[10px]">Taxi</span>
               </div>
-              <span className="text-white text-[10px] sm:text-[11px] font-semibold">Food</span>
-            </div>
-
-            <div className="w-px h-7 sm:h-8 bg-white/20" />
-
-            <div className="flex-1 flex flex-col items-center gap-1.5 sm:gap-2">
-              <div className="w-11 h-11 sm:w-[50px] sm:h-[50px] bg-white rounded-2xl flex items-center justify-center shadow-sm">
-                <ShoppingBag className="w-5 h-5 sm:w-6 sm:h-6 text-primary" strokeWidth={2} />
-              </div>
-              <span className="text-white text-[10px] sm:text-[11px] font-semibold text-center leading-tight">
-                Quick
-                <br />
-                Commerce
-              </span>
-            </div>
-
-            <div className="w-px h-7 sm:h-8 bg-white/20" />
-
-            <div className="flex-1 flex flex-col items-center gap-1.5 sm:gap-2">
-              <div className="w-11 h-11 sm:w-[50px] sm:h-[50px] bg-white rounded-2xl flex items-center justify-center shadow-sm">
-                <Car className="w-5 h-5 sm:w-6 sm:h-6 text-primary" strokeWidth={2} />
-              </div>
-              <span className="text-white text-[10px] sm:text-[11px] font-semibold">Taxi</span>
             </div>
           </div>
         </div>
 
-        {/* Form sheet */}
-        <div className="flex-1 bg-white rounded-t-[2.5rem] -mt-6 relative z-20 flex flex-col">
-          <div className="p-6 sm:p-8 pb-4">
-            <h2 className="text-[28px] sm:text-[32px] font-black text-foreground mb-1">Welcome!</h2>
-            <p className="text-gray-500 font-medium text-sm sm:text-[15px] mb-6 sm:mb-8">
+        <div
+          className={`relative z-20 -mt-1 flex min-h-0 flex-1 flex-col rounded-t-[1.75rem] bg-white ${
+            keyboardOpen ? "" : "overflow-hidden"
+          }`}
+        >
+          <div
+            className={`min-h-0 flex-1 px-5 pb-3 pt-4 sm:px-6 sm:pt-5 ${
+              keyboardOpen ? "overflow-visible pb-[max(1rem,env(safe-area-inset-bottom))]" : "overflow-y-auto"
+            }`}
+          >
+            <h2 className="mb-0.5 text-[22px] font-black text-foreground sm:text-[26px]">Welcome!</h2>
+            <p className="mb-4 text-sm font-medium text-gray-500 sm:mb-5">
               {step === 1 ? "Login to continue" : `Enter OTP sent to +91 ${phoneNumber}`}
             </p>
 
@@ -380,18 +477,18 @@ export default function UnifiedOTPFastLogin() {
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: 20 }}
                   onSubmit={handleSendOTP}
-                  className="space-y-6"
+                  className="space-y-4"
                 >
                   <div>
-                    <Label className="text-foreground text-[13px] font-bold mb-2 block ml-1">
+                    <Label className="mb-1.5 ml-1 block text-[13px] font-bold text-foreground">
                       Mobile Number
                     </Label>
-                    <div className="flex items-center border border-primary/40 rounded-[14px] focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-all bg-white overflow-hidden shadow-sm h-12 sm:h-14">
-                      <div className="flex items-center gap-1.5 px-3 sm:px-4 h-full text-gray-800 shrink-0">
-                        <span className="font-bold text-sm sm:text-[15px]">+91</span>
-                        <ChevronDown className="w-4 h-4 text-gray-400 hidden sm:block" strokeWidth={3} />
+                    <div className="flex h-12 items-center overflow-hidden rounded-[14px] border border-primary/40 bg-white shadow-sm transition-all focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20">
+                      <div className="flex h-full shrink-0 items-center gap-1.5 px-3 text-gray-800">
+                        <span className="text-sm font-bold">+91</span>
+                        <ChevronDown className="hidden h-4 w-4 text-gray-400 sm:block" strokeWidth={3} />
                       </div>
-                      <div className="w-px h-6 bg-gray-200" />
+                      <div className="h-6 w-px bg-gray-200" />
                       <input
                         type="tel"
                         required
@@ -402,7 +499,7 @@ export default function UnifiedOTPFastLogin() {
                         }
                         maxLength={10}
                         inputMode="numeric"
-                        className="flex-1 min-w-0 px-3 sm:px-4 h-full outline-none text-gray-900 font-bold placeholder:text-gray-400 text-sm sm:text-[15px]"
+                        className="h-full min-w-0 flex-1 px-3 text-sm font-bold text-gray-900 outline-none placeholder:text-gray-400"
                         placeholder="Enter mobile number"
                       />
                     </div>
@@ -411,14 +508,14 @@ export default function UnifiedOTPFastLogin() {
                   <button
                     type="submit"
                     disabled={loading || phoneNumber.length < 10}
-                    className="w-full h-12 sm:h-14 bg-primary hover:bg-primary/90 disabled:bg-gray-200 disabled:text-gray-400 text-primary-foreground rounded-[14px] font-bold text-base shadow-lg shadow-primary/25 transition-all active:scale-[0.98] flex items-center justify-center gap-2 relative overflow-hidden"
+                    className="relative flex h-12 w-full items-center justify-center gap-2 overflow-hidden rounded-[14px] bg-primary text-base font-bold text-primary-foreground shadow-lg shadow-primary/25 transition-all hover:bg-primary/90 active:scale-[0.98] disabled:bg-gray-200 disabled:text-gray-400"
                   >
                     {loading ? (
-                      <Loader2 className="w-5 h-5 animate-spin" />
+                      <Loader2 className="h-5 w-5 animate-spin" />
                     ) : (
                       <>
                         <span>Get OTP</span>
-                        <ArrowRight className="w-5 h-5 sm:w-[22px] sm:h-[22px] absolute right-4 sm:right-5" strokeWidth={2.5} />
+                        <ArrowRight className="absolute right-4 h-5 w-5" strokeWidth={2.5} />
                       </>
                     )}
                   </button>
@@ -430,13 +527,13 @@ export default function UnifiedOTPFastLogin() {
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -20 }}
                   onSubmit={handleVerifyOTP}
-                  className="space-y-6"
+                  className="space-y-4"
                 >
                   <div>
-                    <Label className="text-foreground text-[13px] font-bold mb-2 block ml-1">
+                    <Label className="mb-1.5 ml-1 block text-[13px] font-bold text-foreground">
                       Enter OTP Code
                     </Label>
-                    <div className="grid grid-cols-4 gap-2 sm:gap-3">
+                    <div className="grid grid-cols-4 gap-2">
                       {[0, 1, 2, 3].map((index) => (
                         <input
                           key={index}
@@ -468,7 +565,7 @@ export default function UnifiedOTPFastLogin() {
                               }
                             }
                           }}
-                          className="w-full h-12 sm:h-14 text-center text-xl sm:text-2xl font-bold bg-white border border-primary/40 focus:ring-2 focus:ring-primary/20 focus:border-primary rounded-[14px] outline-none transition-all text-gray-900 shadow-sm"
+                          className="h-12 w-full rounded-[14px] border border-primary/40 bg-white text-center text-xl font-bold text-gray-900 shadow-sm outline-none transition-all focus:border-primary focus:ring-2 focus:ring-primary/20"
                           placeholder="•"
                           aria-label={`OTP digit ${index + 1}`}
                         />
@@ -476,7 +573,7 @@ export default function UnifiedOTPFastLogin() {
                     </div>
                   </div>
 
-                  <div className="flex flex-col items-center gap-3">
+                  <div className="flex flex-col items-center gap-2">
                     <div className="flex items-center gap-2 text-[13px] font-semibold">
                       {resendTimer > 0 ? (
                         <span className="text-gray-400">
@@ -497,7 +594,7 @@ export default function UnifiedOTPFastLogin() {
                     <button
                       type="button"
                       onClick={handleEditNumber}
-                      className="text-[13px] text-gray-400 hover:text-primary transition-colors"
+                      className="text-[13px] text-gray-400 transition-colors hover:text-primary"
                     >
                       Edit phone number
                     </button>
@@ -506,17 +603,14 @@ export default function UnifiedOTPFastLogin() {
                   <button
                     type="submit"
                     disabled={loading || otp.length < 4}
-                    className="w-full h-12 sm:h-14 bg-primary hover:bg-primary/90 disabled:bg-gray-200 disabled:text-gray-400 text-primary-foreground rounded-[14px] font-bold text-base shadow-lg shadow-primary/25 transition-all active:scale-[0.98] flex items-center justify-center gap-2 relative overflow-hidden"
+                    className="relative flex h-12 w-full items-center justify-center gap-2 overflow-hidden rounded-[14px] bg-primary text-base font-bold text-primary-foreground shadow-lg shadow-primary/25 transition-all hover:bg-primary/90 active:scale-[0.98] disabled:bg-gray-200 disabled:text-gray-400"
                   >
                     {loading ? (
-                      <Loader2 className="w-5 h-5 animate-spin" />
+                      <Loader2 className="h-5 w-5 animate-spin" />
                     ) : (
                       <>
                         <span>Verify & Continue</span>
-                        <ArrowRight
-                          className="w-5 h-5 sm:w-[22px] sm:h-[22px] absolute right-4 sm:right-5"
-                          strokeWidth={2.5}
-                        />
+                        <ArrowRight className="absolute right-4 h-5 w-5" strokeWidth={2.5} />
                       </>
                     )}
                   </button>
@@ -525,28 +619,31 @@ export default function UnifiedOTPFastLogin() {
             </AnimatePresence>
           </div>
 
-          {/* Footer */}
-          <div className="mt-auto bg-secondary px-5 sm:px-6 py-6 sm:py-8 rounded-t-[2rem] flex flex-col items-center">
-            <div className="flex justify-between w-full max-w-sm mb-5 sm:mb-6 gap-2">
-              <div className="flex gap-2 items-center">
-                <ShieldCheck className="w-5 h-5 sm:w-[22px] sm:h-[22px] text-primary" strokeWidth={1.5} />
-                <span className="text-[10px] font-semibold text-gray-600 leading-tight">
+          <div
+            className={`mt-auto flex shrink-0 flex-col items-center rounded-t-[1.5rem] bg-secondary px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5 sm:py-4 ${
+              keyboardOpen ? "hidden" : ""
+            }`}
+          >
+            <div className="mb-2 flex w-full max-w-sm justify-between gap-2">
+              <div className="flex items-center gap-1.5">
+                <ShieldCheck className="h-4 w-4 text-primary" strokeWidth={1.5} />
+                <span className="text-[9px] font-semibold leading-tight text-gray-600">
                   Secure
                   <br />
                   & Safe
                 </span>
               </div>
-              <div className="flex gap-2 items-center">
-                <Zap className="w-5 h-5 sm:w-[22px] sm:h-[22px] text-primary" strokeWidth={1.5} />
-                <span className="text-[10px] font-semibold text-gray-600 leading-tight">
+              <div className="flex items-center gap-1.5">
+                <Zap className="h-4 w-4 text-primary" strokeWidth={1.5} />
+                <span className="text-[9px] font-semibold leading-tight text-gray-600">
                   Fast
                   <br />
                   Delivery
                 </span>
               </div>
-              <div className="flex gap-2 items-center">
-                <BadgeCheck className="w-5 h-5 sm:w-[22px] sm:h-[22px] text-primary" strokeWidth={1.5} />
-                <span className="text-[10px] font-semibold text-gray-600 leading-tight">
+              <div className="flex items-center gap-1.5">
+                <BadgeCheck className="h-4 w-4 text-primary" strokeWidth={1.5} />
+                <span className="text-[9px] font-semibold leading-tight text-gray-600">
                   Trusted by
                   <br />
                   Millions
@@ -554,12 +651,12 @@ export default function UnifiedOTPFastLogin() {
               </div>
             </div>
 
-            <p className="text-center text-[10px] text-gray-500 font-medium max-w-[280px]">
+            <p className="max-w-[280px] text-center text-[10px] font-medium text-gray-500">
               By continuing, you agree to our{" "}
               <Link
                 to="/terms"
                 state={{ from: `${loginLocation.pathname}${loginLocation.search}` }}
-                className="text-primary font-semibold hover:underline"
+                className="font-semibold text-primary hover:underline"
               >
                 Terms & Conditions
               </Link>{" "}
@@ -567,7 +664,7 @@ export default function UnifiedOTPFastLogin() {
               <Link
                 to="/privacy"
                 state={{ from: `${loginLocation.pathname}${loginLocation.search}` }}
-                className="text-primary font-semibold hover:underline"
+                className="font-semibold text-primary hover:underline"
               >
                 Privacy Policy
               </Link>

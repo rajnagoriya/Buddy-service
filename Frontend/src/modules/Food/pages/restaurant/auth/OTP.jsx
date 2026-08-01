@@ -23,6 +23,7 @@ export default function RestaurantOTP() {
   const [focusedIndex, setFocusedIndex] = useState(null)
   const inputRefs = useRef([])
   const hasSubmittedRef = useRef(false)
+  const verifyingRef = useRef(false)
 
   useEffect(() => {
     const stored = sessionStorage.getItem("restaurantAuthData")
@@ -159,6 +160,10 @@ export default function RestaurantOTP() {
   }
 
   const handleVerify = async (otpValue = null) => {
+    // Single-flight: auto-submit + button click must not verify twice.
+    // First success consumes OTP; a second call returns "OTP not found".
+    if (isLoading || verifyingRef.current) return
+
     const code = otpValue || otp.join("")
 
     if (code.length !== 4) {
@@ -167,7 +172,10 @@ export default function RestaurantOTP() {
       return
     }
 
+    verifyingRef.current = true
+    hasSubmittedRef.current = true
     setIsLoading(true)
+    let loginSucceeded = false
 
     try {
       if (!authData) throw new Error("Session expired. Please login again.")
@@ -199,6 +207,7 @@ export default function RestaurantOTP() {
       const restaurant = data?.user ?? data?.restaurant
 
       if (accessToken && restaurant) {
+        loginSucceeded = true
         setRestaurantAuthData("restaurant", accessToken, restaurant, data?.refreshToken)
         window.dispatchEvent(new Event("restaurantAuthChanged"))
         sessionStorage.removeItem("restaurantAuthData")
@@ -251,6 +260,14 @@ export default function RestaurantOTP() {
         }, 800)
       }
     } catch (err) {
+      // Duplicate verify after success consumes OTP — ignore the noisy error.
+      if (loginSucceeded || /otp not found/i.test(String(err?.response?.data?.message || ""))) {
+        const alreadyAuthed = Boolean(localStorage.getItem("restaurant_accessToken"))
+        if (alreadyAuthed || loginSucceeded) {
+          return
+        }
+      }
+
       const message = err?.response?.data?.message || "Invalid OTP. Please try again."
 
       if (/banned/i.test(message)) {
@@ -278,6 +295,7 @@ export default function RestaurantOTP() {
       inputRefs.current[0]?.focus()
     } finally {
       setIsLoading(false)
+      verifyingRef.current = false
     }
   }
 
@@ -343,7 +361,11 @@ export default function RestaurantOTP() {
 
       <Button
         type="button"
-        onClick={() => handleVerify()}
+        onClick={() => {
+          if (verifyingRef.current || isLoading || hasSubmittedRef.current) return
+          hasSubmittedRef.current = true
+          handleVerify()
+        }}
         disabled={isLoading || !isOtpComplete}
         className="rt-btn-primary mt-6 h-12 w-full text-[15px] shadow-md disabled:opacity-50"
       >

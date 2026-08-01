@@ -52,46 +52,78 @@ const issueTokens = async (payload) => {
 };
 
 const ensureFoodUserForIdentity = async (identity, { name } = {}) => {
-  const existing = await FoodUser.findOne({ identityId: identity._id });
-  if (existing) return existing;
+  const findExisting = async () =>
+    (await FoodUser.findOne({ identityId: identity._id })) ||
+    (await FoodUser.findOne({ phone: identity.phone }));
 
-  const linkedByPhone = await FoodUser.findOne({ phone: identity.phone });
-  if (linkedByPhone) {
-    linkedByPhone.identityId = identity._id;
-    if (name && !linkedByPhone.name) linkedByPhone.name = name;
-    await linkedByPhone.save();
-    return linkedByPhone;
+  const existing = await findExisting();
+  if (existing) {
+    let dirty = false;
+    if (!existing.identityId) {
+      existing.identityId = identity._id;
+      dirty = true;
+    }
+    if (name && !existing.name) {
+      existing.name = name;
+      dirty = true;
+    }
+    if (dirty) {
+      try {
+        await existing.save();
+      } catch (_) {
+        // Non-fatal — identity link can be repaired later.
+      }
+    }
+    return existing;
   }
 
-  return FoodUser.create({
-    identityId: identity._id,
-    phone: identity.phone,
-    countryCode: identity.countryCode || '+91',
-    name: name || identity.name || '',
-    ...(identity.email ? { email: identity.email } : {}),
-    isVerified: true,
-  });
+  try {
+    return await FoodUser.create({
+      identityId: identity._id,
+      phone: identity.phone,
+      countryCode: identity.countryCode || '+91',
+      name: name || identity.name || '',
+      ...(identity.email ? { email: identity.email } : {}),
+      isVerified: true,
+    });
+  } catch (err) {
+    // Parallel/racy inserts into buddy_users hit unique phone index.
+    if (err?.code === 11000) {
+      const raced = await findExisting();
+      if (raced) return raced;
+    }
+    throw err;
+  }
 };
 
 const ensureTaxiUserForIdentity = async (identity, { name } = {}) => {
-  const existing = await TaxiUser.findOne({ identityId: identity._id });
-  if (existing) return existing;
+  // FoodUser and TaxiUser share the buddy_users collection — never create a
+  // second document for the same phone. Resolve via FoodUser first, then link.
+  const foodDoc = await ensureFoodUserForIdentity(identity, { name });
 
-  const linkedByPhone = await TaxiUser.findOne({ phone: identity.phone });
-  if (linkedByPhone) {
-    linkedByPhone.identityId = identity._id;
-    if (name && !linkedByPhone.name) linkedByPhone.name = name;
-    await linkedByPhone.save();
-    return linkedByPhone;
+  const existing =
+    (await TaxiUser.findOne({ identityId: identity._id })) ||
+    (await TaxiUser.findOne({ phone: identity.phone })) ||
+    foodDoc;
+
+  if (existing && existing !== foodDoc) {
+    let dirty = false;
+    if (!existing.identityId) {
+      existing.identityId = identity._id;
+      dirty = true;
+    }
+    if (name && !existing.name) {
+      existing.name = name;
+      dirty = true;
+    }
+    if (dirty) {
+      try {
+        await existing.save();
+      } catch (_) {}
+    }
   }
 
-  return TaxiUser.create({
-    identityId: identity._id,
-    phone: identity.phone,
-    countryCode: identity.countryCode || '+91',
-    name: name || identity.name || 'User',
-    isVerified: true,
-  });
+  return existing || foodDoc;
 };
 
 const findFoodPartnerForIdentity = async (identity) => {
@@ -290,10 +322,10 @@ export const verifyOtpUnified = async ({
       throw new AuthError('Your account has been deactivated. Please contact support.');
     }
 
-    const [foodUser, taxiUser] = await Promise.all([
-      ensureFoodUserForIdentity(identity, { name: trimmedName }),
-      ensureTaxiUserForIdentity(identity, { name: trimmedName }),
-    ]);
+    const foodUser = await ensureFoodUserForIdentity(identity, { name: trimmedName });
+    // Sequential on purpose: both models write buddy_users with unique phone.
+    // Parallel create races and surfaces as "already registered" on first signup.
+    const taxiUser = await ensureTaxiUserForIdentity(identity, { name: trimmedName });
 
     // Keep identityRefs current — useful for support / admin tooling.
     await BuddyIdentity.updateOne(

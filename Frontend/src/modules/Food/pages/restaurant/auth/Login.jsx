@@ -69,8 +69,9 @@ export default function RestaurantLogin() {
 
   return (
     <RestaurantAuthLayout
-      title="Partner login"
-      subtitle="Enter your registered mobile number"
+      subtitle="Enter your number"
+      showBack={false}
+      showBadge={false}
       footer={
         <p className="text-center text-xs leading-relaxed text-[var(--rt-muted,#6b7280)]">
           By continuing, you agree to our{" "}
@@ -139,17 +140,6 @@ export default function RestaurantLogin() {
           )}
         </Button>
       </form>
-
-      <div className="mt-5 border-t border-[var(--rt-border,#e8edf2)] pt-4 text-center text-sm">
-        <span className="text-gray-600">New partner? </span>
-        <button
-          type="button"
-          onClick={() => navigate("/food/restaurant/signup")}
-          className="font-semibold text-[var(--rt-primary-strong,#27A344)] hover:underline"
-        >
-          Register restaurant
-        </button>
-      </div>
     </RestaurantAuthLayout>
   )
 }

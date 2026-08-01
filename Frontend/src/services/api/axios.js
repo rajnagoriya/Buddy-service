@@ -262,6 +262,18 @@ apiClient.interceptors.response.use(
     if (err?.response?.status !== 401 || !original || original._retry) {
       return Promise.reject(err);
     }
+
+    // OTP / login endpoints return 401 for invalid/missing OTP — never treat as
+    // session expiry or run refresh (that can clear a just-issued login).
+    const requestUrl = String(original?.url || "");
+    if (
+      /\/(request-otp|verify-otp|login|register)(\?|$)/i.test(requestUrl) ||
+      /\/auth\/(user|restaurant|delivery)\/(request-otp|verify-otp)/i.test(requestUrl) ||
+      /\/food\/auth\/(user|restaurant|delivery)\/(request-otp|verify-otp)/i.test(requestUrl)
+    ) {
+      return Promise.reject(err);
+    }
+
     const refreshToken = getRefreshToken(module);
     if (!refreshToken) {
       clearModuleAuth(module);
