@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
 import { restaurantAPI } from "@food/api"
-import { isModuleAuthenticated, setAuthData } from "@food/utils/auth"
+import { hasModuleSession, setAuthData } from "@food/utils/auth"
 import { Mail, Lock, EyeOff, Eye, CheckSquare, UtensilsCrossed } from "lucide-react"
 import { Button } from "@food/components/ui/button"
 import { Input } from "@food/components/ui/input"
@@ -20,10 +20,9 @@ export default function RestaurantSignIn() {
   const [error, setError] = useState("")
   const companyName = useCompanyName()
 
-  // Redirect to restaurant home if already authenticated
+  // Redirect to restaurant home if a recoverable session exists (access or refresh).
   useEffect(() => {
-    const isAuthenticated = isModuleAuthenticated("restaurant")
-    if (isAuthenticated) {
+    if (hasModuleSession("restaurant")) {
       navigate("/food/restaurant", { replace: true })
     }
   }, [navigate])
@@ -38,17 +37,13 @@ export default function RestaurantSignIn() {
       const response = await restaurantAPI.login(email, password)
       const data = response?.data?.data || response?.data
       
-      if (data.accessToken && data.restaurant) {
-        // Replace old token with new one (handles cross-module login)
-        setAuthData("restaurant", data.accessToken, data.restaurant, data.refreshToken)
-        
-        // Dispatch custom event for same-tab updates
-        window.dispatchEvent(new Event('restaurantAuthChanged'))
-        
-        navigate("/food/restaurant", { replace: true })
-      } else {
-        throw new Error("Login failed. Please try again.")
+      if (!data.accessToken || !data.restaurant || !data.refreshToken) {
+        throw new Error("Invalid response from server. Please try again.")
       }
+
+      setAuthData("restaurant", data.accessToken, data.restaurant, data.refreshToken)
+      window.dispatchEvent(new Event('restaurantAuthChanged'))
+      navigate("/food/restaurant", { replace: true })
     } catch (err) {
       const message =
         err?.response?.data?.message ||

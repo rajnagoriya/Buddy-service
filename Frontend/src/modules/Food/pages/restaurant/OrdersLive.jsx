@@ -1498,20 +1498,13 @@ export default function OrdersLive() {
         debugError("Error reverifying restaurant:", error);
       }
 
-      // Handle 401 Unauthorized errors (token expired/invalid)
+      // Handle 401 Unauthorized — axios interceptor refreshes the token when possible.
+      // Do not hard-redirect to login here; that logs partners out on transient auth races.
       if (error.response?.status === 401) {
         const errorMessage =
           error.response?.data?.message ||
-          "Your session has expired. Please login again.";
+          "Your session could not be verified. Please try again.";
         alert(errorMessage);
-        // The axios interceptor should handle redirecting to login
-        // But if it doesn't, we can manually redirect
-        if (!error.response?.data?.message?.includes("inactive")) {
-          // Only redirect if it's not an "inactive" error (which we handle differently)
-          setTimeout(() => {
-            window.location.href = "/food/restaurant/login";
-          }, 1500);
-        }
       } else {
         // Other errors (400, 500, etc.)
         const errorMessage =

@@ -390,7 +390,7 @@ export default function AdminNavbar({ onMenuClick }) {
                     { icon: Package, label: "Orders", path: "/admin/food/orders/all" },
                     { icon: Users, label: "Users", path: "/admin/food/customers" },
                     { icon: UtensilsCrossed, label: "Products", path: "/admin/food/foods" },
-                    { icon: FileText, label: "Reports", path: "/admin/food/transaction-report" },
+                    { icon: FileText, label: "Reports", path: "/admin/food/tax-report" },
                   ].map((action, idx) => (
                     <button
                       key={idx}

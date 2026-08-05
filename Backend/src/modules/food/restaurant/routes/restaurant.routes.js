@@ -108,8 +108,7 @@ const onboardingUploadFields = upload.fields([
     { name: 'panImage', maxCount: 1 },
     { name: 'gstImage', maxCount: 1 },
     { name: 'fssaiImage', maxCount: 1 },
-    { name: 'menuImages', maxCount: 10 },
-    { name: 'menuPdf', maxCount: 1 }
+    { name: 'menuImages', maxCount: 10 }
 ]);
 
 router.post('/register', uploadFields, registerRestaurantController);

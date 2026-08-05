@@ -61,6 +61,11 @@ export default function RestaurantGoogleCallback() {
 
         // Store authentication data using utility function
         const refreshToken = searchParams.get("refreshToken")
+        if (!token || !user || !refreshToken) {
+          setStatus("error")
+          setError("Invalid authentication response. Please try again.")
+          return
+        }
         setAuthData("restaurant", token, user, refreshToken)
 
         // Notify any listeners that auth state has changed

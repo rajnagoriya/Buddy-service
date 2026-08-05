@@ -228,7 +228,7 @@ export default function AdminHome() {
               helper={`${periodLabel} transaction volume`}
               icon={<ShoppingBag className="h-5 w-5 text-emerald-600" />}
               accent="bg-emerald-200/40"
-              path="/admin/food/transaction-report"
+              path="/admin/food/tax-report"
             />
             <MetricCard
               title="Commission earned"
@@ -260,7 +260,7 @@ export default function AdminHome() {
               helper={`Total delivery fees: ${periodLabel}`}
               icon={<Truck className="h-5 w-5 text-blue-600" />}
               accent="bg-blue-200/40"
-              path="/admin/food/transaction-report"
+              path="/admin/food/tax-report"
             />
             <MetricCard
               title="Admin-borne delivery"
@@ -284,7 +284,7 @@ export default function AdminHome() {
               helper={totalRevenueHelper}
               icon={<DollarSign className="h-5 w-5 text-green-600" />}
               accent="bg-green-200/40"
-              path="/admin/food/transaction-report"
+              path="/admin/food/tax-report"
             />
             <MetricCard
               title="Total restaurants"

@@ -7,6 +7,7 @@ import { Button } from "@food/components/ui/button"
 import { Input } from "@food/components/ui/input"
 import { Label } from "@food/components/ui/label"
 import RestaurantAuthLayout from "@food/components/restaurant/auth/RestaurantAuthLayout"
+import { hasModuleSession } from "@food/utils/auth"
 
 const DEFAULT_COUNTRY_CODE = "+91"
 
@@ -17,6 +18,14 @@ export default function RestaurantLogin() {
   const [phone, setPhone] = useState(() => sessionStorage.getItem("restaurantLoginPhone") || "")
   const [loading, setLoading] = useState(false)
   const submitting = useRef(false)
+
+  // Stay logged in across close/reopen — same as admin/driver.
+  useEffect(() => {
+    if (location.state?.banned) return
+    if (hasModuleSession("restaurant")) {
+      navigate("/food/restaurant", { replace: true })
+    }
+  }, [location.state?.banned, navigate])
 
   useEffect(() => {
     if (location.state?.banned) {

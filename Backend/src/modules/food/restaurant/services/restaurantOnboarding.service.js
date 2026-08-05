@@ -1,9 +1,6 @@
 import mongoose from "mongoose";
 import { FoodRestaurant } from "../models/restaurant.model.js";
 import {
-  uploadFileBuffer,
-} from "../../../../services/cloudinary.service.js";
-import {
   replaceCloudinaryImage,
   setRestaurantImageField,
   uploadFoodImage,
@@ -81,7 +78,7 @@ const hasSubmittedProfile = (doc) => {
   if (!doc) return false;
   if (doc.submittedAt) return true;
   if (doc.pendingUpdateReason === "New Registration" && !isDraftRestaurant(doc)) {
-    return Boolean(doc.menuPdf && doc.panNumber && doc.fssaiNumber);
+    return Boolean(doc.profileImage && doc.panNumber && doc.fssaiNumber);
   }
   return false;
 };
@@ -152,7 +149,6 @@ const buildOnboardingPayload = (doc, outletTimings = null) => {
         outletTimings: outletTimings || onboarding.step2?.outletTimings || null,
         menuImageUrls: doc?.menuImages,
         profileImageUrl: doc?.profileImage,
-        menuPdfUrl: doc?.menuPdf,
         estimatedDeliveryTime: doc?.estimatedDeliveryTime,
       },
       step3: onboarding.step3 || {
@@ -214,16 +210,6 @@ const uploadStepFiles = async (stepNumber, files = {}, restaurant = null) => {
         files.menuImages.map((file) =>
           uploadFoodImage(file, "food/restaurants/menu"),
         ),
-      );
-    }
-    if (files?.menuPdf?.[0]) {
-      uploaded.menuPdf = await uploadFileBuffer(
-        files.menuPdf[0].buffer,
-        "food/restaurants/menu-pdf",
-        {
-          fileName: files.menuPdf[0].originalname || "menu.pdf",
-          format: "pdf",
-        },
       );
     }
   }
@@ -417,7 +403,6 @@ export const saveOnboardingStep = async (restaurantId, stepNumber, payload, file
 
     if (uploads.profileImage) restaurant.profileImage = uploads.profileImage;
     if (uploads.menuImages?.length) restaurant.menuImages = uploads.menuImages;
-    if (uploads.menuPdf) restaurant.menuPdf = uploads.menuPdf;
     if (uploads.imagePublicIds && Object.keys(uploads.imagePublicIds).length) {
       restaurant.imagePublicIds = {
         ...(restaurant.imagePublicIds || {}),
@@ -434,7 +419,6 @@ export const saveOnboardingStep = async (restaurantId, stepNumber, payload, file
       outletTimings: savedTimings,
       menuImageUrls: restaurant.menuImages,
       profileImageUrl: restaurant.profileImage,
-      menuPdfUrl: restaurant.menuPdf,
       estimatedDeliveryTime: restaurant.estimatedDeliveryTime,
     };
   }
@@ -524,9 +508,6 @@ export const submitOnboarding = async (restaurantId, payload, files) => {
   const restaurant = await FoodRestaurant.findById(restaurantId);
   if (!restaurant) throw new ValidationError("Restaurant not found");
 
-  if (!restaurant.menuPdf) {
-    throw new ValidationError("Menu PDF is required");
-  }
   if (!restaurant.profileImage) {
     throw new ValidationError("Restaurant profile image is required");
   }

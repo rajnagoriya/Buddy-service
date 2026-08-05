@@ -141,16 +141,13 @@ export default function RestaurantSignupEmail() {
 
       const data = response?.data?.data || response?.data
       
-      if (data.accessToken && data.restaurant) {
-        // Replace old token with new one (handles cross-module login)
-        setAuthData("restaurant", data.accessToken, data.restaurant, data.refreshToken)
-        
-        window.dispatchEvent(new Event("restaurantAuthChanged"))
-        
-        navigate("/food/restaurant/onboarding", { replace: true })
-      } else {
+      if (!data.accessToken || !data.restaurant || !data.refreshToken) {
         throw new Error("Registration failed. Please try again.")
       }
+
+      setAuthData("restaurant", data.accessToken, data.restaurant, data.refreshToken)
+      window.dispatchEvent(new Event("restaurantAuthChanged"))
+      navigate("/food/restaurant/onboarding", { replace: true })
     } catch (err) {
       const message =
         err?.response?.data?.message ||

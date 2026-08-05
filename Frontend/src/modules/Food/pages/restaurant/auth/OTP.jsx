@@ -211,59 +211,62 @@ export default function RestaurantOTP() {
         null
       const restaurant = data?.user ?? data?.restaurant
 
-      if (accessToken && restaurant) {
-        loginSucceeded = true
-        setRestaurantAuthData("restaurant", accessToken, restaurant, refreshToken)
-        window.dispatchEvent(new Event("restaurantAuthChanged"))
-        sessionStorage.removeItem("restaurantAuthData")
-        toast.success("Verification successful!")
-
-        setTimeout(async () => {
-          if (data?.isRejected || data?.pendingApproval && data?.isRejected) {
-            const rejectionStep = data?.rejectionStep || 1
-            navigate("/food/restaurant/pending-verification", {
-              replace: true,
-              state: {
-                isRejected: true,
-                rejectionReason: data?.rejectionReason || "",
-                rejectionStep,
-                phone: data?.phone || phone,
-              },
-            })
-            return
-          }
-
-          const onboardingStatus = String(data?.onboardingStatus || "").toUpperCase()
-          const accountApproved =
-            String(restaurant?.status || "").toLowerCase() === "approved" ||
-            Boolean(restaurant?.approvedAt) ||
-            onboardingStatus === "APPROVED"
-
-          // Never send an already-approved restaurant back into the wizard.
-          if (
-            !accountApproved &&
-            (onboardingStatus === "IN_PROGRESS" ||
-              onboardingStatus === "NOT_STARTED" ||
-              data?.isNewOnboarding ||
-              authData?.isSignUp)
-          ) {
-            const step = data?.currentStep || (await checkOnboardingStatus()) || 1
-            navigate(`/food/restaurant/onboarding?step=${step}`, { replace: true })
-            return
-          }
-
-          const onboardingComplete =
-            accountApproved || isRestaurantOnboardingComplete(restaurant)
-          if (!onboardingComplete) {
-            const incompleteStep = await checkOnboardingStatus()
-            if (incompleteStep) {
-              navigate(`/food/restaurant/onboarding?step=${incompleteStep}`, { replace: true })
-              return
-            }
-          }
-          navigate(returnPath || "/food/restaurant", { replace: true })
-        }, 800)
+      // Require refresh token (same as admin) so close/reopen can renew the session.
+      if (!accessToken || !restaurant || !refreshToken) {
+        throw new Error("Invalid response from server. Please try logging in again.")
       }
+
+      loginSucceeded = true
+      setRestaurantAuthData("restaurant", accessToken, restaurant, refreshToken)
+      window.dispatchEvent(new Event("restaurantAuthChanged"))
+      sessionStorage.removeItem("restaurantAuthData")
+      toast.success("Verification successful!")
+
+      setTimeout(async () => {
+        if (data?.isRejected || data?.pendingApproval && data?.isRejected) {
+          const rejectionStep = data?.rejectionStep || 1
+          navigate("/food/restaurant/pending-verification", {
+            replace: true,
+            state: {
+              isRejected: true,
+              rejectionReason: data?.rejectionReason || "",
+              rejectionStep,
+              phone: data?.phone || phone,
+            },
+          })
+          return
+        }
+
+        const onboardingStatus = String(data?.onboardingStatus || "").toUpperCase()
+        const accountApproved =
+          String(restaurant?.status || "").toLowerCase() === "approved" ||
+          Boolean(restaurant?.approvedAt) ||
+          onboardingStatus === "APPROVED"
+
+        // Never send an already-approved restaurant back into the wizard.
+        if (
+          !accountApproved &&
+          (onboardingStatus === "IN_PROGRESS" ||
+            onboardingStatus === "NOT_STARTED" ||
+            data?.isNewOnboarding ||
+            authData?.isSignUp)
+        ) {
+          const step = data?.currentStep || (await checkOnboardingStatus()) || 1
+          navigate(`/food/restaurant/onboarding?step=${step}`, { replace: true })
+          return
+        }
+
+        const onboardingComplete =
+          accountApproved || isRestaurantOnboardingComplete(restaurant)
+        if (!onboardingComplete) {
+          const incompleteStep = await checkOnboardingStatus()
+          if (incompleteStep) {
+            navigate(`/food/restaurant/onboarding?step=${incompleteStep}`, { replace: true })
+            return
+          }
+        }
+        navigate(returnPath || "/food/restaurant", { replace: true })
+      }, 800)
     } catch (err) {
       // Duplicate verify after success consumes OTP — ignore the noisy error.
       if (loginSucceeded || /otp not found/i.test(String(err?.response?.data?.message || ""))) {

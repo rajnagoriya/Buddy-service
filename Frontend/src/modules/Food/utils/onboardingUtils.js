@@ -27,15 +27,6 @@ const isPresentImage = (value) => {
 const hasValidMenuImages = (images) =>
   Array.isArray(images) && images.length > 0 && images.some(isPresentImage)
 
-const isPresentDocument = (value) => {
-  if (!value) return false
-  if (typeof value === "string" && value.trim()) return true
-  if (typeof File !== "undefined" && value instanceof File) return true
-  if (typeof Blob !== "undefined" && value instanceof Blob) return true
-  if (value?.url) return true
-  return false
-}
-
 const isStepComplete = (stepData, stepNumber) => {
   if (!stepData) return false
 
@@ -74,7 +65,6 @@ const isStepComplete = (stepData, stepNumber) => {
       stepData.openDays.length > 0 &&
       hasValidMenuImages(stepData.menuImageUrls) &&
       isPresentImage(stepData.profileImageUrl) &&
-      isPresentDocument(stepData.menuPdf) &&
       Boolean(String(stepData.estimatedDeliveryTime || "").trim())
     )
   }
@@ -269,7 +259,6 @@ export const mapOnboardingFormToCheckData = (step1 = {}, step2 = {}, step3 = {})
     },
     menuImageUrls: step2.menuImages,
     profileImageUrl: step2.profileImage,
-    menuPdf: step2.menuPdf,
     estimatedDeliveryTime: step2.estimatedDeliveryTime,
   },
   step3: {

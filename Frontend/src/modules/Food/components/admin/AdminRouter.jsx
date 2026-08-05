@@ -78,15 +78,11 @@ const DeliverymanBonus = lazy(() => import("@food/pages/admin/delivery-partners/
 const EarningAddon = lazy(() => import("@food/pages/admin/delivery-partners/EarningAddon"));
 const EarningAddonHistory = lazy(() => import("@food/pages/admin/delivery-partners/EarningAddonHistory"));
 const DeliveryEarnings = lazy(() => import("@food/pages/admin/delivery-partners/DeliveryEarnings"));
-const AdminRevenue = lazy(() => import("@food/pages/admin/revenue/AdminRevenue"));
 // Disbursement Management
 // Report Management
-const TransactionReport = lazy(() => import("@food/pages/admin/reports/TransactionReport"));
 const ExpenseReport = lazy(() => import("@food/pages/admin/reports/ExpenseReport"));
 const DisbursementReportRestaurants = lazy(() => import("@food/pages/admin/reports/DisbursementReportRestaurants"));
 const DisbursementReportDeliverymen = lazy(() => import("@food/pages/admin/reports/DisbursementReportDeliverymen"));
-const RegularOrderReport = lazy(() => import("@food/pages/admin/reports/RegularOrderReport"));
-const CampaignOrderReport = lazy(() => import("@food/pages/admin/reports/CampaignOrderReport"));
 const RestaurantReport = lazy(() => import("@food/pages/admin/reports/RestaurantReport"));
 const FeedbackExperienceReport = lazy(() => import("@food/pages/admin/reports/FeedbackExperienceReport"));
 const TaxReport = lazy(() => import("@food/pages/admin/reports/TaxReport"));
@@ -313,16 +309,12 @@ export default function AdminRouter() {
             <Route path="delivery-partners/earning-addon" element={<EarningAddon />} />
             <Route path="delivery-partners/earning-addon-history" element={<EarningAddonHistory />} />
             <Route path="delivery-partners/earnings" element={<DeliveryEarnings />} />
-            <Route path="admin-revenue" element={<AdminRevenue />} />
 
 
             {/* REPORTS & SETTINGS */}
-            <Route path="transaction-report" element={<TransactionReport />} />
             <Route path="expense-report" element={<ExpenseReport />} />
             <Route path="disbursement-report/restaurants" element={<DisbursementReportRestaurants />} />
             <Route path="disbursement-report/deliverymen" element={<DisbursementReportDeliverymen />} />
-            <Route path="order-report/regular" element={<RegularOrderReport />} />
-            <Route path="order-report/campaign" element={<CampaignOrderReport />} />
             <Route path="restaurant-report" element={<RestaurantReport />} />
             <Route path="customer-report/feedback-experience" element={<FeedbackExperienceReport />} />
             <Route path="tax-report" element={<TaxReport />} />

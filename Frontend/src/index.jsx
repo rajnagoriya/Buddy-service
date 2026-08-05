@@ -2,7 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Toaster } from 'sonner'
 import App from './app/App.jsx'
-import { isModuleAuthenticated } from './modules/Food/utils/auth.js'
+import { hasModuleSession, isModuleAuthenticated } from './modules/Food/utils/auth.js'
 import './shared/styles/global.css'
 
 const NATIVE_LAST_ROUTE_KEY = 'native_last_route'
@@ -75,11 +75,39 @@ function samePortalFamily(pathname = '', hashPath = '') {
   return false
 }
 
+function isRestaurantAuthEntryPath(pathname = '') {
+  const path = String(pathname).split('?')[0] || ''
+  return (
+    path === '/food/restaurant/login' ||
+    path === '/food/restaurant/welcome' ||
+    path === '/food/restaurant/signup' ||
+    path === '/food/restaurant/otp' ||
+    path === '/food/restaurant/auth/sign-in' ||
+    path === '/restaurant/login' ||
+    path === '/restaurant/welcome' ||
+    path === '/restaurant/signup' ||
+    path === '/restaurant/otp'
+  )
+}
+
 function resolveNativeInitialRoute() {
   if (typeof window === 'undefined') return '/food/user'
 
   const pathname = getNativePathname()
   const storedRoute = String(localStorage.getItem(NATIVE_LAST_ROUTE_KEY) || '').trim()
+
+  // Restaurant shell often opens on /login every launch — if a session exists,
+  // skip auth screens so partners stay logged in like admin/driver.
+  if (
+    (pathname.startsWith('/food/restaurant') || pathname.startsWith('/restaurant')) &&
+    isRestaurantAuthEntryPath(pathname) &&
+    hasModuleSession('restaurant')
+  ) {
+    if (storedRoute.startsWith('/food/restaurant') && !isRestaurantAuthEntryPath(storedRoute)) {
+      return storedRoute
+    }
+    return '/food/restaurant'
+  }
 
   // Always honor the URL the native shell opened — do not replace /driver/*
   // with a stale restaurant/user route from localStorage or another role's auth.
@@ -102,10 +130,10 @@ function resolveNativeInitialRoute() {
     return storedRoute
   }
 
-  if (isModuleAuthenticated('restaurant')) return '/food/restaurant'
-  if (isModuleAuthenticated('delivery')) return '/food/delivery'
-  if (isModuleAuthenticated('admin')) return '/admin'
-  if (isModuleAuthenticated('user')) return '/food/user'
+  if (hasModuleSession('restaurant') || isModuleAuthenticated('restaurant')) return '/food/restaurant'
+  if (hasModuleSession('delivery') || isModuleAuthenticated('delivery')) return '/food/delivery'
+  if (hasModuleSession('admin') || isModuleAuthenticated('admin')) return '/admin'
+  if (hasModuleSession('user') || isModuleAuthenticated('user')) return '/food/user'
 
   return '/food/user'
 }
@@ -116,6 +144,22 @@ function bootstrapNativeHashRoute() {
   const pathname = getNativePathname()
   const currentHash = String(window.location?.hash || '')
   const hashPath = currentHash.startsWith('#') ? currentHash.slice(1) : currentHash
+  const hashPathOnly = String(hashPath).split('?')[0] || ''
+
+  // Logged-in restaurant opened on an auth screen — land in the panel.
+  if (
+    hasModuleSession('restaurant') &&
+    (isRestaurantAuthEntryPath(pathname) || isRestaurantAuthEntryPath(hashPathOnly))
+  ) {
+    const storedRoute = String(localStorage.getItem(NATIVE_LAST_ROUTE_KEY) || '').trim()
+    const target =
+      storedRoute.startsWith('/food/restaurant') && !isRestaurantAuthEntryPath(storedRoute)
+        ? storedRoute
+        : '/food/restaurant'
+    const search = String(window.location?.search || '')
+    window.history.replaceState(null, '', `#${target}${search}`)
+    return
+  }
 
   // Keep an existing hash only when it matches the portal the shell opened.
   // Otherwise a previous session leaves #/food/restaurant/... on /driver/login.

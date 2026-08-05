@@ -190,6 +190,14 @@ function onRefreshFailed(module) {
  * @param {string} module
  * @returns {Promise<string|null>} new access token or null
  */
+function isTransientRefreshError(err) {
+  if (!err) return false;
+  // No HTTP response = network / timeout / offline — keep tokens so reopen can retry.
+  if (!err.response) return true;
+  const status = err.response.status;
+  return status === 408 || status === 429 || status >= 500;
+}
+
 export async function refreshModuleAccessToken(module) {
   if (!module) return null;
   const refreshToken = getRefreshToken(module);
@@ -226,7 +234,13 @@ export async function refreshModuleAccessToken(module) {
       onRefreshed(newAccessToken, module);
       return newAccessToken;
     }
-  } catch (_) {
+  } catch (err) {
+    // Only wipe the session when the refresh token is definitively invalid.
+    // Network blips on app reopen must not force restaurant partners to log in again.
+    if (isTransientRefreshError(err)) {
+      onRefreshed(null, module);
+      return null;
+    }
     onRefreshFailed(module);
     return null;
   } finally {
@@ -357,7 +371,11 @@ apiClient.interceptors.response.use(
         original.headers.Authorization = `Bearer ${newAccessToken}`;
         return apiClient(original);
       }
-    } catch (_) {
+    } catch (refreshErr) {
+      if (isTransientRefreshError(refreshErr)) {
+        onRefreshed(null, module);
+        return Promise.reject(err);
+      }
       onRefreshFailed(module);
       return Promise.reject(err);
     } finally {

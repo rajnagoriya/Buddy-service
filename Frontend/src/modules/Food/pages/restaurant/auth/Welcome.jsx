@@ -7,6 +7,7 @@ import loginBanner2 from "@food/assets/restaurant/loginbanner2.png"
 import loginBanner3 from "@food/assets/restaurant/loginbanner3.png"
 import loginBanner4 from "@food/assets/restaurant/loginbanner4.png"
 import { useCompanyName } from "@food/hooks/useCompanyName"
+import { hasModuleSession } from "@food/utils/auth"
 
 // Carousel data with images and taglines
 const carouselData = [
@@ -40,6 +41,12 @@ export default function RestaurantWelcome() {
   const [touchStart, setTouchStart] = useState(null)
   const [touchEnd, setTouchEnd] = useState(null)
   const carouselRef = useRef(null)
+
+  useEffect(() => {
+    if (hasModuleSession("restaurant")) {
+      navigate("/food/restaurant", { replace: true })
+    }
+  }, [navigate])
 
   // Minimum swipe distance (in pixels)
   const minSwipeDistance = 50
