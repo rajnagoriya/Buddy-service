@@ -23,6 +23,8 @@ const foodCheckoutSessionSchema = new mongoose.Schema(
       enum: ['razorpay'],
       default: 'razorpay',
     },
+    /** Why the session ended in 'failed' — set from the payment.failed webhook. */
+    failureReason: { type: String, default: null },
     /** Full create-order DTO snapshot (items, address, notes, delivery options, etc.) */
     orderPayload: { type: mongoose.Schema.Types.Mixed, required: true },
     /** Server-recalculated pricing (source of truth for amount charged) */

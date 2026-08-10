@@ -23,6 +23,9 @@ const startOtpWorker = () => {
     }
     const worker = new Worker(OTP_QUEUE, processOtpJob, {
         connection,
+        // Must match the queue prefix in queues/index.js exactly, or this worker
+        // subscribes to keys no producer ever writes.
+        prefix: config.redisKeyPrefix,
         concurrency: 5,
         defaultJobOptions
     });

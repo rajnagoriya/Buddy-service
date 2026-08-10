@@ -50,9 +50,27 @@ export const config = {
     // Redis
     redisEnabled: process.env.REDIS_ENABLED === 'true',
     redisUrl: process.env.REDIS_URL,
+    /**
+     * Namespace for every Redis key this app owns (BullMQ queues + Socket.IO adapter channels).
+     *
+     * Not optional in practice: a shared Redis is common in dev, and BullMQ queue names here
+     * ('order', 'tracking', 'otp', 'notification', 'payment') are generic enough to collide with
+     * another project's queues — two apps would then consume each other's jobs. Socket.IO
+     * pub/sub channels are NOT scoped by Redis db index, so they need this even when the db
+     * index differs.
+     */
+    redisKeyPrefix: process.env.REDIS_KEY_PREFIX || 'buddy',
 
     // BullMQ
     bullmqEnabled: process.env.BULLMQ_ENABLED === 'true',
+
+    // Realtime sync (see REALTIME_SYNC_PLAN.md).
+    // When false, publish() emits exactly as the old direct io.to().emit() calls did — no
+    // extra writes, no payload change. Turn on to start building the per-recipient event log.
+    syncCursorEnabled: process.env.SYNC_CURSOR_ENABLED === 'true',
+    // 0 disables the TTL index. Set (e.g. 7) once you are happy for the recovery buffer to
+    // self-prune; enabling it will delete existing events older than this.
+    syncEventTtlDays: Number(process.env.SYNC_EVENT_TTL_DAYS || 0),
 
     // Cloudinary
     cloudinaryCloudName: process.env.CLOUDINARY_CLOUD_NAME,

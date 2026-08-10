@@ -108,6 +108,20 @@ const startServer = async () => {
             logger.warn('BullMQ is enabled but Redis is disabled. Queue initialization skipped.');
         }
 
+        // Make the degraded dispatch path visible at boot rather than as a per-job warning.
+        // Without BullMQ, addOrderJob() is a no-op, so tryAutoAssign cannot re-queue its own
+        // DISPATCH_TIMEOUT_CHECK. Re-hunting then depends entirely on recoverStuckOrders(),
+        // which runs every 30s below and now also heals orders left in 'offered'.
+        if (!config.bullmqEnabled || !config.redisEnabled) {
+            logger.warn(
+                'Dispatch retries are running in WATCHDOG-ONLY mode ' +
+                `(BULLMQ_ENABLED=${config.bullmqEnabled}, REDIS_ENABLED=${config.redisEnabled}). ` +
+                'Re-offers happen on the 30s watchdog instead of the 60s job. ' +
+                'Enable Redis + BullMQ for precise timing — and confirm the Socket.IO Redis ' +
+                'adapter attaches first, or worker-process emits will be silently dropped.',
+            );
+        }
+
         // 6. Start the HTTP server
         server = httpServer.listen(config.port, config.host, () => {
             logger.info(`Server running in ${config.nodeEnv} mode on ${config.host}:${config.port}`);

@@ -1,12 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
-import io from 'socket.io-client';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { API_BASE_URL } from '@food/api/config';
+import { createRealtimeSocket } from '@/services/socket/createRealtimeSocket';
+import { createSyncEngine } from '@/services/socket/syncEngine';
 import { restaurantAPI } from '@food/api';
 const alertSound = '/zomato_sms.mp3';
 import { dispatchNotificationInboxRefresh } from '@food/hooks/useNotificationInbox';
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
-const debugError = (...args) => {}
+// Errors stay visible: a silenced debugError is how an unrecoverable auth failure would look
+// identical to a healthy socket. debugLog/debugWarn remain no-ops to keep the console quiet.
+const debugError = (...args) => { console.error('[RestaurantSocket]', ...args); }
 
 const resolveAudioSource = (source) => {
   return source;
@@ -94,6 +97,11 @@ export const useRestaurantNotifications = () => {
   const userInteractedRef = useRef(false); // Track user interaction for autoplay policy
   const audioUnlockAttemptedRef = useRef(false);
   const [restaurantId, setRestaurantId] = useState(null);
+  // Latest-value ref so the stable connection effect can read the id without depending on it.
+  const restaurantIdRef = useRef(null);
+  const joinedRestaurantRoomRef = useRef(null);
+  const syncRef = useRef(null);
+  const applyNewOrderRef = useRef(null);
   const lastConnectErrorLogRef = useRef(0);
   const lastAlertAtByOrderRef = useRef(new Map());
   const lastBrowserNotificationAtByOrderRef = useRef(new Map());
@@ -253,6 +261,24 @@ export const useRestaurantNotifications = () => {
     }
   };
 
+  restaurantIdRef.current = restaurantId;
+
+  /**
+   * Join this restaurant's room. Reads the id from a ref so it stays callable from the stable
+   * connection effect. `join-restaurant` is idempotent server-side and validated against the
+   * JWT, so a repeat emit is harmless.
+   */
+  const joinRestaurantRoomIfPossible = useCallback(() => {
+    const id = restaurantIdRef.current;
+    if (!socketRef.current?.connected || !id) return false;
+    if (joinedRestaurantRoomRef.current === id) return true;
+
+    debugLog('Joining restaurant room', { restaurantId: id, socketId: socketRef.current?.id });
+    socketRef.current.emit('join-restaurant', id);
+    joinedRestaurantRoomRef.current = id;
+    return true;
+  }, []);
+
   // Get restaurant ID from API
   useEffect(() => {
     const fetchRestaurantId = async () => {
@@ -320,210 +346,58 @@ export const useRestaurantNotifications = () => {
     };
   }, []);
 
+  // Socket connection effect.
+  //
+  // deps [] on purpose: the connection must not wait on (or be rebuilt by) restaurantId, which
+  // resolves asynchronously from getCurrentRestaurant(). Previously the socket refused to
+  // connect at all until that call returned, so every event in that window was lost. The server
+  // decodes identity from the JWT and auto-joins the restaurant room; the explicit join is
+  // handled by the room effect below once the id lands.
   useEffect(() => {
-    if (!API_BASE_URL || !String(API_BASE_URL).trim()) {
-      setIsConnected(false);
-      return;
-    }
-    if (!restaurantId) {
-      debugLog('? Waiting for restaurantId...');
-      return;
-    }
-
-    // Normalize backend URL - use simpler, more robust approach
-    let backendUrl = API_BASE_URL;
-    
-    // Step 1: Extract protocol and hostname using URL parsing if possible
-    try {
-      const urlObj = new URL(backendUrl);
-      // Remove /api from pathname
-      let pathname = urlObj.pathname.replace(/^\/api\/?$/, '');
-      // Reconstruct clean URL
-      backendUrl = `${urlObj.protocol}//${urlObj.hostname}${urlObj.port ? `:${urlObj.port}` : ''}${pathname}`;
-    } catch (e) {
-      // If URL parsing fails, use regex-based normalization
-      // Remove /api suffix first
-      backendUrl = backendUrl.replace(/\/api\/?$/, '');
-      backendUrl = backendUrl.replace(/\/+$/, ''); // Remove trailing slashes
-      
-      // Normalize protocol - ensure exactly two slashes after protocol
-      // Fix patterns: https:/, https:///, https://https://
-      if (backendUrl.startsWith('https:') || backendUrl.startsWith('http:')) {
-        // Extract protocol
-        const protocolMatch = backendUrl.match(/^(https?):/i);
-        if (protocolMatch) {
-          const protocol = protocolMatch[1].toLowerCase();
-          // Remove everything up to and including the first valid domain part
-          const afterProtocol = backendUrl.substring(protocol.length + 1);
-          // Remove leading slashes
-          const cleanPath = afterProtocol.replace(/^\/+/, '');
-          // Reconstruct with exactly two slashes
-          backendUrl = `${protocol}://${cleanPath}`;
-        }
-      }
-    }
-    
-    // Final cleanup: ensure exactly two slashes after protocol
-    backendUrl = backendUrl.replace(/^(https?):\/+/gi, '$1://');
-    backendUrl = backendUrl.replace(/\/+$/, ''); // Remove trailing slashes
-    
-    // CRITICAL: Check for localhost in production BEFORE creating socket
-    // Detect production environment more reliably
-    const frontendHostname = window.location.hostname;
-    const isLocalhost = frontendHostname === 'localhost' || 
-                        frontendHostname === '127.0.0.1' ||
-                        frontendHostname === '';
-    const isProductionBuild = import.meta.env.MODE === 'production' || import.meta.env.PROD;
-    // Production deployment: not localhost AND (HTTPS OR has domain name with dots)
-    const isProductionDeployment = !isLocalhost && (
-      window.location.protocol === 'https:' || 
-      (frontendHostname.includes('.') && !frontendHostname.startsWith('192.168.') && !frontendHostname.startsWith('10.'))
-    );
-    
-    // If backend URL is localhost but we're not running locally, BLOCK connection
-    const backendIsLocalhost = backendUrl.includes('localhost') || backendUrl.includes('127.0.0.1');
-    // Block if: backend is localhost AND (production build OR production deployment)
-    // Allow if: frontend is also localhost (development scenario)
-    const shouldBlockConnection = backendIsLocalhost && (isProductionBuild || isProductionDeployment) && !isLocalhost;
-    
-    if (shouldBlockConnection) {
-      // Try to infer backend URL from frontend URL (common pattern: api.domain.com or domain.com/api)
-      const frontendHost = window.location.hostname;
-      const frontendProtocol = window.location.protocol;
-      let suggestedBackendUrl = null;
-      
-      // Common patterns:
-      // - If frontend is on foods.appzeto.com, backend might be api.foods.appzeto.com or foods.appzeto.com
-      if (frontendHost.includes('foods.appzeto.com')) {
-        suggestedBackendUrl = `${frontendProtocol}//api.foods.appzeto.com/api`;
-      } else if (frontendHost.includes('appzeto.com')) {
-        suggestedBackendUrl = `${frontendProtocol}//api.${frontendHost}/api`;
-      }
-      
-      debugError('? CRITICAL: BLOCKING Socket.IO connection to localhost!');
-      debugError('Backend connectivity disabled (UI-only mode).');
-      debugError('?? Current backendUrl:', backendUrl);
-      debugError('?? Current API_BASE_URL:', API_BASE_URL);
-      debugError('?? Frontend hostname:', frontendHost);
-      debugError('?? Frontend protocol:', frontendProtocol);
-      debugError('?? Is production build:', isProductionBuild);
-      debugError('?? Is production deployment:', isProductionDeployment);
-      debugError('?? Backend is localhost:', backendIsLocalhost);
-      if (suggestedBackendUrl) {
-        debugError('?? Suggested backend URL:', suggestedBackendUrl);
-      } else {
-        debugError('?? Backend URL config is disabled in this build.');
-      }
-      debugError('?? Backend URL config is disabled in this build.');
-      
-      // Clean up any existing socket connection
-      if (socketRef.current) {
-        debugLog('?? Cleaning up existing socket connection...');
-        socketRef.current.disconnect();
-        socketRef.current = null;
-      }
-      
-      // Don't try to connect to localhost in production - it will fail
-      setIsConnected(false);
-      return; // CRITICAL: Exit early to prevent socket creation
-    }
-    
-    // Validate backend URL format
-    if (!backendUrl || !backendUrl.startsWith('http')) {
-      debugError('? CRITICAL: Invalid backend URL format:', backendUrl);
-      debugError('?? API_BASE_URL:', API_BASE_URL);
-      debugError('?? Expected format: https://your-domain.com or ');
-      setIsConnected(false);
-      return; // Don't try to connect with invalid URL
-    }
-    
-    // Construct Socket.IO URL
-    // IMPORTANT: Socket.IO server is on the origin (not /api/v1).
-    // Our API baseURL is typically like: http://localhost:5000/api/v1
-    // So for sockets we always connect to: http://localhost:5000
-    let socketOrigin = backendUrl;
-    try {
-      socketOrigin = new URL(backendUrl).origin;
-    } catch {
-      socketOrigin = String(backendUrl || "")
-        .replace(/\/api\/v\d+\/?$/i, "")
-        .replace(/\/api\/?$/i, "")
-        .replace(/\/+$/, "");
-    }
-
-    // Backend uses default namespace; rooms handle role separation.
-    const socketUrl = `${socketOrigin}`;
-    
-    // Validate socket URL format
-    try {
-      const urlTest = new URL(socketUrl); // This will throw if URL is invalid
-      // Additional validation: ensure it's not localhost in production
-      if ((isProductionBuild || isProductionDeployment) && (urlTest.hostname === 'localhost' || urlTest.hostname === '127.0.0.1')) {
-        debugError('? CRITICAL: Socket URL contains localhost in production!');
-        debugError('?? Socket URL:', socketUrl);
-        debugError('?? This should have been caught earlier, but blocking anyway');
+    const created = createRealtimeSocket({
+      apiBaseUrl: API_BASE_URL,
+      module: 'restaurant',
+      log: debugLog,
+      warn: debugWarn,
+      onAuthFatal: () => {
+        debugError('Restaurant socket auth could not be recovered - re-login required.');
         setIsConnected(false);
-        return;
-      }
-    } catch (urlError) {
-      debugError('? CRITICAL: Invalid Socket.IO URL:', socketUrl);
-      debugError('?? URL validation error:', urlError.message);
-      debugError('?? Backend URL:', backendUrl);
-      debugError('?? API_BASE_URL:', API_BASE_URL);
-      setIsConnected(false);
-      return; // Don't try to connect with invalid URL
-    }
-    
-    debugLog('?? Attempting to connect to Socket.IO:', socketUrl);
-    debugLog('?? Backend URL:', backendUrl);
-    debugLog('?? API_BASE_URL:', API_BASE_URL);
-    debugLog('?? Restaurant ID:', restaurantId);
-    debugLog('?? Environment:', import.meta.env.MODE);
-    debugLog('?? Is Production Build:', isProductionBuild);
-    debugLog('?? Is Production Deployment:', isProductionDeployment);
-
-    // Initialize socket connection (default namespace)
-    // Use polling only to avoid repeated "WebSocket connection failed" when backend is down
-    socketRef.current = io(socketUrl, {
-      path: '/socket.io/',
-      transports: ['polling'],
-      reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      reconnectionAttempts: Infinity,
-      timeout: 20000,
-      forceNew: false,
-      autoConnect: true,
-      auth: {
-        token: localStorage.getItem('restaurant_accessToken') || localStorage.getItem('accessToken')
-      }
+      },
     });
 
+    if (!created) {
+      setIsConnected(false);
+      return undefined;
+    }
+
+    const { socket, destroy } = created;
+    socketRef.current = socket;
+
+    // Cursor sync. This is the restaurant's first real recovery path: previously it never
+    // called resync, and the server had no RESTAURANT branch even if it had — which is exactly
+    // why the 10s order refetch existed.
+    const syncEngine = createSyncEngine({
+      socket,
+      module: 'restaurant',
+      log: debugLog,
+      warn: debugWarn,
+      onEvent: (type, payload, meta) => {
+        if (type === 'new_order') {
+          applyNewOrderRef.current?.(payload, { replayed: meta.replayed });
+        }
+      },
+    });
+    syncRef.current = syncEngine;
+
     socketRef.current.on('connect', () => {
-      debugLog('? Restaurant Socket connected, restaurantId:', restaurantId);
-      debugLog('? Socket ID:', socketRef.current.id);
-      debugLog('? Socket URL:', socketUrl);
+      debugLog('Restaurant socket connected', {
+        socketId: socketRef.current?.id,
+        restaurantId: restaurantIdRef.current,
+        transport: socketRef.current?.io?.engine?.transport?.name || 'unknown',
+      });
       setIsConnected(true);
-      
-      // Join restaurant room immediately after connection with retry
-      if (restaurantId) {
-        const joinRoom = () => {
-          debugLog('?? Joining restaurant room with ID:', restaurantId);
-          socketRef.current.emit('join-restaurant', restaurantId);
-          
-          // Retry join after 2 seconds if no confirmation received
-          setTimeout(() => {
-            if (socketRef.current?.connected) {
-              debugLog('?? Retrying restaurant room join...');
-              socketRef.current.emit('join-restaurant', restaurantId);
-            }
-          }, 2000);
-        };
-        
-        joinRoom();
-      } else {
-        debugWarn('?? Cannot join restaurant room: restaurantId is missing');
-      }
+      joinedRestaurantRoomRef.current = null;
+      joinRestaurantRoomIfPossible();
     });
 
     // Listen for room join confirmation
@@ -543,11 +417,11 @@ export const useRestaurantNotifications = () => {
         debugWarn(
           'Restaurant Socket:',
           isTransportError
-            ? `Cannot reach backend at ${backendUrl}. Ensure the backend is running (e.g. npm run dev in backend).`
+            ? `Cannot reach backend at ${API_BASE_URL}. Ensure the backend is running (e.g. npm run dev in backend).`
             : error.message
         );
         if (!isTransportError) {
-          debugWarn('Details:', { type: error.type, socketUrl, backendUrl });
+          debugWarn('Details:', { type: error.type, apiBaseUrl: API_BASE_URL });
         }
       }
       if (error.message?.includes('CORS') || error.message?.includes('Not allowed')) {
@@ -574,17 +448,18 @@ export const useRestaurantNotifications = () => {
 
     // Listen for successful reconnection
     socketRef.current.on('reconnect', (attemptNumber) => {
-      debugLog(`? Reconnected after ${attemptNumber} attempts`);
+      debugLog(`Reconnected after ${attemptNumber} attempts`);
       setIsConnected(true);
-      
-      // Rejoin restaurant room after reconnection
-      if (restaurantId) {
-        socketRef.current.emit('join-restaurant', restaurantId);
-      }
+      joinedRestaurantRoomRef.current = null;
+      joinRestaurantRoomIfPossible();
     });
 
-    // Listen for new order notifications
-    socketRef.current.on('new_order', (orderData) => {
+    /**
+     * Apply a new order. Shared by the live socket event and by sync replay so a restaurant
+     * that was disconnected lands in the same state as one that was connected. Idempotent —
+     * the same order legitimately arrives both ways.
+     */
+    const applyNewOrder = (orderData, { replayed = false } = {}) => {
       const normalizedOrder = {
         ...orderData,
         orderMongoId: orderData?.orderMongoId || orderData?._id || orderData?.order_mongo_id,
@@ -596,12 +471,12 @@ export const useRestaurantNotifications = () => {
         const scheduledTime = new Date(normalizedOrder.scheduledAt).getTime();
         const now = Date.now();
         if (scheduledTime > now + 15 * 60000) {
-          debugLog('Ignoring far-away scheduled order from socket:', normalizedOrder.orderId);
+          debugLog('Ignoring far-away scheduled order:', normalizedOrder.orderId);
           return;
         }
       }
 
-      debugLog('?? New order received:', normalizedOrder);
+      debugLog(replayed ? 'Order recovered via sync:' : 'New order received:', normalizedOrder);
       setNewOrder(normalizedOrder);
 
       if (typeof window !== 'undefined') {
@@ -611,6 +486,13 @@ export const useRestaurantNotifications = () => {
       }
 
       handleIncomingOrderAlert(normalizedOrder, 'socket');
+    };
+    applyNewOrderRef.current = applyNewOrder;
+
+    // Listen for new order notifications
+    socketRef.current.on('new_order', (orderData) => {
+      if (syncRef.current?.noteLiveEvent(orderData)) return; // already applied via sync
+      applyNewOrder(orderData);
     });
     
     // Listen for new dining booking notifications
@@ -656,16 +538,28 @@ export const useRestaurantNotifications = () => {
 
     return () => {
       stopAlertLoop();
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-        socketRef.current = null;
-      }
+      joinedRestaurantRoomRef.current = null;
+      syncEngine.destroy();
+      syncRef.current = null;
+      destroy();
+      socketRef.current = null;
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current = null;
       }
     };
-  }, [restaurantId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Room effect: joins on the already-open socket once restaurantId resolves. Kept separate
+  // from the connection effect so a late id can never gate or rebuild the connection.
+  useEffect(() => {
+    if (!restaurantId) {
+      debugLog('Waiting for restaurantId before joining the restaurant room...');
+      return;
+    }
+    joinRestaurantRoomIfPossible();
+  }, [restaurantId, joinRestaurantRoomIfPossible]);
 
   // Track user interaction for autoplay policy
   useEffect(() => {

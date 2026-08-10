@@ -10,6 +10,19 @@ export const apiRateLimiter = rateLimit({
     max: config.nodeEnv === 'development' ? Math.max(config.rateLimitMaxRequests, 2000) : config.rateLimitMaxRequests,
     standardHeaders: true,
     legacyHeaders: false,
+    /**
+     * Never rate-limit payment webhooks.
+     *
+     * They arrive from the gateway's IPs, not a user, so a burst (or the gateway's own retries)
+     * shares one bucket and can trip the limit. A 429 is a non-2xx, so the gateway treats it as
+     * a delivery failure — meaning the requests we drop are exactly the payment.captured events
+     * we cannot afford to lose. Signature verification, not rate limiting, is what protects
+     * this endpoint.
+     */
+    skip: (req) => {
+        const url = req.originalUrl || req.url || '';
+        return url.includes('/payments/webhook/');
+    },
     message: {
         success: false,
         message: 'Too many requests, please try again later.'

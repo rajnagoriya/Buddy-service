@@ -18,9 +18,26 @@ const RestaurantSessionContext = createContext(null)
 
 let sessionLoadPromise = null
 
-export function invalidateRestaurantSession() {
+/**
+ * Drop the cached session WITHOUT announcing it.
+ *
+ * Split out from invalidateRestaurantSession because the provider below both listens for
+ * `restaurantSessionInvalidated` and (via loadSession force) used to dispatch it — and
+ * dispatchEvent is synchronous, so the handler re-entered itself until the stack blew:
+ *
+ *   onSessionInvalidated → loadSession({force}) → invalidateRestaurantSession()
+ *     → dispatchEvent → onSessionInvalidated → …
+ *
+ * Anything already inside the provider must use this; only callers that need to notify the
+ * provider should use invalidateRestaurantSession().
+ */
+function resetRestaurantSessionCaches() {
   sessionLoadPromise = null
   invalidateRestaurantSessionCache()
+}
+
+export function invalidateRestaurantSession() {
+  resetRestaurantSessionCaches()
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent("restaurantSessionInvalidated"))
   }
@@ -62,8 +79,10 @@ export function RestaurantSessionProvider({ children }) {
       return
     }
 
+    // Cache-only reset: this runs INSIDE the provider, so dispatching the invalidation event
+    // here would re-enter our own listener synchronously and recurse forever.
     if (force) {
-      invalidateRestaurantSession()
+      resetRestaurantSessionCaches()
     }
 
     setLoading(true)
@@ -104,7 +123,9 @@ export function RestaurantSessionProvider({ children }) {
       loadSession({ force: true }).catch(() => {})
     }
     const onSessionInvalidated = () => {
-      loadSession({ force: true }).catch(() => {})
+      // No `force`: whoever dispatched this already cleared the caches, so forcing would only
+      // clear them a second time — and, before the split above, re-dispatch this same event.
+      loadSession().catch(() => {})
     }
 
     window.addEventListener("restaurantAuthChanged", onAuthChange)
@@ -124,8 +145,11 @@ export function RestaurantSessionProvider({ children }) {
     }
   }, [loadSession])
 
+  // These fetch and setState themselves, so they only need the caches cleared — dispatching
+  // the invalidation event would make the provider run a second, redundant full session load
+  // (two extra API calls) on top of the single fetch below.
   const refreshRestaurant = useCallback(async () => {
-    invalidateRestaurantSession()
+    resetRestaurantSessionCaches()
     const res = await restaurantAPI.getCurrentRestaurant()
     const next = extractRestaurantPayload(res)
     setRestaurant(next)
@@ -133,7 +157,7 @@ export function RestaurantSessionProvider({ children }) {
   }, [])
 
   const refreshOnboarding = useCallback(async () => {
-    invalidateRestaurantSession()
+    resetRestaurantSessionCaches()
     const res = await restaurantAPI.getOnboardingProgress()
     const next = extractOnboardingPayload(res)
     setOnboarding(next)

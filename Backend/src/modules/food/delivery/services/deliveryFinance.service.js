@@ -8,7 +8,7 @@ import { DeliveryBonusTransaction } from '../../admin/models/deliveryBonusTransa
 import { getDeliveryCashLimitSettings } from '../../admin/services/admin.service.js';
 import { getBalance } from '../../../../core/payments/transaction.service.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
-import { createRazorpayOrder, getRazorpayKeyId, isRazorpayConfigured, verifyPaymentSignature } from '../../orders/helpers/razorpay.helper.js';
+import { assertRazorpayAvailableInProduction, createRazorpayOrder, getRazorpayKeyId, isRazorpayConfigured, verifyPaymentSignature } from '../../orders/helpers/razorpay.helper.js';
 import { resolveRiderPayoutAmount } from '../../orders/services/order.helpers.js';
 
 /**
@@ -396,6 +396,8 @@ export const createDeliveryCashDepositOrder = async (deliveryPartnerId, amountIn
     const receipt = `cash_deposit_${String(deliveryPartnerId).slice(-8)}_${Date.now()}`;
 
     if (!isRazorpayConfigured()) {
+        // In production this must not silently hand back a stub — see the helper.
+        assertRazorpayAvailableInProduction();
         return {
             razorpay: {
                 key: getRazorpayKeyId() || 'rzp_test_dummy',

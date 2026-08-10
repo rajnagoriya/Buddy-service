@@ -24,6 +24,9 @@ const startTrackingWorker = () => {
     // Set concurrency to handle multiple high-frequency updates without blocking
     const worker = new Worker(TRACKING_QUEUE, processTrackingJob, {
         connection,
+        // Must match the queue prefix in queues/index.js exactly, or this worker
+        // subscribes to keys no producer ever writes.
+        prefix: config.redisKeyPrefix,
         concurrency: 10,
         defaultJobOptions
     });

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import io from 'socket.io-client';
 import { API_BASE_URL } from '@food/api/config';
+import { createRealtimeSocket } from '@/services/socket/createRealtimeSocket';
+import { createSyncEngine } from '@/services/socket/syncEngine';
 import { deliveryAPI } from '@food/api';
 const alertSound = '/alert.mp3';
 const originalSound = '/original.mp3';
@@ -192,8 +193,20 @@ export const useDeliveryNotifications = () => {
   const [claimedOrderId, setClaimedOrderId] = useState(null); // set when another partner claims an order
   const [adminNotification, setAdminNotification] = useState(null);
   const joinedDeliveryRoomRef = useRef(null);
+  // Latest-value refs so the connection effect can run with deps [] and still call through to
+  // current callbacks/state. Without these the socket was torn down and rebuilt every time
+  // deliveryPartnerId resolved (null → localStorage → API), reconnecting at least twice on
+  // every mount and losing any event that arrived in the gap.
+  const deliveryPartnerIdRef = useRef(null);
+  const recoverDeliveryStateRef = useRef(null);
+  const sharedOrderRef = useRef(null);
+  const syncRef = useRef(null);
+  const applyOrderOfferRef = useRef(null);
   const ALERT_LOOP_INTERVAL_MS = 4500;
   const ALERT_LOOP_MAX_MS = 120000;
+  // Must stay comfortably under the server's STALE_PRESENCE_MS (2 min) so a healthy rider is
+  // never ranked as a ghost between pings.
+  const HEARTBEAT_INTERVAL_MS = 30000;
   const ALERT_DEDUPE_MS = 15000;
   const BROWSER_NOTIFICATION_DEDUPE_MS = 20000;
   const NOTIFICATION_PERMISSION_ASKED_KEY = 'delivery_notification_permission_asked';
@@ -427,23 +440,35 @@ export const useDeliveryNotifications = () => {
     }
   }, [deliveryPartnerId, handleIncomingOrderAlert]);
 
+  // Keep the refs current on every render so the stable connection effect never reads a
+  // stale callback or value.
+  deliveryPartnerIdRef.current = deliveryPartnerId;
+  recoverDeliveryStateRef.current = recoverDeliveryState;
+  sharedOrderRef.current = sharedOrder;
+
+  /**
+   * Join this partner's delivery room. Reads the id from a ref so it stays callable from the
+   * connection effect. Safe to call repeatedly — server-side `join-delivery` is idempotent and
+   * `joinedDeliveryRoomRef` suppresses duplicate emits within one connection.
+   */
   const joinDeliveryRoomIfPossible = useCallback(() => {
-    if (!socketRef.current?.connected || !deliveryPartnerId) {
+    const partnerId = deliveryPartnerIdRef.current;
+    if (!socketRef.current?.connected || !partnerId) {
       return false;
     }
 
-    if (joinedDeliveryRoomRef.current === deliveryPartnerId) {
+    if (joinedDeliveryRoomRef.current === partnerId) {
       return true;
     }
 
     debugLog('Joining delivery room', {
-      deliveryPartnerId,
+      deliveryPartnerId: partnerId,
       socketId: socketRef.current?.id,
     });
-    socketRef.current.emit('join-delivery', deliveryPartnerId);
-    joinedDeliveryRoomRef.current = deliveryPartnerId;
+    socketRef.current.emit('join-delivery', partnerId);
+    joinedDeliveryRoomRef.current = partnerId;
     return true;
-  }, [deliveryPartnerId]);
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -673,122 +698,66 @@ export const useDeliveryNotifications = () => {
     fetchDeliveryPartnerId();
   }, []);
 
-  // Socket connection effect (no backend when API_BASE_URL is empty)
+  // Socket connection effect.
+  //
+  // deps [] on purpose: the connection must outlive deliveryPartnerId resolving. The server
+  // decodes identity from the JWT and auto-joins the role room, so the id is only needed for
+  // the explicit `join-delivery` — which the room effect below handles on the live socket.
   useEffect(() => {
-    if (!API_BASE_URL || !String(API_BASE_URL).trim()) {
-      setIsConnected(false);
-      return;
-    }
-
-    // IMPORTANT: Socket.IO server is on the origin (not /api/v1).
-    // Our API baseURL is typically like: http://localhost:5000/api/v1
-    // So for sockets we always connect to: http://localhost:5000
-    let backendUrl = API_BASE_URL;
-    try {
-      const base =
-        String(backendUrl).startsWith('http')
-          ? undefined
-          : (typeof window !== 'undefined' ? window.location.origin : undefined);
-      backendUrl = new URL(backendUrl, base).origin;
-    } catch {
-      // best-effort fallback: strip common API prefixes
-      backendUrl = String(backendUrl || "")
-        .replace(/\/api\/v\d+\/?$/i, "")
-        .replace(/\/api\/?$/i, "")
-        .replace(/\/+$/, "");
-
-      if ((!backendUrl || !backendUrl.startsWith('http')) && typeof window !== 'undefined') {
-        backendUrl = window.location.origin;
-      }
-    }
-    
-    // Backend uses default namespace; rooms handle role separation.
-    const socketUrl = `${backendUrl}`;
-    
-    debugLog('?? Attempting to connect to Delivery Socket.IO:', socketUrl);
-    debugLog('?? Backend URL:', backendUrl);
-    debugLog('?? API_BASE_URL:', API_BASE_URL);
-    debugLog('?? Delivery Partner ID:', deliveryPartnerId);
-    debugLog('?? Environment: (ui-only mode)');
-    
-    // Block localhost only in production builds. In dev, localhost is expected.
-    if (import.meta.env.PROD && backendUrl.includes('localhost')) {
-      debugError('? CRITICAL: Trying to connect Socket.IO to localhost in production!');
-      debugError('?? Current socketUrl:', socketUrl);
-      debugError('?? Current API_BASE_URL:', API_BASE_URL);
-      setIsConnected(false);
-      return;
-    }
-    
-    // Validate backend URL format
-    if (!backendUrl || !backendUrl.startsWith('http')) {
-      debugError('? CRITICAL: Invalid backend URL format:', backendUrl);
-      debugError('?? API_BASE_URL:', API_BASE_URL);
-      debugError('?? Expected format: https://your-domain.com or ');
-      return; // Don't try to connect with invalid URL
-    }
-    
-    // Validate socket URL format
-    try {
-      new URL(socketUrl); // This will throw if URL is invalid
-    } catch (urlError) {
-      debugError('? CRITICAL: Invalid Socket.IO URL:', socketUrl);
-      debugError('?? URL validation error:', urlError.message);
-      debugError('?? Backend URL:', backendUrl);
-      debugError('?? API_BASE_URL:', API_BASE_URL);
-      return; // Don't try to connect with invalid URL
-    }
-
-    const token = localStorage.getItem('delivery_accessToken') || localStorage.getItem('accessToken');
-    const tokenPreview = token ? `${String(token).slice(0, 12)}...` : null;
-    debugLog('Preparing socket auth payload', {
-      tokenPresent: Boolean(token),
-      tokenPreview,
-      deliveryPartnerId,
-      socketUrl,
-    });
-
-    socketRef.current = io(socketUrl, {
-      path: '/socket.io/',
-      transports: ['polling', 'websocket'], // Allow both
-      reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      reconnectionAttempts: Infinity,
-      timeout: 20000,
-      auth: {
-        token: token || ""
+    const created = createRealtimeSocket({
+      apiBaseUrl: API_BASE_URL,
+      module: 'delivery',
+      log: debugLog,
+      warn: debugWarn,
+      onAuthFatal: () => {
+        debugError('Socket auth could not be recovered — re-login required.');
+        setIsConnected(false);
       },
-      query: token ? { token } : undefined,
     });
 
-    debugLog('Socket.IO client created', {
-      socketUrl,
-      path: '/socket.io/',
-      transports: ['polling', 'websocket'],
-      tokenPresent: Boolean(token),
-      tokenPreview,
-      deliveryPartnerId,
+    if (!created) {
+      setIsConnected(false);
+      return undefined;
+    }
+
+    const { socket, destroy } = created;
+    socketRef.current = socket;
+
+    // Cursor sync: recovers anything the live channel dropped while this app was backgrounded,
+    // offline, or killed. Replayed events are routed to the SAME handlers as live ones.
+    const syncEngine = createSyncEngine({
+      socket,
+      module: 'delivery',
+      log: debugLog,
+      warn: debugWarn,
+      onEvent: (type, payload, meta) => {
+        if (type === 'new_order' || type === 'new_order_available') {
+          applyOrderOfferRef.current?.(payload, { replayed: meta.replayed });
+        }
+        // Other event types fall through: the resync/getCurrentDelivery path below still
+        // reconciles trip state, so nothing regresses while coverage grows.
+      },
     });
+    syncRef.current = syncEngine;
 
     socketRef.current.on('connect', () => {
       debugLog('Socket connected', {
         socketId: socketRef.current?.id,
-        deliveryPartnerId,
+        deliveryPartnerId: deliveryPartnerIdRef.current,
         transport: socketRef.current?.io?.engine?.transport?.name || 'unknown',
       });
       setIsConnected(true);
 
       joinedDeliveryRoomRef.current = null;
       if (!joinDeliveryRoomIfPossible()) {
-        debugLog('Socket connected before deliveryPartnerId was ready; waiting to join room.');
+        debugLog('Socket connected before deliveryPartnerId was ready; the room effect will join.');
       }
       debugLog('Requesting resync after connect', {
-        deliveryPartnerId,
+        deliveryPartnerId: deliveryPartnerIdRef.current,
         socketId: socketRef.current?.id,
       });
       socketRef.current.emit('resync');
-      void recoverDeliveryState();
+      void recoverDeliveryStateRef.current?.();
     });
 
     socketRef.current.on('delivery-room-joined', (data) => {
@@ -799,6 +768,9 @@ export const useDeliveryNotifications = () => {
       debugLog('Resync completed', data);
     });
 
+    // Auth-specific handshake failures (AUTH_MISSING / AUTH_INVALID) are handled inside
+    // createRealtimeSocket, which refreshes the token and retries. This handler is for
+    // reporting only.
     socketRef.current.on('connect_error', (error) => {
       debugError('Socket connection error', {
         message: error?.message,
@@ -806,11 +778,8 @@ export const useDeliveryNotifications = () => {
         description: error?.description,
         context: error?.context,
         data: error?.data,
-        socketUrl,
         apiBaseUrl: API_BASE_URL,
-        deliveryPartnerId,
-        tokenPresent: Boolean(token),
-        tokenPreview,
+        deliveryPartnerId: deliveryPartnerIdRef.current,
         transport: socketRef.current?.io?.engine?.transport?.name || 'unknown',
       });
       setIsConnected(false);
@@ -820,11 +789,11 @@ export const useDeliveryNotifications = () => {
       debugWarn('Socket disconnected', {
         reason,
         socketId: socketRef.current?.id,
-        deliveryPartnerId,
+        deliveryPartnerId: deliveryPartnerIdRef.current,
       });
       setIsConnected(false);
       joinedDeliveryRoomRef.current = null;
-      
+
       if (reason === 'io server disconnect') {
         socketRef.current.connect();
       }
@@ -833,8 +802,7 @@ export const useDeliveryNotifications = () => {
     socketRef.current.on('reconnect_attempt', (attemptNumber) => {
       debugWarn('Reconnection attempt', {
         attemptNumber,
-        socketUrl,
-        deliveryPartnerId,
+        deliveryPartnerId: deliveryPartnerIdRef.current,
       });
     });
 
@@ -842,7 +810,7 @@ export const useDeliveryNotifications = () => {
       debugLog('Socket reconnected', {
         attemptNumber,
         socketId: socketRef.current?.id,
-        deliveryPartnerId,
+        deliveryPartnerId: deliveryPartnerIdRef.current,
         transport: socketRef.current?.io?.engine?.transport?.name || 'unknown',
       });
       setIsConnected(true);
@@ -850,28 +818,33 @@ export const useDeliveryNotifications = () => {
       joinedDeliveryRoomRef.current = null;
       joinDeliveryRoomIfPossible();
       socketRef.current.emit('resync');
-      void recoverDeliveryState();
+      void recoverDeliveryStateRef.current?.();
     });
 
-    socketRef.current.on('new_order', (orderData) => {
-      debugLog('New order received via socket', {
+    /**
+     * Apply an order offer. Shared by the live socket event and by sync replay, so a rider who
+     * was offline when the offer fired ends up in exactly the same state as one who was online.
+     * Must stay idempotent — the same offer legitimately arrives both ways.
+     */
+    const applyOrderOffer = (orderData, { replayed = false } = {}) => {
+      debugLog(replayed ? 'Order offer recovered via sync' : 'New order received via socket', {
         orderId: orderData?.orderId || orderData?.orderMongoId || orderData?._id,
         dispatchStatus: orderData?.dispatch?.status,
       });
       setNewOrder(orderData);
       handleIncomingOrderAlert(orderData);
+    };
+    applyOrderOfferRef.current = applyOrderOffer;
+
+    socketRef.current.on('new_order', (orderData) => {
+      if (syncRef.current?.noteLiveEvent(orderData)) return; // already applied via sync
+      applyOrderOffer(orderData);
     });
 
     // Listen for priority-based order notifications (new_order_available)
     socketRef.current.on('new_order_available', (orderData) => {
-      debugLog('New order available received via socket', {
-        orderId: orderData?.orderId || orderData?.orderMongoId || orderData?._id,
-        phase: orderData?.phase || 'unknown',
-        dispatchStatus: orderData?.dispatch?.status,
-      });
-      // Treat it the same as new_order for now - delivery boy can accept it
-      setNewOrder(orderData);
-      handleIncomingOrderAlert(orderData);
+      if (syncRef.current?.noteLiveEvent(orderData)) return;
+      applyOrderOffer(orderData);
     });
     
     socketRef.current.on('shareable_order_available', (orderData) => {
@@ -916,7 +889,10 @@ export const useDeliveryNotifications = () => {
       // If the order in status update is the same as sharedOrder, and it's delivered/cancelled, clear it.
       const status = String(statusData?.status || statusData?.orderStatus || '').toLowerCase();
       const updatedId = statusData?._id || statusData?.orderId || statusData?.orderMongoId;
-      const sharedId = sharedOrder?.orderId || sharedOrder?._id || sharedOrder?.orderMongoId;
+      // Read through a ref: this listener is registered once, so closing over `sharedOrder`
+      // would pin it to its value at mount.
+      const currentShared = sharedOrderRef.current;
+      const sharedId = currentShared?.orderId || currentShared?._id || currentShared?.orderMongoId;
       
       if (updatedId && sharedId && String(updatedId) === String(sharedId)) {
         if (
@@ -974,63 +950,52 @@ export const useDeliveryNotifications = () => {
       dispatchNotificationInboxRefresh();
     });
 
-    // Auth change/refresh listeners
-    const handleAuthChange = () => {
-      const newToken = localStorage.getItem('delivery_accessToken') || localStorage.getItem('accessToken');
-      if (socketRef.current && newToken) {
-        debugLog('?? Auth changed, updating socket token');
-        socketRef.current.auth.token = newToken;
-        // Only reconnect if not already connecting/connected or if token changed significantly
-        if (!socketRef.current.connected) {
-          socketRef.current.connect();
-        }
-      }
-    };
+    // Token refresh / auth-change handling now lives in createRealtimeSocket, so the socket
+    // adopts a new token without the hook having to rebuild it.
 
-    const handleAuthRefreshed = (e) => {
-      if (e.detail?.module === 'delivery' && socketRef.current && e.detail.token) {
-        debugLog('?? Auth refreshed for delivery, updating socket token');
-        socketRef.current.auth.token = e.detail.token;
-        if (!socketRef.current.connected) {
-          socketRef.current.connect();
-        }
-      }
-    };
-
+    // Re-sync whenever the app comes back to the foreground — a backgrounded webview can miss
+    // events without the socket ever reporting a disconnect.
     const handleWindowFocus = () => {
-      void recoverDeliveryState();
+      void recoverDeliveryStateRef.current?.();
     };
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        void recoverDeliveryState();
+        void recoverDeliveryStateRef.current?.();
       }
     };
 
-    window.addEventListener('deliveryAuthChanged', handleAuthChange);
-    window.addEventListener('authRefreshed', handleAuthRefreshed);
     window.addEventListener('focus', handleWindowFocus);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
+    // Liveness ping so dispatch can tell a connected-but-idle rider from a ghost whose app was
+    // killed while availabilityStatus still said 'online'. Cheap: no payload, no response.
+    const heartbeat = window.setInterval(() => {
+      if (socketRef.current?.connected) {
+        socketRef.current.emit('heartbeat');
+      }
+    }, HEARTBEAT_INTERVAL_MS);
+
     return () => {
-      debugLog('? Cleaning up socket connection...');
+      debugLog('Cleaning up socket connection...');
       stopAlertLoop();
       joinedDeliveryRoomRef.current = null;
-      window.removeEventListener('deliveryAuthChanged', handleAuthChange);
-      window.removeEventListener('authRefreshed', handleAuthRefreshed);
+      window.clearInterval(heartbeat);
       window.removeEventListener('focus', handleWindowFocus);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      if (socketRef.current) {
-        socketRef.current.removeAllListeners();
-        socketRef.current.disconnect();
-        socketRef.current = null;
-      }
+      syncEngine.destroy();
+      syncRef.current = null;
+      destroy();
+      socketRef.current = null;
     };
-  }, [deliveryPartnerId, handleIncomingOrderAlert, joinDeliveryRoomIfPossible, playNotificationSound, recoverDeliveryState, showBackgroundOrderNotification, startAlertLoop, stopAlertLoop]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
+  // Room effect: joins on the already-open socket once the partner id resolves. Kept separate
+  // from the connection effect so an id arriving late can never cause a reconnect.
   useEffect(() => {
     if (!deliveryPartnerId) {
-      debugLog('? Waiting for deliveryPartnerId...');
+      debugLog('Waiting for deliveryPartnerId before joining the delivery room...');
       return;
     }
 

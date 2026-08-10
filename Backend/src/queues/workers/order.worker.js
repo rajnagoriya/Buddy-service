@@ -23,6 +23,9 @@ const startOrderWorker = () => {
     }
     const worker = new Worker(ORDER_QUEUE, processOrderJob, {
         connection,
+        // Must match the queue prefix in queues/index.js exactly, or this worker
+        // subscribes to keys no producer ever writes.
+        prefix: config.redisKeyPrefix,
         concurrency: 5,
         defaultJobOptions
     });

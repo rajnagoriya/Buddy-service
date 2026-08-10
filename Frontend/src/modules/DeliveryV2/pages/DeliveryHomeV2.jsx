@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useDeliveryStore } from '@/modules/DeliveryV2/store/useDeliveryStore';
+import { DELIVERY_TRIP_POLL_MS, pollEnabled } from '@/services/socket/pollConfig';
 import { useProximityCheck } from '@/modules/DeliveryV2/hooks/useProximityCheck';
 import { useOrderManager } from '@/modules/DeliveryV2/hooks/useOrderManager';
 import { useDeliveryNotifications } from '@food/hooks/useDeliveryNotifications';
@@ -44,7 +45,7 @@ import useNotificationInbox from "@food/hooks/useNotificationInbox";
 function BottomPopup({ isOpen, onClose, title, children }) {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-[600] flex items-end">
+    <div className="fixed inset-0 z-600 flex items-end">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <motion.div
         initial={{ y: "100%" }}
@@ -632,10 +633,15 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
       }
     };
 
-    const poller = window.setInterval(verifyStillActive, 15000);
+    // Was a hard-coded 15s. `order_reassigned_elsewhere` / `order_claimed` arrive over the
+    // socket and cursor sync fills any gap on reconnect, so this is now a slow backstop.
+    // Set VITE_DELIVERY_TRIP_POLL_MS=0 to retire it.
+    const poller = pollEnabled(DELIVERY_TRIP_POLL_MS)
+      ? window.setInterval(verifyStillActive, DELIVERY_TRIP_POLL_MS)
+      : null;
     return () => {
       cancelled = true;
-      window.clearInterval(poller);
+      if (poller) window.clearInterval(poller);
     };
   }, [activeOrder?._id, activeOrder?.orderId]);
 
@@ -1136,7 +1142,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
     <div className="delivery-v2-theme relative h-screen w-full text-[#0F172A] overflow-hidden flex flex-col">
       {/* ─── 1. TOP HEADER (Premium Deep Tech) ─── */}
       {currentTab !== 'history' && (
-        <div className="absolute top-0 inset-x-0 header-blend shadow-lg z-[200] safe-top pb-1">
+        <div className="absolute top-0 inset-x-0 header-blend shadow-lg z-200 safe-top pb-1">
           <div className="flex items-center justify-between px-3 py-1.5">
             <div className="flex items-center gap-2">
               <div

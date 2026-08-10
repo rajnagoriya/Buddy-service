@@ -1,6 +1,11 @@
-import crypto from 'crypto';
-import { readFileSync, existsSync } from 'fs';
-import { resolve } from 'path';
+/**
+ * FCM push delivery.
+ *
+ * Sends via the firebase-admin SDK (initialised once in config/firebase.js). This module used
+ * to hand-roll a service-account JWT, mint its own OAuth token into a private cache, and POST
+ * once per token — a second, independent Firebase credential path with its own failure modes,
+ * only one of which was checked at boot.
+ */
 import { FoodUser } from '../users/user.model.js';
 import { FoodRestaurant } from '../../modules/food/restaurant/models/restaurant.model.js';
 import { FoodDeliveryPartner } from '../../modules/food/delivery/models/deliveryPartner.model.js';
@@ -8,10 +13,6 @@ import { Admin } from '../admin/admin.model.js';
 import { config } from '../../config/env.js';
 import { logger } from '../../utils/logger.js';
 
-const FIREBASE_MESSAGING_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
-const OAUTH_TOKEN_URL = 'https://oauth2.googleapis.com/token';
-const FCM_SEND_URL = (projectId) =>
-    `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/messages:send`;
 const OWNER_MODELS = {
     USER: FoodUser,
     RESTAURANT: FoodRestaurant,
@@ -49,107 +50,7 @@ export const normalizeFcmOwnerType = (ownerType) => {
     return null;
 };
 
-let cachedAccessToken = null;
-let cachedAccessTokenExpiryMs = 0;
-let cachedServiceAccount = null;
-
 const sanitizeString = (value) => String(value ?? '').trim();
-
-const toBase64Url = (input) =>
-    Buffer.from(JSON.stringify(input))
-        .toString('base64')
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/g, '');
-
-const normalizePrivateKey = (key) => String(key || '').replace(/\\n/g, '\n').trim();
-
-const getServiceAccountFromEnv = () => {
-    if (cachedServiceAccount) return cachedServiceAccount;
-
-    const rawJson = sanitizeString(config.firebaseServiceAccount || process.env.FIREBASE_SERVICE_ACCOUNT);
-    if (rawJson) {
-        cachedServiceAccount = JSON.parse(rawJson);
-        return cachedServiceAccount;
-    }
-
-    const pathValue = sanitizeString(config.firebaseServiceAccountPath || process.env.FIREBASE_SERVICE_ACCOUNT_PATH);
-    if (pathValue) {
-        const filePath = resolve(process.cwd(), pathValue);
-        if (existsSync(filePath)) {
-            cachedServiceAccount = JSON.parse(readFileSync(filePath, 'utf8'));
-            return cachedServiceAccount;
-        }
-    }
-
-    throw new Error('Firebase service account is not configured. Set FIREBASE_SERVICE_ACCOUNT or FIREBASE_SERVICE_ACCOUNT_PATH.');
-};
-
-const getFirebaseProjectId = () => {
-    const account = getServiceAccountFromEnv();
-    const projectId =
-        sanitizeString(config.firebaseProjectId) ||
-        sanitizeString(account.project_id) ||
-        sanitizeString(process.env.FIREBASE_PROJECT_ID);
-    if (!projectId) {
-        throw new Error('Firebase project ID is not configured.');
-    }
-    return projectId;
-};
-
-const getFirebaseAccessToken = async () => {
-    const now = Date.now();
-    if (cachedAccessToken && cachedAccessTokenExpiryMs - now > 60_000) {
-        return cachedAccessToken;
-    }
-
-    const account = getServiceAccountFromEnv();
-    const privateKey = normalizePrivateKey(account.private_key);
-    if (!account.client_email || !privateKey) {
-        throw new Error('Firebase service account is missing client_email or private_key.');
-    }
-
-    const iat = Math.floor(now / 1000);
-    const exp = iat + 3600;
-    const header = { alg: 'RS256', typ: 'JWT' };
-    const payload = {
-        iss: account.client_email,
-        scope: FIREBASE_MESSAGING_SCOPE,
-        aud: OAUTH_TOKEN_URL,
-        iat,
-        exp
-    };
-
-    const jwtUnsigned = `${toBase64Url(header)}.${toBase64Url(payload)}`;
-    const signer = crypto.createSign('RSA-SHA256');
-    signer.update(jwtUnsigned);
-    signer.end();
-    const signature = signer.sign(privateKey, 'base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
-    const assertion = `${jwtUnsigned}.${signature}`;
-
-    const body = new URLSearchParams({
-        grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-        assertion
-    });
-
-    const response = await fetch(OAUTH_TOKEN_URL, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body
-    });
-
-    if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`Firebase OAuth token exchange failed (${response.status}): ${text}`);
-    }
-
-    const json = await response.json();
-    cachedAccessToken = json.access_token;
-    cachedAccessTokenExpiryMs = now + ((Number(json.expires_in) || 3600) * 1000);
-    return cachedAccessToken;
-};
 
 const normalizeDataMap = (data = {}) => {
     const result = {};
@@ -161,6 +62,15 @@ const normalizeDataMap = (data = {}) => {
 };
 
 const buildMessagePayload = (payload = {}, token) => {
+    const message = buildMessageBody(payload);
+    return token ? { ...message, token } : message;
+};
+
+/**
+ * Build the FCM v1 message body WITHOUT a token, so it can be reused for a multicast send.
+ * (buildMessagePayload above keeps the single-token shape for any legacy caller.)
+ */
+const buildMessageBody = (payload = {}) => {
     const notification = {
         title: sanitizeString(payload.title || payload.notification?.title || 'New notification'),
         body: sanitizeString(payload.body || payload.notification?.body || '')
@@ -171,7 +81,7 @@ const buildMessagePayload = (payload = {}, token) => {
 
     // If payload.dataOnly is true, we omit the 'notification' block.
     // This prevents FCM from auto-displaying while allowing app code to show a 'Local Notification'.
-    const message = { token };
+    const message = {};
 
     if (!payload.dataOnly) {
         message.notification = notification;
@@ -235,25 +145,6 @@ const buildMessagePayload = (payload = {}, token) => {
     return message;
 };
 
-const parseFirebaseError = async (response) => {
-    try {
-        return await response.json();
-    } catch {
-        try {
-            const text = await response.text();
-            return { error: { message: text } };
-        } catch {
-            return { error: { message: 'Unknown Firebase error' } };
-        }
-    }
-};
-
-const shouldRemoveTokenFromError = (errorJson, response) => {
-    const status = response?.status;
-    const message = String(errorJson?.error?.message || '').toUpperCase();
-    return status === 404 || message.includes('UNREGISTERED') || message.includes('INVALID_ARGUMENT');
-};
-
 const getOwnerModel = (ownerType) => {
     const normalized = normalizeFcmOwnerType(ownerType);
     return normalized ? OWNER_MODELS[normalized] || null : null;
@@ -261,9 +152,25 @@ const getOwnerModel = (ownerType) => {
 
 const getTokenFieldForPlatform = (platform) => OWNER_TOKEN_FIELDS[platform === 'mobile' ? 'mobile' : 'web'];
 
+/**
+ * Normalize a stored token array to "oldest first, most recently registered last", capped at 10.
+ *
+ * Dedupe keeps the LAST occurrence, not the first. This matters: `[...new Set(...)]` preserves
+ * FIRST insertion order, so re-registering a token that was already in the array left it sitting
+ * at its original position instead of promoting it. Combined with pickLatestTokenOnly (which
+ * reads the tail), a rider returning to a previously-used device silently stopped receiving
+ * pushes — they kept going to whichever device last registered a genuinely new token.
+ */
 const normalizeTokenList = (tokens = []) => {
-    const normalized = [...new Set((Array.isArray(tokens) ? tokens : [tokens]).map(sanitizeString).filter(Boolean))];
-    return normalized.slice(-10);
+    const raw = (Array.isArray(tokens) ? tokens : [tokens]).map(sanitizeString).filter(Boolean);
+    const seen = new Set();
+    const newestFirst = [];
+    for (let i = raw.length - 1; i >= 0; i -= 1) {
+        if (seen.has(raw[i])) continue;
+        seen.add(raw[i]);
+        newestFirst.push(raw[i]);
+    }
+    return newestFirst.reverse().slice(-10);
 };
 
 const pickLatestTokenOnly = (tokens = []) => {
@@ -354,60 +261,116 @@ export const removeFirebaseDeviceToken = async ({ ownerType, ownerId, token, pla
     return { success: true };
 };
 
-export const sendPushNotification = async (tokens, payload = {}) => {
-    const projectId = getFirebaseProjectId();
-    const accessToken = await getFirebaseAccessToken();
-    const uniqueTokens = normalizeTokenList(tokens);
+/** FCM caps a multicast at 500 tokens per call. */
+const MULTICAST_BATCH_SIZE = 500;
 
+/** Admin SDK error codes that mean the token is dead and should be dropped. */
+const UNREGISTERED_CODES = new Set([
+    'messaging/registration-token-not-registered',
+    'messaging/invalid-registration-token',
+    'messaging/invalid-argument',
+]);
+
+/**
+ * Send a push to one or more device tokens.
+ *
+ * Uses the Admin SDK's multicast instead of one HTTP request per token. The previous
+ * implementation hand-rolled a service-account JWT, minted its own OAuth token, and issued a
+ * separate `fetch` per token — so a broadcast to 50 riders was 50 round trips, on an order with
+ * a 60-second offer window.
+ *
+ * Return shape is unchanged for callers: { successCount, failureCount, results[] }.
+ */
+export const sendPushNotification = async (tokens, payload = {}) => {
+    const uniqueTokens = normalizeTokenList(tokens);
     if (uniqueTokens.length === 0) {
         return { successCount: 0, failureCount: 0, results: [] };
     }
 
-    const results = await Promise.all(
-        uniqueTokens.map(async (token) => {
-            const message = buildMessagePayload(payload, token);
-            try {
-                const response = await fetch(FCM_SEND_URL(projectId), {
-                    method: 'POST',
-                    headers: {
-                        Authorization: `Bearer ${accessToken}`,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ message })
-                });
+    const { getFirebaseMessaging } = await import('../../config/firebase.js');
+    let messaging;
+    try {
+        messaging = getFirebaseMessaging();
+    } catch (err) {
+        logger.error(`FCM send aborted — messaging not initialized: ${err.message}`);
+        return {
+            successCount: 0,
+            failureCount: uniqueTokens.length,
+            results: uniqueTokens.map((token) => ({ token, ok: false, remove: false, error: err.message })),
+        };
+    }
 
-                if (!response.ok) {
-                    const errorJson = await parseFirebaseError(response);
-                    return {
-                        token,
+    const body = buildMessageBody(payload);
+    const results = [];
+
+    for (let i = 0; i < uniqueTokens.length; i += MULTICAST_BATCH_SIZE) {
+        const batch = uniqueTokens.slice(i, i + MULTICAST_BATCH_SIZE);
+        try {
+            // sendEachForMulticast reports per-token success rather than failing the whole batch.
+            const res = await messaging.sendEachForMulticast({ ...body, tokens: batch });
+            res.responses.forEach((r, idx) => {
+                if (r.success) {
+                    results.push({ token: batch[idx], ok: true, response: { name: r.messageId } });
+                } else {
+                    const code = r.error?.code || '';
+                    results.push({
+                        token: batch[idx],
                         ok: false,
-                        remove: shouldRemoveTokenFromError(errorJson, response),
-                        error: errorJson?.error?.message || `FCM send failed (${response.status})`
-                    };
+                        remove: UNREGISTERED_CODES.has(code),
+                        error: r.error?.message || code || 'FCM send failed',
+                        code,
+                    });
                 }
+            });
+        } catch (error) {
+            // Whole-batch failure (network, auth, quota) — retryable, so do NOT drop tokens.
+            logger.warn(`FCM multicast batch failed: ${error?.message || error}`);
+            batch.forEach((token) => {
+                results.push({ token, ok: false, remove: false, error: error?.message || String(error) });
+            });
+        }
+    }
 
-                return {
-                    token,
-                    ok: true,
-                    response: await response.json()
-                };
-            } catch (error) {
-                return {
-                    token,
-                    ok: false,
-                    remove: false,
-                    error: error?.message || String(error)
-                };
-            }
-        })
-    );
-
-    const successCount = results.filter((result) => result.ok).length;
-    const failureCount = results.length - successCount;
-    return { successCount, failureCount, results };
+    const successCount = results.filter((r) => r.ok).length;
+    return { successCount, failureCount: results.length - successCount, results };
 };
 
-export const sendNotificationToOwner = async ({ ownerType, ownerId, payload, platform } = {}) => {
+/**
+ * Write a delivery receipt. Never throws and never blocks the send — a telemetry failure must
+ * not become a notification failure.
+ */
+const recordPushReceipt = async ({
+    ownerType, ownerId, payload = {}, status, tokensTargeted = 0,
+    successCount = 0, failureCount = 0, errorCodes, error = null, attempt = 1,
+}) => {
+    try {
+        const { PushReceipt } = await import('./pushReceipt.model.js');
+        await PushReceipt.create({
+            ownerType: normalizeFcmOwnerType(ownerType) || 'USER',
+            ownerId: String(ownerId),
+            type: sanitizeString(payload?.data?.type) || 'unknown',
+            orderId: payload?.data?.orderId ? String(payload.data.orderId) : null,
+            title: sanitizeString(payload?.title).slice(0, 200),
+            status,
+            tokensTargeted,
+            successCount,
+            failureCount,
+            attempt: Number(attempt) || 1,
+            errorCodes: errorCodes?.length ? errorCodes.slice(0, 5) : undefined,
+            error: error ? String(error).slice(0, 500) : null,
+        });
+    } catch (err) {
+        logger.warn(`Push receipt write failed: ${err.message}`);
+    }
+};
+
+/**
+ * @param {object}  params
+ * @param {boolean} [params.options.throwOnTotalFailure] - rethrow retryable total failures so a
+ *   queue worker can retry. Off by default: direct callers keep the old swallow behaviour.
+ * @param {number}  [params.options.attempt] - BullMQ attempt number, recorded on the receipt.
+ */
+export const sendNotificationToOwner = async ({ ownerType, ownerId, payload, platform, options = {} } = {}) => {
     // 💡 Clone the payload to avoid side-effects (e.g. adding multiple prefixes to the same object during broadcasting)
     const enrichedPayload = { ...payload };
 
@@ -435,27 +398,71 @@ export const sendNotificationToOwner = async ({ ownerType, ownerId, payload, pla
     const shouldFanoutAllDevices = payload?.sendToAllDevices === true;
     const targetTokens = shouldFanoutAllDevices ? normalizeTokenList(tokens) : pickLatestTokenOnly(tokens);
     if (!targetTokens.length) {
+        // A recipient with no registered token is itself a delivery failure worth seeing —
+        // it is the difference between "push failed" and "push was never possible".
+        await recordPushReceipt({
+            ownerType, ownerId, payload: enrichedPayload,
+            status: 'failed', tokensTargeted: 0, successCount: 0, failureCount: 0,
+            error: 'no registered device token',
+            attempt: options.attempt,
+        });
         return { successCount: 0, failureCount: 0, results: [] };
     }
     try {
         console.log(`[FCM] Sending to ${ownerType}:${ownerId}. Title: "${enrichedPayload.title || 'Data Only'}"`);
         const response = await sendPushNotification(targetTokens, enrichedPayload);
-        const invalidTokens = (response.results || [])
 
+        await recordPushReceipt({
+            ownerType, ownerId, payload: enrichedPayload,
+            status: response.successCount > 0
+                ? (response.failureCount > 0 ? 'partial' : 'sent')
+                : 'failed',
+            tokensTargeted: targetTokens.length,
+            successCount: response.successCount,
+            failureCount: response.failureCount,
+            errorCodes: [...new Set((response.results || [])
+                .filter((r) => !r.ok)
+                .map((r) => r.code || r.error)
+                .filter(Boolean))],
+            attempt: options.attempt,
+        });
+
+        // A send where every token failed for a RETRYABLE reason must surface to the caller so
+        // the queue can retry it. Unregistered-token failures are terminal and must not.
+        if (response.successCount === 0 && response.failureCount > 0) {
+            const allTerminal = (response.results || []).every((r) => r.ok || r.remove);
+            if (!allTerminal && options.throwOnTotalFailure) {
+                throw new Error(
+                    `FCM delivery failed for all ${response.failureCount} token(s): ` +
+                    `${response.results?.find((r) => !r.ok)?.error || 'unknown'}`,
+                );
+            }
+        }
+
+        const invalidTokens = (response.results || [])
             .filter((item) => !item.ok && item.remove)
             .map((item) => item.token)
             .filter(Boolean);
+        // Pruning dead tokens is housekeeping, and must not be able to rewrite the outcome of
+        // a send that already happened: a validation error on an unrelated field of the owner
+        // document used to fall through to the catch below and log the whole push as failed.
         if (invalidTokens.length > 0) {
-            const model = getOwnerModel(ownerType);
-            const doc = model ? await model.findById(ownerId) : null;
-            if (doc) {
-                const fieldNames = platform
-                    ? [getTokenFieldForPlatform(platform)]
-                    : [OWNER_TOKEN_FIELDS.web, OWNER_TOKEN_FIELDS.mobile];
-                for (const field of fieldNames) {
-                    doc[field] = normalizeTokenList((Array.isArray(doc[field]) ? doc[field] : []).filter((t) => !invalidTokens.includes(t)));
+            try {
+                const model = getOwnerModel(ownerType);
+                const doc = model ? await model.findById(ownerId) : null;
+                if (doc) {
+                    const fieldNames = platform
+                        ? [getTokenFieldForPlatform(platform)]
+                        : [OWNER_TOKEN_FIELDS.web, OWNER_TOKEN_FIELDS.mobile];
+                    for (const field of fieldNames) {
+                        doc[field] = normalizeTokenList((Array.isArray(doc[field]) ? doc[field] : []).filter((t) => !invalidTokens.includes(t)));
+                    }
+                    // validateModifiedOnly: never block token cleanup on pre-existing invalid
+                    // data elsewhere in the profile.
+                    await doc.save({ validateModifiedOnly: true });
                 }
-                await doc.save();
+            } catch (pruneErr) {
+                logger.warn(`Dead-token prune failed for ${ownerType}:${ownerId}: ${pruneErr.message}`);
             }
         }
         logger.info(
@@ -464,28 +471,51 @@ export const sendNotificationToOwner = async ({ ownerType, ownerId, payload, pla
         return response;
     } catch (error) {
         logger.warn(`FCM push failed for ${ownerType}:${ownerId}: ${error.message}`);
+        await recordPushReceipt({
+            ownerType, ownerId, payload: enrichedPayload,
+            status: 'failed', tokensTargeted: targetTokens.length,
+            successCount: 0, failureCount: targetTokens.length,
+            error: error.message, attempt: options.attempt,
+        });
+        // Rethrow when the caller is a retrying queue worker; otherwise preserve the previous
+        // swallow-and-return-shape behaviour so no existing call site changes.
+        if (options.throwOnTotalFailure) throw error;
         return { successCount: 0, failureCount: targetTokens.length, error: error.message };
     }
 };
 
-export const sendNotificationToOwners = async (targets = [], payload = {}) => {
+/** Cap on concurrent per-owner sends, so a large broadcast cannot exhaust the socket pool. */
+const FANOUT_CONCURRENCY = 20;
+
+export const sendNotificationToOwners = async (targets = [], payload = {}, options = {}) => {
     // 🔍 Tip #6: Deduplicate targets by ownerType:ownerId before sending
     // This prevents duplicate notifications if the same person is listed twice (e.g. as USER and partner)
     const uniqueTargets = Array.isArray(targets)
         ? [...new Map(targets.filter(t => t?.ownerType && t?.ownerId).map(t => [`${t.ownerType}:${t.ownerId}`, t])).values()]
         : [];
+    if (uniqueTargets.length === 0) return [];
 
-    const results = [];
-    for (const target of uniqueTargets) {
-        results.push(
-            await sendNotificationToOwner({
+    // Bounded-concurrency fan-out. This was a sequential `for … await` loop, so notifying 50
+    // riders meant 50 serial round trips — tens of seconds on an order with a 60s offer window.
+    const results = new Array(uniqueTargets.length);
+    let cursor = 0;
+    const runWorker = async () => {
+        for (;;) {
+            const index = cursor++;
+            if (index >= uniqueTargets.length) return;
+            const target = uniqueTargets[index];
+            results[index] = await sendNotificationToOwner({
                 ownerType: target.ownerType,
                 ownerId: target.ownerId,
                 platform: target.platform,
-                payload
-            })
-        );
-    }
+                payload,
+                options,
+            });
+        }
+    };
+    await Promise.all(
+        Array.from({ length: Math.min(FANOUT_CONCURRENCY, uniqueTargets.length) }, runWorker),
+    );
     return results;
 };
 
@@ -521,7 +551,70 @@ export const sendTestNotification = async ({ ownerType, ownerId, platform }) => 
         }
     });
 };
+/**
+ * Hand a push to the notification queue so BullMQ owns the retry + dead-letter, falling back to
+ * a direct send when the queue is unavailable.
+ *
+ * The queue is what turns a transient FCM 5xx or quota rejection from a permanently lost
+ * notification into a retried one.
+ *
+ * @returns {Promise<boolean>} true when the job was queued
+ */
+let workerProbeAt = 0;
+let workerProbeResult = false;
+const WORKER_PROBE_TTL_MS = 30000;
+
+/**
+ * Is anything actually consuming the notification queue?
+ *
+ * Without this, enabling BullMQ while the notification worker is not running would queue every
+ * push into a void — pushes would stop entirely and silently. Probed at most once per 30s and
+ * cached, so it costs nothing on the hot path and self-heals when a worker starts or dies.
+ */
+const hasLiveNotificationWorker = async (queue) => {
+    const now = Date.now();
+    if (now - workerProbeAt < WORKER_PROBE_TTL_MS) return workerProbeResult;
+    workerProbeAt = now;
+    try {
+        const workers = await queue.getWorkers();
+        workerProbeResult = Array.isArray(workers) && workers.length > 0;
+        if (!workerProbeResult) {
+            logger.warn('No notification worker is consuming the queue — sending pushes inline.');
+        }
+    } catch {
+        workerProbeResult = false;
+    }
+    return workerProbeResult;
+};
+
+const tryQueuePush = async (targets, payload) => {
+    try {
+        const { getNotificationQueue } = await import('../../queues/index.js');
+        const queue = getNotificationQueue();
+        if (!queue) return false;
+        if (!(await hasLiveNotificationWorker(queue))) return false;
+
+        const { addNotificationJob } = await import('../../queues/producers/notification.producer.js');
+        const job = await addNotificationJob(
+            { action: 'send-push', targets, payload },
+            {
+                attempts: 4,
+                backoff: { type: 'exponential', delay: 2000 },
+                removeOnComplete: { count: 500 },
+                // Keep failures for a week: this IS the dead-letter queue.
+                removeOnFail: { age: 7 * 24 * 3600 },
+            },
+        );
+        return Boolean(job);
+    } catch (err) {
+        logger.warn(`Push enqueue failed, sending inline: ${err.message}`);
+        return false;
+    }
+};
+
 export const notifyOwnerSafely = async (target = {}, payload = {}) => {
+    if (!target?.ownerType || !target?.ownerId) return null;
+    if (await tryQueuePush([target], payload)) return { queued: true };
     try {
         return await sendNotificationToOwner({ ...target, payload });
     } catch (error) {
@@ -531,6 +624,8 @@ export const notifyOwnerSafely = async (target = {}, payload = {}) => {
 };
 
 export const notifyOwnersSafely = async (targets = [], payload = {}) => {
+    if (!Array.isArray(targets) || targets.length === 0) return [];
+    if (await tryQueuePush(targets, payload)) return [{ queued: true }];
     try {
         return await sendNotificationToOwners(targets, payload);
     } catch (error) {

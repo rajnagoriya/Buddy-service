@@ -15,14 +15,35 @@ import { getRoadDistanceBatch } from '../../../../core/location/distance.service
 import {
   buildDeliverySocketPayload,
   buildOrderIdentityFilter,
-  notifyOwnerSafely,
   notifyOwnersSafely,
+  publish,
   MAX_DISPATCH_ATTEMPTS,
 } from './order.helpers.js';
 import { fetchRoadDistancesKm } from '../utils/googleMaps.js';
 
-// Singleton initializer loop for Socket Bridge at server boot
+// Singleton initializer loop for Socket Bridge at server boot.
+//
+// Bounded: this module is also imported by the standalone BullMQ workers (see
+// ecosystem.config.cjs), where initSocket() is never called, so getIO() stays null forever. An
+// unbounded retry left a 200ms timer spinning for the lifetime of every worker process.
+const SOCKET_BRIDGE_RETRY_MS = 200;
+const SOCKET_BRIDGE_MAX_ATTEMPTS = 150; // ~30s, ample for boot ordering in the web process
 let socketBridgeInitialized = false;
+let socketBridgeAttempts = 0;
+
+function scheduleSocketBridgeRetry() {
+  socketBridgeAttempts += 1;
+  if (socketBridgeAttempts >= SOCKET_BRIDGE_MAX_ATTEMPTS) {
+    logger.warn(
+      '[SocketBridge] Socket.IO unavailable in this process after ' +
+      `${socketBridgeAttempts} attempts; giving up. Expected in BullMQ worker processes — ` +
+      'but note that socket emits from this process will be dropped unless the Redis adapter is attached.',
+    );
+    return;
+  }
+  setTimeout(tryInitSocketBridge, SOCKET_BRIDGE_RETRY_MS).unref?.();
+}
+
 function tryInitSocketBridge() {
   if (socketBridgeInitialized) return;
   try {
@@ -38,13 +59,32 @@ function tryInitSocketBridge() {
           logger.warn(`[SocketBridge] Failed to load socket-bridge.service.js: ${err.message}`);
         });
     } else {
-      setTimeout(tryInitSocketBridge, 200);
+      scheduleSocketBridgeRetry();
     }
-  } catch (err) {
-    setTimeout(tryInitSocketBridge, 200);
+  } catch {
+    scheduleSocketBridgeRetry();
   }
 }
 tryInitSocketBridge();
+
+/**
+ * Candidate ordering: live riders first, then nearest.
+ *
+ * Used for every re-sort in the shortlist pipeline (straight-line, then road-distance
+ * refinement) so a later sort cannot silently discard the presence ranking.
+ */
+/**
+ * How long a `dispatch.dispatchingAt` lock is honoured before it is treated as abandoned.
+ * Must exceed the worst-case runtime of tryAutoAssign (geo query + Distance Matrix + writes).
+ */
+const DISPATCH_LOCK_TTL_MS = 2 * 60 * 1000;
+
+const byPresenceThenDistance = (a, b) => {
+  const aStale = Boolean(a?.stalePresence);
+  const bStale = Boolean(b?.stalePresence);
+  if (aStale !== bStale) return aStale ? 1 : -1;
+  return a.distanceKm - b.distanceKm;
+};
 
 /**
  * Symmetric check to the taxi side: drop any delivery partner whose linked
@@ -229,29 +269,43 @@ async function listNearbyOnlineDeliveryPartners(
   const allOnline = await FoodDeliveryPartner.find({
     availabilityStatus: "online",
   })
-    .select("_id status lastLat lastLng lastLocationAt name")
+    .select("_id status lastLat lastLng lastLocationAt name presence")
     .lean();
 
   const scored = [];
   const allowedStatuses = process.env.NODE_ENV === 'production' ? ['approved'] : ['approved', 'pending'];
   const STALE_GPS_MS = 10 * 60 * 1000;
+  // A partner not seen on a socket for this long is probably a ghost: availabilityStatus says
+  // 'online' but the app is killed. Rank them last rather than dropping them, so a presence
+  // bug (or a partner on a flaky connection) can never starve dispatch.
+  const STALE_PRESENCE_MS = 2 * 60 * 1000;
+
+  const hasStalePresence = (p) => {
+    const lastSeen = p?.presence?.lastSeenAt;
+    // No presence recorded at all = a partner who has not connected since this shipped.
+    // Treat as fresh so the rollout cannot silently de-rank the entire fleet.
+    if (!lastSeen) return false;
+    return Date.now() - new Date(lastSeen).getTime() > STALE_PRESENCE_MS;
+  };
 
   for (const p of allOnline) {
     if (!allowedStatuses.includes(p.status)) continue;
 
+    const stalePresence = hasStalePresence(p);
     const isStale = !p.lastLocationAt || (Date.now() - new Date(p.lastLocationAt).getTime()) > STALE_GPS_MS;
     if (p.lastLat == null || p.lastLng == null || isStale) {
-      scored.push({ partnerId: p._id, distanceKm: 999, status: p.status });
+      scored.push({ partnerId: p._id, distanceKm: 999, status: p.status, stalePresence });
       continue;
     }
 
     const d = haversineKm(rLat, rLng, p.lastLat, p.lastLng);
     if (Number.isFinite(d) && d <= maxKm) {
-      scored.push({ partnerId: p._id, distanceKm: d, status: p.status, lat: p.lastLat, lng: p.lastLng });
+      scored.push({ partnerId: p._id, distanceKm: d, status: p.status, lat: p.lastLat, lng: p.lastLng, stalePresence });
     }
   }
 
-  scored.sort((a, b) => a.distanceKm - b.distanceKm);
+  // Live riders first, then by distance. Ghosts stay in the pool but sit at the back.
+  scored.sort(byPresenceThenDistance);
   let picked = scored.slice(0, Math.max(1, limit));
 
   // Refine the already stale-filtered, straight-line-sorted shortlist with real
@@ -266,7 +320,7 @@ async function listNearbyOnlineDeliveryPartners(
     withCoords.forEach((p, i) => {
       if (roadResults[i]) p.distanceKm = roadResults[i].meters / 1000;
     });
-    picked = picked.slice().sort((a, b) => a.distanceKm - b.distanceKm);
+    picked = picked.slice().sort(byPresenceThenDistance);
   }
 
   // Re-rank top candidates by road distance when Google Maps is configured.
@@ -293,7 +347,7 @@ async function listNearbyOnlineDeliveryPartners(
             c.entry.distanceSource = 'road';
           }
         });
-        picked.sort((a, b) => a.distanceKm - b.distanceKm);
+        picked.sort(byPresenceThenDistance);
       }
     }
   }
@@ -356,6 +410,20 @@ export async function tryAutoAssign(orderId, options = {}) {
   const attempt = options.attempt || 1;
   const lockTimeout = 90000; // 90 seconds lock interval
 
+  // Self-healing dispatch lock.
+  //
+  // `dispatchingAt` is cleared in a finally block, so a process that dies inside this function
+  // leaves it set forever — and the selection query below used to require
+  // `{ $exists: false }`, which made that order permanently undispatchable. Comparing against a
+  // TTL instead means a crashed lock ages out on its own.
+  const staleLockBefore = new Date(Date.now() - DISPATCH_LOCK_TTL_MS);
+  const lockIsFree = {
+    $or: [
+      { 'dispatch.dispatchingAt': { $exists: false } },
+      { 'dispatch.dispatchingAt': null },
+      { 'dispatch.dispatchingAt': { $lt: staleLockBefore } },
+    ],
+  };
 
   const dispatchableStatuses = new Set([
     'created',
@@ -378,15 +446,19 @@ export async function tryAutoAssign(orderId, options = {}) {
     {
       _id: isObjectId ? new mongoose.Types.ObjectId(orderId) : null,
       orderStatus: { $in: Array.from(dispatchableStatuses) },
-      $or: [
-        { 'dispatch.status': 'unassigned' },
+      $and: [
         {
-          'dispatch.status': 'assigned',
-          'dispatch.acceptedAt': { $exists: false },
-          'dispatch.assignedAt': { $lt: new Date(Date.now() - lockTimeout) }
-        }
+          $or: [
+            { 'dispatch.status': 'unassigned' },
+            {
+              'dispatch.status': 'assigned',
+              'dispatch.acceptedAt': { $exists: false },
+              'dispatch.assignedAt': { $lt: new Date(Date.now() - lockTimeout) }
+            }
+          ],
+        },
+        lockIsFree,
       ],
-      'dispatch.dispatchingAt': { $exists: false }
     },
     {
       $set: { 'dispatch.dispatchingAt': new Date() }
@@ -399,7 +471,8 @@ export async function tryAutoAssign(orderId, options = {}) {
     const qcQuery = {
       workflowStatus: 'DELIVERY_SEARCH',
       'dispatch.status': { $in: ['unassigned', 'offered', 'timed_out'] },
-      'dispatch.dispatchingAt': { $exists: false }
+      // Same self-healing lock as the food path above.
+      ...lockIsFree,
     };
     if (isObjectId) {
       qcQuery._id = new mongoose.Types.ObjectId(orderId);
@@ -494,8 +567,7 @@ export async function tryAutoAssign(orderId, options = {}) {
         return order;
       }
       
-      const io = getIO();
-      if (io && partners.length > 0) {
+      if (partners.length > 0) {
         let payload;
         if (isQc) {
           const { adaptQcOrderToFoodShape } = await import('../../../../shared/adapters/delivery-response.adapter.js');
@@ -503,10 +575,23 @@ export async function tryAutoAssign(orderId, options = {}) {
         } else {
           payload = buildDeliverySocketPayload(order, order.restaurantId);
         }
-        for (const p of partners) {
-          const roomName = rooms.delivery(p.partnerId);
-          io.to(roomName).emit('new_order_available', { ...payload, pickupDistanceKm: p.distanceKm });
-        }
+        // Re-broadcast to the already-offered pool. Through publish() so it is durable and so
+        // it works from the BullMQ worker, where getIO() is null.
+        const distanceByPartner = new Map(
+          partners.map((p) => [String(p.partnerId), p.distanceKm]),
+        );
+        await publish(
+          'new_order_available',
+          payload,
+          partners.map((p) => ({ kind: 'DELIVERY_PARTNER', id: p.partnerId })),
+          {
+            orderMongoId: order._id,
+            payloadFor: (r) => ({
+              ...payload,
+              pickupDistanceKm: distanceByPartner.get(String(r.id)),
+            }),
+          },
+        );
       }
 
       // Re-queue itself to keep trying
@@ -520,7 +605,6 @@ export async function tryAutoAssign(orderId, options = {}) {
       return order;
     }
 
-    const io = getIO();
     let payload;
     if (isQc) {
       const { adaptQcOrderToFoodShape } = await import('../../../../shared/adapters/delivery-response.adapter.js');
@@ -531,53 +615,69 @@ export async function tryAutoAssign(orderId, options = {}) {
 
     const phase1Batch = eligible.slice(0, Math.min(3, eligible.length));
 
+    // Everyone this attempt offers to. Phase 2 is the wide broadcast that exists precisely
+    // because nobody accepted, so it needs the same reach as phase 1 — not less.
+    const offerBatch = isPhase2 ? eligible : phase1Batch;
+
     if (isPhase2) {
-      // PHASE 2 BROADCAST: Notify everyone remaining
       logger.info(`[Phase 2] Broadcasting order ${order._id} to ${eligible.length} riders.`);
-      for (const p of eligible) {
-        const roomName = rooms.delivery(p.partnerId);
-        if (io) {
-          const eventPayload = { ...payload, pickupDistanceKm: p.distanceKm };
-          io.to(roomName).emit('new_order', eventPayload);
-          io.to(roomName).emit('new_order_available', eventPayload);
-        }
-      }
-    } else {
-      // PHASE 1: Offer to top few nearby riders
+    } else if (phase1Batch[0]) {
       const lead = phase1Batch[0];
-      if (lead) {
-        logger.info(`[Phase 1] Offering order ${order._id} to ${phase1Batch.length} riders (lead ${lead.partnerId}, ${lead.distanceKm}km)`);
-      }
-
-      for (const p of phase1Batch) {
-        const roomName = rooms.delivery(p.partnerId);
-        if (io) {
-          const eventPayload = { ...payload, pickupDistanceKm: p.distanceKm };
-          io.to(roomName).emit('new_order', eventPayload);
-          io.to(roomName).emit('new_order_available', eventPayload);
-        }
-      }
-
-      if (lead && !isQc) {
-        try {
-          await notifyOwnerSafely(
-            { ownerType: 'DELIVERY_PARTNER', ownerId: lead.partnerId },
-            {
-              title: 'New order assigned!',
-              body: `You have 60 seconds to accept Order #${order.order_id || order._id}.`,
-              // Time-critical offer: ring through on a killed app.
-              ring: true,
-              data: { type: 'new_order', orderId: order._id.toString() },
-            },
-          );
-        } catch (err) {
-          logger.warn(`Push notification failed for partner ${lead.partnerId}: ${err.message}`);
-        }
-      }
+      logger.info(`[Phase 1] Offering order ${order._id} to ${phase1Batch.length} riders (lead ${lead.partnerId}, ${lead.distanceKm}km)`);
     }
 
-    const partnersToRecord = isPhase2 ? eligible : phase1Batch;
-    const offeredToEntries = partnersToRecord.map(p => ({
+    // Through publish() so the offer lands in the durable outbox before it is emitted. This is
+    // the event a rider most needs to recover after being offline, and until now it had no
+    // durable record at all — a missed `new_order` was simply gone.
+    //
+    // pickupDistanceKm is per-rider, so the live payload is overridden per recipient while the
+    // stored event keeps the base payload. The emitted shape is unchanged.
+    const distanceByPartner = new Map(
+      offerBatch.map((p) => [String(p.partnerId), p.distanceKm]),
+    );
+    await publish(
+      'new_order',
+      payload,
+      offerBatch.map((p) => ({ kind: 'DELIVERY_PARTNER', id: p.partnerId })),
+      {
+        orderMongoId: order._id,
+        alsoEmit: ['new_order_available'],
+        payloadFor: (r) => ({
+          ...payload,
+          pickupDistanceKm: distanceByPartner.get(String(r.id)),
+        }),
+      },
+    );
+
+    // Push to EVERY rider in the batch, not just the lead. A socket emit only reaches a rider
+    // whose app is foregrounded and connected; a rider with a backgrounded or killed app is
+    // reachable by FCM alone. Previously phase 1 pushed to the lead only and phase 2 pushed to
+    // nobody, so an offline rider could never learn about an offer.
+    //
+    // Fire-and-forget: notifyOwnersSafely fans out sequentially, and dispatch must not block on
+    // it. `eligible` is bounded by searchOptions.limit (15), so the fan-out stays small.
+    if (!isQc && offerBatch.length > 0) {
+      const pushTargets = offerBatch.map((p) => ({
+        ownerType: 'DELIVERY_PARTNER',
+        ownerId: p.partnerId,
+      }));
+      void notifyOwnersSafely(pushTargets, {
+        title: 'New order available!',
+        body: `You have 60 seconds to accept Order #${order.order_id || order._id}.`,
+        // Time-critical offer: ring through on a killed app.
+        ring: true,
+        // Ring every device this rider has registered (phone + web dashboard), rather than the
+        // single most-recent token. An offer is worth the duplicate; the client dedupes by
+        // order id within ALERT_DEDUPE_MS.
+        sendToAllDevices: true,
+        data: { type: 'new_order', orderId: order._id.toString() },
+      }).catch((err) => {
+        logger.warn(`Dispatch push fan-out failed for order ${order._id}: ${err.message}`);
+      });
+    }
+
+    // Record exactly who was offered — same list that was emitted/pushed to above.
+    const offeredToEntries = offerBatch.map(p => ({
       partnerId: p.partnerId,
       at: new Date(),
       action: 'offered',
@@ -658,14 +758,20 @@ export async function processDispatchTimeout(orderId, partnerId, options = {}) {
 
   if (stillAssigned) {
     logger.info(`Dispatch timeout for partner ${partnerId} on order ${orderId}. Re-trying hunt...`);
-    const offer = order.dispatch.offeredTo?.find(
-      o => String(o.partnerId) === String(partnerId) && o.action === 'offered'
-    );
-    if (offer) offer.action = 'timeout';
+
+    // Use the id straight off the doc rather than re-casting `partnerId`: stillAssigned has
+    // already proven they are equal, and this cannot throw on a malformed input.
+    const timedOutPartnerId = order.dispatch.deliveryPartnerId;
 
     order.dispatch.status = 'unassigned';
     order.dispatch.deliveryPartnerId = null;
 
+    // Mark just this partner's offer in place with an array filter.
+    //
+    // This used to read `offeredTo`, mutate it in memory and `$set` the whole array back — so
+    // two overlapping timeout jobs for the same order silently lost one another's writes, and a
+    // rider who had already declined could be re-offered indefinitely while a fresh rider was
+    // skipped. A positional update touches only the matching element.
     const collectionName = isQc ? 'quick_orders' : 'food_orders';
     await mongoose.connection.db.collection(collectionName).updateOne(
       { _id: order._id },
@@ -673,11 +779,16 @@ export async function processDispatchTimeout(orderId, partnerId, options = {}) {
         $set: {
           'dispatch.status': 'unassigned',
           'dispatch.deliveryPartnerId': null,
-          'dispatch.offeredTo': order.dispatch.offeredTo
+          'dispatch.offeredTo.$[offer].action': 'timeout',
         }
+      },
+      {
+        arrayFilters: [
+          { 'offer.partnerId': timedOutPartnerId, 'offer.action': 'offered' },
+        ],
       }
     );
-    
+
     await tryAutoAssign(order._id, { attempt: nextAttempt });
   } else if (order.dispatch?.status === 'unassigned' || order.dispatch?.status === 'offered') {
     await tryAutoAssign(order._id, { attempt: nextAttempt });

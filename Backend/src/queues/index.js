@@ -42,6 +42,9 @@ const createQueue = (queueName) => {
     if (!conn) return null;
     const queue = new Queue(queueName, {
         connection: conn,
+        // Namespaced so 'order'/'tracking'/'otp' cannot collide with another app on a shared
+        // Redis. Must match the worker prefix exactly or jobs are produced where nothing reads.
+        prefix: config.redisKeyPrefix,
         defaultJobOptions
     });
     queueInstances.set(queueName, queue);

@@ -106,6 +106,21 @@ const deliveryPartnerSchema = new mongoose.Schema(
             default: 'offline'
         },
         /**
+         * Socket-derived liveness, written on connect/disconnect and refreshed by the client
+         * heartbeat. `availabilityStatus` alone is an explicit API toggle with no liveness
+         * signal, so a partner who force-quits the app stays 'online' forever and keeps
+         * absorbing offers into the void.
+         *
+         * Advisory only for now: dispatch DE-PRIORITISES a partner with stale presence rather
+         * than excluding them, so a bug here can never starve the rider pool. Promote to a hard
+         * filter once the telemetry is trusted.
+         */
+        presence: {
+            socketConnectedAt: { type: Date },
+            lastSeenAt: { type: Date },
+            _id: false,
+        },
+        /**
          * Single source of truth for the partner's live GPS location, written
          * exclusively via saveActorLocation(). `lastLocation`/`lastLat`/`lastLng`/
          * `location` below are deprecated read-compat fields kept only until the

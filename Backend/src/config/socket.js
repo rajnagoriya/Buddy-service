@@ -42,6 +42,30 @@ const isFoodDeliveryRole = (role) =>
     role === 'DELIVERY_PARTNER' || role === 'DRIVER';
 
 /**
+ * Record socket-derived liveness for a delivery partner.
+ *
+ * Advisory data only — dispatch uses it to rank, never to exclude — so every failure is
+ * swallowed. It must never be able to break a connection or a location update.
+ *
+ * @param {string} partnerId
+ * @param {{ connected?: boolean }} [options] - set socketConnectedAt on a fresh connect
+ */
+const touchDeliveryPresence = async (partnerId, { connected = false } = {}) => {
+    if (!partnerId) return;
+    try {
+        const { FoodDeliveryPartner } = await import(
+            '../modules/food/delivery/models/deliveryPartner.model.js'
+        );
+        const now = new Date();
+        const $set = { 'presence.lastSeenAt': now };
+        if (connected) $set['presence.socketConnectedAt'] = now;
+        await FoodDeliveryPartner.updateOne({ _id: partnerId }, { $set });
+    } catch (err) {
+        logger.warn(`Presence update skipped for ${partnerId}: ${err.message}`);
+    }
+};
+
+/**
  * Initializes Socket.IO with the provided HTTP server.
  * When REDIS_ENABLED=true and REDIS_URL is set, attaches Redis adapter for horizontal scaling.
  * @param {import('http').Server} server
@@ -112,8 +136,13 @@ export const initSocket = async (server) => {
             pubClient.on('error', (err) => logger.error(`Socket.IO Redis pub client: ${err.message}`));
             subClient.on('error', (err) => logger.error(`Socket.IO Redis sub client: ${err.message}`));
             await Promise.all([pubClient.connect(), subClient.connect()]);
-            io.adapter(createAdapter(pubClient, subClient));
-            logger.info('Socket.IO Redis adapter attached for horizontal scaling');
+            // `key` namespaces the pub/sub channels. Redis pub/sub is global — it is NOT scoped
+            // by db index — so without this, a second app using the default 'socket.io' key on
+            // the same Redis would receive (and rebroadcast) this app's room events.
+            io.adapter(createAdapter(pubClient, subClient, { key: `${config.redisKeyPrefix}:socket.io` }));
+            logger.info(
+                `Socket.IO Redis adapter attached for horizontal scaling (key=${config.redisKeyPrefix}:socket.io)`,
+            );
         } catch (err) {
             logger.warn(`Socket.IO Redis adapter skipped (using in-memory): ${err.message}`);
         }
@@ -140,6 +169,7 @@ export const initSocket = async (server) => {
                     deliveryPartnerId: String(userId),
                     room: roomNames.delivery(userId),
                 });
+                void touchDeliveryPresence(userId, { connected: true });
             }
         }
 
@@ -352,6 +382,14 @@ export const initSocket = async (server) => {
             socket.leave(room);
         });
 
+        // Client liveness ping. Cheap enough to take on the socket rather than an HTTP route,
+        // and it keeps presence fresh for a rider who is connected but idle (no location
+        // updates because they have no active trip).
+        socket.on('heartbeat', () => {
+            if (!isFoodDeliveryRole(socket.user?.role)) return;
+            void touchDeliveryPresence(userId);
+        });
+
         socket.on('disconnect', () => {
             logger.info(`Socket client disconnected: ${socket.id}`);
             if (isFoodDeliveryRole(role)) {
@@ -359,7 +397,67 @@ export const initSocket = async (server) => {
                     socketId: socket.id,
                     deliveryPartnerId: String(userId || ''),
                 });
+                // Stamp the moment we lost them so dispatch can age them out.
+                void touchDeliveryPresence(userId);
             }
+        });
+
+        /**
+         * Cursor sync — the replacement for order polling.
+         *
+         * One handler for USER / RESTAURANT / DELIVERY_PARTNER; only the recipient filter
+         * differs. Unlike `resync` below (which is scoped to the caller's single ACTIVE order,
+         * and has no RESTAURANT branch at all), this answers "what was addressed to me since
+         * cursor N?" — so a rider who was offered an order while offline, and therefore has no
+         * active order, still recovers the offer.
+         *
+         * Client contract:
+         *   emit('sync', { since }, ack?)  →  ack/emit('sync_batch', { events, nextCursor, hasMore })
+         * Events are ordered by cursor and carry an eventId for client-side dedupe.
+         *
+         * `resync` is intentionally left untouched and still live: apps in the field call it.
+         */
+        socket.on('sync', async (data, ack) => {
+            const respond = (payload) => {
+                if (typeof ack === 'function') ack(payload);
+                else socket.emit('sync_batch', payload);
+            };
+
+            try {
+                // Dynamic import: order.helpers.js imports getIO/getBroadcaster from this
+                // module, so a static import here would close the cycle at module-eval time.
+                const { readSyncBatch, recipientKindForRole } = await import(
+                    '../modules/food/orders/services/order.helpers.js'
+                );
+                const kind = recipientKindForRole(role);
+                if (!kind || !userId) {
+                    return respond({ events: [], nextCursor: Number(data?.since) || 0, hasMore: false });
+                }
+
+                const since = Number(data?.since) || 0;
+                const batch = await readSyncBatch({ kind, id: userId }, since, data?.limit);
+
+                if (batch.events.length > 0) {
+                    logger.info(
+                        `[Sync] ${kind}:${userId} recovered ${batch.events.length} event(s) ` +
+                        `from cursor ${since} → ${batch.nextCursor}${batch.hasMore ? ' (more pending)' : ''}`,
+                    );
+                }
+                return respond(batch);
+            } catch (err) {
+                logger.error(`Sync failed for ${role}:${userId} — ${err.message}`);
+                return respond({ events: [], nextCursor: Number(data?.since) || 0, hasMore: false });
+            }
+        });
+
+        /**
+         * Client confirms it applied up to `cursor`. Advisory: the client is the authority on
+         * its own cursor (it persists it), so this exists purely for observability.
+         */
+        socket.on('sync_ack', (data) => {
+            const cursor = Number(data?.cursor);
+            if (!Number.isFinite(cursor)) return;
+            logger.info(`[Sync] ${role}:${userId} acked cursor ${cursor}`);
         });
 
         // 🆕 Resync State on Reconnect
@@ -427,6 +525,9 @@ export const initSocket = async (server) => {
 
 /**
  * Returns the initialized Socket.IO instance.
+ *
+ * NOTE: this is null in any process that did not call initSocket() — notably the standalone
+ * BullMQ workers in ecosystem.config.cjs. Use getBroadcaster() when you only need to emit.
  * @returns {Server | null}
  */
 export const getIO = (silent = false) => {
@@ -434,6 +535,69 @@ export const getIO = (silent = false) => {
         logger.warn('Socket.IO not initialized');
     }
     return io;
+};
+
+let redisEmitter = null;
+let redisEmitterInit = null;
+
+/**
+ * Lazily build a Redis-backed emitter for processes that have no Socket.IO server.
+ *
+ * The BullMQ workers run dispatch (processDispatchTimeout → tryAutoAssign → emit 'new_order'),
+ * but getIO() is null there, so every `if (io)` guard silently skipped and the offer reached
+ * nobody. The emitter publishes to the same adapter channels the web process subscribes to,
+ * so the emit is delivered for real.
+ *
+ * Requires the SAME `key` as the adapter above, or the web process never sees the message.
+ */
+const getRedisEmitter = async () => {
+    if (redisEmitter) return redisEmitter;
+    if (!config.redisEnabled || !config.redisUrl) return null;
+    if (redisEmitterInit) return redisEmitterInit;
+
+    redisEmitterInit = (async () => {
+        try {
+            const { Emitter } = await import('@socket.io/redis-emitter');
+            const { createClient } = await import('redis');
+            const client = createClient({ url: config.redisUrl });
+            client.on('error', (err) => logger.error(`Socket.IO emitter Redis error: ${err.message}`));
+            await client.connect();
+            redisEmitter = new Emitter(client, { key: `${config.redisKeyPrefix}:socket.io` });
+            logger.info(
+                `Socket.IO Redis emitter ready (key=${config.redisKeyPrefix}:socket.io) — this process can emit without a Socket.IO server`,
+            );
+            return redisEmitter;
+        } catch (err) {
+            logger.warn(`Socket.IO Redis emitter unavailable: ${err.message}`);
+            return null;
+        } finally {
+            redisEmitterInit = null;
+        }
+    })();
+
+    return redisEmitterInit;
+};
+
+/**
+ * Something that can `.to(room).emit(event, payload)`.
+ *
+ * Returns the real Socket.IO server when this process has one, otherwise a Redis emitter.
+ * Callers that need server-only APIs (room membership, socket iteration) must use getIO().
+ *
+ * @returns {Promise<{to: Function} | null>}
+ */
+export const getBroadcaster = async () => {
+    if (io) return io;
+    return getRedisEmitter();
+};
+
+/** Close the emitter's Redis client (graceful shutdown in worker processes). */
+export const closeRedisEmitter = async () => {
+    const client = redisEmitter?.redisClient;
+    redisEmitter = null;
+    if (client?.quit) {
+        try { await client.quit(); } catch { /* already closing */ }
+    }
 };
 
 export const rooms = roomNames;

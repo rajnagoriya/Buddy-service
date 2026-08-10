@@ -23,6 +23,9 @@ const startNotificationWorker = () => {
     }
     const worker = new Worker(NOTIFICATION_QUEUE, processNotificationJob, {
         connection,
+        // Must match the queue prefix in queues/index.js exactly, or this worker
+        // subscribes to keys no producer ever writes.
+        prefix: config.redisKeyPrefix,
         concurrency: 5,
         defaultJobOptions
     });

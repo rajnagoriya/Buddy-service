@@ -15,8 +15,18 @@ export const handleRazorpayWebhook = async (req, res) => {
     const secret = config.razorpayWebhookSecret;
 
     // 1. Verify Signature using raw body buffer
-    if (!signature || !secret || !req.rawBody) {
-        logger.warn('Razorpay Webhook: Missing signature or rawBody buffer.');
+    if (!secret) {
+        // Spell this out: an unset secret rejects EVERY webhook, so payment.captured and
+        // refund events are silently never processed. That looks identical to "Razorpay isn't
+        // calling us" unless the cause is named.
+        logger.error(
+            'Razorpay Webhook REJECTED: RAZORPAY_WEBHOOK_SECRET is not set. ' +
+            'All payment/refund webhooks will fail until it matches the dashboard webhook secret.',
+        );
+        return res.status(400).send('Webhook secret not configured');
+    }
+    if (!signature || !req.rawBody) {
+        logger.warn('Razorpay Webhook: Missing x-razorpay-signature header or raw body.');
         return res.status(400).send('Invalid signature');
     }
 
@@ -25,7 +35,14 @@ export const handleRazorpayWebhook = async (req, res) => {
         .update(req.rawBody)
         .digest('hex');
 
-    if (expected !== signature) {
+    // Constant-time compare — a plain !== leaks the expected digest byte-by-byte via timing.
+    const expectedBuf = Buffer.from(expected, 'utf8');
+    const providedBuf = Buffer.from(String(signature), 'utf8');
+    const signatureValid =
+        expectedBuf.length === providedBuf.length &&
+        crypto.timingSafeEqual(expectedBuf, providedBuf);
+
+    if (!signatureValid) {
         logger.warn('Razorpay Webhook: Signature verification failed.');
         return res.status(400).send('Invalid signature');
     }
@@ -78,6 +95,64 @@ export const handleRazorpayWebhook = async (req, res) => {
                     }
                 } catch (checkoutErr) {
                     logger.error(`Webhook checkout finalize error: ${checkoutErr.message}`);
+                }
+            }
+        }
+
+        // --- 🔴 Handle Payment Failed ---
+        //
+        // Previously unhandled: only the browser's onError/onDismiss callback cancelled the
+        // checkout, so a customer whose payment failed after they closed the tab (or lost
+        // connectivity) left the session stuck in 'pending_payment' until its 30-minute TTL,
+        // and a placed order kept payment.status 'pending' with nothing to correct it.
+        if (event === 'payment.failed') {
+            const paymentObj = payload?.payment?.entity || {};
+            const rzOrderId = paymentObj.order_id;
+            const rzPaymentId = paymentObj.id;
+            const reason = paymentObj.error_description || paymentObj.error_reason || 'Payment failed';
+
+            if (rzOrderId) {
+                // Pay-then-place: close the checkout session so it is not left hanging.
+                try {
+                    const { FoodCheckoutSession } = await import(
+                        '../../../modules/food/orders/models/foodCheckoutSession.model.js'
+                    );
+                    const session = await FoodCheckoutSession.findOneAndUpdate(
+                        // Only a session that never completed — never downgrade a paid/completed one.
+                        { 'razorpay.orderId': rzOrderId, status: 'pending_payment' },
+                        { $set: { status: 'failed', failureReason: String(reason).slice(0, 300) } },
+                        { new: true },
+                    );
+                    if (session) {
+                        logger.info(`Webhook [payment.failed]: Checkout ${session._id} marked failed — ${reason}`);
+                    }
+                } catch (sessionErr) {
+                    logger.error(`Webhook payment.failed checkout update error: ${sessionErr.message}`);
+                }
+
+                // Place-then-pay: an order already exists and its payment did not go through.
+                try {
+                    const failedOrder = await FoodOrder.findOneAndUpdate(
+                        {
+                            'payment.razorpay.orderId': rzOrderId,
+                            'payment.status': { $nin: ['paid', 'refunded'] },
+                        },
+                        {
+                            $set: {
+                                'payment.status': 'failed',
+                                'payment.failureReason': String(reason).slice(0, 300),
+                                ...(rzPaymentId ? { 'payment.razorpay.paymentId': rzPaymentId } : {}),
+                            },
+                        },
+                        { new: true },
+                    );
+                    if (failedOrder) {
+                        logger.warn(
+                            `Webhook [payment.failed]: Order ${failedOrder.order_id || failedOrder._id} payment failed — ${reason}`,
+                        );
+                    }
+                } catch (orderErr) {
+                    logger.error(`Webhook payment.failed order update error: ${orderErr.message}`);
                 }
             }
         }

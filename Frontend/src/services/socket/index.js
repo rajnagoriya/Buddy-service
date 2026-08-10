@@ -1,6 +1,13 @@
 /**
- * Socket placeholder for future backend integration.
- * Export nothing so imports can be added later.
+ * Realtime socket entry point.
+ *
+ * Use `createRealtimeSocket` rather than calling `io()` directly — it owns URL resolution,
+ * connection options and token-refresh recovery, so those cannot drift between modules again.
  */
 
-export default {};
+export {
+  createRealtimeSocket,
+  resolveSocketOrigin,
+  readModuleToken,
+} from './createRealtimeSocket.js';
+export { default } from './createRealtimeSocket.js';

@@ -118,6 +118,8 @@ const paymentSchema = new mongoose.Schema(
             ],
             default: 'cod_pending'
         },
+        /** Populated from the payment.failed webhook so a failure is diagnosable after the fact. */
+        failureReason: { type: String, default: null },
         amountDue: { type: Number, min: 0 },
         razorpay: {
             orderId: { type: String },

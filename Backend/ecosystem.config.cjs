@@ -44,5 +44,19 @@ module.exports = {
         NODE_ENV: 'production',
       },
     },
+    {
+      // Push delivery with retry + dead-letter. If this is not running, firebase.service.js
+      // detects the absent consumer and falls back to sending inline, so pushes still go out —
+      // but without retries. Keep it running in production.
+      name: 'buddy-worker-notification',
+      script: 'src/queues/workers/notification.worker.js',
+      cwd: __dirname,
+      instances: 1,
+      autorestart: true,
+      max_memory_restart: '512M',
+      env: {
+        NODE_ENV: 'production',
+      },
+    },
   ],
 };

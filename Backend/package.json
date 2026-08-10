@@ -22,6 +22,10 @@
     "seed:restaurants": "node scripts/seedRestaurantOnboarding/seedRestaurants.js --with-global-categories",
     "seed:restaurant-addons": "node scripts/seedRestaurantOnboarding/seedAddons.js",
     "seed:restaurant-onboarding": "node scripts/seedRestaurantOnboarding/seedGlobalCategories.js && node scripts/seedRestaurantOnboarding/seedRestaurants.js --with-global-categories && node scripts/seedRestaurantOnboarding/seedAddons.js",
+    "seed:indore": "node scripts/seedIndore/seedIndore.js",
+    "seed:indore:clean": "node scripts/seedIndore/seedIndore.js --clean",
+    "seed:indore:fast": "node scripts/seedIndore/seedIndore.js --clean --offline-images",
+    "seed:indore:wipe": "node scripts/seedIndore/seedIndore.js --wipe-only",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -32,6 +36,7 @@
     "@mapbox/polyline": "^1.2.1",
     "@phonepe-pg/pg-sdk-node": "^2.0.6",
     "@socket.io/redis-adapter": "^8.3.0",
+    "@socket.io/redis-emitter": "^5.1.0",
     "axios": "^1.16.1",
     "bcryptjs": "^2.4.3",
     "bull": "^4.16.5",

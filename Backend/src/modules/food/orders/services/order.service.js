@@ -927,6 +927,27 @@ export async function finalizeCheckoutFromWebhook(rzOrderId, rzPaymentId) {
   if (checkoutService.isCheckoutExpired(session) && session.status === 'pending_payment') {
     session.status = 'expired';
     await session.save();
+
+    // The customer's money WAS captured — we are just past the 30-minute checkout window.
+    // Silently returning here left them charged with no order and no refund. Refund it and
+    // alert an admin; never keep money for an order that will not exist.
+    try {
+      const { initiateRazorpayRefund } = await import('../helpers/razorpay.helper.js');
+      const refund = await initiateRazorpayRefund(rzPaymentId, Number(session.amountDue || 0));
+      logger.warn(
+        `Checkout ${session._id} expired but payment ${rzPaymentId} was captured. ` +
+        `Auto-refund ${refund.success ? 'initiated' : 'FAILED'}: ${refund.refundId || refund.error}`,
+      );
+      await notifyOwnersSafely([{ ownerType: 'ADMIN', ownerId: 'GLOBAL' }], {
+        title: refund.success ? 'Expired checkout auto-refunded' : 'Expired checkout refund FAILED',
+        body: `Payment ${rzPaymentId} (₹${session.amountDue}) arrived after checkout ${session._id} expired.`,
+        data: { type: 'expired_checkout_payment', checkoutId: String(session._id), paymentId: String(rzPaymentId) },
+      });
+    } catch (refundErr) {
+      logger.error(
+        `CRITICAL: expired checkout ${session._id} was paid (${rzPaymentId}) and auto-refund threw: ${refundErr.message}. Manual refund required.`,
+      );
+    }
     return null;
   }
 
@@ -1421,22 +1442,61 @@ export async function recoverStuckOrders() {
   const TWO_MIN = 2 * 60 * 1000;
 
   try {
-    // 1. Stuck in 'assigned' (partner never accepted) for > 2m
-    const stuckAssigned = await FoodOrder.find({
-      'dispatch.status': 'assigned',
+    // 1. Stuck waiting on a partner who never accepted.
+    //    Covers BOTH dispatch states: 'assigned' (a specific partner was locked in) and
+    //    'offered' (tryAutoAssign broadcast to a batch). 'offered' was previously missing here,
+    //    so the only safety net that runs without BullMQ never matched the state the dispatcher
+    //    actually produces — those orders were never re-hunted, only auto-cancelled.
+    const STALE_OFFER_MS = 90 * 1000; // 60s offer window + buffer
+    const stuckCandidates = await FoodOrder.find({
+      'dispatch.status': { $in: ['assigned', 'offered'] },
       'dispatch.acceptedAt': { $exists: false },
-      'dispatch.assignedAt': { $lt: new Date(now - TWO_MIN) },
       orderStatus: { $nin: ['delivered', 'cancelled_by_user', 'cancelled_by_restaurant'] }
     });
 
+    // 'assigned' carries dispatch.assignedAt; 'offered' does not, so fall back to the newest
+    // offeredTo entry. Filtering in JS keeps one query for both shapes.
+    const lastDispatchActivityAt = (order) => {
+      const offers = Array.isArray(order.dispatch?.offeredTo) ? order.dispatch.offeredTo : [];
+      const offerTimes = offers
+        .map((o) => (o?.at ? new Date(o.at).getTime() : null))
+        .filter((t) => Number.isFinite(t));
+      const assignedAt = order.dispatch?.assignedAt
+        ? new Date(order.dispatch.assignedAt).getTime()
+        : null;
+      const candidates = [...offerTimes, assignedAt].filter((t) => Number.isFinite(t));
+      return candidates.length ? Math.max(...candidates) : null;
+    };
+
+    // Continue the escalation ladder instead of restarting at attempt 1 (which would pin the
+    // search radius at 15km forever). Offers record their own attemptNumber.
+    const nextDispatchAttempt = (order) => {
+      const offers = Array.isArray(order.dispatch?.offeredTo) ? order.dispatch.offeredTo : [];
+      const highest = offers.reduce(
+        (max, o) => Math.max(max, Number(o?.attemptNumber) || 0),
+        0,
+      );
+      return highest + 1;
+    };
+
+    const stuckAssigned = stuckCandidates.filter((order) => {
+      const activeAt = lastDispatchActivityAt(order);
+      const threshold =
+        order.dispatch?.status === 'offered' ? STALE_OFFER_MS : TWO_MIN;
+      // No timestamp at all: treat as stale so it can never sit in limbo.
+      if (activeAt == null) return true;
+      return now.getTime() - activeAt > threshold;
+    });
+
     if (stuckAssigned.length > 0) {
-      logger.info(`Watchdog: Healing ${stuckAssigned.length} stuck assigned orders.`);
+      logger.info(`Watchdog: Healing ${stuckAssigned.length} stuck assigned/offered orders.`);
       for (const order of stuckAssigned) {
+        const attempt = nextDispatchAttempt(order);
         // Reset status to unassigned and re-trigger auto-assign
         order.dispatch.status = 'unassigned';
         order.dispatch.deliveryPartnerId = null;
         await order.save();
-        await tryAutoAssign(order._id);
+        await tryAutoAssign(order._id, { attempt });
       }
     }
 
@@ -1511,11 +1571,36 @@ export async function recoverStuckOrders() {
     }
 
     // 4. Auto-cancel orders with no accepted driver (see NO_DRIVER_AUTO_CANCEL_MS)
-    const noRiderTimeout = await FoodOrder.find({
-      orderStatus: { $in: ['created', 'scheduled'] },
+    //
+    // Age is measured from when the DRIVER HUNT started, not from createdAt, and 'scheduled'
+    // orders are excluded entirely. Both matter:
+    //
+    //  - A scheduled order sits as orderStatus:'scheduled' until processScheduledOrderAlerts
+    //    activates it (only when scheduledAt is within 30 min). Matching 'scheduled' here
+    //    cancelled every future order NO_DRIVER_AUTO_CANCEL_MS after it was placed — so an
+    //    order scheduled for tonight died minutes after checkout.
+    //  - Once activated it becomes 'created' but keeps its original createdAt (hours old), so a
+    //    createdAt-based age cancelled it instantly, before a single rider was offered.
+    const huntCandidates = await FoodOrder.find({
+      orderStatus: 'created',
       'dispatch.status': { $in: ['unassigned', 'offered', 'assigned'] },
-      createdAt: { $lt: new Date(now - NO_DRIVER_AUTO_CANCEL_MS) },
+      'dispatch.acceptedAt': { $exists: false },
     });
+
+    /** When this order actually started looking for a rider. */
+    const huntStartedAt = (order) => {
+      const times = [new Date(order.createdAt).getTime()];
+      // Scheduled orders are activated by a status transition into 'created' — that, not
+      // checkout time, is when the hunt begins.
+      for (const h of Array.isArray(order.statusHistory) ? order.statusHistory : []) {
+        if (h?.to === 'created' && h?.at) times.push(new Date(h.at).getTime());
+      }
+      return Math.max(...times.filter(Number.isFinite));
+    };
+
+    const noRiderTimeout = huntCandidates.filter(
+      (order) => now.getTime() - huntStartedAt(order) > NO_DRIVER_AUTO_CANCEL_MS,
+    );
 
     if (noRiderTimeout.length > 0) {
       logger.info(`Watchdog: Auto-cancelling ${noRiderTimeout.length} orders due to no rider availability.`);

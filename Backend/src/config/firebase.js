@@ -45,29 +45,42 @@ const getServiceAccountFromEnv = () => {
  */
 export const initializeFirebaseRealtime = () => {
     try {
-        if (admin.apps.length > 0) {
-            db = admin.database();
-            messaging = admin.messaging();
-            return { db, messaging };
-        }
-
-        const serviceAccount = getServiceAccountFromEnv();
         const databaseURL = config.firebaseDatabaseUrl;
 
-        if (!serviceAccount) {
-            logger.warn('⚠️ Firebase service account not configured. Firebase features may not work.');
-            return null;
+        if (admin.apps.length === 0) {
+            const serviceAccount = getServiceAccountFromEnv();
+            if (!serviceAccount) {
+                logger.error(
+                    '❌ Firebase service account not configured — PUSH NOTIFICATIONS ARE DISABLED. ' +
+                    'Set FIREBASE_SERVICE_ACCOUNT or FIREBASE_SERVICE_ACCOUNT_PATH.',
+                );
+                return null;
+            }
+            admin.initializeApp({
+                credential: admin.credential.cert(serviceAccount),
+                databaseURL: databaseURL || undefined,
+            });
         }
 
-        admin.initializeApp({
-            credential: admin.credential.cert(serviceAccount),
-            databaseURL: databaseURL || undefined
-        });
-
-        db = admin.database();
+        // Messaging is initialised FIRST and independently of the Realtime Database.
+        //
+        // These used to be initialised together inside one try block, so a missing or invalid
+        // databaseURL made `admin.database()` throw and left `messaging` null — silently
+        // disabling every push notification because of an unrelated RTDB misconfiguration.
         messaging = admin.messaging();
+        logger.info('✅ Firebase Messaging initialized');
 
-        logger.info('✅ Firebase Realtime Database Initialized Successfully');
+        if (databaseURL) {
+            try {
+                db = admin.database();
+                logger.info('✅ Firebase Realtime Database initialized');
+            } catch (dbErr) {
+                logger.warn(`Firebase Realtime Database unavailable (push still works): ${dbErr.message}`);
+            }
+        } else {
+            logger.info('Firebase Realtime Database URL not set — skipping RTDB (push unaffected)');
+        }
+
         return { db, messaging };
     } catch (error) {
         logger.error(`❌ Firebase Initialization Error: ${error.message}`);

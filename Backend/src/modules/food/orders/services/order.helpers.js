@@ -5,7 +5,8 @@ import {
   sendNotificationToOwner,
   sendNotificationToOwners,
 } from "../../../../core/notifications/firebase.service.js";
-import { getIO, rooms } from '../../../../config/socket.js';
+import { getIO, getBroadcaster, rooms } from '../../../../config/socket.js';
+import { config } from '../../../../config/env.js';
 import { addOrderJob } from '../../../../queues/producers/order.producer.js';
 import { FoodOrderEvent } from '../models/foodOrderEvent.model.js';
 
@@ -55,6 +56,205 @@ export async function enqueueOrderEvent(action, payload = {}) {
   } catch (err) {
     logger.warn(`BullMQ enqueue order event failed (sync): ${action} - ${err?.message || err}`);
   }
+}
+
+/** Max events returned per sync page. A rider offline for hours must not blow the frame limit. */
+export const SYNC_PAGE_SIZE = 100;
+
+/** Map a JWT role to the recipient kind used in the outbox. */
+export function recipientKindForRole(role) {
+  if (role === 'USER') return 'USER';
+  if (role === 'RESTAURANT') return 'RESTAURANT';
+  if (role === 'DELIVERY_PARTNER' || role === 'DRIVER') return 'DELIVERY_PARTNER';
+  return null;
+}
+
+/**
+ * Fetch the events addressed to one recipient after their cursor.
+ *
+ * This is what makes a poll unnecessary: it answers "what was sent to me while I was away?"
+ * exactly, in one indexed query, instead of refetching the whole order list on a timer.
+ *
+ * Read-only and never throws — a sync failure must degrade to "no events", not break the
+ * socket connection.
+ *
+ * @param {{kind:string, id:any}} recipient
+ * @param {number} sinceCursor - client's last applied cursor (0 = everything retained)
+ * @param {number} [limit]
+ * @returns {Promise<{events:Array, nextCursor:number, hasMore:boolean}>}
+ */
+export async function readSyncBatch(recipient, sinceCursor = 0, limit = SYNC_PAGE_SIZE) {
+  const empty = { events: [], nextCursor: Number(sinceCursor) || 0, hasMore: false };
+  if (!config.syncCursorEnabled) return empty;
+
+  try {
+    const [rec] = normalizeRecipients([recipient]);
+    if (!rec) return empty;
+
+    const since = Number.isFinite(Number(sinceCursor)) ? Number(sinceCursor) : 0;
+    const pageSize = Math.max(1, Math.min(Number(limit) || SYNC_PAGE_SIZE, SYNC_PAGE_SIZE));
+
+    // limit+1 to detect a further page without a second count query.
+    const rows = await FoodOrderEvent.find({
+      cursor: { $gt: since },
+      recipients: {
+        $elemMatch: { kind: rec.kind, id: new mongoose.Types.ObjectId(String(rec.id)) },
+      },
+    })
+      .sort({ cursor: 1 })
+      .limit(pageSize + 1)
+      .lean();
+
+    const hasMore = rows.length > pageSize;
+    const page = hasMore ? rows.slice(0, pageSize) : rows;
+    const events = page.map((e) => ({
+      cursor: e.cursor,
+      eventId: e.eventId,
+      type: e.type,
+      at: e.at,
+      payload: e.payload,
+    }));
+
+    return {
+      events,
+      nextCursor: events.length ? events[events.length - 1].cursor : since,
+      hasMore,
+    };
+  } catch (err) {
+    logger.warn(`readSyncBatch failed: ${err?.message || err}`);
+    return empty;
+  }
+}
+
+/**
+ * Map a sync recipient to its Socket.IO room.
+ * @param {{kind: string, id: any}} recipient
+ * @returns {string|null}
+ */
+function roomForRecipient(recipient) {
+  const id = recipient?.id;
+  if (!id) return null;
+  switch (recipient.kind) {
+    case 'USER': return rooms.user(id);
+    case 'RESTAURANT': return rooms.restaurant(id);
+    case 'DELIVERY_PARTNER': return rooms.delivery(id);
+    default: return null;
+  }
+}
+
+const VALID_RECIPIENT_KINDS = new Set(['USER', 'RESTAURANT', 'DELIVERY_PARTNER']);
+
+function normalizeRecipients(recipients = []) {
+  const seen = new Set();
+  const out = [];
+  for (const r of Array.isArray(recipients) ? recipients : [recipients]) {
+    if (!r || !VALID_RECIPIENT_KINDS.has(r.kind) || !r.id) continue;
+    const key = `${r.kind}:${String(r.id)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ kind: r.kind, id: r.id });
+  }
+  return out;
+}
+
+/**
+ * Single chokepoint for emitting a realtime event to a known set of recipients.
+ *
+ * Order matters: the durable record is written BEFORE the live emit. If the process dies after
+ * the write, the client's next sync finds the event; if it dies before, the event never
+ * logically happened. The reverse order — which is what the ~85 scattered `io.to().emit()`
+ * calls do today — can emit an event that no recovery path will ever replay.
+ *
+ * Gated on `config.syncCursorEnabled`. With the flag OFF this is behaviourally identical to a
+ * direct `io.to(room).emit(type, payload)`: no extra writes, no payload change.
+ *
+ * Failures in the durable path are logged and swallowed — an outbox problem must never stop a
+ * live event reaching a connected client.
+ *
+ * @param {string} type - event name, e.g. 'new_order'
+ * @param {object} basePayload - payload stored in the outbox
+ * @param {Array<{kind:'USER'|'RESTAURANT'|'DELIVERY_PARTNER', id:any}>} recipients
+ * @param {object} [options]
+ * @param {(r:object)=>object} [options.payloadFor] - per-recipient live payload override
+ * @param {string|object} [options.orderMongoId] - defaults to basePayload.orderMongoId/orderId
+ * @param {string[]} [options.alsoEmit] - extra event names to emit with the same payload
+ * @returns {Promise<number|null>} allocated cursor, or null when disabled/unavailable
+ */
+export async function publish(type, basePayload = {}, recipients = [], options = {}) {
+  const targets = normalizeRecipients(recipients);
+  let cursor = null;
+
+  if (config.syncCursorEnabled && targets.length > 0) {
+    try {
+      const rawOrderId =
+        options.orderMongoId || basePayload.orderMongoId || basePayload.orderId;
+      if (rawOrderId && mongoose.Types.ObjectId.isValid(String(rawOrderId))) {
+        const [{ nextGlobalCursor }, { FoodOrderEvent: EventModel }] = await Promise.all([
+          import('../models/foodCounter.model.js'),
+          import('../models/foodOrderEvent.model.js'),
+        ]);
+        cursor = await nextGlobalCursor();
+        const updated = await mongoose
+          .model('FoodOrder')
+          .findByIdAndUpdate(rawOrderId, { $inc: { eventSeq: 1 } }, { new: true, select: 'eventSeq' })
+          .lean();
+        await EventModel.create({
+          orderId: rawOrderId,
+          seq: updated?.eventSeq ?? 0,
+          eventId: randomUUID(),
+          type,
+          payload: basePayload,
+          at: new Date(),
+          cursor,
+          recipients: targets.map((r) => ({ kind: r.kind, id: r.id })),
+        });
+      }
+    } catch (err) {
+      // Never let an outbox failure suppress the live emit.
+      logger.warn(`publish outbox append failed: ${type} - ${err?.message || err}`);
+      cursor = null;
+    }
+  }
+
+  // Broadcaster, not getIO(): in a BullMQ worker there is no Socket.IO server, so this falls
+  // back to the Redis emitter. Without it every dispatch emit from the worker is dropped.
+  const broadcaster = await getBroadcaster();
+  const localIo = getIO(true);
+  if (broadcaster) {
+    const eventNames = [type, ...(Array.isArray(options.alsoEmit) ? options.alsoEmit : [])];
+    const absent = [];
+    for (const r of targets) {
+      const room = roomForRecipient(r);
+      if (!room) continue;
+
+      // Gap telemetry, measured where the gap actually happens: an empty room means the live
+      // emit reached nobody. This is the number that justifies (or retires) the order polls —
+      // it needs no client change, unlike a cursor the client has to report.
+      //
+      // Only meaningful in a process that owns a Socket.IO server; the Redis emitter has no
+      // view of room membership, so we skip rather than report a false gap.
+      if (localIo && (localIo.sockets?.adapter?.rooms?.get(room)?.size || 0) === 0) {
+        absent.push(`${r.kind}:${r.id}`);
+      }
+
+      const live = options.payloadFor ? options.payloadFor(r) : basePayload;
+      // __cursor lets a client detect a gap against its own last-applied cursor. Harmless to
+      // clients that ignore it, and absent entirely while the flag is off.
+      const framed = cursor == null ? live : { ...live, __cursor: cursor };
+      for (const name of eventNames) broadcaster.to(room).emit(name, framed);
+    }
+
+    if (absent.length > 0) {
+      logger.info(
+        `[SyncGap] '${type}' emitted to ${absent.length}/${targets.length} disconnected recipient(s) ` +
+        `[${absent.join(', ')}] — ${cursor == null
+          ? 'NOT recoverable (SYNC_CURSOR_ENABLED is off)'
+          : `recoverable at cursor ${cursor}`}`,
+      );
+    }
+  }
+
+  return cursor;
 }
 
 // Canonical implementation lives in core/location/haversine.util.js.
@@ -718,8 +918,16 @@ export function pushStatusHistory(order, { byRole, byId, from, to, note = "" }) 
 
 export const MAX_DISPATCH_ATTEMPTS = 10;
 
-/** Auto-cancel food orders with no accepted driver after this age. Testing: 1 min → production: 5 min. */
-export const NO_DRIVER_AUTO_CANCEL_MS = 1 * 60 * 1000;
+/**
+ * Auto-cancel food orders with no accepted driver after this age.
+ *
+ * MUST stay well above the dispatch escalation ladder or orders die mid-search: tryAutoAssign
+ * re-queues itself every 60s and only widens the radius from attempt 2 (15 → 25 → 40 → 60km),
+ * switching to the phase-2 broadcast at attempt 3. At the previous 1 min this watchdog cancelled
+ * the order before a single retry could run, so the ladder was unreachable. 8 min covers
+ * attempts 1-7 — the full radius expansion plus two broadcast rounds.
+ */
+export const NO_DRIVER_AUTO_CANCEL_MS = 8 * 60 * 1000;
 
 /**
  * How long a bulk order waits for a second (shared) delivery partner to join before the
@@ -1733,28 +1941,29 @@ export async function notifyRestaurantNewOrder(orderDoc, restaurantIdOverride = 
 
     const scopedOrder = buildRestaurantScopedOrder(orderDoc, targetRestaurantId);
     const leanOrder = toRestaurantOrderResponse(scopedOrder);
-    const io = getIO();
-    if (io) {
-      const scopedStatus = leanOrder.orderStatus || leanOrder.status || 'created';
-      const payload = {
-        ...leanOrder,
-        orderMongoId: orderDoc._id?.toString?.() || leanOrder.orderMongoId,
-        orderId: orderDoc.order_id || orderDoc._id?.toString?.() || leanOrder.orderId,
-        // Always use THIS restaurant's pickup-scoped status (never aggregate)
-        status: scopedStatus,
-        orderStatus: scopedStatus,
-        // Fresh timer on DP resend; otherwise rider-accept time for first notify
-        restaurantNotifiedAt: notifiedAt,
-        resentToRestaurant: freshNotify,
-        dispatch: leanOrder.dispatch,
-        isMultiRestaurant: Boolean(orderDoc.isMultiRestaurant),
-        myPickupStatus: scopedOrder.myPickupStatus || null,
-      };
-      logger.info(
-        `[RestaurantOrders] Emitting new_order to ${rooms.restaurant(targetRestaurantId)} for order ${orderDoc._id?.toString?.() || ''} status=${scopedStatus}${freshNotify ? ' (resent)' : ''}`,
-      );
-      io.to(rooms.restaurant(targetRestaurantId)).emit("new_order", payload);
-    }
+    const scopedStatus = leanOrder.orderStatus || leanOrder.status || 'created';
+    const payload = {
+      ...leanOrder,
+      orderMongoId: orderDoc._id?.toString?.() || leanOrder.orderMongoId,
+      orderId: orderDoc.order_id || orderDoc._id?.toString?.() || leanOrder.orderId,
+      // Always use THIS restaurant's pickup-scoped status (never aggregate)
+      status: scopedStatus,
+      orderStatus: scopedStatus,
+      // Fresh timer on DP resend; otherwise rider-accept time for first notify
+      restaurantNotifiedAt: notifiedAt,
+      resentToRestaurant: freshNotify,
+      dispatch: leanOrder.dispatch,
+      isMultiRestaurant: Boolean(orderDoc.isMultiRestaurant),
+      myPickupStatus: scopedOrder.myPickupStatus || null,
+    };
+    logger.info(
+      `[RestaurantOrders] Emitting new_order to ${rooms.restaurant(targetRestaurantId)} for order ${orderDoc._id?.toString?.() || ''} status=${scopedStatus}${freshNotify ? ' (resent)' : ''}`,
+    );
+    // Durable-then-live: a restaurant that was disconnected when this fired currently has no
+    // way to learn the order exists, which is exactly what the 10s order poll compensates for.
+    await publish('new_order', payload, [{ kind: 'RESTAURANT', id: targetRestaurantId }], {
+      orderMongoId: orderDoc._id,
+    });
 
     await notifyOwnersSafely(
       [{ ownerType: "RESTAURANT", ownerId: targetRestaurantId }],

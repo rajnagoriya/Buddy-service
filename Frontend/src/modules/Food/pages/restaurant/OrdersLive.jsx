@@ -7,6 +7,11 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import Lenis from "lenis";
 import {
+  RESTAURANT_ORDERS_POLL_MS,
+  RESTAURANT_BOOKINGS_POLL_MS,
+  pollEnabled,
+} from "@/services/socket/pollConfig";
+import {
   Printer,
   Volume2,
   VolumeX,
@@ -606,10 +611,14 @@ function TableBookings() {
     };
 
     fetchBookings();
-    const interval = setInterval(fetchBookings, 8000);
+    // Was a hard-coded 8s. Now a slow safety net behind pollConfig — `new_dining_booking`
+    // arrives over the socket, this only catches a gap.
+    const interval = pollEnabled(RESTAURANT_BOOKINGS_POLL_MS)
+      ? setInterval(fetchBookings, RESTAURANT_BOOKINGS_POLL_MS)
+      : null;
     return () => {
       isMounted = false;
-      clearInterval(interval);
+      if (interval) clearInterval(interval);
     };
   }, []);
 
@@ -804,7 +813,21 @@ function AllOrders({ onSelectOrder, onCancel }) {
     };
 
     fetchOrders();
-    intervalId = setInterval(fetchOrders, 10000);
+
+    // Was a hard-coded 10s full order-list refetch — the single heaviest poll in the app, and
+    // the one cursor sync exists to replace. Now a slow safety net; set
+    // VITE_RESTAURANT_ORDERS_POLL_MS=0 to retire it once the sync logs are clean.
+    if (pollEnabled(RESTAURANT_ORDERS_POLL_MS)) {
+      intervalId = setInterval(fetchOrders, RESTAURANT_ORDERS_POLL_MS);
+    }
+
+    // Refetch immediately when a new order arrives over the socket, so lowering the poll
+    // interval does not make the list feel slower — it makes it faster.
+    const onSocketOrder = () => { void fetchOrders(); };
+    window.addEventListener('restaurant:new_order', onSocketOrder);
+    window.addEventListener('restaurantOrderStatusUpdate', onSocketOrder);
+
+    // Pure UI clock for the countdown badges — no network, stays at 1s.
     countdownIntervalId = setInterval(() => {
       if (isMounted) {
         setCurrentTime(new Date());
@@ -813,6 +836,8 @@ function AllOrders({ onSelectOrder, onCancel }) {
 
     return () => {
       isMounted = false;
+      window.removeEventListener('restaurant:new_order', onSocketOrder);
+      window.removeEventListener('restaurantOrderStatusUpdate', onSocketOrder);
       if (intervalId) clearInterval(intervalId);
       if (countdownIntervalId) clearInterval(countdownIntervalId);
     };

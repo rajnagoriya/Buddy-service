@@ -23,6 +23,9 @@ const startPaymentWorker = () => {
     }
     const worker = new Worker(PAYMENT_QUEUE, processPaymentJob, {
         connection,
+        // Must match the queue prefix in queues/index.js exactly, or this worker
+        // subscribes to keys no producer ever writes.
+        prefix: config.redisKeyPrefix,
         concurrency: 5,
         defaultJobOptions
     });
