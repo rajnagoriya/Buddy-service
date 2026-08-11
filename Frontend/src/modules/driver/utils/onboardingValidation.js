@@ -15,6 +15,7 @@ export const FIELD_LIMITS = {
   name: 80,
   email: 120,
   city: 60,
+  state: 60,
   vehicleMake: 60,
   vehicleModel: 60,
   vehicleNumber: 15,

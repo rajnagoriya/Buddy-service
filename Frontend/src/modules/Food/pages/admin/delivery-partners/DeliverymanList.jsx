@@ -1137,6 +1137,18 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
                           <p className="text-sm text-slate-900 mt-1">{viewDetails.documents.bankDetails.bankName}</p>
                         </div>
                       )}
+                      {viewDetails.documents.bankDetails.branchName && (
+                        <div>
+                          <label className="text-xs font-semibold text-slate-500 uppercase">Branch</label>
+                          <p className="text-sm text-slate-900 mt-1">{viewDetails.documents.bankDetails.branchName}</p>
+                        </div>
+                      )}
+                      {viewDetails.documents.bankDetails.upiId && (
+                        <div>
+                          <label className="text-xs font-semibold text-slate-500 uppercase">UPI ID</label>
+                          <p className="text-sm text-slate-900 mt-1">{viewDetails.documents.bankDetails.upiId}</p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

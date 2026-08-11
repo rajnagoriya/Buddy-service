@@ -43,6 +43,13 @@
   background: #f3f4f6;
 }
 
+/* Subtle green accent on white sidebar — not full green */
+.restaurant-theme .rt-sidebar {
+  background:
+    linear-gradient(180deg, var(--rt-primary-soft) 0%, #ffffff 120px),
+    #ffffff;
+}
+
 .restaurant-theme .rt-btn-primary {
   background: var(--rt-primary-strong);
   color: #fff;

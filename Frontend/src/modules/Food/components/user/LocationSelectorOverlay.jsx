@@ -10,6 +10,10 @@ import { useProfile } from "@food/context/ProfileContext"
 import { toast } from "sonner"
 import { locationAPI, userAPI } from "@food/api"
 import { Loader } from '@googlemaps/js-api-loader'
+import {
+  setDeliveryAddressMode,
+  setUserLocationStorage,
+} from "@food/utils/deliveryLocationStorage"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -942,9 +946,10 @@ export default function LocationSelectorOverlay({ isOpen, onClose }) {
       // Requirement: when user taps "Use current location" from delivery-location selector,
       // don't open the "Add address" form. Just close and return to homepage.
       // Store selection mode so Cart can prefer this current location for delivery address.
-      try {
-        localStorage.setItem("deliveryAddressMode", "current");
-      } catch {}
+      setDeliveryAddressMode("current")
+      if (locationData) {
+        setUserLocationStorage(locationData)
+      }
       setShowAddressForm(false)
       setAddressFormData((prev) => ({
         ...prev,
@@ -2000,9 +2005,7 @@ export default function LocationSelectorOverlay({ isOpen, onClose }) {
       if (savedAddressId) {
         setDefaultAddress(savedAddressId)
         // User saved an address; prefer saved delivery address in Cart.
-        try {
-          localStorage.setItem("deliveryAddressMode", "saved")
-        } catch {}
+        setDeliveryAddressMode("saved")
       }
 
       // Reset form
@@ -2093,7 +2096,7 @@ export default function LocationSelectorOverlay({ isOpen, onClose }) {
         longitude,
         formattedAddress: `${address.street}, ${address.city}, ${address.state}`
       }
-      localStorage.setItem("userLocation", JSON.stringify(locationData))
+      setUserLocationStorage(locationData)
 
       // Update map position to show selected address
       setMapPosition([latitude, longitude])
@@ -2142,9 +2145,7 @@ export default function LocationSelectorOverlay({ isOpen, onClose }) {
         setDefaultAddress(selectedAddressId)
       }
       // User picked a saved address; Cart should prefer saved address over current location.
-      try {
-        localStorage.setItem("deliveryAddressMode", "saved");
-      } catch {}
+      setDeliveryAddressMode("saved")
       onClose()
     } catch (error) {
       debugError("Error selecting saved address:", error)

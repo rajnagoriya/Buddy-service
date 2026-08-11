@@ -117,6 +117,11 @@ const buddyIdentitySchema = new mongoose.Schema(
       default: '',
       trim: true,
     },
+    state: {
+      type: String,
+      default: '',
+      trim: true,
+    },
 
     // A single human can hold multiple roles over time (e.g. customer who
     // later becomes a driver). The token's `role` claim picks one of these

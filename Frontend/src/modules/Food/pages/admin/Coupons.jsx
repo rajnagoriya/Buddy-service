@@ -543,10 +543,10 @@ export default function Coupons() {
 
       if (editingOfferId) {
         await adminAPI.updateAdminOffer(editingOfferId, payload)
-        toast.success("Coupon updated — pending re-approval")
+        toast.success("Coupon updated successfully")
       } else {
         await adminAPI.createAdminOffer(payload)
-        toast.success("Coupon submitted for approval")
+        toast.success("Coupon created successfully")
       }
       setFormDialogOpen(false)
       resetForm()

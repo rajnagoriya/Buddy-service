@@ -1,21 +1,18 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { useNavigate, useOutletContext } from "react-router-dom"
-import useRestaurantBackNavigation from "@food/hooks/useRestaurantBackNavigation"
+import { useNavigate } from "react-router-dom"
 import {
-  ArrowLeft,
   Search,
   Filter,
   ChevronDown,
   Calendar,
   Copy,
   ChevronRight,
-  HelpCircle,
-  Menu,
   Loader2,
 } from "lucide-react"
 import { DateRangeCalendar } from "@food/components/ui/date-range-calendar"
 import RestaurantPanelModal from "@food/components/restaurant/panel/RestaurantPanelModal"
+import RestaurantPanelHeader from "@food/components/restaurant/panel/RestaurantPanelHeader"
 import { restaurantAPI } from "@food/api"
 import { useRestaurantNotifications } from "@food/hooks/useRestaurantNotifications"
 const debugLog = (...args) => {}
@@ -123,8 +120,6 @@ const filterOptions = {
 
 export default function AllOrdersPage() {
   const navigate = useNavigate()
-  const goBack = useRestaurantBackNavigation()
-  const { openSidebar } = useOutletContext() || {}
   const [searchQuery, setSearchQuery] = useState("")
   const [debouncedSearch, setDebouncedSearch] = useState("")
   const [showCalendar, setShowCalendar] = useState(false)
@@ -222,14 +217,24 @@ export default function AllOrdersPage() {
       price: item.price || 0
     }))
     
-    // Determine status (backend: orderStatus)
-    let status = (order.orderStatus || order.status || "created").toUpperCase()
-    if (status === 'CANCELLED') status = 'CANCELLED'
-    else if (status === 'REJECTED') status = 'REJECTED'
-    else if (status === 'DELIVERED') status = 'DELIVERED'
-    else if (status === 'PREPARING') status = 'PREPARING'
-    else if (status === 'READY') status = 'READY'
-    else if (status === 'OUT_FOR_DELIVERY' || status === 'OUT FOR DELIVERY') status = 'OUT FOR DELIVERY'
+    // Determine status (prefer terminal order status over display-mapped status)
+    let status = String(order.orderStatus || order.aggregateOrderStatus || order.status || "created")
+      .toUpperCase()
+      .replace(/-/g, "_")
+      .replace(/\s+/g, "_")
+    if (status === "CANCELLED") status = "CANCELLED"
+    else if (status === "REJECTED") status = "REJECTED"
+    else if (status === "DELIVERED" || status === "COMPLETED") status = "DELIVERED"
+    else if (status === "PREPARING") status = "PREPARING"
+    else if (status === "READY" || status === "READY_FOR_PICKUP") status = "READY"
+    else if (
+      status === "OUT_FOR_DELIVERY" ||
+      status === "PICKED_UP" ||
+      status === "REACHED_DROP" ||
+      status === "REACHED_PICKUP"
+    ) {
+      status = "OUT FOR DELIVERY"
+    }
     
     // Get rejection/cancellation reason
     let reason = null
@@ -492,45 +497,20 @@ export default function AllOrdersPage() {
 
   return (
     <div className="min-h-screen bg-gray-100">
-      {/* Order history header — fixed, respects sidebar on desktop */}
-      <div className="sticky top-0 z-40 border-b border-gray-200 bg-white/95 px-4 py-3 backdrop-blur-md">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => openSidebar?.()}
-            className="inline-flex rounded-xl border border-gray-200 p-2 hover:bg-gray-50 lg:hidden"
-            aria-label="Open menu"
-          >
-            <Menu className="h-5 w-5 text-gray-700" />
-          </button>
-          <button
-            onClick={goBack}
-            className="hidden p-1.5 hover:bg-gray-100 rounded-lg transition-colors lg:inline-flex"
-            aria-label="Go back"
-          >
-            <ArrowLeft className="w-6 h-6 text-gray-900" />
-          </button>
-          <div className="flex-1 min-w-0">
-            <h1 className="text-lg font-bold text-gray-900">
-              Order History
-            </h1>
-            <p className="text-xs text-gray-500">
-              {pagination.total || filteredOrders.length}{" "}
-              {(pagination.total || filteredOrders.length) === 1 ? "order" : "orders"} found
-            </p>
-          </div>
-          <button
-            onClick={() => navigate('/food/restaurant/help-centre/support')}
-            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-            aria-label="Help"
-          >
-            <HelpCircle className="w-5 h-5 text-gray-900" />
-          </button>
-        </div>
+      {/* Same desktop header pattern as live orders (name/location via RestaurantPanelHeader) */}
+      <div className="hidden lg:block">
+        <RestaurantPanelHeader
+          title="Order History"
+          showSearch
+        />
       </div>
 
       {/* Search and Filter Section */}
       <div className="px-4 py-4 space-y-3">
+        <p className="text-xs text-gray-500">
+          {pagination.total || filteredOrders.length}{" "}
+          {(pagination.total || filteredOrders.length) === 1 ? "order" : "orders"} found
+        </p>
         {/* Search Bar */}
         <div className="flex items-center gap-2">
           <div className="flex-1 relative">

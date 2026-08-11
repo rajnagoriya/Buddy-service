@@ -190,6 +190,11 @@ const driverSchema = new mongoose.Schema(
       default: '',
       trim: true,
     },
+    state: {
+      type: String,
+      default: '',
+      trim: true,
+    },
     referralCode: {
       type: String,
       default: '',

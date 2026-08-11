@@ -1,33 +1,41 @@
 import { useState, useRef, useEffect } from "react"
-import { getGoogleMapsApiKey } from "@food/utils/googleMapsApiKey"
 import { useNavigate } from "react-router-dom"
-import { Building2, Info, Tag, Upload, Calendar, FileText, MapPin, CheckCircle2, X, Image as ImageIcon, Clock, Loader2 } from "lucide-react"
+import { Building2, Upload, X, Image as ImageIcon, CheckCircle2, Loader2 } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@food/components/ui/dialog"
 import { Input } from "@food/components/ui/input"
 import { Label } from "@food/components/ui/label"
 import { Button } from "@food/components/ui/button"
-import { adminAPI, uploadAPI, zoneAPI } from "@food/api"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@food/components/ui/select"
+import { adminAPI, uploadAPI } from "@food/api"
 import { toast } from "sonner"
 import OutletTimingsEditor from "@food/components/admin/OutletTimingsEditor"
-import { getDefaultDays } from "@food/utils/outletTimingsUtils"
+import RestaurantLocationMapPicker from "@food/components/restaurant/onboarding/RestaurantLocationMapPicker"
+import OnboardingProgress from "@food/components/restaurant/onboarding/OnboardingProgress"
+import { CUISINE_OPTIONS, ONBOARDING_STEPS } from "@food/components/restaurant/onboarding/onboardingSteps"
+import { DAY_NAMES, getDefaultDays } from "@food/utils/outletTimingsUtils"
 import { EMAIL_REGEX } from "@/shared/utils/emailValidation"
 import { invalidateApprovedRestaurantsCache } from "@food/utils/adminRestaurantCache"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => { console.warn(...args) }
 const debugError = (...args) => { console.error(...args) }
 
-
-const cuisinesOptions = [
-  "North Indian",
-  "South Indian",
-  "Chinese",
-  "Pizza",
-  "Burgers",
-  "Bakery",
-  "Cafe",
+const ESTIMATED_DELIVERY_TIME_OPTIONS = [
+  "10-15 min",
+  "15-20 min",
+  "20-25 min",
+  "25-30 min",
+  "30-35 min",
+  "35-40 min",
+  "40-45 min",
+  "45-50 min",
 ]
 
-const daysOfWeek = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 const PHONE_REGEX = /^\d{10}$/
 const PAN_REGEX = /^[A-Z]{5}[0-9]{4}[A-Z]$/
 const FSSAI_REGEX = /^\d{14}$/
@@ -41,6 +49,7 @@ const sanitizeFssai = (value = "") => value.replace(/\D/g, "").slice(0, 14)
 const sanitizeIfsc = (value = "") => value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 11)
 const sanitizeGst = (value = "") => value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 15)
 const normalizeName = (value = "") => value.replace(/\s+/g, " ").trimStart()
+const normalizePincode = (value = "") => sanitizeDigits(value).slice(0, 6)
 const hasLetters = (value = "") => /[A-Za-z]/.test(value)
 const getTodayLocalYMD = () => new Date().toISOString().split("T")[0]
 const timeStringToMinutes = (value = "") => {
@@ -192,36 +201,16 @@ function DietTypeIcon({ type, size = "sm", className = "" }) {
   )
 }
 
-const isPointInPolygon = (lat, lng, polygon = []) => {
-  if (!Array.isArray(polygon) || polygon.length < 3) return false
-  const x = Number(lat)
-  const y = Number(lng)
-  if (!Number.isFinite(x) || !Number.isFinite(y)) return false
-
-  let inside = false
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const xi = Number(polygon[i].latitude)
-    const yi = Number(polygon[i].longitude)
-    const xj = Number(polygon[j].latitude)
-    const yj = Number(polygon[j].longitude)
-
-    const intersect = yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi
-    if (intersect) inside = !inside
-  }
-  return inside
-}
-
 export default function AddRestaurant() {
   const navigate = useNavigate()
   const [step, setStep] = useState(1)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showSuccessDialog, setShowSuccessDialog] = useState(false)
   const [formErrors, setFormErrors] = useState({})
-  const [zones, setZones] = useState([])
-  const [zonesLoading, setZonesLoading] = useState(false)
   const [isHydrated, setIsHydrated] = useState(false)
   const [phoneAvailability, setPhoneAvailability] = useState("idle")
   const [emailAvailability, setEmailAvailability] = useState("idle")
+  const [locationInZone, setLocationInZone] = useState(false)
 
   // Step 1: Basic Info
   const [step1, setStep1] = useState({
@@ -274,14 +263,6 @@ export default function AddRestaurant() {
     accountHolderName: "",
     accountType: "",
   })
-
-  const languageTabs = [
-    { key: "default", label: "Default" },
-    { key: "en", label: "English(EN)" },
-    { key: "bn", label: "Bengali - ?????(BN)" },
-    { key: "ar", label: "Arabic - ??????? (AR)" },
-    { key: "es", label: "Spanish - espa�ol(ES)" },
-  ]
 
   const mainContentRef = useRef(null)
 
@@ -467,39 +448,46 @@ export default function AddRestaurant() {
     }
   }
 
-  // Validation functions
+  // Validation functions — aligned with APK restaurant onboarding
   const validateStep1 = () => {
     const errors = []
     if (!step1.restaurantName?.trim()) errors.push("Restaurant name is required")
-    if (!step1.dietaryType) errors.push("Please select restaurant type")
+    if (!step1.dietaryType) errors.push("Please select restaurant type (Veg, Non veg, or Mixed)")
     if (!step1.ownerName?.trim()) errors.push("Owner name is required")
     if (step1.ownerName?.trim() && (!NAME_REGEX.test(step1.ownerName.trim()) || !hasLetters(step1.ownerName))) {
       errors.push("Owner name must contain valid characters")
     }
     if (!step1.ownerEmail?.trim()) errors.push("Owner email is required")
-    if (step1.ownerEmail?.trim() && !EMAIL_REGEX.test(step1.ownerEmail.trim())) errors.push("Please enter a valid email address")
+    else if (!EMAIL_REGEX.test(step1.ownerEmail.trim())) errors.push("Please enter a valid email address")
+    else if (
+      step1.ownerEmail.toLowerCase().includes("@gnail.com") ||
+      step1.ownerEmail.toLowerCase().includes("@gnil.com")
+    ) {
+      errors.push("Invalid email domain. Did you mean '@gmail.com'?")
+    }
     if (!step1.ownerPhone?.trim()) errors.push("Owner phone number is required")
     if (step1.ownerPhone?.trim() && !PHONE_REGEX.test(step1.ownerPhone.trim())) errors.push("Owner phone number must be 10 digits")
     if (!step1.primaryContactNumber?.trim()) errors.push("Primary contact number is required")
-    if (step1.primaryContactNumber?.trim() && !PHONE_REGEX.test(step1.primaryContactNumber.trim())) errors.push("Primary contact number must be 10 digits")
+    if (step1.primaryContactNumber?.trim() && !PHONE_REGEX.test(step1.primaryContactNumber.trim())) {
+      errors.push("Primary contact number must be 10 digits")
+    }
     if (!step1.zoneId?.trim()) {
-      errors.push("Service zone is required")
-    } else if (
-      step1.location?.latitude !== undefined &&
-      step1.location?.latitude !== "" &&
-      step1.location?.longitude !== undefined &&
-      step1.location?.longitude !== ""
-    ) {
-      const selectedZone = zones.find((z) => String(z?._id || z?.id || "") === step1.zoneId)
-      if (selectedZone) {
-        const isInside = isPointInPolygon(step1.location.latitude, step1.location.longitude, selectedZone.coordinates)
-        if (!isInside) {
-          errors.push("The selected location is outside the chosen service zone boundaries.")
-        }
-      }
+      errors.push("Please select a service zone first")
+    } else if (!locationInZone) {
+      errors.push("Pin your restaurant location inside the selected service zone on the map")
+    }
+    const lat = Number(step1.location?.latitude)
+    const lng = Number(step1.location?.longitude)
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      errors.push("Please select your restaurant location on the map")
     }
     if (!step1.location?.area?.trim()) errors.push("Area/Sector/Locality is required")
     if (!step1.location?.city?.trim()) errors.push("City is required")
+    if (!step1.location?.pincode?.trim()) {
+      errors.push("Pincode is required")
+    } else if (!/^\d{6}$/.test(normalizePincode(step1.location.pincode))) {
+      errors.push("Pincode must be exactly 6 digits")
+    }
     return errors
   }
 
@@ -509,8 +497,23 @@ export default function AddRestaurant() {
     if (!step2.profileImage) errors.push("Restaurant profile image is required")
     if (!step2.cuisines || step2.cuisines.length === 0) errors.push("Please select at least one cuisine")
     if (!step2.estimatedDeliveryTime?.trim()) errors.push("Estimated delivery time is required")
-    const hasOpenDay = Object.values(step2.outletTimings || {}).some((slot) => slot?.isOpen !== false)
-    if (!hasOpenDay) errors.push("At least one day must be open")
+    const openDayCount = DAY_NAMES.filter((day) => step2.outletTimings?.[day]?.isOpen !== false).length
+    if (openDayCount === 0) errors.push("Please keep at least one day open")
+    for (const day of DAY_NAMES) {
+      const slot = step2.outletTimings?.[day]
+      if (slot?.isOpen === false) continue
+      if (!slot?.openingTime?.trim()) errors.push(`${day}: opening time is required`)
+      if (!slot?.closingTime?.trim()) errors.push(`${day}: closing time is required`)
+      const openingMinutes = timeStringToMinutes(slot?.openingTime)
+      const closingMinutes = timeStringToMinutes(slot?.closingTime)
+      if (openingMinutes !== null && closingMinutes !== null) {
+        if (openingMinutes === closingMinutes) {
+          errors.push(`${day}: opening and closing time cannot be the same`)
+        } else if (closingMinutes < openingMinutes) {
+          errors.push(`${day}: closing time cannot be before opening time`)
+        }
+      }
+    }
     return errors
   }
 
@@ -641,7 +644,8 @@ export default function AddRestaurant() {
       const payload = {
         // Step 1
         restaurantName: step1.restaurantName,
-        pureVegRestaurant: step1.dietaryType === 'veg',
+        dietaryType: step1.dietaryType,
+        pureVegRestaurant: step1.dietaryType === "veg",
         ownerName: step1.ownerName,
         ownerEmail: step1.ownerEmail,
         ownerPhone: step1.ownerPhone,
@@ -698,37 +702,6 @@ export default function AddRestaurant() {
       setIsSubmitting(false)
     }
   }
-
-  const locationSearchInputRef = useRef(null)
-  const placesAutocompleteRef = useRef(null)
-  const mapsScriptLoadedRef = useRef(false)
-
-  // Manual search states for fallback
-  const [locationSearchValue, setLocationSearchValue] = useState("")
-  const [locationSuggestions, setLocationSuggestions] = useState([])
-  const [isSearchingLocation, setIsSearchingLocation] = useState(false)
-
-  useEffect(() => {
-    if (step !== 1) return
-    let cancelled = false
-    setZonesLoading(true)
-    zoneAPI
-      .getPublicZones()
-      .then((res) => {
-        const list = res?.data?.data?.zones || res?.data?.zones || []
-        if (!cancelled) setZones(Array.isArray(list) ? list : [])
-      })
-      .catch(() => {
-        if (!cancelled) setZones([])
-      })
-      .finally(() => {
-        if (!cancelled) setZonesLoading(false)
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [step])
 
   const handleCheckPhone = async () => {
     const phone = step1.ownerPhone?.trim()
@@ -794,215 +767,7 @@ export default function AddRestaurant() {
     }
   }
 
-  // Initialize Google Places Autocomplete for Step 1 location search.
-  useEffect(() => {
-    if (step !== 1) return
-
-    let cancelled = false
-    let autocomplete = null
-
-    const init = async () => {
-      // Wait for the input ref to be attached
-      let inputElement = null
-      for (let i = 0; i < 50; i++) {
-        if (locationSearchInputRef.current) {
-          inputElement = locationSearchInputRef.current
-          break
-        }
-        await new Promise((r) => setTimeout(r, 100))
-      }
-      
-      if (!inputElement || cancelled) return
-
-      const loadMaps = async () => {
-        // 1. If already fully loaded and available
-        if (window.google?.maps?.places?.Autocomplete) {
-          mapsScriptLoadedRef.current = true
-          return true
-        }
-
-        // 2. Load API Key
-        const apiKey = await getGoogleMapsApiKey()
-        if (!apiKey) {
-          debugError("Google Maps API Key missing or invalid")
-          return false
-        }
-
-        // 3. Catch Google Maps authentication failures
-        window.gm_authFailure = () => {
-          debugError("Google Maps authentication failed.")
-        }
-
-        // 4. Check for any existing script and force libraries=places
-        const scripts = Array.from(document.getElementsByTagName("script"))
-        const mapsScript = scripts.find(s => s.src?.includes("maps.googleapis.com/maps/api/js"))
-        
-        if (mapsScript && !mapsScript.src.includes("libraries=places")) {
-          mapsScript.remove()
-        } else if (mapsScript && mapsScript.src.includes("libraries=places")) {
-           for (let i = 0; i < 60; i++) {
-              if (window.google?.maps?.places?.Autocomplete) return true
-              if (cancelled) return false
-              await new Promise(r => setTimeout(r, 100))
-           }
-        }
-
-        // 5. Create and append new script
-        return new Promise((resolve) => {
-          const script = document.createElement("script")
-          script.id = "google-maps-sdk"
-          script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&v=weekly`
-          script.async = true
-          script.defer = true
-          script.onload = () => {
-            setTimeout(() => {
-              const ok = !!window.google?.maps?.places?.Autocomplete
-              mapsScriptLoadedRef.current = ok
-              resolve(ok)
-            }, 200)
-          }
-          script.onerror = () => resolve(false)
-          document.head.appendChild(script)
-        })
-      }
-
-      const parsePlace = (place) => {
-        const formattedAddress = place?.formatted_address || ""
-        const comps = Array.isArray(place?.address_components) ? place.address_components : []
-        const get = (types) => comps.find((c) => types.some((t) => c.types?.includes(t)))?.long_name || ""
-        
-        const area = get(["sublocality_level_1", "sublocality", "neighborhood"]) || get(["locality"])
-        const city = get(["locality"]) || get(["administrative_area_level_2"])
-        const state = get(["administrative_area_level_1"]) || get(["administrative_area_level_2"])
-        const pincode = get(["postal_code"])
-        const lat = place?.geometry?.location?.lat?.()
-        const lng = place?.geometry?.location?.lng?.()
-        
-        return {
-          formattedAddress,
-          area,
-          city,
-          state,
-          pincode,
-          latitude: typeof lat === 'number' ? Number(lat.toFixed(6)) : "",
-          longitude: typeof lng === 'number' ? Number(lng.toFixed(6)) : "",
-        }
-      }
-
-      const ok = await loadMaps()
-      if (!ok || cancelled || !inputElement) return
-
-      if (inputElement.hasAttribute('data-google-places-initialized')) return
-
-      try {
-        autocomplete = new window.google.maps.places.Autocomplete(
-          inputElement,
-          {
-            fields: ["formatted_address", "address_components", "geometry"],
-            componentRestrictions: { country: "in" },
-            types: ["geocode", "establishment"]
-          }
-        )
-        
-        inputElement.setAttribute('data-google-places-initialized', 'true')
-        placesAutocompleteRef.current = autocomplete
-
-        autocomplete.addListener("place_changed", () => {
-          const place = autocomplete.getPlace()
-          if (!place?.geometry) return
-          
-          const parsed = parsePlace(place)
-          setStep1((prev) => ({
-            ...prev,
-            location: {
-              ...prev.location,
-              formattedAddress: parsed.formattedAddress || prev.location.formattedAddress,
-              addressLine1: parsed.formattedAddress || prev.location.addressLine1 || "",
-              area: parsed.area || prev.location.area,
-              city: parsed.city || prev.location.city,
-              state: parsed.state || prev.location.state,
-              pincode: parsed.pincode || prev.location.pincode,
-              latitude: parsed.latitude !== "" ? parsed.latitude : prev.location.latitude,
-              longitude: parsed.longitude !== "" ? parsed.longitude : prev.location.longitude,
-            },
-          }))
-          
-          setLocationSearchValue(parsed.formattedAddress)
-          inputElement.blur()
-        })
-        
-        const pacContainerFix = () => {
-          const applyFix = () => {
-            const containers = document.querySelectorAll('.pac-container');
-            if (containers.length > 0) {
-              containers.forEach(container => {
-                container.style.zIndex = '999999';
-                container.style.pointerEvents = 'auto';
-                container.style.visibility = 'visible';
-                container.style.display = 'block';
-              });
-            }
-          };
-          applyFix();
-          setTimeout(applyFix, 100);
-          setTimeout(applyFix, 300);
-        };
-        
-        inputElement.addEventListener('focus', pacContainerFix);
-        inputElement.addEventListener('input', pacContainerFix);
-      } catch (e) {
-        debugError("Autocomplete error:", e)
-      }
-    }
-
-    init().catch(() => {})
-
-    return () => {
-      cancelled = true
-      if (autocomplete) {
-        try { window.google?.maps?.event?.clearInstanceListeners(autocomplete) } catch {}
-      }
-      if (locationSearchInputRef.current) {
-        locationSearchInputRef.current.removeAttribute('data-google-places-initialized')
-      }
-      placesAutocompleteRef.current = null
-    }
-  }, [step])
-
-  // Hybrid Search Fallback (Nominatim)
-  useEffect(() => {
-    if (step !== 1) return
-    const q = String(locationSearchValue || "").trim()
-    if (q.length < 3) {
-      setLocationSuggestions([])
-      setIsSearchingLocation(false)
-      return
-    }
-
-    const t = setTimeout(async () => {
-      try {
-        setIsSearchingLocation(true)
-        const url = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=4&q=${encodeURIComponent(q)}&countrycodes=in`
-        const res = await fetch(url, { headers: { Accept: "application/json" } })
-        const json = await res.json()
-        const mapped = (Array.isArray(json) ? json : []).map(r => ({
-          id: r.place_id,
-          display: r.display_name || "",
-          lat: Number(r.lat),
-          lng: Number(r.lon),
-          addr: r.address || {},
-        }))
-        setLocationSuggestions(mapped)
-      } catch (e) {
-        debugError("Nominatim search failed:", e)
-      } finally {
-        setIsSearchingLocation(false)
-      }
-    }, 400)
-
-    return () => clearTimeout(t)
-  }, [locationSearchValue, step])
-
+  // Zones are loaded inside RestaurantLocationMapPicker (same as APK onboarding).
 
   // Render functions for each step
   const renderStep1 = () => (
@@ -1123,88 +888,6 @@ export default function AddRestaurant() {
 
       <section className="bg-white p-4 sm:p-6 rounded-md space-y-4">
         <h2 className="text-lg font-semibold text-black">Restaurant contact & location</h2>
-        <div className="relative">
-          <Label className="text-xs text-gray-700">Search location</Label>
-          <div className="relative">
-            <Input
-              ref={locationSearchInputRef}
-              value={locationSearchValue}
-              onChange={(e) => setLocationSearchValue(e.target.value)}
-              className="mt-1 bg-white text-sm"
-              placeholder="Search and select restaurant address..."
-            />
-            {isSearchingLocation && (
-              <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                <Loader2 className="h-4 w-4 animate-spin text-orange-500" />
-              </div>
-            )}
-          </div>
-
-          {locationSuggestions.length > 0 && (
-            <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-md shadow-xl z-50 overflow-hidden max-h-60 overflow-y-auto">
-              {locationSuggestions.map((s) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  onClick={() => {
-                    const { lat, lng, display, addr } = s
-                    const area = addr.suburb || addr.neighbourhood || addr.city_district || addr.locality || ""
-                    const city = addr.city || addr.town || addr.village || ""
-                    const state = addr.state || ""
-                    const pincode = addr.postcode || ""
-
-                    setStep1((prev) => ({
-                      ...prev,
-                      location: {
-                        ...prev.location,
-                        formattedAddress: display,
-                        addressLine1: display,
-                        area: area || prev.location.area,
-                        city: city || prev.location.city,
-                        state: state || prev.location.state,
-                        pincode: pincode || prev.location.pincode,
-                        latitude: lat,
-                        longitude: lng,
-                      },
-                    }))
-                    setLocationSearchValue(display)
-                    setLocationSuggestions([])
-                  }}
-                  className="w-full px-4 py-2 text-left text-[13px] font-medium text-gray-700 hover:bg-orange-50 border-b border-gray-100 last:border-none"
-                >
-                  <span className="truncate">{s.display}</span>
-                </button>
-              ))}
-            </div>
-          )}
-          
-          <p className="text-[11px] text-gray-500 mt-1">
-            Search to auto-fill Area, City, State, Pincode and coordinates.
-          </p>
-        </div>
-        <div>
-          <Label className="text-xs text-gray-700">Service zone*</Label>
-          <select
-            value={step1.zoneId || ""}
-            onChange={(e) => setStep1({ ...step1, zoneId: e.target.value })}
-            className="mt-1 w-full h-9 rounded-md border border-input bg-white px-3 text-sm"
-            disabled={zonesLoading}
-          >
-            <option value="">{zonesLoading ? "Loading zones..." : "Select a zone"}</option>
-            {zones.map((z) => {
-              const id = String(z?._id || z?.id || "")
-              const label = z?.name || z?.zoneName || z?.serviceLocation || id
-              return (
-                <option key={id} value={id}>
-                  {label}
-                </option>
-              )
-            })}
-          </select>
-          <p className="text-[11px] text-gray-500 mt-1">
-            Choose the service zone where your restaurant will be available.
-          </p>
-        </div>
         <div>
           <Label className="text-xs text-gray-700">Primary contact number*</Label>
           <Input
@@ -1216,49 +899,88 @@ export default function AddRestaurant() {
             maxLength={10}
           />
         </div>
-        <div className="space-y-3">
-          <Input
-            value={step1.location?.area || ""}
-            onChange={(e) => setStep1({ ...step1, location: { ...step1.location, area: e.target.value } })}
-            className="bg-white text-sm"
-            placeholder="Area / Sector / Locality*"
+        <div>
+          <Label className="text-xs text-gray-700">Restaurant location*</Label>
+          <p className="text-[11px] text-gray-500 mt-1 mb-2">
+            Select a service zone, then pin the restaurant location inside the zone on the map (same as APK registration).
+          </p>
+          <RestaurantLocationMapPicker
+            value={{
+              zoneId: step1.zoneId,
+              location: step1.location,
+            }}
+            onChange={({ zoneId, isInZone, location }) => {
+              setLocationInZone(Boolean(isInZone))
+              const hasPin =
+                Number.isFinite(Number(location?.latitude)) &&
+                Number.isFinite(Number(location?.longitude))
+              setStep1((prev) => ({
+                ...prev,
+                zoneId: zoneId || "",
+                location: {
+                  ...prev.location,
+                  formattedAddress: hasPin
+                    ? location?.formattedAddress || ""
+                    : "",
+                  addressLine1: hasPin
+                    ? location?.addressLine1 || location?.formattedAddress || ""
+                    : "",
+                  area: hasPin ? location?.area || "" : "",
+                  city: location?.city || prev.location?.city || "",
+                  state: hasPin ? location?.state || "" : "",
+                  pincode: hasPin ? location?.pincode || "" : "",
+                  latitude: hasPin ? location?.latitude : "",
+                  longitude: hasPin ? location?.longitude : "",
+                },
+              }))
+            }}
           />
-          <Input
-            value={step1.location?.city || ""}
-            onChange={(e) => setStep1({ ...step1, location: { ...step1.location, city: e.target.value } })}
-            className="bg-white text-sm"
-            placeholder="City*"
-          />
-          <Input
-            value={step1.location?.addressLine1 || ""}
-            onChange={(e) => setStep1({ ...step1, location: { ...step1.location, addressLine1: e.target.value } })}
-            className="bg-white text-sm"
-            placeholder="Shop no. / building no. (optional)"
-          />
-          <Input
-            value={step1.location?.addressLine2 || ""}
-            onChange={(e) => setStep1({ ...step1, location: { ...step1.location, addressLine2: e.target.value } })}
-            className="bg-white text-sm"
-            placeholder="Floor / tower (optional)"
-          />
-          <Input
-            value={step1.location?.state || ""}
-            onChange={(e) => setStep1({ ...step1, location: { ...step1.location, state: e.target.value } })}
-            className="bg-white text-sm"
-            placeholder="State (optional)"
-          />
-          <Input
-            value={step1.location?.pincode || ""}
-            onChange={(e) => setStep1({ ...step1, location: { ...step1.location, pincode: e.target.value } })}
-            className="bg-white text-sm"
-            placeholder="Pin code (optional)"
-          />
-          <Input
-            value={step1.location?.landmark || ""}
-            onChange={(e) => setStep1({ ...step1, location: { ...step1.location, landmark: e.target.value } })}
-            className="bg-white text-sm"
-            placeholder="Nearby landmark (optional)"
-          />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="sm:col-span-2">
+            <Label className="text-xs text-gray-700">Area / Sector / Locality*</Label>
+            <Input
+              value={step1.location?.area || ""}
+              onChange={(e) => setStep1({ ...step1, location: { ...step1.location, area: e.target.value } })}
+              className="mt-1 bg-white text-sm"
+              placeholder="Locality"
+            />
+          </div>
+          <div>
+            <Label className="text-xs text-gray-700">City*</Label>
+            <Input
+              value={step1.location?.city || ""}
+              readOnly={Boolean(step1.zoneId)}
+              onChange={(e) => setStep1({ ...step1, location: { ...step1.location, city: e.target.value } })}
+              className={`mt-1 bg-white text-sm${step1.zoneId ? " bg-gray-50" : ""}`}
+              placeholder={step1.zoneId ? "Set from selected zone" : "City"}
+            />
+          </div>
+          <div>
+            <Label className="text-xs text-gray-700">Pincode*</Label>
+            <Input
+              value={step1.location?.pincode || ""}
+              onChange={(e) =>
+                setStep1({
+                  ...step1,
+                  location: { ...step1.location, pincode: normalizePincode(e.target.value) },
+                })
+              }
+              className="mt-1 bg-white text-sm"
+              placeholder="6-digit pincode"
+              inputMode="numeric"
+              maxLength={6}
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <Label className="text-xs text-gray-700">State</Label>
+            <Input
+              value={step1.location?.state || ""}
+              onChange={(e) => setStep1({ ...step1, location: { ...step1.location, state: e.target.value } })}
+              className="mt-1 bg-white text-sm"
+              placeholder="State"
+            />
+          </div>
         </div>
       </section>
     </div>
@@ -1345,9 +1067,10 @@ export default function AddRestaurant() {
 
       <section className="bg-white p-4 sm:p-6 rounded-md space-y-5">
         <div>
-          <Label className="text-xs text-gray-700">Select cuisines (up to 3)*</Label>
+          <Label className="text-xs text-gray-700">Select cuisines*</Label>
+          <p className="text-[11px] text-gray-500 mt-1">Choose all that apply (same as APK registration)</p>
           <div className="mt-2 flex flex-wrap gap-2">
-            {cuisinesOptions.map((cuisine) => {
+            {CUISINE_OPTIONS.map((cuisine) => {
               const active = step2.cuisines.includes(cuisine)
               return (
                 <button
@@ -1357,7 +1080,6 @@ export default function AddRestaurant() {
                     setStep2((prev) => {
                       const exists = prev.cuisines.includes(cuisine)
                       if (exists) return { ...prev, cuisines: prev.cuisines.filter((c) => c !== cuisine) }
-                      if (prev.cuisines.length >= 3) return prev
                       return { ...prev, cuisines: [...prev.cuisines, cuisine] }
                     })
                   }}
@@ -1377,13 +1099,21 @@ export default function AddRestaurant() {
 
         <div>
           <Label className="text-xs text-gray-700">Estimated delivery time*</Label>
-          <Input
+          <Select
             value={step2.estimatedDeliveryTime || ""}
-            onChange={(e) => setStep2({ ...step2, estimatedDeliveryTime: e.target.value })}
-            autoComplete="off"
-            className="mt-1 bg-white text-sm"
-            placeholder="e.g., 25-30 mins"
-          />
+            onValueChange={(value) => setStep2({ ...step2, estimatedDeliveryTime: value })}
+          >
+            <SelectTrigger className="mt-1 bg-white text-sm">
+              <SelectValue placeholder="Select delivery time" />
+            </SelectTrigger>
+            <SelectContent>
+              {ESTIMATED_DELIVERY_TIME_OPTIONS.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {option}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </section>
     </div>
@@ -1523,12 +1253,28 @@ export default function AddRestaurant() {
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col">
-      <header className="px-4 py-4 sm:px-6 sm:py-5 bg-white flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Building2 className="w-5 h-5 text-blue-600" />
-          <div className="text-sm font-semibold text-black">Add New Restaurant</div>
+      <header className="px-4 py-4 sm:px-6 sm:py-5 bg-white space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Building2 className="w-5 h-5 text-blue-600" />
+            <div>
+              <div className="text-sm font-semibold text-black">Add New Restaurant</div>
+              <div className="text-[11px] text-gray-500">
+                {ONBOARDING_STEPS.find((s) => s.id === step)?.title || `Step ${step}`}
+                {" — "}
+                {ONBOARDING_STEPS.find((s) => s.id === step)?.subtitle || ""}
+              </div>
+            </div>
+          </div>
+          <div className="text-xs text-gray-600">Step {step} of 3</div>
         </div>
-        <div className="text-xs text-gray-600">Step {step} of 3</div>
+        <OnboardingProgress
+          currentStep={step}
+          completedSteps={new Set(Array.from({ length: Math.max(0, step - 1) }, (_, i) => i + 1))}
+          onStepSelect={(next) => {
+            if (next < step) setStep(next)
+          }}
+        />
       </header>
 
       <main ref={mainContentRef} className="flex-1 px-4 sm:px-6 py-4 space-y-4">

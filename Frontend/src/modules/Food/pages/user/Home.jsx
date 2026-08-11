@@ -1290,19 +1290,54 @@ export default function Home() {
     const city = String(effectiveLocation?.city || "")
       .trim()
       .toLowerCase();
+    // Coarser rounding (~1.1km) avoids refetch loops from small GPS drift.
     const lat = Number.isFinite(effectiveLocation?.latitude)
-      ? Math.round(effectiveLocation.latitude * 1000) / 1000
+      ? Math.round(effectiveLocation.latitude * 100) / 100
       : null;
     const lng = Number.isFinite(effectiveLocation?.longitude)
-      ? Math.round(effectiveLocation.longitude * 1000) / 1000
+      ? Math.round(effectiveLocation.longitude * 100) / 100
       : null;
-    return `${city}|${lat ?? ""}|${lng ?? ""}|${effectiveZoneId || ""}`;
+    // Prefer stable coords over flapping zoneId while zone resolves.
+    const zonePart =
+      lat != null && lng != null ? "" : String(effectiveZoneId || "");
+    return `${city}|${lat ?? ""}|${lng ?? ""}|${zonePart}`;
   }, [
     effectiveLocation?.city,
     effectiveLocation?.latitude,
     effectiveLocation?.longitude,
     effectiveZoneId,
   ]);
+
+  // Freeze the first usable location key so GPS jitter / zone settle doesn't reload the list.
+  const stableRestaurantsLocationKeyRef = useRef("");
+  const [stableRestaurantsLocationKey, setStableRestaurantsLocationKey] = useState("");
+
+  useEffect(() => {
+    const hasCoords = restaurantsLocationQueryKey.split("|").slice(1, 3).every(Boolean);
+    const hasCity = Boolean(
+      String(effectiveLocation?.city || "").trim() &&
+        String(effectiveLocation?.city || "").toLowerCase() !== "current location",
+    );
+    if (!hasCoords && !hasCity && !effectiveZoneId) return;
+
+    if (!stableRestaurantsLocationKeyRef.current) {
+      stableRestaurantsLocationKeyRef.current = restaurantsLocationQueryKey;
+      setStableRestaurantsLocationKey(restaurantsLocationQueryKey);
+      return;
+    }
+
+    // Only unlock when the user explicitly changes delivery address/mode (event-driven sync
+    // already updates effectiveLocation). Compare city+coarse coords; ignore zone-only flips.
+    const [prevCity, prevLat, prevLng] = String(stableRestaurantsLocationKeyRef.current).split("|");
+    const [nextCity, nextLat, nextLng] = String(restaurantsLocationQueryKey).split("|");
+    const locationChanged =
+      prevCity !== nextCity || prevLat !== nextLat || prevLng !== nextLng;
+
+    if (locationChanged) {
+      stableRestaurantsLocationKeyRef.current = restaurantsLocationQueryKey;
+      setStableRestaurantsLocationKey(restaurantsLocationQueryKey);
+    }
+  }, [restaurantsLocationQueryKey, effectiveLocation?.city, effectiveZoneId]);
 
   const homeListCity = useMemo(
     () => resolveUserListCity(effectiveLocation),
@@ -1407,10 +1442,10 @@ export default function Home() {
   const restaurantListQueryKey = useMemo(
     () =>
       buildRestaurantListQueryKey(
-        restaurantsLocationQueryKey,
+        stableRestaurantsLocationKey || restaurantsLocationQueryKey,
         appliedFilters,
       ),
-    [restaurantsLocationQueryKey, appliedFilters],
+    [stableRestaurantsLocationKey, restaurantsLocationQueryKey, appliedFilters],
   );
 
   const fetchRestaurantPage = useCallback(
@@ -1466,7 +1501,13 @@ export default function Home() {
   });
 
   const showRestaurantSkeleton =
-    loadingRestaurants || (restaurantsFetchReady && !homeListCity);
+    loadingRestaurants ||
+    (restaurantsFetchReady &&
+      !homeListCity &&
+      !(
+        Number.isFinite(effectiveLocation?.latitude) &&
+        Number.isFinite(effectiveLocation?.longitude)
+      ));
 
   const menuUnionRestaurantIdsKey = useMemo(() => {
     if (!Array.isArray(restaurantsData) || restaurantsData.length === 0) {

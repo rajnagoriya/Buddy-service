@@ -120,7 +120,7 @@ export default function OnboardingWizard() {
     onboardingServices: [],
     foodVehicle: { type: "bike", number: "", make: "", model: "", color: "", photoUrl: "", rcUrl: "", insuranceUrl: "" },
     taxiVehicle: { type: "", vehicleTypeId: "", name: "", number: "", make: "", model: "", color: "", photoUrl: "", rcUrl: "", insuranceUrl: "", commercialPermitUrl: "", pucUrl: "" },
-    basics: { name: "", email: "", gender: "", city: "" },
+    basics: { name: "", email: "", gender: "", city: "", state: "" },
     kyc: {
       aadhaar: { number: "", documentUrl: "", backDocumentUrl: "" },
       pan: { number: "", documentUrl: "" },
@@ -228,6 +228,7 @@ export default function OnboardingWizard() {
             email: data?.basics?.email || prev.basics.email,
             gender: data?.basics?.gender || prev.basics.gender,
             city: data?.basics?.city || prev.basics.city,
+            state: data?.basics?.state || prev.basics.state,
           },
           kyc: {
             aadhaar: {
@@ -901,6 +902,15 @@ export default function OnboardingWizard() {
                     value={state.basics.city}
                     onChange={(v) => setField("basics.city", v.slice(0, FIELD_LIMITS.city))}
                     placeholder="e.g. Indore (optional)"
+                  />
+                  <Field
+                    label="State"
+                    required
+                    value={state.basics.state}
+                    onChange={(v) => setField("basics.state", v.slice(0, FIELD_LIMITS.state))}
+                    onBlur={() => markTouched("basics.state")}
+                    error={showErr("basics.state")}
+                    placeholder="e.g. Madhya Pradesh"
                   />
                 </>
               )}

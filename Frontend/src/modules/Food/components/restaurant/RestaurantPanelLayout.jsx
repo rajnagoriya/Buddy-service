@@ -1,14 +1,11 @@
 import { useState } from "react"
 import { Outlet, useLocation } from "react-router-dom"
 import RestaurantSidebar from "./RestaurantSidebar"
-import RestaurantPanelHeader from "./panel/RestaurantPanelHeader"
+import RestaurantNavbar from "./RestaurantNavbar"
 
 export default function RestaurantPanelLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const location = useLocation()
-  const hideMobilePanelHeader =
-    location.pathname.includes("/orders/all") ||
-    location.pathname.includes("/orders/live")
 
   return (
     <div className="rt-panel-bg min-h-screen">
@@ -18,15 +15,21 @@ export default function RestaurantPanelLayout() {
       />
 
       <div className="lg:ml-[270px]">
-        {!hideMobilePanelHeader ? (
-          <RestaurantPanelHeader
+        {/* Same header as live orders: restaurant name, location, status, actions */}
+        <div className="sticky top-0 z-50 bg-white lg:hidden">
+          <RestaurantNavbar
+            showNotifications
             onMenuClick={() => setSidebarOpen(true)}
-            className="lg:hidden"
           />
-        ) : null}
+        </div>
 
         <main key={location.pathname} className="min-h-screen">
-          <Outlet context={{ openSidebar: () => setSidebarOpen(true) }} />
+          <Outlet
+            context={{
+              openSidebar: () => setSidebarOpen(true),
+              closeSidebar: () => setSidebarOpen(false),
+            }}
+          />
         </main>
       </div>
     </div>

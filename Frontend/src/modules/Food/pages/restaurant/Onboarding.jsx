@@ -1105,8 +1105,10 @@ export default function RestaurantOnboarding() {
             dietaryType: resolveDietaryType(s1, apiData || {}),
             ownerName: sanitizeDraftDisplayValue(s1.ownerName || apiData?.ownerName),
             ownerEmail: s1.ownerEmail || apiData?.email || "",
-            ownerPhone: s1.ownerPhone || apiData?.phone || "",
-            primaryContactNumber: s1.primaryContactNumber || apiData?.primaryContactNumber || "",
+            ownerPhone: normalizePhoneDigits(s1.ownerPhone || apiData?.phone || ""),
+            primaryContactNumber: normalizePhoneDigits(
+              s1.primaryContactNumber || apiData?.primaryContactNumber || "",
+            ),
             zoneId: s1.zoneId || apiData?.zoneId || "",
             location: {
               ...prev.location,
@@ -1286,7 +1288,7 @@ export default function RestaurantOnboarding() {
     if (!verifiedPhoneNumber) return
     setStep1((prev) => ({
       ...prev,
-      ownerPhone: verifiedPhoneNumber,
+      ownerPhone: normalizePhoneDigits(verifiedPhoneNumber),
     }))
   }, [verifiedPhoneNumber])
 
@@ -1905,10 +1907,10 @@ export default function RestaurantOnboarding() {
   }
 
   const renderStep1 = () => (
-    <div className="rounded-2xl border border-gray-100 bg-white p-4 sm:p-5">
+    <div className="rounded-2xl border border-gray-100 bg-white p-3 sm:p-5">
       <OnboardingSection title="Restaurant">
         <OnboardingField label="Restaurant type" required>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
             {DIETARY_OPTIONS.map((option) => {
               const selected = step1.dietaryType === option.value
               return (
@@ -1917,7 +1919,7 @@ export default function RestaurantOnboarding() {
                   type="button"
                   onClick={() => isEditing && setStep1({ ...step1, dietaryType: option.value })}
                   disabled={!isEditing}
-                  className={`flex h-11 items-center justify-center gap-2 rounded-xl border-2 px-2 text-xs font-semibold transition-colors ${
+                  className={`flex h-10 sm:h-11 items-center justify-center gap-1.5 sm:gap-2 rounded-xl border-2 px-1.5 sm:px-2 text-[11px] sm:text-xs font-semibold transition-colors ${
                     selected
                       ? "border-primary-orange bg-primary-orange text-white"
                       : "border-gray-200 bg-white text-gray-700"
@@ -1949,7 +1951,7 @@ export default function RestaurantOnboarding() {
         </OnboardingField>
       </OnboardingSection>
 
-      <div className="my-5 h-px bg-gray-100" />
+      <div className="my-3 h-px bg-gray-100 sm:my-5" />
 
       <OnboardingSection title="Owner">
         <OnboardingField label="Full name" required>
@@ -1978,11 +1980,19 @@ export default function RestaurantOnboarding() {
         </OnboardingField>
         <OnboardingField label="Phone" required>
           <Input
-            value={step1.ownerPhone || ""}
+            value={normalizePhoneDigits(step1.ownerPhone || "")}
             onChange={(e) => {
-              const val = e.target.value.replace(/\D/g, "").slice(0, 10)
-              setStep1({ ...step1, ownerPhone: val })
+              setStep1({ ...step1, ownerPhone: normalizePhoneDigits(e.target.value) })
             }}
+            onPaste={(e) => {
+              e.preventDefault()
+              setStep1({
+                ...step1,
+                ownerPhone: normalizePhoneDigits(e.clipboardData.getData("text")),
+              })
+            }}
+            inputMode="tel"
+            autoComplete="tel"
             readOnly={Boolean(verifiedPhoneNumber)}
             className={onboardingInputClass}
             placeholder="10-digit mobile"
@@ -1991,27 +2001,30 @@ export default function RestaurantOnboarding() {
         </OnboardingField>
       </OnboardingSection>
 
-      <div className="my-5 h-px bg-gray-100" />
+      <div className="my-3 h-px bg-gray-100 sm:my-5" />
 
       <OnboardingSection title="Location">
         <OnboardingField label="Contact number" required>
           <Input
-            value={step1.primaryContactNumber || ""}
+            value={normalizePhoneDigits(step1.primaryContactNumber || "")}
             onChange={(e) => {
-              const val = e.target.value.replace(/\D/g, "").slice(0, 10)
-              setStep1({ ...step1, primaryContactNumber: val })
+              setStep1({ ...step1, primaryContactNumber: normalizePhoneDigits(e.target.value) })
             }}
             onKeyDown={(e) => {
               const allowed = ["Backspace", "Delete", "ArrowLeft", "ArrowRight", "Tab", "Enter"]
               if (!allowed.includes(e.key) && !/^\d$/.test(e.key)) e.preventDefault()
-              if (/^\d$/.test(e.key) && (step1.primaryContactNumber || "").length >= 10) e.preventDefault()
+              if (/^\d$/.test(e.key) && normalizePhoneDigits(step1.primaryContactNumber || "").length >= 10) {
+                e.preventDefault()
+              }
             }}
             onPaste={(e) => {
               e.preventDefault()
-              const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 10)
-              setStep1({ ...step1, primaryContactNumber: pasted })
+              setStep1({
+                ...step1,
+                primaryContactNumber: normalizePhoneDigits(e.clipboardData.getData("text")),
+              })
             }}
-            inputMode="numeric"
+            inputMode="tel"
             className={onboardingInputClass}
             placeholder="Restaurant contact"
             disabled={!isEditing}
@@ -2053,7 +2066,7 @@ export default function RestaurantOnboarding() {
           />
         </OnboardingField>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 sm:gap-4">
           <OnboardingField label="Area" required className="sm:col-span-2">
             <Input
               value={step1.location?.area || ""}
@@ -2118,7 +2131,7 @@ export default function RestaurantOnboarding() {
 
 
   const renderStep2 = () => (
-    <div className="rounded-2xl border border-gray-100 bg-white p-4 sm:p-5">
+    <div className="rounded-2xl border border-gray-100 bg-white p-3 sm:p-5">
       <OnboardingSection title="Menu & photos">
         <OnboardingField label="Menu images" required>
         <div className="space-y-2">
@@ -2314,7 +2327,7 @@ export default function RestaurantOnboarding() {
         </div>
       </OnboardingSection>
 
-      <div className="my-5 h-px bg-gray-100" />
+      <div className="my-3 h-px bg-gray-100 sm:my-5" />
 
       <OnboardingSection title="Cuisines">
         <div className="flex flex-wrap gap-2">
@@ -2344,7 +2357,7 @@ export default function RestaurantOnboarding() {
         )}
       </OnboardingSection>
 
-      <div className="my-5 h-px bg-gray-100" />
+      <div className="my-3 h-px bg-gray-100 sm:my-5" />
 
       <OnboardingSection title="Timings & hours">
         <div className="space-y-3">
@@ -2410,9 +2423,9 @@ export default function RestaurantOnboarding() {
   )
 
   const renderStep3 = () => (
-    <div className="rounded-2xl border border-gray-100 bg-white p-4 sm:p-5 space-y-5">
+    <div className="rounded-2xl border border-gray-100 bg-white p-3 sm:p-5 space-y-3 sm:space-y-5">
       <OnboardingSection title="PAN details">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-4">
           <div>
             <Label className="text-xs text-gray-700">PAN number</Label>
             <Input
@@ -2709,7 +2722,7 @@ export default function RestaurantOnboarding() {
       <div className="h-px bg-gray-100" />
 
       <OnboardingSection title="Bank account">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-4">
           <Input
             value={step3.accountNumber || ""}
             onChange={(e) => setStep3({ ...step3, accountNumber: normalizeBankAcc(e.target.value) })}
@@ -2723,7 +2736,7 @@ export default function RestaurantOnboarding() {
             placeholder="Re-enter account number"
           />
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-4">
           <Input
             value={step3.ifscCode || ""}
             onChange={(e) => setStep3({ ...step3, ifscCode: normalizeIFSC(e.target.value) })}
@@ -2784,7 +2797,7 @@ export default function RestaurantOnboarding() {
         onStepSelect={handleStepSelect}
       >
         {rejectionNotice ? (
-          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <div className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-800 sm:mb-4 sm:px-4 sm:py-3">
             <p className="font-semibold">Previous registration was rejected</p>
             <p className="mt-1 text-xs leading-relaxed text-red-700">{rejectionNotice}</p>
           </div>

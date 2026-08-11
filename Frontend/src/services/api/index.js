@@ -1455,6 +1455,26 @@ export const restaurantAPI = {
           // Normalize backend order fields to match existing restaurant UI expectations.
           // UI historically uses: order.status, order.address, order.total, order.paymentMethod
           const normalizeStatus = (s, order) => {
+            // Terminal order status must win over pickup status.
+            // Backend keeps myPickupStatus="picked_up" even after delivered, which
+            // previously made delivered orders appear as "Out for delivery".
+            const orderStatus = String(
+              s ||
+                order?.orderStatus ||
+                order?.aggregateOrderStatus ||
+                order?.status ||
+                "",
+            ).toLowerCase();
+
+            if (
+              orderStatus === "delivered" ||
+              orderStatus === "completed"
+            ) {
+              return "delivered";
+            }
+            if (orderStatus.includes("cancel")) return "cancelled";
+            if (orderStatus === "rejected") return "rejected";
+
             // Prefer this restaurant's own pickup status when present (multi-restaurant)
             const pickupStatus = String(
               order?.myPickupStatus
@@ -1468,15 +1488,21 @@ export const restaurantAPI = {
             if (pickupStatus === "picked_up") return "out_for_delivery";
             if (pickupStatus === "cancelled") return "cancelled";
 
-            const v = String(s || "").toLowerCase();
             // Backend: created -> treat as confirmed/new in UI
-            if (v === "created") return "confirmed";
+            if (orderStatus === "created") return "confirmed";
             // Backend: ready_for_pickup -> ready
-            if (v === "ready_for_pickup") return "ready";
-            // Backend: picked_up -> out_for_delivery (restaurant handed over)
-            if (v === "picked_up") return "out_for_delivery";
-            if (v.includes("cancel")) return "cancelled";
-            return v || "confirmed";
+            if (orderStatus === "ready_for_pickup") return "ready";
+            // Backend: picked_up / reached_drop -> out_for_delivery
+            if (
+              orderStatus === "picked_up" ||
+              orderStatus === "reached_drop" ||
+              orderStatus === "reached_pickup" ||
+              orderStatus === "out_for_delivery" ||
+              orderStatus === "out-for-delivery"
+            ) {
+              return "out_for_delivery";
+            }
+            return orderStatus || "confirmed";
           };
 
           const rows = rowsRaw.map((o) => {
