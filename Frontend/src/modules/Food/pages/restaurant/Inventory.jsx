@@ -25,6 +25,7 @@ import { Switch } from "@food/components/ui/switch"
 import { useNavigate } from "react-router-dom"
 import { restaurantAPI, uploadAPI } from "@food/api"
 import { toast } from "sonner"
+import { allowsNonVegFood } from "@food/utils/dietaryType"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -1242,19 +1243,32 @@ export default function Inventory() {
       toast.error("Please enter a valid price")
       return
     }
+    if (!addonImageFile && !addonImagePreview) {
+      toast.error("Please upload an add-on image")
+      return
+    }
     setSavingAddon(true)
     try {
       let imageUrl = ""
       if (addonImageFile) {
         const uploadRes = await uploadAPI.uploadMedia(addonImageFile, { folder: "appzeto/restaurant/addons" })
         imageUrl = uploadRes?.data?.data?.url || uploadRes?.data?.url || ""
+      } else if (
+        typeof addonImagePreview === "string" &&
+        (addonImagePreview.startsWith("http://") || addonImagePreview.startsWith("https://"))
+      ) {
+        imageUrl = addonImagePreview
+      }
+      if (!imageUrl) {
+        toast.error("Please upload an add-on image")
+        return
       }
       const payload = {
         name: addonName.trim(),
         description: addonDescription.trim(),
         price: parsedPrice,
         image: imageUrl,
-        images: imageUrl ? [imageUrl] : [],
+        images: [imageUrl],
       }
       await restaurantAPI.addAddon(payload)
       toast.success("Add-on submitted to admin for approval")
@@ -1483,10 +1497,13 @@ export default function Inventory() {
     }
   }, [categories, totalItemsCount, addons, activeTab])
 
-  const activeFilterOptions = useMemo(
-    () => (activeTab === "add-ons" ? ADDON_FILTER_OPTIONS : MENU_FILTER_OPTIONS),
-    [activeTab]
-  )
+  const activeFilterOptions = useMemo(() => {
+    if (activeTab === "add-ons") return ADDON_FILTER_OPTIONS
+    if (!allowsNonVegFood(restaurantProfile)) {
+      return MENU_FILTER_OPTIONS.filter((option) => option.value !== "non-veg")
+    }
+    return MENU_FILTER_OPTIONS
+  }, [activeTab, restaurantProfile])
 
   useEffect(() => {
     if (!activeFilterOptions.some((option) => option.value === selectedFilter)) {
@@ -2096,7 +2113,9 @@ export default function Inventory() {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Image (1 only)</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Image (1 only) <span className="text-red-500">*</span>
+                      </label>
                       {addonImagePreview && (
                         <div className="mb-2">
                           <img
@@ -2124,7 +2143,9 @@ export default function Inventory() {
                           {addonImageFile?.name || "Upload image"}
                         </span>
                         <span className="mt-1 block text-xs text-gray-500">
-                          {addonImageFile ? "Image selected successfully" : "Tap to choose 1 image from your device"}
+                          {addonImageFile
+                            ? "Image selected successfully"
+                            : "Required — tap to choose 1 image from your device"}
                         </span>
                       </button>
                       <p className="text-xs text-gray-500 mt-1">PNG, JPG, WEBP, HEIC up to 5MB.</p>

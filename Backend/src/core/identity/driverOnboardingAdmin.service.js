@@ -290,6 +290,7 @@ export async function getJoinRequestDetail(identityId) {
     email: identity.email || '',
     phone: identity.phone || '',
     city: identity.city || '',
+    state: identity.state || '',
     gender: identity.gender || '',
     onboardingServices: services,
     servicesLabel: formatServicesLabel(services),
@@ -377,7 +378,7 @@ export async function approveDriverService(requestId, service) {
 
   const services = Array.isArray(identity.onboardingServices) ? identity.onboardingServices : [];
   if (!services.includes(svc)) {
-    throw new ValidationError(`Driver did not apply for ${SERVICE_LABELS[svc]}`);
+    throw new ValidationError(`Driver did not apply for ${SERVICE_LABELS[svc] === 'Food' ? 'delivery' : SERVICE_LABELS[svc]}`);
   }
 
   const approvedAt = new Date();
@@ -412,7 +413,7 @@ export async function rejectDriverService(requestId, service, reason) {
 
   const services = Array.isArray(identity.onboardingServices) ? identity.onboardingServices : [];
   if (!services.includes(svc)) {
-    throw new ValidationError(`Driver did not apply for ${SERVICE_LABELS[svc]}`);
+    throw new ValidationError(`Driver did not apply for ${SERVICE_LABELS[svc] === 'Food' ? 'delivery' : SERVICE_LABELS[svc]}`);
   }
 
   const rejectedAt = new Date();

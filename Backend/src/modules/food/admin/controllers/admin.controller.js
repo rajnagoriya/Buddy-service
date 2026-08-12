@@ -634,7 +634,7 @@ export async function createAdminOffer(req, res, next) {
         const body = validateCreateOfferDto(req.body || {});
         const adminId = req.user?.userId || req.user?._id;
         const created = await adminService.createAdminOffer(body, adminId);
-        res.status(201).json({ success: true, message: 'Offer submitted for approval', data: { offer: created } });
+        res.status(201).json({ success: true, message: 'Offer created successfully', data: { offer: created } });
     } catch (error) {
         next(error);
     }
@@ -1527,12 +1527,12 @@ export async function approveDeliveryPartner(req, res, next) {
         if (!partner) {
             return res.status(404).json({
                 success: false,
-                message: 'Delivery partner not found'
+                message: 'Driver not found'
             });
         }
         res.status(200).json({
             success: true,
-            message: 'Delivery partner approved successfully',
+            message: 'Driver approved successfully',
             data: partner
         });
     } catch (error) {
@@ -1554,12 +1554,12 @@ export async function rejectDeliveryPartner(req, res, next) {
         if (!partner) {
             return res.status(404).json({
                 success: false,
-                message: 'Delivery partner not found'
+                message: 'Driver not found'
             });
         }
         res.status(200).json({
             success: true,
-            message: 'Delivery partner rejected successfully',
+            message: 'Driver rejected successfully',
             data: partner
         });
     } catch (error) {

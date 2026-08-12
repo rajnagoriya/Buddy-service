@@ -343,6 +343,12 @@ export default function DriverProfile() {
         value: basics?.city || deliveryProfile?.location?.city,
       });
     }
+    if (basics?.state || deliveryProfile?.location?.state) {
+      items.push({
+        label: "State",
+        value: basics?.state || deliveryProfile?.location?.state,
+      });
+    }
     if (joinedAt) items.push({ label: "Joined", value: joinedAt });
     if (state?.isVerified || deliveryProfile?.status) {
       const approved = ["approved", "active"].includes(
@@ -356,8 +362,10 @@ export default function DriverProfile() {
     return items;
   }, [
     basics?.city,
+    basics?.state,
     basics?.gender,
     deliveryProfile?.location?.city,
+    deliveryProfile?.location?.state,
     deliveryProfile?.status,
     joinedAt,
     state?.isVerified,

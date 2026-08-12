@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { identityAPI, persistDriverIdentitySession } from "@food/api";
 
 const RESEND_COOLDOWN_SECONDS = 60;
+const DRIVER_LOGIN_PHONE_KEY = "driverLoginPhone";
 
 /**
  * Single Driver Login. Phone + OTP. Server figures out whether this
@@ -35,6 +36,18 @@ export default function DriverLogin() {
   const navigate = useNavigate();
   const location = useLocation();
   const intendedRedirect = String(location.state?.redirect || "");
+
+  useEffect(() => {
+    try {
+      if (phone) {
+        sessionStorage.setItem(DRIVER_LOGIN_PHONE_KEY, phone);
+      } else {
+        sessionStorage.removeItem(DRIVER_LOGIN_PHONE_KEY);
+      }
+    } catch {
+      // ignore
+    }
+  }, [phone]);
 
   useEffect(() => {
     if (step !== 2 || resendTimer <= 0) return;
@@ -139,6 +152,12 @@ export default function DriverLogin() {
         activeService: data.activeService,
       });
 
+      try {
+        sessionStorage.removeItem(DRIVER_LOGIN_PHONE_KEY);
+      } catch {
+        // ignore
+      }
+
       if (data?.needsOnboarding) {
         toast.success("Welcome! Let's finish your onboarding.");
         navigate("/driver/onboarding", { replace: true });
@@ -226,6 +245,8 @@ export default function DriverLogin() {
                         type="tel"
                         required
                         autoFocus
+                        autoComplete="tel-national"
+                        inputMode="numeric"
                         value={phone}
                         onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
                         maxLength={10}

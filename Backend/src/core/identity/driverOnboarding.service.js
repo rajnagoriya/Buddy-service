@@ -349,7 +349,7 @@ export const updateTaxiVehicle = async (identity, body) => {
 };
 
 export const updateBasics = async (identity, body) => {
-  const { name, email, gender, city, profileImage } = body || {};
+  const { name, email, gender, city, state, profileImage } = body || {};
   identity.name = assertString(name, 'Name', { min: 2, max: 80, pattern: RE_PERSON_NAME });
   if (email !== undefined) {
     const normalizedEmail = assertOptionalString(email, 'Email', {
@@ -369,11 +369,33 @@ export const updateBasics = async (identity, body) => {
   if (city !== undefined) {
     identity.city = assertOptionalString(city, 'City', { max: 60 }) || '';
   }
+  if (state !== undefined) {
+    identity.state = assertString(state, 'State', { min: 2, max: 60 });
+  }
   if (profileImage !== undefined) {
     identity.profileImage = assertOptionalHttpUrl(profileImage, 'Profile image') || '';
   }
 
   await advanceStep(identity, 'basics');
+
+  // Keep pending partner/driver docs in sync so admin View Details shows city/state.
+  const profilePatch = {
+    name: identity.name,
+    email: identity.email || '',
+    city: identity.city || '',
+    state: identity.state || '',
+  };
+  await Promise.all([
+    FoodDeliveryPartner.updateMany(
+      { $or: [{ identityId: identity._id }, { phone: identity.phone }] },
+      { $set: profilePatch },
+    ),
+    Driver.updateMany(
+      { $or: [{ identityId: identity._id }, { phone: identity.phone }] },
+      { $set: { ...profilePatch, gender: identity.gender || '' } },
+    ),
+  ]);
+
   return identity;
 };
 
@@ -487,15 +509,54 @@ export const updateBank = async (identity, body) => {
       : '',
     accountNumber: hasBank ? normalizedAccount : '',
     ifscCode: hasBank ? normalizedIfsc : '',
-    bankName: assertOptionalString(bankName, 'Bank name', { max: 80 }) || '',
-    branchName: assertOptionalString(branchName, 'Branch name', { max: 80 }) || '',
+    bankName: hasBank
+      ? assertOptionalString(bankName, 'Bank name', { max: 80 }) || ''
+      : '',
+    branchName: hasBank
+      ? assertOptionalString(branchName, 'Branch name', { max: 80 }) || ''
+      : '',
     upiId: hasUpi ? normalizedUpi : '',
-    upiQrCodeUrl: assertOptionalHttpUrl(upiQrCodeUrl, 'UPI QR code') || '',
+    upiQrCodeUrl: hasUpi
+      ? assertOptionalHttpUrl(upiQrCodeUrl, 'UPI QR code') || ''
+      : '',
     updatedAt: new Date(),
   };
 
   identity.markModified('bank');
   await advanceStep(identity, 'bank');
+
+  // Keep partner/driver payout fields in sync for admin View Details.
+  const bankPatch = {
+    bankAccountHolderName: identity.bank.accountHolderName || '',
+    bankAccountNumber: identity.bank.accountNumber || '',
+    bankIfscCode: identity.bank.ifscCode || '',
+    bankName: identity.bank.bankName || '',
+    upiId: identity.bank.upiId || '',
+    upiQrCode: identity.bank.upiQrCodeUrl || '',
+  };
+  await Promise.all([
+    FoodDeliveryPartner.updateMany(
+      { $or: [{ identityId: identity._id }, { phone: identity.phone }] },
+      { $set: bankPatch },
+    ),
+    Driver.updateMany(
+      { $or: [{ identityId: identity._id }, { phone: identity.phone }] },
+      {
+        $set: {
+          bankDetails: {
+            accountHolderName: identity.bank.accountHolderName || '',
+            accountNumber: identity.bank.accountNumber || '',
+            ifsc: identity.bank.ifscCode || '',
+            branchName: identity.bank.branchName || '',
+            upiId: identity.bank.upiId || '',
+            qrCodeImage: identity.bank.upiQrCodeUrl || '',
+            updatedAt: new Date(),
+          },
+        },
+      },
+    ),
+  ]);
+
   return identity;
 };
 
@@ -668,6 +729,7 @@ const buildFoodPartnerFields = (identity) => ({
   email: identity.email || '',
   countryCode: identity.countryCode || '+91',
   city: identity.city || '',
+  state: identity.state || '',
   vehicleType: identity.foodVehicle?.type || identity.vehicle?.type || '',
   vehicleName:
     [identity.foodVehicle?.make, identity.foodVehicle?.model]
@@ -712,6 +774,7 @@ const buildTaxiDriverFields = (identity) => {
     profileImage: selfieUrl,
     gender: identity.gender || '',
     city: identity.city || '',
+    state: identity.state || '',
     registerFor: 'taxi',
     documents: {
       aadhaar: identity.kyc?.aadhaar || {},
@@ -975,6 +1038,7 @@ export const getOnboardingState = async (identity) => {
       email: identity.email,
       gender: identity.gender,
       city: identity.city,
+      state: identity.state,
       profileImage: identity.profileImage,
     },
     kyc: identity.kyc || {},

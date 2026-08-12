@@ -15,7 +15,13 @@ export default function RestaurantLogin() {
   const navigate = useNavigate()
   const location = useLocation()
   const phoneInputRef = useRef(null)
-  const [phone, setPhone] = useState(() => sessionStorage.getItem("restaurantLoginPhone") || "")
+  const [phone, setPhone] = useState(() => {
+    try {
+      return toIndianMobileDigits(sessionStorage.getItem("restaurantLoginPhone") || "")
+    } catch {
+      return ""
+    }
+  })
   const [loading, setLoading] = useState(false)
   const submitting = useRef(false)
 
@@ -38,22 +44,24 @@ export default function RestaurantLogin() {
   }, [location.pathname, location.state, navigate])
 
   const validatePhone = (num) => {
-    const digits = num.replace(/\D/g, "")
+    const digits = toIndianMobileDigits(num)
     if (digits.length !== 10) return false
     return ["6", "7", "8", "9"].includes(digits[0])
   }
 
   const handleSendOTP = async (e) => {
     if (e) e.preventDefault()
-    if (!validatePhone(phone)) {
+    const normalized = toIndianMobileDigits(phone)
+    if (!validatePhone(normalized)) {
       toast.error("Please enter a valid 10-digit mobile number")
       return
     }
     if (submitting.current) return
     submitting.current = true
     setLoading(true)
+    setPhone(normalized)
 
-    const fullPhone = `${DEFAULT_COUNTRY_CODE} ${phone}`.trim()
+    const fullPhone = `${DEFAULT_COUNTRY_CODE} ${normalized}`.trim()
 
     try {
       await restaurantAPI.sendOTP(fullPhone, "login")
@@ -64,7 +72,7 @@ export default function RestaurantLogin() {
         module: "restaurant",
       }
       sessionStorage.setItem("restaurantAuthData", JSON.stringify(authData))
-      sessionStorage.setItem("restaurantLoginPhone", phone)
+      sessionStorage.setItem("restaurantLoginPhone", normalized)
       toast.success("Verification code sent!")
       navigate("/food/restaurant/otp", { state: { from: location.state?.from } })
     } catch (apiErr) {
@@ -100,16 +108,16 @@ export default function RestaurantLogin() {
         </p>
       }
     >
-      <form onSubmit={handleSendOTP} className="w-full space-y-4">
-        <div className="space-y-2">
+      <form onSubmit={handleSendOTP} className="w-full space-y-3 sm:space-y-4">
+        <div className="space-y-1.5 sm:space-y-2">
           <Label
             htmlFor="restaurant-login-phone"
             className="text-sm font-semibold text-gray-800"
           >
             Mobile number
           </Label>
-          <div className="flex gap-2.5">
-            <div className="flex h-12 w-[4.25rem] shrink-0 items-center justify-center rounded-xl border border-[var(--rt-border,#e8edf2)] bg-[var(--rt-surface-muted,#f4f6f9)] text-sm font-semibold text-gray-700">
+          <div className="flex gap-2 sm:gap-2.5">
+            <div className="flex h-11 w-[4.25rem] shrink-0 items-center justify-center rounded-xl border border-[var(--rt-border,#e8edf2)] bg-[var(--rt-surface-muted,#f4f6f9)] text-sm font-semibold text-gray-700 sm:h-12">
               +91
             </div>
             <div className="relative min-w-0 flex-1">
@@ -120,15 +128,19 @@ export default function RestaurantLogin() {
                 id="restaurant-login-phone"
                 ref={phoneInputRef}
                 type="tel"
-                inputMode="numeric"
+                inputMode="tel"
                 autoComplete="tel"
+                name="tel"
                 autoFocus
                 required
                 value={phone}
-                onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
-                maxLength={10}
+                onChange={(e) => applyPhoneInput(e.target.value)}
+                onPaste={(e) => {
+                  e.preventDefault()
+                  applyPhoneInput(e.clipboardData?.getData("text") || "")
+                }}
                 placeholder="10-digit number"
-                className="h-12 rounded-xl border border-[var(--rt-border,#e8edf2)] bg-white pl-10 text-[15px] shadow-none placeholder:text-gray-400 focus-visible:border-[var(--rt-primary-strong,#27A344)] focus-visible:ring-2 focus-visible:ring-[var(--rt-primary-soft,#E8F7EC)]"
+                className="login-phone-input h-11 rounded-xl border border-[var(--rt-border,#e8edf2)] bg-white pl-10 text-[15px] text-gray-900 shadow-none placeholder:text-gray-400 focus-visible:border-[var(--rt-primary-strong,#27A344)] focus-visible:ring-2 focus-visible:ring-[var(--rt-primary-soft,#E8F7EC)] sm:h-12"
               />
             </div>
           </div>
@@ -137,7 +149,7 @@ export default function RestaurantLogin() {
         <Button
           type="submit"
           disabled={loading || phone.length < 10}
-          className="rt-btn-primary h-12 w-full text-[15px] shadow-md hover:brightness-105 disabled:opacity-50"
+          className="rt-btn-primary h-11 w-full text-[15px] shadow-md hover:brightness-105 disabled:opacity-50 sm:h-12"
         >
           {loading ? (
             <>

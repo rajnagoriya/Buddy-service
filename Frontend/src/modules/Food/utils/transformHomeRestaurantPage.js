@@ -99,17 +99,13 @@ export function transformRestaurantApiList(
       ).map((item) => item?.image),
     );
 
-    const allImages = Array.from(
-      new Set(
-        [
-          ...coverImages,
-          ...profileImageCandidates,
-          ...menuImageCandidates,
-          ...featuredItemImages,
-        ].filter(Boolean),
-      ),
-    );
-    const image = allImages[0] || profileImageUrl || "";
+    // List cards show a single primary image (not a full gallery of cover/menu/items).
+    const image =
+      coverImages[0] ||
+      profileImageUrl ||
+      menuImageCandidates[0] ||
+      featuredItemImages[0] ||
+      "";
     const offerText = restaurant.offer || null;
 
     return {
@@ -134,7 +130,7 @@ export function transformRestaurantApiList(
         : (distanceInKm !== null ? distanceInKm * 1000 : null),
       distanceSource,
       image,
-      images: allImages,
+      images: image ? [image] : [],
       priceRange: restaurant.priceRange || "$$",
       featuredDish: restaurant.featuredDish || null,
       featuredPrice: restaurant.featuredPrice || null,

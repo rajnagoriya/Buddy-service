@@ -4,6 +4,7 @@ import { FoodFeeSettings } from '../../admin/models/feeSettings.model.js';
 import { FoodDeliveryCommissionRule } from '../../admin/models/deliveryCommissionRule.model.js';
 import { FoodOffer } from '../../admin/models/offer.model.js';
 import { FoodItem } from '../../admin/models/food.model.js';
+import { FoodAddon } from '../../restaurant/models/foodAddon.model.js';
 import {
   checkOfferEligibility,
   computeOfferDiscount,
@@ -31,6 +32,7 @@ import {
 /**
  * Re-load cart lines from catalog. Never trust client prices / availability.
  * Returns hydrated items with server prices.
+ * Supports both FoodItem (menu) and FoodAddon (complete-your-meal addons).
  */
 export async function validateAndHydrateCartItems(items = []) {
   if (!Array.isArray(items) || items.length === 0) {
@@ -56,17 +58,80 @@ export async function validateAndHydrateCartItems(items = []) {
     )
     .lean();
 
-  const byId = new Map(catalogItems.map((doc) => [String(doc._id), doc]));
+  const byId = new Map(catalogItems.map((doc) => [String(doc._id), { kind: 'item', doc }]));
+
+  const missingIds = ids.filter((id) => !byId.has(id));
+  if (missingIds.length > 0) {
+    const addonDocs = await FoodAddon.find({
+      _id: { $in: missingIds },
+      isDeleted: { $ne: true },
+    })
+      .select('restaurantId draft published approvalStatus isAvailable')
+      .lean();
+
+    for (const addon of addonDocs) {
+      byId.set(String(addon._id), { kind: 'addon', doc: addon });
+    }
+  }
+
   const hydrated = [];
 
   for (const line of items) {
     const itemId = String(line.itemId || line.id || line._id || '');
-    const doc = byId.get(itemId);
-    if (!doc) {
+    const entry = byId.get(itemId);
+    if (!entry) {
       throw new ValidationError(
         `Item "${line.name || itemId}" is no longer available. Please refresh your cart.`,
       );
     }
+
+    if (entry.kind === 'addon') {
+      const addon = entry.doc;
+      const payload = addon.published || addon.draft;
+      if (!payload) {
+        throw new ValidationError(
+          `Addon "${line.name || itemId}" is no longer available. Please refresh your cart.`,
+        );
+      }
+      if (addon.approvalStatus && addon.approvalStatus !== 'approved') {
+        throw new ValidationError(`"${payload.name}" is not available for ordering`);
+      }
+      if (addon.isAvailable === false) {
+        throw new ValidationError(`"${payload.name}" is currently unavailable`);
+      }
+
+      const lineRestaurantId = String(line.restaurantId || '');
+      if (lineRestaurantId && String(addon.restaurantId) !== lineRestaurantId) {
+        throw new ValidationError(`"${payload.name}" does not belong to the selected restaurant`);
+      }
+
+      const unitPrice = Number(payload.price) || 0;
+      const qty = Math.max(1, Number(line.quantity) || 1);
+      const image =
+        payload.image ||
+        (Array.isArray(payload.images) ? payload.images[0] : '') ||
+        line.image ||
+        '';
+
+      hydrated.push({
+        ...line,
+        itemId: String(addon._id),
+        name: payload.name,
+        price: unitPrice,
+        variantId: undefined,
+        variantName: undefined,
+        variantPrice: unitPrice,
+        quantity: qty,
+        image,
+        description: line.description || payload.description || '',
+        isVeg: line.isVeg !== false,
+        isAddon: true,
+        restaurantId: String(addon.restaurantId),
+      });
+      continue;
+    }
+
+    const doc = entry.doc;
     if (doc.approvalStatus && doc.approvalStatus !== 'approved') {
       throw new ValidationError(`"${doc.name}" is not available for ordering`);
     }
@@ -125,6 +190,7 @@ export async function validateAndHydrateCartItems(items = []) {
       image: line.image || doc.image || '',
       description: line.description || doc.description || '',
       isVeg: doc.foodType === 'Veg',
+      isAddon: false,
       preparationTime: line.preparationTime || doc.preparationTime,
       restaurantId: String(doc.restaurantId),
     });

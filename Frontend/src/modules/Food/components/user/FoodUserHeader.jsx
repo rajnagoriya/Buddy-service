@@ -107,7 +107,6 @@ export default function FoodUserHeader({ variant, className = "" }) {
   const locationCard = (
     <button
       type="button"
-      disabled={locationLoading}
       onClick={openLocationSelector}
       className={locationCardClass}
     >

@@ -1544,6 +1544,19 @@ export function useLocation() {
           shouldForceRefresh || !hasInitialLocation ? "(needed)" : "(refresh)",
         )
 
+        // If user already chose a saved delivery address, don't overwrite it with GPS on cold start.
+        // Manual "Use current location" still goes through requestLocation().
+        let deliveryMode = "saved"
+        try {
+          deliveryMode = localStorage.getItem("deliveryAddressMode") || "saved"
+        } catch {
+          deliveryMode = "saved"
+        }
+        if (deliveryMode === "saved" && hasInitialLocation && !shouldForceRefresh) {
+          setLoading(false)
+          return
+        }
+
         getLocation(true, true)
           .then((nextLocation) => {
             if (

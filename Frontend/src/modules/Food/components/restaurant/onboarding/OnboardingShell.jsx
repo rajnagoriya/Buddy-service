@@ -91,7 +91,7 @@ export default function OnboardingShell({
                 disabled={isLoggingOut}
                 variant="ghost"
                 size="icon"
-                className="h-9 w-9 rounded-xl text-red-600 hover:bg-red-50 hover:text-red-700"
+                className="h-8 w-8 rounded-xl text-red-600 hover:bg-red-50 hover:text-red-700 sm:h-9 sm:w-9"
                 title="Logout"
               >
                 <LogOut className="h-4 w-4" />
@@ -122,7 +122,7 @@ export default function OnboardingShell({
         >
           <div className="mx-auto w-full max-w-xl">
             {loading ? (
-              <div className="rounded-2xl border border-gray-100 bg-white p-8 text-center shadow-sm">
+              <div className="rounded-2xl border border-gray-100 bg-white p-6 text-center shadow-sm sm:p-8">
                 <div className="mx-auto mb-3 h-7 w-7 animate-spin rounded-full border-2 border-primary-orange border-t-transparent" />
                 <p className="text-sm text-gray-500">Loading...</p>
               </div>
@@ -133,21 +133,21 @@ export default function OnboardingShell({
         </main>
 
         {error ? (
-          <div className="shrink-0 px-4 pb-1 text-center text-xs text-red-600 sm:px-6">{error}</div>
+          <div className="shrink-0 px-3 pb-1 text-center text-xs text-red-600 sm:px-6">{error}</div>
         ) : null}
 
         <footer
-          className={`z-30 shrink-0 border-t border-gray-100 bg-white px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-6 ${
+          className={`z-30 shrink-0 border-t border-gray-100 bg-white px-3 py-2.5 pb-[max(0.65rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-3 ${
             keyboardInset ? "hidden" : ""
           }`}
         >
-          <div className="mx-auto flex w-full max-w-xl items-center justify-between gap-3">
+          <div className="mx-auto flex w-full max-w-xl items-center justify-between gap-2 sm:gap-3">
             <Button
               type="button"
               variant="ghost"
               disabled={step === 1 || saving}
               onClick={onBack}
-              className="h-10 rounded-xl px-3 text-sm text-gray-600"
+              className="h-9 rounded-xl px-2.5 text-sm text-gray-600 sm:h-10 sm:px-3"
             >
               Back
             </Button>
@@ -157,7 +157,7 @@ export default function OnboardingShell({
                 type="button"
                 onClick={onContinue}
                 disabled={saving || loading || continueDisabled || (step === 3 && !isEditing)}
-                className="h-10 min-w-28 rounded-xl bg-primary-orange px-5 text-sm font-semibold text-white hover:bg-primary-orange/90 disabled:opacity-50"
+                className="h-9 min-w-24 rounded-xl bg-primary-orange px-4 text-sm font-semibold text-white hover:bg-primary-orange/90 disabled:opacity-50 sm:h-10 sm:min-w-28 sm:px-5"
               >
                 {continueLabel}
               </Button>

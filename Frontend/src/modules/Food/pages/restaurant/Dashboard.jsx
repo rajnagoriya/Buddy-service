@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom"
+import { createPortal } from "react-dom"
 import { motion } from "framer-motion"
 import {
   FileText,
@@ -33,13 +34,13 @@ function MetricPill({ label, value, sublabel, active, onClick }) {
       type="button"
       onClick={onClick}
       className={`
-        min-w-[132px] shrink-0 rounded-[20px] border px-4 py-3 text-left transition
+        min-w-[108px] sm:min-w-[132px] shrink-0 rounded-2xl sm:rounded-[20px] border px-3 py-2 sm:px-4 sm:py-3 text-left transition
         ${active ? "rt-pill-active shadow-sm" : "border-[var(--rt-border)] bg-white hover:bg-gray-50"}
       `}
     >
-      <p className="text-xs font-medium text-gray-500">{label}</p>
-      <p className="mt-1 text-lg font-bold text-gray-900">{value}</p>
-      {sublabel ? <p className="mt-0.5 text-[11px] text-gray-400">{sublabel}</p> : null}
+      <p className="text-[10px] sm:text-xs font-medium text-gray-500">{label}</p>
+      <p className="mt-0.5 text-base sm:mt-1 sm:text-lg font-bold text-gray-900 leading-tight">{value}</p>
+      {sublabel ? <p className="mt-0.5 text-[10px] sm:text-[11px] text-gray-400">{sublabel}</p> : null}
     </button>
   )
 }
@@ -47,21 +48,21 @@ function MetricPill({ label, value, sublabel, active, onClick }) {
 function QuickTile({ icon: Icon, title, subtitle, onClick, badge }) {
   return (
     <PanelCard onClick={onClick} hoverable padding="p-0" className="overflow-hidden">
-      <div className="flex h-full flex-col p-4">
-        <div className="mb-3 flex items-start justify-between gap-2">
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--rt-primary-soft)] text-[var(--rt-primary-strong)]">
-            <Icon className="h-5 w-5" />
+      <div className="flex h-full flex-col p-2.5 sm:p-4">
+        <div className="mb-1.5 sm:mb-3 flex items-start justify-between gap-1.5 sm:gap-2">
+          <div className="flex h-8 w-8 sm:h-11 sm:w-11 items-center justify-center rounded-xl sm:rounded-2xl bg-[var(--rt-primary-soft)] text-[var(--rt-primary-strong)]">
+            <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
           </div>
           {badge ? (
-            <span className="rounded-full bg-red-500 px-2 py-0.5 text-[11px] font-bold text-white">
+            <span className="rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] sm:px-2 sm:text-[11px] font-bold text-white">
               {badge}
             </span>
           ) : null}
         </div>
-        <p className="font-semibold text-gray-900">{title}</p>
-        <p className="mt-1 line-clamp-2 text-sm text-gray-500">{subtitle}</p>
-        <div className="mt-auto flex items-center justify-end pt-3 text-[var(--rt-primary-strong)]">
-          <ChevronRight className="h-4 w-4" />
+        <p className="text-sm sm:text-base font-semibold text-gray-900 leading-tight">{title}</p>
+        <p className="mt-0.5 sm:mt-1 line-clamp-2 text-[11px] sm:text-sm text-gray-500 leading-snug">{subtitle}</p>
+        <div className="mt-auto flex items-center justify-end pt-1.5 sm:pt-3 text-[var(--rt-primary-strong)]">
+          <ChevronRight className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
         </div>
       </div>
     </PanelCard>
@@ -105,7 +106,13 @@ export default function Dashboard() {
   ].filter(Boolean)
 
   return (
-    <div className="rt-panel-bg min-h-screen pb-28 lg:pb-8">
+    <div
+      className={`rt-panel-bg min-h-screen lg:pb-8 ${
+        attentionItems.length > 0
+          ? "pb-[calc(4.5rem+env(safe-area-inset-bottom))] sm:pb-[calc(5rem+env(safe-area-inset-bottom))]"
+          : "pb-6 sm:pb-8"
+      }`}
+    >
       <div className="hidden lg:block">
         <RestaurantPanelHeader
           title={restaurantName}
@@ -132,28 +139,29 @@ export default function Dashboard() {
             type="button"
             onClick={refresh}
             disabled={refreshing}
-            className="rounded-2xl border border-[var(--rt-border)] bg-white p-2.5 shadow-sm disabled:opacity-60"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--rt-border)] bg-white px-2.5 py-1.5 text-[11px] font-semibold text-gray-600 shadow-sm disabled:opacity-60 sm:text-xs"
             aria-label="Refresh dashboard"
           >
-            <RefreshCw className={`h-5 w-5 text-gray-600 ${refreshing ? "animate-spin" : ""}`} />
+            <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
+            Refresh
           </button>
         </div>
 
         {loading ? (
-          <div className="flex min-h-[50vh] items-center justify-center">
-            <Loader2 className="h-8 w-8 animate-spin text-[var(--rt-primary-strong)]" />
+          <div className="flex min-h-[40vh] sm:min-h-[50vh] items-center justify-center">
+            <Loader2 className="h-7 w-7 sm:h-8 sm:w-8 animate-spin text-[var(--rt-primary-strong)]" />
           </div>
         ) : (
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-3.5 sm:space-y-6">
             {error ? (
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              <div className="rounded-xl sm:rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 sm:px-4 sm:py-3 text-xs sm:text-sm text-amber-800">
                 {error}
               </div>
             ) : null}
 
             <section>
-              <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-base font-bold text-gray-900">Today at a glance</h2>
+              <div className="mb-2 sm:mb-3 flex items-center justify-between">
+                <h2 className="text-sm sm:text-base font-bold text-gray-900">Today at a glance</h2>
                 <button
                   type="button"
                   onClick={refresh}
@@ -164,7 +172,7 @@ export default function Dashboard() {
                   Refresh
                 </button>
               </div>
-              <div className="flex gap-3 overflow-x-auto pb-1 scrollbar-hide">
+              <div className="flex gap-2 sm:gap-3 overflow-x-auto pb-0.5 scrollbar-hide">
                 <MetricPill
                   label="Orders"
                   value={todayOrders}
@@ -194,8 +202,8 @@ export default function Dashboard() {
             </section>
 
             <section>
-              <h2 className="mb-3 text-base font-bold text-gray-900">Quick actions</h2>
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
+              <h2 className="mb-2 sm:mb-3 text-sm sm:text-base font-bold text-gray-900">Quick actions</h2>
+              <div className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-3 xl:grid-cols-4">
                 <QuickTile
                   icon={FileText}
                   title="Live orders"
@@ -252,42 +260,42 @@ export default function Dashboard() {
               </div>
             </section>
 
-            <section className="grid gap-4 lg:grid-cols-2">
-              <PanelCard padding="p-5">
-                <div className="mb-3 flex items-center gap-2">
-                  <TrendingUp className="h-5 w-5 text-[var(--rt-primary-strong)]" />
-                  <h3 className="font-bold text-gray-900">Operations summary</h3>
+            <section className="grid gap-2.5 sm:gap-4 lg:grid-cols-2">
+              <PanelCard padding="p-3 sm:p-5">
+                <div className="mb-2 sm:mb-3 flex items-center gap-1.5 sm:gap-2">
+                  <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5 text-[var(--rt-primary-strong)]" />
+                  <h3 className="text-sm sm:text-base font-bold text-gray-900">Operations summary</h3>
                 </div>
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div className="rounded-2xl bg-[var(--rt-surface-muted)] px-3 py-3">
+                <div className="grid grid-cols-2 gap-2 sm:gap-3 text-xs sm:text-sm">
+                  <div className="rounded-xl sm:rounded-2xl bg-[var(--rt-surface-muted)] px-2.5 py-2 sm:px-3 sm:py-3">
                     <p className="text-gray-500">Live queue</p>
-                    <p className="text-xl font-bold text-gray-900">{liveOrders}</p>
+                    <p className="text-lg sm:text-xl font-bold text-gray-900 leading-tight">{liveOrders}</p>
                   </div>
                   {ENABLE_DINING ? (
-                    <div className="rounded-2xl bg-[var(--rt-surface-muted)] px-3 py-3">
+                    <div className="rounded-xl sm:rounded-2xl bg-[var(--rt-surface-muted)] px-2.5 py-2 sm:px-3 sm:py-3">
                       <p className="text-gray-500">Reservations</p>
-                      <p className="text-xl font-bold text-gray-900">{upcomingReservations}</p>
+                      <p className="text-lg sm:text-xl font-bold text-gray-900 leading-tight">{upcomingReservations}</p>
                     </div>
                   ) : (
-                    <div className="rounded-2xl bg-[var(--rt-surface-muted)] px-3 py-3">
+                    <div className="rounded-xl sm:rounded-2xl bg-[var(--rt-surface-muted)] px-2.5 py-2 sm:px-3 sm:py-3">
                       <p className="text-gray-500">Complaints</p>
-                      <p className="text-xl font-bold text-gray-900">{openComplaints}</p>
+                      <p className="text-lg sm:text-xl font-bold text-gray-900 leading-tight">{openComplaints}</p>
                     </div>
                   )}
-                  <div className="rounded-2xl bg-[var(--rt-surface-muted)] px-3 py-3">
+                  <div className="rounded-xl sm:rounded-2xl bg-[var(--rt-surface-muted)] px-2.5 py-2 sm:px-3 sm:py-3">
                     <p className="text-gray-500">Preparing</p>
-                    <p className="text-xl font-bold text-gray-900">{preparingCount}</p>
+                    <p className="text-lg sm:text-xl font-bold text-gray-900 leading-tight">{preparingCount}</p>
                   </div>
-                  <div className="rounded-2xl bg-[var(--rt-surface-muted)] px-3 py-3">
+                  <div className="rounded-xl sm:rounded-2xl bg-[var(--rt-surface-muted)] px-2.5 py-2 sm:px-3 sm:py-3">
                     <p className="text-gray-500">Ready</p>
-                    <p className="text-xl font-bold text-gray-900">{readyCount}</p>
+                    <p className="text-lg sm:text-xl font-bold text-gray-900 leading-tight">{readyCount}</p>
                   </div>
                 </div>
               </PanelCard>
 
-              <PanelCard padding="p-5">
-                <h3 className="mb-3 font-bold text-gray-900">Shortcuts</h3>
-                <div className="space-y-2">
+              <PanelCard padding="p-3 sm:p-5">
+                <h3 className="mb-2 sm:mb-3 text-sm sm:text-base font-bold text-gray-900">Shortcuts</h3>
+                <div className="space-y-1.5 sm:space-y-2">
                   {[
                     { label: "Order history", route: `${RESTAURANT_BASE}/orders/all` },
                     { label: "Delivery settings", route: `${RESTAURANT_BASE}/delivery-settings` },
@@ -298,10 +306,10 @@ export default function Dashboard() {
                       key={item.route}
                       type="button"
                       onClick={() => navigate(item.route)}
-                      className="flex w-full items-center justify-between rounded-2xl border border-[var(--rt-border)] px-3 py-2.5 text-left text-sm font-medium text-gray-700 hover:bg-[var(--rt-surface-muted)]"
+                      className="flex w-full items-center justify-between rounded-xl sm:rounded-2xl border border-[var(--rt-border)] px-2.5 py-2 sm:px-3 sm:py-2.5 text-left text-xs sm:text-sm font-medium text-gray-700 hover:bg-[var(--rt-surface-muted)]"
                     >
                       {item.label}
-                      <ChevronRight className="h-4 w-4 text-gray-400" />
+                      <ChevronRight className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-gray-400" />
                     </button>
                   ))}
                 </div>
@@ -311,22 +319,30 @@ export default function Dashboard() {
         )}
       </div>
 
-      {attentionItems.length > 0 ? (
-        <div className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] left-0 right-0 z-50 px-4 lg:bottom-4 lg:left-[290px]">
-          <div className="mx-auto flex max-w-4xl gap-2 overflow-x-auto rounded-2xl border border-[var(--rt-border)] bg-white p-2 shadow-lg">
-            {attentionItems.map((item) => (
-              <button
-                key={item.label}
-                type="button"
-                onClick={() => navigate(item.route)}
-                className="shrink-0 rounded-xl bg-[var(--rt-primary-soft)] px-3 py-2 text-xs font-semibold text-[var(--rt-primary-strong)]"
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : null}
+      {attentionItems.length > 0 && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="pointer-events-none fixed inset-x-0 bottom-0 z-[80] lg:left-[270px]"
+              style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
+            >
+              <div className="pointer-events-auto px-3 pb-2 pt-1 sm:px-4 sm:pb-3">
+                <div className="mx-auto flex max-w-4xl gap-1.5 overflow-x-auto rounded-xl border border-[var(--rt-border)] bg-white/95 p-1.5 shadow-[0_-4px_24px_rgba(15,23,42,0.12)] backdrop-blur-md scrollbar-hide sm:gap-2 sm:rounded-2xl sm:p-2">
+                  {attentionItems.map((item) => (
+                    <button
+                      key={item.label}
+                      type="button"
+                      onClick={() => navigate(item.route)}
+                      className="shrink-0 rounded-lg bg-[var(--rt-primary-soft)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--rt-primary-strong)] sm:rounded-xl sm:px-3 sm:py-2 sm:text-xs"
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   )
 }

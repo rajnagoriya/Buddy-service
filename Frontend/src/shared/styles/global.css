@@ -177,3 +177,18 @@ gmp-place-autocomplete {
   display: block;
 }
 
+/* Keep login phone fields white when browser autofills a saved number */
+.login-phone-input:-webkit-autofill,
+.login-phone-input:-webkit-autofill:hover,
+.login-phone-input:-webkit-autofill:focus,
+.login-phone-input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px #ffffff inset !important;
+  box-shadow: 0 0 0 1000px #ffffff inset !important;
+  -webkit-text-fill-color: #111827 !important;
+  caret-color: #111827;
+  background-color: #ffffff !important;
+  background-image: none !important;
+  transition: background-color 99999s ease-in-out 0s;
+}
+
+

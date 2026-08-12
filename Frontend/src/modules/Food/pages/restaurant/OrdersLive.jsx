@@ -2337,10 +2337,6 @@ export default function OrdersLive() {
   return (
     <SelectedOrderContext.Provider value={selectedOrder?.orderId || null}>
     <div className="rt-panel-bg flex min-h-screen flex-col lg:h-screen lg:overflow-hidden">
-      <div className="sticky top-0 z-50 bg-white lg:hidden">
-        <RestaurantNavbar showNotifications={true} />
-      </div>
-
       <div className="hidden lg:block">
         <RestaurantPanelHeader title="Live orders" subtitle="Manage incoming and active orders" showSearch />
       </div>

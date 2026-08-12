@@ -37,6 +37,10 @@ import CartCheckoutBar from "@food/components/user/cart/CartCheckoutBar"
 import RestaurantUnavailableModal from "@food/components/user/cart/RestaurantUnavailableModal"
 import AddMoneyModal from "@food/components/user/AddMoneyModal"
 import { useCartRestaurantValidation } from "@food/hooks/useCartRestaurantValidation"
+import {
+  setDeliveryAddressMode as persistDeliveryAddressMode,
+  setUserLocationStorage,
+} from "@food/utils/deliveryLocationStorage"
 const zoopSound = "/zomato_sms.mp3"
 const debugLog = (...args) => { }
 const debugWarn = (...args) => { }
@@ -1126,8 +1130,8 @@ function Cart() {
       return undefined
     }
 
-    // Same inputs as last successful/in-flight request — skip duplicate calculate
-    if (pricingRequestKey === lastPricingKeyRef.current && pricing != null) {
+    // Same inputs as last successful/failed request — skip duplicate calculate
+    if (pricingRequestKey === lastPricingKeyRef.current) {
       setLoadingPricing(false)
       return undefined
     }
@@ -1153,6 +1157,7 @@ function Cart() {
           image: item.image || item.imageUrl,
           description: item.description,
           isVeg: item.isVeg !== false,
+          isAddon: Boolean(item.isAddon || item.itemType === "addon"),
           restaurantId: resolveEntityId(
             item.restaurantId || item.restaurant?._id || item.restaurant,
           ) || undefined,
@@ -1206,7 +1211,14 @@ function Cart() {
         if (error.code !== 'ERR_NETWORK' && error.response?.status !== 404) {
           debugError("Error calculating pricing:", error)
         }
+        // Mark this key as attempted so we don't spin forever on the same failing cart.
+        lastPricingKeyRef.current = keyForRequest
         setPricing(null)
+        const message =
+          error?.response?.data?.message ||
+          error?.message ||
+          "Unable to calculate bill. Please try again."
+        toast.error(message)
       } finally {
         if (!cancelled && requestId === pricingRequestIdRef.current) {
           setLoadingPricing(false)
@@ -1598,7 +1610,9 @@ function Cart() {
       const address = addresses.find(addr => normalizeAddressLabel(addr.label) === targetLabel)
 
       if (!address) {
-        toast.error(`No ${label} address found. Please add an address first.`)
+        // Always keep chips clickable — open selector to add/select that label
+        openLocationSelector()
+        toast.info(`Add a ${label} address to use it for delivery`)
         return
       }
 
@@ -1653,12 +1667,10 @@ function Cart() {
           ? `${address.additionalDetails}, ${address.street}, ${address.city}, ${address.state}${address.zipCode ? ` ${address.zipCode}` : ''}`
           : `${address.street}, ${address.city}, ${address.state}${address.zipCode ? ` ${address.zipCode}` : ''}`
       }
-      localStorage.setItem("userLocation", JSON.stringify(locationData))
+      setUserLocationStorage(locationData)
       // User selected a saved address from Cart; prefer saved mode.
-      try {
-        localStorage.setItem("deliveryAddressMode", "saved")
-        setDeliveryAddressMode("saved")
-      } catch { }
+      persistDeliveryAddressMode("saved")
+      setDeliveryAddressMode("saved")
 
       toast.success(`${address.label || "Saved"} address selected!`)
     } catch (error) {
@@ -1803,6 +1815,7 @@ function Cart() {
         image: item.image || "",
         description: item.description || "",
         isVeg: item.isVeg === true || item.foodType === "Veg",
+        isAddon: Boolean(item.isAddon || item.itemType === "addon"),
         preparationTime: item.preparationTime,
         restaurantId: resolveEntityId(
           item.restaurantId || item.restaurant?._id || item.restaurant,
@@ -2248,6 +2261,8 @@ function Cart() {
                                   image: addon.image || (addon.images && addon.images[0]) || "",
                                   description: addon.description || "",
                                   isVeg: true,
+                                  isAddon: true,
+                                  itemType: "addon",
                                   restaurant: cartRestaurantName,
                                   restaurantId: cartRestaurantId
                                 });
@@ -2551,18 +2566,27 @@ function Cart() {
                         {["Home", "Work", "Other"].map((label) => {
                           const normalizedLabel = normalizeAddressLabel(label)
                           const addressExists = addresses.some(addr => normalizeAddressLabel(addr.label) === normalizedLabel)
+                          const activeAddress =
+                            deliveryAddressMode === "current"
+                              ? null
+                              : (selectedAddress || savedAddress)
+                          const isSelected =
+                            Boolean(activeAddress) &&
+                            normalizeAddressLabel(activeAddress.label) === normalizedLabel
                           return (
                             <button
                               key={label}
+                              type="button"
                               onClick={(e) => {
                                 e.preventDefault()
                                 e.stopPropagation()
                                 handleSelectAddressByLabel(label)
                               }}
-                              disabled={!addressExists}
-                              className={`text-xs px-4 py-1.5 rounded-full font-semibold transition-all ${addressExists
-                                ? 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-gray-800 dark:text-gray-300'
-                                : 'bg-gray-50 text-gray-400 border border-gray-100 cursor-not-allowed dark:bg-gray-900'
+                              className={`text-xs px-4 py-1.5 rounded-full font-semibold transition-all ${isSelected
+                                ? "bg-[#16A34A] text-white"
+                                : addressExists
+                                  ? "bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-gray-800 dark:text-gray-300"
+                                  : "bg-white text-slate-600 border border-dashed border-slate-300 hover:border-[#16A34A] hover:text-[#16A34A] dark:bg-gray-900 dark:border-gray-700"
                                 }`}
                             >
                               {label}
@@ -2923,7 +2947,7 @@ function Cart() {
         selectedPaymentLabel={selectedPaymentLabel}
         walletBalance={walletBalance}
         isPlacingOrder={isPlacingOrder}
-        isCalculatingPricing={loadingPricing || (hasSavedAddress && cart.length > 0 && pricing == null)}
+        isCalculatingPricing={loadingPricing}
         hasSavedAddress={hasSavedAddress}
         disabled={
           isPlacingOrder ||

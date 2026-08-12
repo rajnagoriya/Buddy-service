@@ -1,3 +1,5 @@
+import { useEffect } from "react"
+import { createPortal } from "react-dom"
 import { useNavigate, useLocation } from "react-router-dom"
 import { LogOut, Store, X } from "lucide-react"
 import { SIDEBAR_SECTIONS, findActiveNavItem } from "@food/utils/restaurantNavConfig"
@@ -23,28 +25,46 @@ export default function RestaurantSidebar({ isOpen = false, onClose }) {
     onClose?.()
   }
 
-  return (
-    <>
-      {isOpen ? (
-        <button
-          type="button"
-          className="fixed inset-0 z-[60] bg-gray-900/40 backdrop-blur-[1px] lg:hidden"
-          onClick={onClose}
-          aria-label="Close navigation"
-        />
-      ) : null}
+  useEffect(() => {
+    if (!isOpen) return undefined
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") onClose?.()
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener("keydown", onKeyDown)
+    }
+  }, [isOpen, onClose])
+
+  const sidebar = (
+    <div className="restaurant-theme">
+      {/* Transparent click-catcher only — no dark overlay color */}
+      <button
+        type="button"
+        className={`fixed inset-0 z-[90] bg-transparent transition-opacity duration-300 lg:hidden ${
+          isOpen ? "pointer-events-auto" : "pointer-events-none"
+        }`}
+        onClick={onClose}
+        aria-label="Close navigation"
+        tabIndex={isOpen ? 0 : -1}
+      />
 
       <aside
         className={`
-          fixed inset-y-0 left-0 z-[70] flex w-[270px] flex-col border-r border-[var(--rt-border)] bg-white
+          rt-sidebar fixed inset-y-0 left-0 z-[100] flex w-[min(270px,86vw)] flex-col
+          border-r border-[var(--rt-border)] bg-white
           transition-transform duration-300 ease-in-out
           lg:translate-x-0
           ${isOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full lg:translate-x-0"}
         `}
+        aria-hidden={!isOpen}
       >
-        <div className="flex items-center justify-between px-5 py-5">
-          <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--rt-primary-soft)] text-[var(--rt-primary-strong)]">
+        <div className="flex items-center justify-between gap-2 border-b border-[var(--rt-border)] px-4 py-4 sm:px-5 sm:py-5">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[var(--rt-primary-soft)] text-[var(--rt-primary-strong)] sm:h-11 sm:w-11">
               <Store className="h-5 w-5" />
             </div>
             <div className="min-w-0">
@@ -55,14 +75,14 @@ export default function RestaurantSidebar({ isOpen = false, onClose }) {
           <button
             type="button"
             onClick={onClose}
-            className="rounded-xl p-2 hover:bg-gray-100 lg:hidden"
+            className="shrink-0 rounded-xl p-2 hover:bg-[var(--rt-primary-soft)] lg:hidden"
             aria-label="Close sidebar"
           >
             <X className="h-5 w-5 text-gray-600" />
           </button>
         </div>
 
-        <nav className="flex-1 space-y-5 overflow-y-auto px-3 pb-4">
+        <nav className="flex-1 space-y-4 overflow-y-auto overscroll-contain px-3 pb-4 pt-3 sm:space-y-5">
           {SIDEBAR_SECTIONS.map((section) => (
             <div key={section.key}>
               {section.label ? (
@@ -87,7 +107,9 @@ export default function RestaurantSidebar({ isOpen = false, onClose }) {
                       >
                         <span
                           className={`flex h-9 w-9 items-center justify-center rounded-xl ${
-                            isActive ? "bg-white shadow-sm" : "bg-[var(--rt-surface-muted)]"
+                            isActive
+                              ? "bg-white text-[var(--rt-primary-strong)] shadow-sm"
+                              : "bg-[var(--rt-surface-muted)] text-gray-600"
                           }`}
                         >
                           <Icon className="h-[18px] w-[18px]" strokeWidth={1.8} />
@@ -103,7 +125,7 @@ export default function RestaurantSidebar({ isOpen = false, onClose }) {
         </nav>
 
         <div className="border-t border-[var(--rt-border)] p-4">
-          <div className="mb-3 flex items-center gap-3 rounded-2xl bg-[var(--rt-surface-muted)] px-3 py-2.5">
+          <div className="mb-3 flex items-center gap-3 rounded-2xl bg-[var(--rt-primary-soft)]/60 px-3 py-2.5">
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--rt-primary-strong)] text-sm font-bold text-white">
               {ownerName.charAt(0).toUpperCase()}
             </div>
@@ -115,13 +137,16 @@ export default function RestaurantSidebar({ isOpen = false, onClose }) {
           <button
             type="button"
             onClick={logout}
-            className="flex w-full items-center justify-center gap-2 rounded-2xl border border-[var(--rt-border)] px-3 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
+            className="flex w-full items-center justify-center gap-2 rounded-2xl border border-[var(--rt-border)] px-3 py-2.5 text-sm font-semibold text-gray-700 transition hover:border-[var(--rt-primary-strong)]/30 hover:bg-[var(--rt-primary-soft)] hover:text-[var(--rt-primary-strong)]"
           >
             <LogOut className="h-4 w-4" />
             Logout
           </button>
         </div>
       </aside>
-    </>
+    </div>
   )
+
+  if (typeof document === "undefined") return null
+  return createPortal(sidebar, document.body)
 }

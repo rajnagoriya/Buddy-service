@@ -35,6 +35,7 @@ import RestaurantPanelModal from "@food/components/restaurant/panel/RestaurantPa
 import RestaurantSubPageShell from "@food/components/restaurant/panel/RestaurantSubPageShell"
 import { isFlutterBridgeAvailable } from "@food/utils/imageUploadUtils"
 import { getFoodVariants } from "@food/utils/foodVariants"
+import { getAllowedItemFoodTypes } from "@food/utils/dietaryType"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -81,7 +82,7 @@ export default function ItemDetailsPage() {
   const [itemSizeQuantity, setItemSizeQuantity] = useState("")
   const [itemSizeUnit, setItemSizeUnit] = useState("piece")
   const [itemDescription, setItemDescription] = useState("")
-  const [foodType, setFoodType] = useState("Non-Veg")
+  const [foodType, setFoodType] = useState("Veg")
   const [basePrice, setBasePrice] = useState("")
   const [variants, setVariants] = useState([])
   const [preparationTime, setPreparationTime] = useState("")
@@ -117,6 +118,9 @@ export default function ItemDetailsPage() {
   const [loadingCategories, setLoadingCategories] = useState(true)
   const [loadingItem, setLoadingItem] = useState(false)
   const [keyboardInset, setKeyboardInset] = useState(0)
+  const [restaurantProfile, setRestaurantProfile] = useState(null)
+  const allowedFoodTypes = getAllowedItemFoodTypes(restaurantProfile)
+  const canSelectNonVeg = allowedFoodTypes.includes("Non-Veg")
 
   const maxNameLength = 70
   const maxDescriptionLength = 1000
@@ -137,7 +141,8 @@ export default function ItemDetailsPage() {
     setItemSizeQuantity(item.itemSizeQuantity || "")
     setItemSizeUnit(item.itemSizeUnit || "piece")
     setItemDescription(item.description || "")
-    setFoodType(item.foodType === "Veg" ? "Veg" : "Non-Veg")
+    const nextFoodType = item.foodType === "Veg" ? "Veg" : "Non-Veg"
+    setFoodType(nextFoodType)
     const itemVariants = getFoodVariants(item)
     setVariants(itemVariants.map(createVariantDraft))
     setBasePrice(itemVariants.length === 0 ? item.price?.toString() || "" : "")
@@ -250,6 +255,32 @@ export default function ItemDetailsPage() {
 
     fetchItemData()
   }, [id, isNewItem, location.state, defaultCategory])
+
+  // Load restaurant dietary type so Food Type options match outlet (veg-only vs mixed)
+  useEffect(() => {
+    const fetchRestaurantProfile = async () => {
+      try {
+        const response = await restaurantAPI.getCurrentRestaurant()
+        const profile =
+          response?.data?.data?.restaurant ||
+          response?.data?.restaurant ||
+          response?.data?.data ||
+          null
+        setRestaurantProfile(profile)
+      } catch (error) {
+        debugWarn("Failed to load restaurant profile for food type options:", error)
+      }
+    }
+
+    fetchRestaurantProfile()
+  }, [])
+
+  // Pure-veg outlets can only select Veg
+  useEffect(() => {
+    if (!canSelectNonVeg && foodType !== "Veg") {
+      setFoodType("Veg")
+    }
+  }, [canSelectNonVeg, foodType])
 
   // Fetch categories from restaurant-specific API
   useEffect(() => {
@@ -529,6 +560,22 @@ export default function ItemDetailsPage() {
       return
     }
 
+    const hasExistingImage = images.some(
+      (img) =>
+        typeof img === "string" &&
+        img.trim() !== "" &&
+        !img.startsWith("blob:") &&
+        (img.startsWith("http://") || img.startsWith("https://")),
+    )
+    const hasNewImageFile = imageFiles.size > 0
+    const hasBlobPreview = images.some(
+      (img) => typeof img === "string" && img.startsWith("blob:"),
+    )
+    if (!hasExistingImage && !hasNewImageFile && !hasBlobPreview) {
+      toast.error("Please upload an item image")
+      return
+    }
+
     try {
       setUploadingImages(true)
       setSaveStatus("uploading")
@@ -593,6 +640,13 @@ export default function ItemDetailsPage() {
         url.trim() !== '' &&
         self.indexOf(url) === index
       ).slice(0, 1)
+
+      if (allImageUrls.length === 0) {
+        toast.error("Please upload an item image")
+        setUploadingImages(false)
+        setSaveStatus("")
+        return
+      }
 
       // Debug: Log image URLs
       debugLog('=== IMAGE UPLOAD SUMMARY ===')
@@ -914,32 +968,36 @@ export default function ItemDetailsPage() {
                 Food Type
               </label>
               <div className="flex gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => setFoodType("Veg")}
-                  className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm ${foodType === "Veg"
-                    ? "bg-green-50 text-green-700 border-2 border-green-600"
-                    : "bg-slate-50 text-slate-700 hover:bg-slate-100 border-2 border-transparent"
-                    }`}
-                >
-                  <div className="h-4 w-4 shrink-0 rounded border flex items-center justify-center border-green-600">
-                    <div className="h-1.5 w-1.5 rounded-full bg-green-600" />
-                  </div>
-                  <span>Veg</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFoodType("Non-Veg")}
-                  className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm ${foodType === "Non-Veg"
-                    ? "bg-red-50 text-red-700 border-2 border-red-600"
-                    : "bg-slate-50 text-slate-700 hover:bg-slate-100 border-2 border-transparent"
-                    }`}
-                >
-                  <div className="h-4 w-4 shrink-0 rounded border flex items-center justify-center border-red-600">
-                    <div className="h-1.5 w-1.5 rounded-full bg-red-600" />
-                  </div>
-                  <span>Non-Veg</span>
-                </button>
+                {allowedFoodTypes.includes("Veg") && (
+                  <button
+                    type="button"
+                    onClick={() => setFoodType("Veg")}
+                    className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm ${foodType === "Veg"
+                      ? "bg-green-50 text-green-700 border-2 border-green-600"
+                      : "bg-slate-50 text-slate-700 hover:bg-slate-100 border-2 border-transparent"
+                      }`}
+                  >
+                    <div className="h-4 w-4 shrink-0 rounded border flex items-center justify-center border-green-600">
+                      <div className="h-1.5 w-1.5 rounded-full bg-green-600" />
+                    </div>
+                    <span>Veg</span>
+                  </button>
+                )}
+                {canSelectNonVeg && (
+                  <button
+                    type="button"
+                    onClick={() => setFoodType("Non-Veg")}
+                    className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm ${foodType === "Non-Veg"
+                      ? "bg-red-50 text-red-700 border-2 border-red-600"
+                      : "bg-slate-50 text-slate-700 hover:bg-slate-100 border-2 border-transparent"
+                      }`}
+                  >
+                    <div className="h-4 w-4 shrink-0 rounded border flex items-center justify-center border-red-600">
+                      <div className="h-1.5 w-1.5 rounded-full bg-red-600" />
+                    </div>
+                    <span>Non-Veg</span>
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -1103,7 +1161,9 @@ export default function ItemDetailsPage() {
           
           {/* Media/Image Upload Card */}
           <div className="bg-white rounded-2xl border border-slate-100 p-5 shadow-sm space-y-4">
-            <h2 className="text-base font-bold text-slate-900 border-b border-slate-50 pb-2">Dish Image</h2>
+            <h2 className="text-base font-bold text-slate-900 border-b border-slate-50 pb-2">
+              Dish Image <span className="text-red-500">*</span>
+            </h2>
             
             {images.length > 0 ? (
               <div className="relative w-full h-56 rounded-xl overflow-hidden bg-slate-100 border border-slate-100">
@@ -1180,7 +1240,7 @@ export default function ItemDetailsPage() {
                   <Camera className="w-6 h-6" />
                 </div>
                 <p className="text-xs font-semibold text-slate-600">No Image Added</p>
-                <p className="text-[10px] text-slate-400 mt-0.5">Upload a picture of your dish</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">Image is required to save this item</p>
               </div>
             )}
 
