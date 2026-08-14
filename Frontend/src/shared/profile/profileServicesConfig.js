@@ -21,7 +21,7 @@ import { ENABLE_DINING } from "@/shared/featureFlags";
 /**
  * Shared profile configuration for all end-user modules.
  * Menu items use `type: 'action'` for in-page handlers (see UnifiedProfile).
- * Temporary: food-only wallets/help — taxi & QC entries removed until those modules reopen.
+ * Temporary: food-only wallets/help — QC entries removed until that module reopens.
  */
 export const PROFILE_SERVICES = [
   {

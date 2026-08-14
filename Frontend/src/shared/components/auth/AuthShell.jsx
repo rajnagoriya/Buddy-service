@@ -8,7 +8,7 @@ export default function AuthShell({
   children,
   footer,
   brandHeadline = 'One app for food, mart & rides',
-  brandLead = 'Sign in to order food, shop quick commerce, and book taxis — all from Buddy Service.',
+  brandLead = 'Sign in to order food and shop quick commerce — all from Buddy Service.',
   brandFeatures = [],
   heroImage = null,
   services = null,

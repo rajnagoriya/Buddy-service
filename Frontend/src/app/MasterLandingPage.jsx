@@ -4,7 +4,6 @@ import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { 
   UtensilsCrossed, 
-  Car, 
   ShoppingBag, 
   User, 
   ArrowRight,
@@ -26,18 +25,6 @@ const MODULES = [
     iconColor: "text-orange-600",
     path: "/food/user",
     stats: "500+ Restaurants"
-  },
-  {
-    id: "taxi",
-    title: "Taxi Services",
-    description: "Reliable, comfortable, and affordable rides wherever you need to go, anytime.",
-    icon: Car,
-    color: "from-blue-500 to-indigo-500",
-    shadow: "shadow-blue-500/20",
-    bg: "bg-blue-50",
-    iconColor: "text-blue-600",
-    path: "/taxi/user",
-    stats: "1000+ Drivers"
   },
   {
     id: "quick-commerce",
@@ -113,13 +100,13 @@ export default function MasterLandingPage() {
               transition={{ delay: 0.2 }}
               className="text-gray-500 text-lg md:text-xl max-w-2xl mx-auto font-medium leading-relaxed"
             >
-              Order food, book rides, and get essentials delivered instantly. 
+              Order food and get essentials delivered instantly. 
               The ultimate multi-service platform designed for your lifestyle.
             </motion.p>
           </div>
 
           {/* Module Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 px-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 px-2 max-w-3xl mx-auto">
             {MODULES.map((module, idx) => (
               <motion.div
                 key={module.id}
@@ -128,18 +115,10 @@ export default function MasterLandingPage() {
                 transition={{ delay: 0.3 + idx * 0.1, type: "spring", stiffness: 100 }}
                 whileHover={{ y: -12, scale: 1.02 }}
                 onClick={() => {
-                  if (module.id === "taxi" || module.id === "quick-commerce") {
-                    toast(
-                      module.id === "taxi"
-                        ? "Taxi is Coming Soon! 🚀"
-                        : "Mart is Coming Soon! 🚀",
-                      {
-                        description:
-                          module.id === "taxi"
-                            ? "We are working hard to bring you the best taxi experience."
-                            : "We are working hard to bring you the best grocery delivery experience.",
-                      },
-                    );
+                  if (module.id === "quick-commerce") {
+                    toast("Mart is Coming Soon! 🚀", {
+                      description: "We are working hard to bring you the best grocery delivery experience.",
+                    });
                     return;
                   }
                   navigate(module.path);

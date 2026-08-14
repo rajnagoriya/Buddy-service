@@ -1,7 +1,7 @@
 /**
  * Unified driver profile.
  *
- * Single profile for both taxi and food-delivery portals. Pulls identity +
+ * Single profile for food-delivery partners. Pulls identity +
  * capability state from onboarding/mode, and enriches with delivery profile
  * (partner ID, zone, rating) when food is enrolled.
  */
@@ -14,7 +14,6 @@ import {
   BadgePercent,
   Bike,
   Camera,
-  Car,
   ChevronRight,
   FileText,
   Gift,
@@ -155,7 +154,6 @@ export default function DriverProfile() {
   const [deliveryProfile, setDeliveryProfile] = useState(null);
   const [capabilities, setCapabilities] = useState({
     food: "not_enabled",
-    taxi: "not_enabled",
   });
   const [activeService, setActiveService] = useState("off");
   const [error, setError] = useState("");
@@ -199,7 +197,6 @@ export default function DriverProfile() {
 
         const nextCaps = {
           food: "not_enabled",
-          taxi: "not_enabled",
           ...(stateData?.capabilities || {}),
           ...(modeData?.capabilities || {}),
         };
@@ -423,30 +420,8 @@ export default function DriverProfile() {
 
   const foodEnrolled = isCapabilityEnrolled(capabilities.food);
 
-  const preferredPortal = useMemo(() => {
-    if (activeService === "food" || activeService === "taxi") return activeService;
-    if (isCapabilityReady(capabilities.taxi)) return "taxi";
-    if (isCapabilityReady(capabilities.food)) return "food";
-    return "taxi";
-  }, [activeService, capabilities.food, capabilities.taxi]);
-
-  const links = useMemo(() => {
-    const taxi = {
-      home: "/taxi/driver/home",
-      editProfile: "/taxi/driver/edit-profile",
-      wallet: "/taxi/driver/wallet",
-      history: "/taxi/driver/history",
-      bank: "/taxi/driver/profile/bank-details",
-      documents: "/taxi/driver/documents",
-      vehicle: "/taxi/driver/vehicle-fleet",
-      notifications: "/taxi/driver/notifications",
-      referral: "/taxi/driver/referral",
-      incentives: "/taxi/driver/incentives",
-      sos: "/taxi/driver/security",
-      help: "/taxi/driver/help-support",
-      deleteAccount: "/taxi/driver/delete-account",
-    };
-    const food = {
+  const links = useMemo(
+    () => ({
       home: "/food/delivery",
       editProfile: "/food/delivery/profile/details",
       wallet: "/food/delivery/pocket",
@@ -455,14 +430,14 @@ export default function DriverProfile() {
       documents: "/food/delivery/profile/documents",
       vehicle: "/food/delivery/profile/details",
       notifications: "/food/delivery/notifications",
-      referral: "/taxi/driver/referral",
-      incentives: "/taxi/driver/incentives",
-      sos: "/taxi/driver/security",
+      referral: "/driver/home",
+      incentives: "/driver/home",
+      sos: "/food/delivery/help/tickets",
       help: "/food/delivery/help/tickets",
       deleteAccount: null,
-    };
-    return preferredPortal === "food" ? food : taxi;
-  }, [preferredPortal]);
+    }),
+    [],
+  );
 
   const clearSessionLocally = () => {
     clearModuleAuth("driver");
@@ -578,17 +553,14 @@ export default function DriverProfile() {
           {
             id: "wallet",
             label: "Wallet & Earnings",
-            sub:
-              preferredPortal === "food"
-                ? "Food & Quick Commerce wallet"
-                : "Taxi wallet",
+            sub: "Food & Quick Commerce wallet",
             icon: <Wallet size={20} />,
             path: links.wallet,
           },
           {
             id: "history",
-            label: "Trip / Order History",
-            sub: preferredPortal === "food" ? "Delivery history" : "Ride history",
+            label: "Order History",
+            sub: "Delivery history",
             icon: <History size={20} />,
             path: links.history,
           },
@@ -631,7 +603,7 @@ export default function DriverProfile() {
           {
             id: "help",
             label: "Help & Support",
-            sub: preferredPortal === "food" ? "Tickets & assistance" : undefined,
+            sub: "Tickets & assistance",
             icon: <HelpCircle size={20} />,
             path: links.help,
           },
@@ -669,8 +641,6 @@ export default function DriverProfile() {
       links.referral,
       links.sos,
       links.wallet,
-      preferredPortal,
-      zoneName,
     ],
   );
 
@@ -798,7 +768,7 @@ export default function DriverProfile() {
           />
           <QuickAction
             icon={<History size={22} />}
-            label={preferredPortal === "food" ? "Order History" : "Trip History"}
+            label="Order History"
             tone="green"
             onClick={() => navigate(links.history)}
           />
@@ -834,30 +804,17 @@ export default function DriverProfile() {
           </h2>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <CapabilityCard
-            Icon={Bike}
-            title="Food & Quick"
-            capability={capabilities.food}
-            active={activeService === "food"}
-            onClick={() =>
-              isCapabilityReady(capabilities.food)
-                ? navigate("/food/delivery")
-                : navigate("/driver/home")
-            }
-          />
-          <CapabilityCard
-            Icon={Car}
-            title="Taxi"
-            capability={capabilities.taxi}
-            active={activeService === "taxi"}
-            onClick={() =>
-              isCapabilityReady(capabilities.taxi)
-                ? navigate("/taxi/driver/home")
-                : navigate("/driver/home")
-            }
-          />
-        </div>
+        <CapabilityCard
+          Icon={Bike}
+          title="Food & Quick"
+          capability={capabilities.food}
+          active={activeService === "food"}
+          onClick={() =>
+            isCapabilityReady(capabilities.food)
+              ? navigate("/food/delivery")
+              : navigate("/driver/home")
+          }
+        />
 
         <button
           type="button"
@@ -869,9 +826,9 @@ export default function DriverProfile() {
               <ArrowLeftRight size={18} />
             </div>
             <div className="text-left">
-              <p className="text-[14px] font-bold leading-tight">Switch Service</p>
+              <p className="text-[14px] font-bold leading-tight">Delivery Mode</p>
               <p className="text-[11px] text-white/60 font-medium">
-                Change between Food, Taxi, or go offline
+                Go online or offline for deliveries
               </p>
             </div>
           </div>

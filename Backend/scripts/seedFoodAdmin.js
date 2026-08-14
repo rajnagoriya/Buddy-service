@@ -24,7 +24,7 @@ dotenv.config();
 const FORCE = process.argv.includes('--force');
 
 const parseServices = (raw) => {
-  const allowed = new Set(['food', 'quickCommerce', 'taxi']);
+  const allowed = new Set(['food', 'quickCommerce']);
   return raw
     .split(',')
     .map((item) => item.trim())

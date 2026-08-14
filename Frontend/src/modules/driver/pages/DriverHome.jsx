@@ -2,11 +2,9 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Bike,
-  Car,
   Loader2,
   LogOut,
   Sparkles,
-  Plus,
   AlertCircle,
   Pencil,
   Package,
@@ -27,52 +25,11 @@ const normalizeMode = (raw) => (OFF_VALUES.has(raw) ? "off" : raw);
 const SERVICE_STATUS_CARDS = [
   { key: "food", label: "Food", Icon: Bike, accent: "text-orange-400" },
   { key: "quickCommerce", label: "Quick Commerce", Icon: Package, accent: "text-emerald-400" },
-  { key: "taxi", label: "Taxi", Icon: Car, accent: "text-sky-400" },
 ];
-
-const SERVICE_TOGGLES = [
-  {
-    key: "food",
-    label: "Food & Quick Commerce",
-    description: "Restaurant orders and quick-commerce deliveries",
-    Icon: Bike,
-    accent: "text-orange-400",
-  },
-  {
-    key: "taxi",
-    label: "Taxi Mode",
-    description: "Rides, parcels, and intercity trips",
-    Icon: Car,
-    accent: "text-sky-400",
-  },
-];
-
-const APPLY_FOR_SERVICE = {
-  food: {
-    service: "food",
-    label: "Food & Quick Commerce",
-    title: "Apply for Food & Quick Commerce",
-    description:
-      "Use your existing verified profile to start delivering restaurant orders and quick-commerce packages.",
-    Icon: Bike,
-    accent: "from-orange-500/20 to-orange-500/5 border-orange-500/25",
-    btnClass: "bg-orange-500 hover:bg-orange-600",
-  },
-  taxi: {
-    service: "taxi",
-    label: "Taxi Driving",
-    title: "Apply for Taxi Driving",
-    description:
-      "Use your existing verified profile to accept rides, parcels, and intercity trips.",
-    Icon: Car,
-    accent: "from-sky-500/20 to-sky-500/5 border-sky-500/25",
-    btnClass: "bg-sky-500 hover:bg-sky-600",
-  },
-};
 
 /**
- * Single home for a driver. Mutually-exclusive service toggles (food vs taxi)
- * plus quick links into the food-delivery and taxi-driver portals.
+ * Single home for a food-delivery partner. Toggle food mode on/off
+ * and open the food-delivery portal when approved.
  */
 export default function DriverHome() {
   const navigate = useNavigate();
@@ -80,14 +37,12 @@ export default function DriverHome() {
   const [capabilities, setCapabilities] = useState({
     food: "not_enabled",
     quickCommerce: "not_enabled",
-    taxi: "not_enabled",
   });
   const [identity, setIdentity] = useState(null);
   const [bootLoading, setBootLoading] = useState(true);
   const [switching, setSwitching] = useState(false);
-  const [enrollingService, setEnrollingService] = useState(null);
   const [latLng, setLatLng] = useState(null);
-  const [rejection, setRejection] = useState({ food: null, quickCommerce: null, taxi: null });
+  const [rejection, setRejection] = useState({ food: null, quickCommerce: null });
   const [resubmitAllowed, setResubmitAllowed] = useState(false);
 
   useEffect(() => {
@@ -114,7 +69,7 @@ export default function DriverHome() {
           return;
         }
         setResubmitAllowed(Boolean(onboardingState?.resubmitAllowed));
-        setRejection(onboardingState?.rejection || { food: null, quickCommerce: null, taxi: null });
+        setRejection(onboardingState?.rejection || { food: null, quickCommerce: null });
         setIdentity(onboardingState?.identity || onboardingState || null);
         if (onboardingState?.capabilities) setCapabilities(onboardingState.capabilities);
         if (modeState?.capabilities) setCapabilities((prev) => ({ ...prev, ...modeState.capabilities }));
@@ -136,65 +91,15 @@ export default function DriverHome() {
     return () => { cancelled = true; };
   }, [navigate]);
 
-  const PORTAL_TARGETS = {
-    taxi: "/taxi/driver/home",
-    food: "/food/delivery",
-  };
-
   const foodRejected = capabilities?.food === "rejected";
   const qcRejected = capabilities?.quickCommerce === "rejected";
-  const taxiRejected = capabilities?.taxi === "rejected";
-  const anyRejected = foodRejected || qcRejected || taxiRejected;
+  const anyRejected = foodRejected || qcRejected;
   const foodEnabled = capabilities?.food && capabilities.food !== "not_enabled";
   const qcEnabled = capabilities?.quickCommerce && capabilities.quickCommerce !== "not_enabled";
-  const taxiEnabled = capabilities?.taxi && capabilities.taxi !== "not_enabled";
   const foodApproved = capabilities?.food === "approved" || capabilities?.food === "enabled" || capabilities?.food === "active";
   const qcApproved = capabilities?.quickCommerce === "approved" || capabilities?.quickCommerce === "enabled" || capabilities?.quickCommerce === "active";
-  const taxiApproved = capabilities?.taxi === "approved" || capabilities?.taxi === "enabled" || capabilities?.taxi === "active";
   const deliveryApproved = foodApproved || qcApproved;
   const deliveryEnabled = foodEnabled || qcEnabled;
-  const missingServiceKey = foodEnabled && !taxiEnabled ? "taxi" : taxiEnabled && !foodEnabled ? "food" : null;
-  const applyCta = missingServiceKey ? APPLY_FOR_SERVICE[missingServiceKey] : null;
-
-  const refreshCapabilities = async () => {
-    const [stateRes, modeRes] = await Promise.all([
-      driverOnboardingAPI.getState().catch(() => null),
-      driverModeAPI.get().catch(() => null),
-    ]);
-    const onboardingState = stateRes?.data?.data || stateRes?.data || {};
-    const modeState = modeRes?.data?.data || modeRes?.data || {};
-    if (onboardingState?.capabilities) {
-      setCapabilities(onboardingState.capabilities);
-    }
-    if (onboardingState?.rejection) {
-      setRejection(onboardingState.rejection);
-    }
-    setResubmitAllowed(Boolean(onboardingState?.resubmitAllowed));
-    if (modeState?.capabilities) {
-      setCapabilities((prev) => ({ ...prev, ...modeState.capabilities }));
-    }
-  };
-
-  const handleApplyForService = async (service) => {
-    if (enrollingService) return;
-    setEnrollingService(service);
-    try {
-      const res = await driverOnboardingAPI.enableCapability(service);
-      const data = res?.data?.data || res?.data || {};
-      const status = data?.status || "pending";
-      setCapabilities((prev) => ({ ...prev, [service]: status }));
-      await refreshCapabilities();
-      toast.success(
-        service === "food"
-          ? "Food & Quick Commerce application submitted — pending admin approval"
-          : "Taxi application submitted — pending admin approval",
-      );
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, "Could not submit application"));
-    } finally {
-      setEnrollingService(null);
-    }
-  };
 
   const applyMode = async (next) => {
     setSwitching(true);
@@ -207,8 +112,6 @@ export default function DriverHome() {
         toast.success("You're offline — not receiving jobs");
       } else if (next === "food") {
         toast.success("Food & Quick Commerce is now active");
-      } else if (next === "taxi") {
-        toast.success("Taxi mode is now active");
       }
     } catch (err) {
       const msg = getApiErrorMessage(err, "Could not switch mode — finish your current job first");
@@ -218,40 +121,24 @@ export default function DriverHome() {
     }
   };
 
-  const toggleService = async (serviceKey, turningOn) => {
+  const toggleFoodMode = async (turningOn) => {
     if (switching) return;
 
-    // Temporary: block entering taxi service until module is ready
-    if (serviceKey === "taxi") {
-      toast("Taxi is Coming Soon! 🚀", {
-        description: "We are working hard to bring you the best taxi experience.",
-      });
+    if (!deliveryEnabled) {
+      toast.error("Complete onboarding to enable delivery.");
       return;
     }
-
-    if (serviceKey === "taxi" && !taxiEnabled) {
-      toast.error("Apply for Taxi below to enable this service.");
-      return;
-    }
-    if (serviceKey === "food" && !deliveryEnabled) {
-      toast.error("Apply for Food or Quick Commerce below to enable this service.");
-      return;
-    }
-    if (serviceKey === "taxi" && taxiEnabled && !taxiApproved) {
-      toast.info("Taxi profile is pending admin approval.");
-      return;
-    }
-    if (serviceKey === "food" && deliveryEnabled && !deliveryApproved) {
+    if (deliveryEnabled && !deliveryApproved) {
       toast.info("Delivery profile is pending admin approval.");
       return;
     }
 
     if (turningOn) {
-      await applyMode(serviceKey);
+      await applyMode("food");
       return;
     }
 
-    if (mode === serviceKey) {
+    if (mode === "food") {
       await applyMode("off");
     }
   };
@@ -276,12 +163,10 @@ export default function DriverHome() {
 
   const isOffline = mode === "off";
   const foodActive = mode === "food";
-  const taxiActive = mode === "taxi";
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900 font-['Poppins']">
       <div className="max-w-md mx-auto p-5 pb-24">
-        {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
             <p className="uppercase text-[10px] text-green-600 font-bold tracking-[0.25em]">
@@ -380,13 +265,12 @@ export default function DriverHome() {
           </div>
         ) : null}
 
-        {/* Service toggles */}
         <div className="rounded-3xl bg-white border border-gray-100 shadow-sm p-5 mb-5">
           <div className="flex items-center justify-between gap-3 mb-3">
             <div className="flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-green-600" />
               <span className="text-[12px] uppercase tracking-widest font-bold text-green-600">
-                Service Mode
+                Delivery Mode
               </span>
             </div>
             <span
@@ -397,160 +281,87 @@ export default function DriverHome() {
                   : "bg-green-100 text-green-600",
               ].join(" ")}
             >
-              {isOffline ? "Offline" : foodActive ? "Food Active" : "Taxi Active"}
+              {isOffline ? "Offline" : "Food Active"}
             </span>
           </div>
           <p className="text-[13px] text-gray-500 mb-4 leading-relaxed">
-            Turn on one service at a time. If both are off, you won't receive any jobs.
+            Turn on delivery mode to receive food and quick-commerce orders.
           </p>
 
-          <div className="space-y-3">
-            {SERVICE_TOGGLES.map(({ key, label, description, Icon, accent }) => {
-              const enabled = key === "food" ? deliveryEnabled : taxiEnabled;
-              const approved = key === "food" ? deliveryApproved : taxiApproved;
-              const rejected = key === "food" ? (foodRejected || qcRejected) : taxiRejected;
-              const pending = enabled && !approved && !rejected;
-              const active = key === "food" ? foodActive : taxiActive;
-              const disabled = !enabled || pending || rejected || switching;
-
-              return (
-                <div
-                  key={key}
-                  className={[
-                    "rounded-2xl border p-4 flex items-center gap-3 transition-all",
-                    active ? "bg-green-50 border-green-500/30" : "bg-gray-50 border-gray-100",
-                    !enabled ? "opacity-60" : "",
-                  ].join(" ")}
-                >
-                  <div className={["w-11 h-11 rounded-xl bg-gray-50 flex items-center justify-center shrink-0", accent].join(" ")}>
-                    <Icon className="w-5 h-5" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-bold text-[14px] flex items-center gap-2 flex-wrap">
-                      {label}
-                      {pending && (
-                        <span className="text-[10px] uppercase tracking-widest text-amber-400">Pending</span>
-                      )}
-                      {(key === "food" ? foodRejected : taxiRejected) && (
-                        <span className="text-[10px] uppercase tracking-widest text-red-400">Rejected</span>
-                      )}
-                      {!enabled && (
-                        <span className="text-[10px] uppercase tracking-widest text-gray-500">Not Enrolled</span>
-                      )}
-                    </div>
-                    <div className="text-gray-400 text-[12px] mt-0.5">{description}</div>
-                  </div>
-                  <label className="relative inline-flex items-center shrink-0 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="sr-only peer"
-                      checked={active}
-                      disabled={disabled}
-                      onChange={(e) => toggleService(key, e.target.checked)}
-                    />
-                    <div
-                      className={[
-                        "w-12 h-7 rounded-full transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-green-600/40",
-                        disabled ? "bg-white/10 cursor-not-allowed" : "bg-gray-200 peer-checked:bg-green-600",
-                      ].join(" ")}
-                    />
-                    <div
-                      className={[
-                        "absolute left-0.5 top-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform",
-                        active ? "translate-x-5" : "translate-x-0",
-                        switching ? "opacity-60" : "",
-                      ].join(" ")}
-                    />
-                  </label>
-                </div>
-              );
-            })}
+          <div
+            className={[
+              "rounded-2xl border p-4 flex items-center gap-3 transition-all",
+              foodActive ? "bg-green-50 border-green-500/30" : "bg-gray-50 border-gray-100",
+              !deliveryEnabled ? "opacity-60" : "",
+            ].join(" ")}
+          >
+            <div className="w-11 h-11 rounded-xl bg-gray-50 flex items-center justify-center shrink-0 text-orange-400">
+              <Bike className="w-5 h-5" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="font-bold text-[14px] flex items-center gap-2 flex-wrap">
+                Food & Quick Commerce
+                {deliveryEnabled && !deliveryApproved && !foodRejected && !qcRejected && (
+                  <span className="text-[10px] uppercase tracking-widest text-amber-400">Pending</span>
+                )}
+                {(foodRejected || qcRejected) && (
+                  <span className="text-[10px] uppercase tracking-widest text-red-400">Rejected</span>
+                )}
+                {!deliveryEnabled && (
+                  <span className="text-[10px] uppercase tracking-widest text-gray-500">Not Enrolled</span>
+                )}
+              </div>
+              <div className="text-gray-400 text-[12px] mt-0.5">
+                Restaurant orders and quick-commerce deliveries
+              </div>
+            </div>
+            <label className="relative inline-flex items-center shrink-0 cursor-pointer">
+              <input
+                type="checkbox"
+                className="sr-only peer"
+                checked={foodActive}
+                disabled={!deliveryEnabled || (deliveryEnabled && !deliveryApproved) || foodRejected || qcRejected || switching}
+                onChange={(e) => toggleFoodMode(e.target.checked)}
+              />
+              <div
+                className={[
+                  "w-12 h-7 rounded-full transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-green-600/40",
+                  !deliveryEnabled || switching ? "bg-white/10 cursor-not-allowed" : "bg-gray-200 peer-checked:bg-green-600",
+                ].join(" ")}
+              />
+              <div
+                className={[
+                  "absolute left-0.5 top-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform",
+                  foodActive ? "translate-x-5" : "translate-x-0",
+                  switching ? "opacity-60" : "",
+                ].join(" ")}
+              />
+            </label>
           </div>
 
           {switching && (
             <div className="flex items-center justify-center gap-2 mt-4 text-[12px] text-gray-400">
               <Loader2 className="w-4 h-4 animate-spin" />
-              Updating service mode…
+              Updating delivery mode…
             </div>
           )}
         </div>
 
-        {applyCta && (
-          <ApplyForServiceCard
-            cta={applyCta}
-            loading={enrollingService === applyCta.service}
-            onApply={() => handleApplyForService(applyCta.service)}
-          />
-        )}
-
-        {/* Capability cards — open portals */}
-        <div className="grid grid-cols-2 gap-3">
-          <CapabilityCard
-            Icon={Bike}
-            title="Food & Quick"
-            status={capabilities.food}
-            enabled={foodEnabled}
-            href={PORTAL_TARGETS.food}
-          />
-          <CapabilityCard
-            Icon={Car}
-            title="Taxi Driving"
-            status={capabilities.taxi}
-            enabled={taxiEnabled}
-            href={PORTAL_TARGETS.taxi}
-            comingSoon
-          />
-        </div>
+        <CapabilityCard
+          Icon={Bike}
+          title="Food & Quick Commerce"
+          status={capabilities.food}
+          enabled={deliveryEnabled}
+          href="/food/delivery"
+        />
       </div>
     </div>
   );
 }
 
-function ApplyForServiceCard({ cta, loading, onApply }) {
-  const { Icon, title, description, btnClass } = cta;
-  return (
-    <div
-      className={[
-        "rounded-3xl border bg-gradient-to-br p-5 mb-5",
-        cta.accent,
-      ].join(" ")}
-    >
-      <div className="flex items-start gap-3 mb-4">
-        <div className="w-11 h-11 rounded-xl bg-white/10 flex items-center justify-center shrink-0">
-          <Icon className="w-5 h-5 text-white" />
-        </div>
-        <div>
-          <h3 className="text-gray-900 font-bold text-[15px] leading-snug">{title}</h3>
-          <p className="text-[12px] text-gray-500 mt-1 leading-relaxed">{description}</p>
-        </div>
-      </div>
-      <button
-        type="button"
-        onClick={onApply}
-        disabled={loading}
-        className={[
-          "w-full h-12 rounded-2xl text-white font-extrabold text-[14px] flex items-center justify-center gap-2 transition-colors active:scale-[0.98] disabled:opacity-60",
-          btnClass,
-        ].join(" ")}
-      >
-        {loading ? (
-          <Loader2 className="w-5 h-5 animate-spin" />
-        ) : (
-          <>
-            <Plus className="w-5 h-5" />
-            <span>{title}</span>
-          </>
-        )}
-      </button>
-    </div>
-  );
-}
-
-function CapabilityCard({ Icon, title, status, enabled, href, comingSoon = false }) {
+function CapabilityCard({ Icon, title, status, enabled, href }) {
   const normalized = String(status || "").toLowerCase();
-  const label = comingSoon
-    ? "Coming soon"
-    : !enabled
+  const label = !enabled
     ? "Not enrolled"
     : normalized === "rejected"
       ? "Rejected"
@@ -558,46 +369,25 @@ function CapabilityCard({ Icon, title, status, enabled, href, comingSoon = false
   const isReady = enabled && (normalized === "approved" || normalized === "enabled" || normalized === "active");
   const isPending = enabled && !isReady && normalized !== "rejected";
   const isRejected = enabled && normalized === "rejected";
-  const target = comingSoon ? null : (!enabled || isRejected ? null : isPending ? "/driver/home" : href);
+  const target = !enabled || isRejected ? null : isPending ? "/driver/home" : href;
 
   const className = [
     "block rounded-2xl border p-4 transition-all",
-    comingSoon
-      ? "bg-slate-50 border-slate-200 opacity-80 cursor-pointer"
-      : isReady
-        ? "bg-green-50 border-green-500/30"
-        : isRejected
-          ? "bg-red-500/10 border-red-500/30"
-          : "bg-gray-50 border-gray-100",
-    !enabled && !comingSoon ? "opacity-70" : "",
+    isReady
+      ? "bg-green-50 border-green-500/30"
+      : isRejected
+        ? "bg-red-500/10 border-red-500/30"
+        : "bg-gray-50 border-gray-100",
+    !enabled ? "opacity-70" : "",
   ].join(" ");
 
   const content = (
     <>
-      <Icon className={[
-        "w-5 h-5 mb-2",
-        comingSoon ? "text-slate-400" : isReady ? "text-green-600" : "text-gray-500",
-      ].join(" ")} />
+      <Icon className={["w-5 h-5 mb-2", isReady ? "text-green-600" : "text-gray-500"].join(" ")} />
       <div className="text-gray-900 font-bold text-[13px]">{title}</div>
       <div className="text-[11px] text-gray-500 mt-1 capitalize">{label}</div>
     </>
   );
-
-  if (comingSoon) {
-    return (
-      <button
-        type="button"
-        className={className + " text-left w-full"}
-        onClick={() =>
-          toast("Taxi is Coming Soon! 🚀", {
-            description: "We are working hard to bring you the best taxi experience.",
-          })
-        }
-      >
-        {content}
-      </button>
-    );
-  }
 
   if (!target) {
     return <div className={className}>{content}</div>;

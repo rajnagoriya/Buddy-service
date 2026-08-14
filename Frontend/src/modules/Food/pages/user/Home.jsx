@@ -2212,7 +2212,7 @@ export default function Home() {
               <div className="rounded-[28px] bg-gradient-to-br from-[#efe7ff] via-[#ffe0ef] to-[#dff6e7] px-6 py-10 text-center shadow-[0_12px_26px_rgba(0,0,0,0.08)]">
                 <div className="text-sm font-black uppercase tracking-[0.3em] text-[#6b5bb5]">Coming Soon</div>
                 <div className="mt-3 text-2xl font-black text-[#2b2b3f]">
-                  {activeTab === "taxi" ? "Taxi" : "Quick Commerce"}
+                  Quick Commerce
                 </div>
                 <p className="mt-2 text-sm font-semibold text-[#2b2b3f]/70">
                   We are preparing the next experience for you.

@@ -5334,7 +5334,6 @@ const buildDeliveryPartnerDetail = (partner, identity = null) => {
     const kyc = identity?.kyc || {};
     const bank = identity?.bank || {};
     const foodVehicle = identity?.foodVehicle || {};
-    const taxiVehicle = identity?.taxiVehicle || {};
 
     const aadhaarNumber = pickText(kyc.aadhaar?.number) || pickText(partner.aadharNumber);
     const aadhaarFront = pickText(kyc.aadhaar?.documentUrl) || pickText(partner.aadharPhoto);
@@ -5449,21 +5448,6 @@ const buildDeliveryPartnerDetail = (partner, identity = null) => {
                       insuranceUrl: pickText(foodVehicle.insuranceUrl) || null,
                   }
                 : null,
-        taxiVehicle: taxiVehicle?.number
-            ? {
-                  type: pickText(taxiVehicle.type) || null,
-                  make: pickText(taxiVehicle.make) || null,
-                  model: pickText(taxiVehicle.model) || null,
-                  number: pickText(taxiVehicle.number) || null,
-                  vehicleTypeId: pickText(taxiVehicle.vehicleTypeId) || null,
-                  color: pickText(taxiVehicle.color) || null,
-                  photoUrl: pickText(taxiVehicle.photoUrl) || null,
-                  rcUrl: pickText(taxiVehicle.rcUrl) || null,
-                  insuranceUrl: pickText(taxiVehicle.insuranceUrl) || null,
-                  commercialPermitUrl: pickText(taxiVehicle.commercialPermitUrl) || null,
-                  pucUrl: pickText(taxiVehicle.pucUrl) || null,
-              }
-            : null,
     };
 };
 
@@ -5485,10 +5469,8 @@ export async function getDeliveryPartnerById(id) {
         const { getEffectiveServiceStatus, ONBOARDING_SERVICES } = await import(
             '../../../../core/identity/driverOnboardingAdmin.service.js'
         );
-        const { Driver } = await import('../../../taxi/driver/models/Driver.js');
-        const driver = await Driver.findOne({ identityId: identity._id }).lean();
         detail.serviceStatuses = ONBOARDING_SERVICES.reduce((acc, svc) => {
-            acc[svc] = getEffectiveServiceStatus(identity, svc, partner, driver);
+            acc[svc] = getEffectiveServiceStatus(identity, svc, partner);
             return acc;
         }, {});
     }

@@ -4,7 +4,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowRight,
   Loader2,
-  Car,
   Bike,
   ShieldCheck,
   ChevronDown,
@@ -202,11 +201,10 @@ export default function DriverLogin() {
             </p>
             <h1 className="text-white text-[30px] leading-[1.15] font-extrabold tracking-tight mb-2">
               One partner account.<br />
-              Food orders <span className="text-green-300">and</span> Taxi rides.
+              Food <span className="text-green-300">&</span> Quick Commerce.
             </h1>
             <p className="text-green-50 text-[13px] font-medium max-w-[290px]">
-              Sign in once to receive both food deliveries and taxi rides — switch
-              modes any time, never both at once.
+              Sign in once to receive restaurant and quick-commerce deliveries.
             </p>
           </div>
         </div>
@@ -362,10 +360,9 @@ export default function DriverLogin() {
           </div>
 
           <div className="mt-auto px-7 py-6 border-t border-gray-100 shadow-[0_-4px_20px_rgba(0,0,0,0.02)]">
-            <div className="grid grid-cols-3 gap-3 mb-5">
+            <div className="grid grid-cols-2 gap-3 mb-5">
               {[
                 { Icon: Bike, label: "Food" },
-                { Icon: Car, label: "Taxi" },
                 { Icon: IndianRupee, label: "Earnings" },
               ].map(({ Icon, label }) => (
                 <div key={label} className="rounded-2xl bg-white/5 border border-gray-100 shadow-[0_-4px_20px_rgba(0,0,0,0.02)] p-3 text-center">

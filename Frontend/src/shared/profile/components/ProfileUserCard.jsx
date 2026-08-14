@@ -5,7 +5,7 @@ import {
   AvatarImage,
 } from "@food/components/ui/avatar";
 import { Card, CardContent } from "@food/components/ui/card";
-import { ChevronRight, Power, Trash2, Star } from "lucide-react";
+import { ChevronRight, Power, Trash2 } from "lucide-react";
 
 export default function ProfileUserCard({
   displayName,
@@ -43,30 +43,6 @@ export default function ProfileUserCard({
             )}
           </div>
         </div>
-
-        {activeService.id === "taxi" && stats?.length > 0 && (
-          <div className="profile-stats-row">
-            {stats.map((stat) => {
-              const raw = badgeValues[stat.key] ?? "0";
-              const value = `${stat.prefix || ""}${raw}${stat.suffix || ""}`;
-              return (
-                <div key={stat.key} className="text-center">
-                  <p className="profile-stat-label">{stat.label}</p>
-                  <p className="profile-stat-value" style={stat.key === "taxiRating" ? { color: "var(--profile-accent)" } : undefined}>
-                    {stat.key === "taxiRating" ? (
-                      <span className="inline-flex items-center gap-1 justify-center">
-                        <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-                        {raw}
-                      </span>
-                    ) : (
-                      value
-                    )}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
-        )}
 
         {activeService.id === "qc" && activeService.summary?.length > 0 && (
           <div className="mt-4">

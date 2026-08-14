@@ -1,10 +1,6 @@
-import mongoose from 'mongoose';
 import { ValidationError, NotFoundError, ConflictError } from '../auth/errors.js';
 import { BuddyIdentity } from './buddyIdentity.model.js';
 import { FoodDeliveryPartner } from '../../modules/food/delivery/models/deliveryPartner.model.js';
-import { Driver } from '../../modules/taxi/driver/models/Driver.js';
-import { hashPassword } from '../../modules/taxi/driver/services/authService.js';
-import { VEHICLE_TYPES } from '../../modules/taxi/constants/index.js';
 
 import {
   initServiceStatusesForOnboarding,
@@ -16,6 +12,7 @@ import {
 
 const VALID_SERVICES = ONBOARDING_SERVICES;
 const FOOD_VEHICLE_TYPES = ['bike', 'scooter'];
+const LEGACY_VEHICLE_TYPES = ['bike', 'scooter', 'auto', 'car'];
 
 const needsFoodVehicleStep = (services = []) =>
   services.includes('food') || services.includes('quickCommerce');
@@ -81,17 +78,12 @@ const getSelectedServices = (identity) => {
 const getNextStep = (identity, currentStep) => {
   const services = getSelectedServices(identity);
   const hasFoodOrQc = needsFoodVehicleStep(services);
-  const hasTaxi = services.includes('taxi');
 
   switch (String(currentStep || '').toLowerCase()) {
     case 'services':
       if (hasFoodOrQc) return 'vehicle_food';
-      if (hasTaxi) return 'vehicle_taxi';
       return 'basics';
     case 'vehicle_food':
-      if (hasTaxi) return 'vehicle_taxi';
-      return 'basics';
-    case 'vehicle_taxi':
       return 'basics';
     case 'basics':
       return 'kyc';
@@ -124,19 +116,18 @@ export const normalizeOnboardingStepForClient = (step, identity = null) => {
     return 'services';
   }
   if (normalized === 'vehicle') {
-    if (identity?.vehicle?.number && !identity?.foodVehicle?.number && !identity?.taxiVehicle?.number) {
+    if (identity?.vehicle?.number && !identity?.foodVehicle?.number) {
       return 'selfie';
     }
     const services = getSelectedServices(identity);
     const effective = services.length ? services : ['food'];
     if (needsFoodVehicleStep(effective) && !identity?.foodVehicle?.number) return 'vehicle_food';
-    if (effective.includes('taxi') && !identity?.taxiVehicle?.number) return 'vehicle_taxi';
     return 'basics';
   }
   if (normalized === 'done') return 'done';
   if (
     !getSelectedServices(identity).length &&
-    !['services', 'vehicle_food', 'vehicle_taxi'].includes(normalized)
+    !['services', 'vehicle_food'].includes(normalized)
   ) {
     return 'services';
   }
@@ -155,7 +146,7 @@ const normalizeVehicleType = (value = '') => {
   const v = String(value || '').trim().toLowerCase();
   if (v.includes('bike') || v.includes('scooter')) return 'bike';
   if (v.includes('auto') || v.includes('rickshaw')) return 'auto';
-  if (VEHICLE_TYPES.includes(v)) return v;
+  if (LEGACY_VEHICLE_TYPES.includes(v)) return v;
   return 'bike';
 };
 
@@ -186,28 +177,9 @@ const assertUniqueVehicleNumber = async (identity, vehicleNumber) => {
       `Vehicle number ${normalized} is already registered with another delivery partner`,
     );
   }
-
-  const existingDriver = await Driver.findOne({
-    $or: [{ identityId: identity._id }, { phone: identity.phone }],
-  })
-    .select('_id phone')
-    .lean();
-
-  const driverConflict = await Driver.findOne({
-    vehicleNumber: normalized,
-    ...excludeExistingDoc(existingDriver),
-  })
-    .select('phone name')
-    .lean();
-
-  if (driverConflict && String(driverConflict.phone) !== String(identity.phone)) {
-    throw new ConflictError(
-      `Vehicle number ${normalized} is already registered with another driver`,
-    );
-  }
 };
 
-const assertUniquePhoneForProfiles = async (identity, { food = false, taxi = false } = {}) => {
+const assertUniquePhoneForProfiles = async (identity, { food = false } = {}) => {
   const phone = String(identity.phone || '').trim();
   if (!phone) return;
 
@@ -220,18 +192,6 @@ const assertUniquePhoneForProfiles = async (identity, { food = false, taxi = fal
       .lean();
     if (partnerConflict) {
       throw new ConflictError('This phone number is already registered as a delivery partner');
-    }
-  }
-
-  if (taxi) {
-    const driverConflict = await Driver.findOne({
-      phone,
-      identityId: { $ne: identity._id },
-    })
-      .select('_id')
-      .lean();
-    if (driverConflict) {
-      throw new ConflictError('This phone number is already registered as a taxi driver');
     }
   }
 };
@@ -248,13 +208,6 @@ const assertCreatableProfiles = async (identity, services = []) => {
     await assertUniquePhoneForProfiles(identity, { food: true });
     const foodNumber = identity.foodVehicle?.number || identity.vehicle?.number;
     await assertUniqueVehicleNumber(identity, foodNumber);
-  }
-  if (normalizedServices.includes('taxi')) {
-    await assertUniquePhoneForProfiles(identity, { taxi: true });
-    const taxiNumber = identity.taxiVehicle?.number || identity.vehicle?.number;
-    if (taxiNumber) {
-      await assertUniqueVehicleNumber(identity, taxiNumber);
-    }
   }
 };
 
@@ -301,53 +254,6 @@ export const updateFoodVehicle = async (identity, body) => {
   return identity;
 };
 
-export const updateTaxiVehicle = async (identity, body) => {
-  const {
-    type,
-    number,
-    vehicleTypeId,
-    name,
-    make,
-    model,
-    color,
-    photoUrl,
-    rcUrl,
-    insuranceUrl,
-    commercialPermitUrl,
-    pucUrl,
-  } = body || {};
-  const vehicleType = normalizeVehicleType(type);
-  if (!vehicleType) {
-    throw new ValidationError('Vehicle type is required');
-  }
-  const vehicleNumber = assertString(number, 'Vehicle number', {
-    max: 15,
-    pattern: RE_VEHICLE,
-    patternMessage: 'Vehicle number must look like MH12AB1234',
-  });
-  const vehicleMake = assertString(make || name, 'Vehicle make', { min: 2, max: 60 });
-  const vehicleModel = assertString(model, 'Vehicle model', { min: 2, max: 60 });
-  const catalogTypeId = sanitize(vehicleTypeId) || '';
-
-  identity.taxiVehicle = {
-    type: vehicleType,
-    make: vehicleMake,
-    model: vehicleModel,
-    vehicleTypeId: catalogTypeId,
-    number: normalizeVehicleNumber(vehicleNumber),
-    color: assertOptionalString(color, 'Vehicle color', { max: 30 }) || '',
-    photoUrl: assertOptionalHttpUrl(photoUrl, 'Vehicle photo') || '',
-    rcUrl: assertHttpUrl(rcUrl, 'RC document'),
-    insuranceUrl: assertHttpUrl(insuranceUrl, 'Insurance document'),
-    commercialPermitUrl: assertHttpUrl(commercialPermitUrl, 'Commercial permit'),
-    pucUrl: assertHttpUrl(pucUrl, 'PUC certificate'),
-  };
-  await assertUniqueVehicleNumber(identity, identity.taxiVehicle.number);
-  identity.markModified('taxiVehicle');
-  await advanceStep(identity, 'vehicle_taxi');
-  return identity;
-};
-
 export const updateBasics = async (identity, body) => {
   const { name, email, gender, city, state, profileImage } = body || {};
   identity.name = assertString(name, 'Name', { min: 2, max: 80, pattern: RE_PERSON_NAME });
@@ -378,23 +284,17 @@ export const updateBasics = async (identity, body) => {
 
   await advanceStep(identity, 'basics');
 
-  // Keep pending partner/driver docs in sync so admin View Details shows city/state.
+  // Keep pending partner docs in sync so admin View Details shows city/state.
   const profilePatch = {
     name: identity.name,
     email: identity.email || '',
     city: identity.city || '',
     state: identity.state || '',
   };
-  await Promise.all([
-    FoodDeliveryPartner.updateMany(
-      { $or: [{ identityId: identity._id }, { phone: identity.phone }] },
-      { $set: profilePatch },
-    ),
-    Driver.updateMany(
-      { $or: [{ identityId: identity._id }, { phone: identity.phone }] },
-      { $set: { ...profilePatch, gender: identity.gender || '' } },
-    ),
-  ]);
+  await FoodDeliveryPartner.updateMany(
+    { $or: [{ identityId: identity._id }, { phone: identity.phone }] },
+    { $set: profilePatch },
+  );
 
   return identity;
 };
@@ -525,7 +425,7 @@ export const updateBank = async (identity, body) => {
   identity.markModified('bank');
   await advanceStep(identity, 'bank');
 
-  // Keep partner/driver payout fields in sync for admin View Details.
+  // Keep partner payout fields in sync for admin View Details.
   const bankPatch = {
     bankAccountHolderName: identity.bank.accountHolderName || '',
     bankAccountNumber: identity.bank.accountNumber || '',
@@ -534,28 +434,10 @@ export const updateBank = async (identity, body) => {
     upiId: identity.bank.upiId || '',
     upiQrCode: identity.bank.upiQrCodeUrl || '',
   };
-  await Promise.all([
-    FoodDeliveryPartner.updateMany(
-      { $or: [{ identityId: identity._id }, { phone: identity.phone }] },
-      { $set: bankPatch },
-    ),
-    Driver.updateMany(
-      { $or: [{ identityId: identity._id }, { phone: identity.phone }] },
-      {
-        $set: {
-          bankDetails: {
-            accountHolderName: identity.bank.accountHolderName || '',
-            accountNumber: identity.bank.accountNumber || '',
-            ifsc: identity.bank.ifscCode || '',
-            branchName: identity.bank.branchName || '',
-            upiId: identity.bank.upiId || '',
-            qrCodeImage: identity.bank.upiQrCodeUrl || '',
-            updatedAt: new Date(),
-          },
-        },
-      },
-    ),
-  ]);
+  await FoodDeliveryPartner.updateMany(
+    { $or: [{ identityId: identity._id }, { phone: identity.phone }] },
+    { $set: bankPatch },
+  );
 
   return identity;
 };
@@ -591,10 +473,9 @@ export const updateSelfie = async (identity, body) => {
 /**
  * Marks onboarding complete and creates the requested capability profiles.
  *
- * Both `FoodDeliveryPartner` and `Driver` (TaxiDriver) docs are created with
- * `status: 'pending'` so admin must approve them before the driver can pick
- * up jobs. KYC + bank + vehicle data is copied from the identity so the
- * driver doesn't re-enter anything.
+ * `FoodDeliveryPartner` docs are created with `status: 'pending'` so admin must
+ * approve them before the driver can pick up jobs. KYC + bank + vehicle data is
+ * copied from the identity so the driver doesn't re-enter anything.
  */
 const hasPayoutDetails = (bank = {}) => {
   const account = String(bank.accountNumber || '').replace(/\D/g, '');
@@ -629,16 +510,6 @@ const assertOnboardingDataComplete = (identityDoc, services = []) => {
       throw new ValidationError('Add your delivery vehicle details');
     }
   }
-
-  if (services.includes('taxi')) {
-    const taxiVehicle = identityDoc.taxiVehicle || {};
-    if (!taxiVehicle.number || !taxiVehicle.make || !taxiVehicle.model || !taxiVehicle.type) {
-      throw new ValidationError('Add your taxi vehicle details');
-    }
-    if (!taxiVehicle.rcUrl || !taxiVehicle.insuranceUrl || !taxiVehicle.commercialPermitUrl || !taxiVehicle.pucUrl) {
-      throw new ValidationError('Upload RC, insurance, commercial permit, and PUC for taxi');
-    }
-  }
 };
 
 export const completeOnboarding = async (identity, body) => {
@@ -663,19 +534,17 @@ export const completeOnboarding = async (identity, body) => {
 
   await assertCreatableProfiles(identityDoc, services);
 
-  const { partner: existingPartner, driver: existingDriver } = await findPartnerProfiles(identityDoc);
+  const { partner: existingPartner } = await findPartnerProfiles(identityDoc);
 
   const serviceRejected = (svc) =>
-    getEffectiveServiceStatus(identityDoc, svc, existingPartner, existingDriver).status === 'rejected';
+    getEffectiveServiceStatus(identityDoc, svc, existingPartner).status === 'rejected';
 
   const foodResubmit = services.includes('food') && serviceRejected('food');
   const qcResubmit = services.includes('quickCommerce') && serviceRejected('quickCommerce');
-  const taxiResubmit = services.includes('taxi') && serviceRejected('taxi');
-  const isResubmit = foodResubmit || qcResubmit || taxiResubmit;
+  const isResubmit = foodResubmit || qcResubmit;
 
   const needsPartner = services.includes('food') || services.includes('quickCommerce');
   const createdPartner = needsPartner ? await ensureFoodPartner(identityDoc) : null;
-  const createdDriver = services.includes('taxi') ? await ensureTaxiDriver(identityDoc) : null;
 
   if (isResubmit) {
     for (const svc of services) {
@@ -701,7 +570,6 @@ export const completeOnboarding = async (identity, body) => {
         onboardingStep: 'done',
         serviceStatuses: identityDoc.serviceStatuses,
         'identityRefs.foodPartnerId': createdPartner?._id || identityDoc.identityRefs?.foodPartnerId || null,
-        'identityRefs.driverId': createdDriver?._id || identityDoc.identityRefs?.driverId || null,
       },
       $addToSet: { roles: 'DRIVER' },
     },
@@ -710,7 +578,6 @@ export const completeOnboarding = async (identity, body) => {
   const capabilities = summariseCapabilitiesFromIdentity(
     identityDoc,
     createdPartner || existingPartner,
-    createdDriver || existingDriver,
   );
 
   return {
@@ -755,59 +622,15 @@ const buildFoodPartnerFields = (identity) => ({
   upiQrCode: identity.bank?.upiQrCodeUrl || '',
 });
 
-const buildTaxiDriverFields = (identity) => {
-  const vehicleTypeId = identity.taxiVehicle?.vehicleTypeId || '';
-  const selfieUrl = identity.onboardingSelfieUrl || identity.profileImage || '';
-  return {
-    identityId: identity._id,
-    name: identity.name,
-    phone: identity.phone,
-    email: identity.email || '',
-    vehicleType: identity.taxiVehicle?.type || identity.vehicle?.type || 'bike',
-    vehicleTypeId: mongoose.Types.ObjectId.isValid(vehicleTypeId) ? vehicleTypeId : null,
-    vehicleNumber: identity.taxiVehicle?.number || identity.vehicle?.number || '',
-    vehicleMake: identity.taxiVehicle?.make || identity.vehicle?.make || '',
-    vehicleModel: identity.taxiVehicle?.model || identity.vehicle?.model || '',
-    vehicleColor: identity.taxiVehicle?.color || identity.vehicle?.color || '',
-    vehicleImage: identity.taxiVehicle?.photoUrl || identity.vehicle?.photoUrl || '',
-    profile_picture: selfieUrl,
-    profileImage: selfieUrl,
-    gender: identity.gender || '',
-    city: identity.city || '',
-    state: identity.state || '',
-    registerFor: 'taxi',
-    documents: {
-      aadhaar: identity.kyc?.aadhaar || {},
-      pan: identity.kyc?.pan || {},
-      drivingLicense: identity.kyc?.drivingLicense || {},
-      selfieUrl,
-    },
-    bankDetails: {
-      accountHolderName: identity.bank?.accountHolderName || '',
-      upiId: identity.bank?.upiId || '',
-      qrCodeImage: identity.bank?.upiQrCodeUrl || '',
-      accountNumber: identity.bank?.accountNumber || '',
-      ifsc: identity.bank?.ifscCode || '',
-      branchName: identity.bank?.branchName || '',
-      updatedAt: new Date(),
-    },
-  };
-};
-
 const findPartnerProfiles = async (identity) => {
-  const [partner, driver] = await Promise.all([
-    FoodDeliveryPartner.findOne({
-      $or: [{ identityId: identity._id }, { phone: identity.phone }],
-    }),
-    Driver.findOne({
-      $or: [{ identityId: identity._id }, { phone: identity.phone }],
-    }),
-  ]);
-  return { partner, driver };
+  const partner = await FoodDeliveryPartner.findOne({
+    $or: [{ identityId: identity._id }, { phone: identity.phone }],
+  });
+  return { partner };
 };
 
-const summarisePartnerCapabilities = (identity, partner, driver) =>
-  summariseCapabilitiesFromIdentity(identity, partner, driver);
+const summarisePartnerCapabilities = (identity, partner) =>
+  summariseCapabilitiesFromIdentity(identity, partner);
 
 const ensureFoodPartner = async (identity) => {
   const existing = await FoodDeliveryPartner.findOne({
@@ -876,55 +699,10 @@ const ensureFoodPartner = async (identity) => {
   });
 };
 
-const ensureTaxiDriver = async (identity) => {
-  const existing = await Driver.findOne({
-    $or: [{ identityId: identity._id }, { phone: identity.phone }],
-  });
-  const fields = buildTaxiDriverFields(identity);
-
-  if (existing) {
-    if (!existing.identityId) {
-      existing.identityId = identity._id;
-    }
-
-    if (String(existing.status || '').toLowerCase() === 'approved') {
-      if (existing.isModified()) await existing.save();
-      return existing;
-    }
-
-    if (String(existing.status || '').toLowerCase() === 'rejected') {
-      existing.set({
-        ...fields,
-        approve: false,
-        status: 'pending',
-      });
-      await existing.save();
-      return existing;
-    }
-
-    if (String(existing.status || '').toLowerCase() === 'pending') {
-      existing.set({ ...fields, approve: false, status: 'pending' });
-      await existing.save();
-      return existing;
-    }
-
-    await existing.save();
-    return existing;
-  }
-
-  return Driver.create({
-    ...fields,
-    password: await hashPassword(String(identity.phone || '')),
-    approve: false,
-    status: 'pending',
-    location: { type: 'Point', coordinates: [0, 0] },
-  });
-};
-
 /**
  * Lets an already-onboarded driver add a new capability (e.g. they signed up
- * for food only, now want taxi too). No KYC re-entry — the identity already
- * has it.
+ * for food only, now want quick commerce too). No KYC re-entry — the identity
+ * already has it.
  */
 export const enableCapability = async (identity, service) => {
   if (!identity.onboardingComplete) {
@@ -950,34 +728,19 @@ export const enableCapability = async (identity, service) => {
     await identity.save();
     return { service: svc, status: partner.status || 'pending' };
   }
-  await assertCreatableProfiles(identity, ['taxi']);
-  const driver = await ensureTaxiDriver(identity);
-  setServiceStatusOnIdentity(identity, 'taxi', {
-    status: 'pending',
-    rejectionReason: '',
-    rejectedAt: null,
-    approvedAt: null,
-  });
-  if (!identity.onboardingServices.includes('taxi')) {
-    identity.onboardingServices.push('taxi');
-    identity.markModified('onboardingServices');
-  }
-  await identity.save();
-  return { service: 'taxi', status: driver.status || 'pending' };
+  throw new ValidationError(`service must be one of: ${VALID_SERVICES.join(', ')}`);
 };
 
 export const getOnboardingState = async (identity) => {
   if (!identity) throw new NotFoundError('Identity not found');
 
-  const { partner, driver } = await findPartnerProfiles(identity);
-  const capabilities = summarisePartnerCapabilities(identity, partner, driver);
-  const foodStatus = getEffectiveServiceStatus(identity, 'food', partner, driver);
-  const qcStatus = getEffectiveServiceStatus(identity, 'quickCommerce', partner, driver);
-  const taxiStatus = getEffectiveServiceStatus(identity, 'taxi', partner, driver);
+  const { partner } = await findPartnerProfiles(identity);
+  const capabilities = summarisePartnerCapabilities(identity, partner);
+  const foodStatus = getEffectiveServiceStatus(identity, 'food', partner);
+  const qcStatus = getEffectiveServiceStatus(identity, 'quickCommerce', partner);
   const foodRejected = foodStatus.status === 'rejected';
   const qcRejected = qcStatus.status === 'rejected';
-  const taxiRejected = taxiStatus.status === 'rejected';
-  const resubmitAllowed = foodRejected || qcRejected || taxiRejected;
+  const resubmitAllowed = foodRejected || qcRejected;
   const onboardingLocked = Boolean(identity.onboardingComplete) && !resubmitAllowed;
 
   return {
@@ -1003,12 +766,10 @@ export const getOnboardingState = async (identity) => {
     serviceStatuses: {
       food: foodStatus,
       quickCommerce: qcStatus,
-      taxi: taxiStatus,
     },
     rejectedServices: [
       foodRejected ? 'food' : null,
       qcRejected ? 'quickCommerce' : null,
-      taxiRejected ? 'taxi' : null,
     ].filter(Boolean),
     rejection: {
       food: foodRejected
@@ -1025,13 +786,6 @@ export const getOnboardingState = async (identity) => {
             partnerId: partner?._id ? String(partner._id) : null,
           }
         : null,
-      taxi: taxiRejected
-        ? {
-            reason: taxiStatus.rejectionReason || '',
-            rejectedAt: taxiStatus.rejectedAt || null,
-            driverId: driver?._id ? String(driver._id) : null,
-          }
-        : null,
     },
     basics: {
       name: identity.name,
@@ -1045,7 +799,6 @@ export const getOnboardingState = async (identity) => {
     bank: identity.bank || {},
     vehicle: identity.vehicle || {},
     foodVehicle: identity.foodVehicle || {},
-    taxiVehicle: identity.taxiVehicle || {},
     selfieUrl: identity.onboardingSelfieUrl || '',
   };
 };

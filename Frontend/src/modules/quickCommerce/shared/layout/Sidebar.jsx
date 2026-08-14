@@ -5,7 +5,7 @@ import { useSettings } from "@core/context/SettingsContext";
 import { cn } from "@qc/lib/utils";
 import { HiChevronDown, HiChevronRight } from "react-icons/hi2";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, UtensilsCrossed, Car, Zap } from "lucide-react";
+import { X, UtensilsCrossed, Zap } from "lucide-react";
 import BusinessLogo from '@food/components/BusinessLogo';
 
 const colorMap = {
@@ -277,20 +277,7 @@ const SidebarContent = ({ items, title, onClose, openMenu, handleToggle, hovered
                 </div>
               </Link>
 
-              {/* Taxi Service */}
-              <Link
-                to="/taxi/admin"
-                className={cn(
-                  "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-yellow-600 text-white hover:from-amber-500 hover:to-yellow-500 transition-all duration-300 shadow-lg shadow-amber-900/20 group border border-amber-400/20",
-                  "justify-start"
-                )}
-              >
-                <Car className="w-4 h-4 shrink-0 text-amber-100 group-hover:scale-110 transition-transform" />
-                <div className="flex-1 flex items-center justify-between overflow-hidden">
-                  <span className="font-semibold text-xs uppercase tracking-wider truncate">Taxi Service</span>
-                  <HiChevronRight className="w-3.5 h-3.5 shrink-0 text-amber-200 group-hover:translate-x-0.5 transition-transform" />
-                </div>
-              </Link>
+
             </div>
           </>
 

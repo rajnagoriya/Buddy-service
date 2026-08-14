@@ -7,7 +7,7 @@ import {
   Loader2,
   Utensils,
   ShoppingBag,
-  Car,
+  IndianRupee,
   ChevronDown,
   ShieldCheck,
   Zap,
@@ -482,9 +482,9 @@ export default function UnifiedOTPFastLogin() {
 
               <div className="flex flex-1 flex-col items-center gap-1">
                 <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white shadow-sm sm:h-10 sm:w-10">
-                  <Car className="h-4 w-4 text-primary sm:h-5 sm:w-5" strokeWidth={2} />
+                  <IndianRupee className="h-4 w-4 text-primary sm:h-5 sm:w-5" strokeWidth={2} />
                 </div>
-                <span className="text-[9px] font-semibold text-white sm:text-[10px]">Taxi</span>
+                <span className="text-[9px] font-semibold text-white sm:text-[10px]">Rewards</span>
               </div>
             </div>
           </div>

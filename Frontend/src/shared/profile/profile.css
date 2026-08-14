@@ -6,10 +6,6 @@
   --profile-accent: #16a34a;
 }
 
-.unified-profile[data-service="taxi"] {
-  --profile-accent: #6366f1;
-}
-
 .unified-profile[data-service="qc"] {
   --profile-accent: #10b981;
 }

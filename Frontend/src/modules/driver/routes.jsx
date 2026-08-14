@@ -1,10 +1,8 @@
 /**
  * Unified Driver module.
  *
- * One login + one onboarding wizard + one mode selector for both
- * food-delivery and taxi-driver capabilities. The token issued here
- * works against every existing food-delivery and taxi-driver endpoint
- * because the backend embeds both `userId` and `sub` in the JWT.
+ * One login + one onboarding wizard + one mode selector for
+ * food-delivery capabilities.
  *
  * Every route below /driver/* (except the login page) is gated by
  * `DriverGuard`:
@@ -66,21 +64,13 @@ export default function DriverRoutes() {
           )}
         />
 
-        {/* Convenience aliases — gated so unfinished/anonymous visitors
-            can't slip into the food or taxi portals through these. */}
+        {/* Convenience alias — gated so unfinished/anonymous visitors
+            can't slip into the food portal through this. */}
         <Route
           path="food"
           element={(
             <DriverGuard requireOnboardingComplete>
               <Navigate to="/food/delivery" replace />
-            </DriverGuard>
-          )}
-        />
-        <Route
-          path="taxi"
-          element={(
-            <DriverGuard requireOnboardingComplete>
-              <Navigate to="/driver/home" replace />
             </DriverGuard>
           )}
         />

@@ -130,7 +130,7 @@ export default function BottomNavigation() {
           {TabLabel(isActive("/food/delivery/history"), "History")}
         </button>
 
-        {/* Profile — unified driver profile (shared with taxi side) */}
+        {/* Profile — unified driver profile */}
         <button
           onClick={() => navigate("/driver/profile")}
           className="flex flex-col items-center gap-1.5 p-2.5"
