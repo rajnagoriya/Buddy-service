@@ -131,11 +131,11 @@ export default function JoinRequest() {
       setIsApproveOpen(false)
       setSelectedRequest(null)
       
-      toast.success(`Successfully approved ${selectedRequest.name}'s join request!`)
+      toast.success(`Successfully approved driver ${selectedRequest.name}'s join request!`)
     } catch (err) {
       debugError("Error approving request:", err)
       const msg = err.response?.data?.message ?? err.response?.data?.error ?? err?.message
-      toast.error(msg || "Failed to approve request. Please try again.")
+      toast.error(msg || "Failed to approve driver. Please try again.")
     } finally {
       setProcessing(false)
     }
@@ -167,11 +167,11 @@ export default function JoinRequest() {
       setSelectedRequest(null)
       setRejectionReason("")
       
-      toast.success(`Successfully rejected ${selectedRequest.name}'s join request.`)
+      toast.success(`Successfully rejected driver ${selectedRequest.name}'s join request.`)
     } catch (err) {
       debugError("Error rejecting request:", err)
       const msg = err.response?.data?.message ?? err.response?.data?.error ?? err?.message
-      toast.error(msg || "Failed to reject request. Please try again.")
+      toast.error(msg || "Failed to reject driver. Please try again.")
     } finally {
       setProcessing(false)
     }
@@ -181,15 +181,15 @@ export default function JoinRequest() {
     if (!selectedRequest) return
     try {
       setProcessingService(service)
-      await adminAPI.approveDeliveryPartner(selectedRequest._id, service)
+      const approveRes = await adminAPI.approveDeliveryPartner(selectedRequest._id, service)
       await fetchJoinRequests()
       if (selectedRequest) {
         const response = await adminAPI.getDeliveryPartnerById(selectedRequest._id)
         if (response.data?.success) setViewDetails(response.data.data.delivery)
       }
-      toast.success(`Approved ${service} service`)
+      toast.success(approveRes?.data?.message || "Driver approved successfully")
     } catch (err) {
-      toast.error(err.response?.data?.message || err?.message || "Failed to approve")
+      toast.error(err.response?.data?.message || err?.message || "Failed to approve driver")
     } finally {
       setProcessingService(null)
     }
@@ -197,20 +197,20 @@ export default function JoinRequest() {
 
   const handleModalReject = async (service) => {
     if (!selectedRequest) return
-    const reason = window.prompt(`Rejection reason for ${service} (required):`)
+    const reason = window.prompt("Rejection reason for this driver (required):")
     if (!reason?.trim()) {
       toast.error("Rejection reason is required")
       return
     }
     try {
       setProcessingService(service)
-      await adminAPI.rejectDeliveryPartner(selectedRequest._id, reason.trim(), service)
+      const rejectRes = await adminAPI.rejectDeliveryPartner(selectedRequest._id, reason.trim(), service)
       await fetchJoinRequests()
       setIsViewOpen(false)
       setViewDetails(null)
-      toast.success(`Rejected ${service} service`)
+      toast.success(rejectRes?.data?.message || "Driver rejected successfully")
     } catch (err) {
-      toast.error(err.response?.data?.message || err?.message || "Failed to reject")
+      toast.error(err.response?.data?.message || err?.message || "Failed to reject driver")
     } finally {
       setProcessingService(null)
     }
@@ -557,11 +557,11 @@ export default function JoinRequest() {
       <Dialog open={isApproveOpen} onOpenChange={setIsApproveOpen}>
         <DialogContent className="max-w-md bg-white p-0 opacity-0 data-[state=open]:opacity-100 data-[state=closed]:opacity-0 transition-opacity duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 data-[state=open]:scale-100 data-[state=closed]:scale-100">
           <DialogHeader className="px-6 pt-6 pb-4">
-            <DialogTitle>Approve Request</DialogTitle>
+            <DialogTitle>Approve Driver</DialogTitle>
           </DialogHeader>
           <div className="px-6 pb-6">
             <p className="text-sm text-slate-700">
-              Are you sure you want to approve "{selectedRequest?.name}"'s join request?
+              Are you sure you want to approve driver "{selectedRequest?.name}"'s join request?
             </p>
           </div>
           <DialogFooter className="px-6 pb-6">
@@ -588,11 +588,11 @@ export default function JoinRequest() {
       <Dialog open={isDenyOpen} onOpenChange={setIsDenyOpen}>
         <DialogContent className="max-w-md bg-white p-0 opacity-0 data-[state=open]:opacity-100 data-[state=closed]:opacity-0 transition-opacity duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 data-[state=open]:scale-100 data-[state=closed]:scale-100">
           <DialogHeader className="px-6 pt-6 pb-4">
-            <DialogTitle>Deny Request</DialogTitle>
+            <DialogTitle>Reject Driver</DialogTitle>
           </DialogHeader>
           <div className="px-6 pb-6 space-y-4">
             <p className="text-sm text-slate-700">
-              Are you sure you want to deny "{selectedRequest?.name}"'s join request?
+              Are you sure you want to reject driver "{selectedRequest?.name}"'s join request?
             </p>
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-2">

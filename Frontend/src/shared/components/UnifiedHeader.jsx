@@ -115,7 +115,6 @@ export default function UnifiedHeader({
 
   const services = [
     { id: "food", label: "Food", icon: "/super-app/food.png", isImage: true, color: "bg-[#F0F9F9]", activeBg: "bg-[#E0F2F1]", path: "/food/user" },
-    { id: "taxi", label: "Transport", icon: "/super-app/taxi.png", isImage: true, color: "bg-[#F0F9F9]", activeBg: "bg-[#E0F2F1]", path: "/taxi/user" },
     { id: "quick", label: "Mart", icon: "/super-app/grocery.png", isImage: true, color: "bg-[#F0F9F9]", activeBg: "bg-[#E0F2F1]", badge: "MEGA", path: "/qc" },
   ];
 
@@ -274,7 +273,7 @@ export default function UnifiedHeader({
         {/* Row 3: Service Grid */}
         {!hideServiceGrid && (
           <div className="pt-2 pb-2">
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 gap-3">
               {services.map((service) => {
                 const isActive = activeTab === service.id;
                 const Icon = service.icon;
@@ -288,12 +287,6 @@ export default function UnifiedHeader({
                         if (service.id === 'quick') {
                           toast('Mart is Coming Soon! 🚀', {
                             description: 'We are working hard to bring you the best grocery delivery experience.',
-                          });
-                          return;
-                        }
-                        if (service.id === 'taxi') {
-                          toast('Taxi is Coming Soon! 🚀', {
-                            description: 'We are working hard to bring you the best taxi experience.',
                           });
                           return;
                         }

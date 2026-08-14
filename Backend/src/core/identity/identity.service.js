@@ -13,28 +13,16 @@ import { normalizeOnboardingStepForClient } from './driverOnboarding.service.js'
 import { normalizePhone, normalizeRoleKey } from './identity.helpers.js';
 
 import { FoodUser } from '../users/user.model.js';
-import { User as TaxiUser } from '../../modules/taxi/user/models/User.js';
 import { FoodDeliveryPartner } from '../../modules/food/delivery/models/deliveryPartner.model.js';
-import { Driver } from '../../modules/taxi/driver/models/Driver.js';
 
 const ROLE_USER = 'USER';
 const ROLE_DRIVER = 'DRIVER';
 
-/**
- * The token signed by `verifyOtpUnified` is verifiable by both the existing
- * food middleware (which reads `userId`) and the existing taxi middleware
- * (which reads `sub`), so the same token works against both module trees
- * during the migration. Once all callers consume `identityId`, the duplicate
- * keys can be dropped.
- */
 const buildTokenPayload = (identity, role, ids) => ({
   identityId: String(identity._id),
   role,
-  // food middleware reads userId / id
   userId: String(ids?.userId || identity._id),
-  // taxi middleware reads sub
   sub: String(ids?.sub || ids?.userId || identity._id),
-  // capability list — frontends can switch tabs without re-decoding
   capabilities: ids?.capabilities || {},
 });
 
@@ -87,7 +75,6 @@ const ensureFoodUserForIdentity = async (identity, { name } = {}) => {
       isVerified: true,
     });
   } catch (err) {
-    // Parallel/racy inserts into buddy_users hit unique phone index.
     if (err?.code === 11000) {
       const raced = await findExisting();
       if (raced) return raced;
@@ -96,47 +83,10 @@ const ensureFoodUserForIdentity = async (identity, { name } = {}) => {
   }
 };
 
-const ensureTaxiUserForIdentity = async (identity, { name } = {}) => {
-  // FoodUser and TaxiUser share the buddy_users collection — never create a
-  // second document for the same phone. Resolve via FoodUser first, then link.
-  const foodDoc = await ensureFoodUserForIdentity(identity, { name });
-
-  const existing =
-    (await TaxiUser.findOne({ identityId: identity._id })) ||
-    (await TaxiUser.findOne({ phone: identity.phone })) ||
-    foodDoc;
-
-  if (existing && existing !== foodDoc) {
-    let dirty = false;
-    if (!existing.identityId) {
-      existing.identityId = identity._id;
-      dirty = true;
-    }
-    if (name && !existing.name) {
-      existing.name = name;
-      dirty = true;
-    }
-    if (dirty) {
-      try {
-        await existing.save();
-      } catch (_) {}
-    }
-  }
-
-  return existing || foodDoc;
-};
-
 const findFoodPartnerForIdentity = async (identity) => {
   return (
     (await FoodDeliveryPartner.findOne({ identityId: identity._id })) ||
     (await FoodDeliveryPartner.findOne({ phone: identity.phone }))
-  );
-};
-
-const findDriverForIdentity = async (identity) => {
-  return (
-    (await Driver.findOne({ identityId: identity._id })) ||
-    (await Driver.findOne({ phone: identity.phone }))
   );
 };
 
@@ -172,32 +122,15 @@ const sanitizeIdentityForResponse = (identity) => ({
   isActive: identity.isActive !== false,
   onboardingComplete: Boolean(identity.onboardingComplete),
   onboardingStep: normalizeOnboardingStepForClient(identity.onboardingStep || 'services', identity),
-  // Normalise the legacy stored `'none'` to the new canonical `'off'` on the
-  // way out so clients only ever see one off-state value.
   activeService:
     !identity.activeService || identity.activeService === 'none' ? 'off' : identity.activeService,
 });
 
-const summariseCapabilities = (partner, driver) => ({
+const summariseCapabilities = (partner) => ({
   food: partner ? partner.status || 'approved' : 'not_enabled',
-  taxi: driver
-    ? String(driver.status || '').toLowerCase() === 'rejected'
-      ? 'rejected'
-      : driver.approve === false || String(driver.status || '').toLowerCase() === 'pending'
-        ? 'pending'
-        : driver.status || 'approved'
-    : 'not_enabled',
 });
 
 const upsertIdentity = async (phoneLast10, role, name) => {
-  // findOneAndUpdate + upsert is atomic on the unique phone index, so two
-  // racing OTP verifications on the same phone cannot create duplicates.
-  //
-  // NOTE: $addToSet covers both "first time" (creates the array with the
-  // role) and "subsequent" (no-op if already present) cases, so we must
-  // NOT also set `roles` in $setOnInsert — MongoDB refuses an update that
-  // touches the same path with two operators ("Updating the path 'roles'
-  // would create a conflict at 'roles'").
   const identity = await BuddyIdentity.findOneAndUpdate(
     { phone: phoneLast10 },
     {
@@ -213,7 +146,6 @@ const upsertIdentity = async (phoneLast10, role, name) => {
     { new: true, upsert: true, setDefaultsOnInsert: true },
   );
 
-  // If we just learned the user's name on first signup, persist it.
   if (name && !identity.name) {
     identity.name = String(name).trim();
     await identity.save();
@@ -221,12 +153,6 @@ const upsertIdentity = async (phoneLast10, role, name) => {
   return identity;
 };
 
-/**
- * STEP 1: Request OTP
- *
- * `role` is only a hint; the same OTP works for whichever role the caller
- * verifies with. We accept it so dev/QA can see in logs why an OTP was sent.
- */
 export const requestOtpUnified = async ({ phone, role }) => {
   if (!phone) throw new ValidationError('Phone is required');
   const phoneLast10 = normalizePhone(phone);
@@ -237,7 +163,7 @@ export const requestOtpUnified = async ({ phone, role }) => {
   const normalizedRole = normalizeRoleKey(role);
 
   if (normalizedRole === ROLE_USER) {
-    const user = await FoodUser.findOne({ 
+    const user = await FoodUser.findOne({
       $or: [
         { phone: phoneLast10 },
         { phone: { $regex: new RegExp(phoneLast10 + '$') } }
@@ -259,14 +185,6 @@ export const requestOtpUnified = async ({ phone, role }) => {
   };
 };
 
-/**
- * STEP 2: Verify OTP and log in / register
- *
- * The response is shaped so the client can route on three signals:
- *   - `needsOnboarding`     → push driver into onboarding wizard
- *   - `capabilities`        → which driver services are approved
- *   - `isNewUser`           → show welcome banner / referral nag for customers
- */
 export const verifyOtpUnified = async ({
   phone,
   role,
@@ -282,8 +200,6 @@ export const verifyOtpUnified = async ({
   const normalizedRole = normalizeRoleKey(role);
   const trimmedName = typeof name === 'string' ? name.trim() : '';
 
-  // Resolve existing identity *before* consuming the OTP so we know whether
-  // this is a brand-new signup that requires a name.
   const preIdentity = await BuddyIdentity.findOne({ phone: phoneLast10 });
   const isNewIdentity = !preIdentity;
   const needsName =
@@ -309,10 +225,8 @@ export const verifyOtpUnified = async ({
     await identity.save();
   }
 
-  // === Branch on role =====================================================
   if (normalizedRole === ROLE_USER) {
-    // Find if there's an existing FoodUser that is deactivated before doing anything
-    const existingFoodUser = await FoodUser.findOne({ 
+    const existingFoodUser = await FoodUser.findOne({
       $or: [
         { phone: phoneLast10 },
         { phone: { $regex: new RegExp(phoneLast10 + '$') } }
@@ -323,27 +237,20 @@ export const verifyOtpUnified = async ({
     }
 
     const foodUser = await ensureFoodUserForIdentity(identity, { name: trimmedName });
-    // Sequential on purpose: both models write buddy_users with unique phone.
-    // Parallel create races and surfaces as "already registered" on first signup.
-    const taxiUser = await ensureTaxiUserForIdentity(identity, { name: trimmedName });
 
-    // Keep identityRefs current — useful for support / admin tooling.
     await BuddyIdentity.updateOne(
       { _id: identity._id },
       {
         $set: {
           'identityRefs.foodUserId': foodUser._id,
-          'identityRefs.taxiUserId': taxiUser._id,
         },
       },
     );
 
     const tokenPayload = buildTokenPayload(identity, ROLE_USER, {
-      // Older food endpoints still resolve a FoodUser by `userId`, so we
-      // pass the FoodUser._id as the legacy id during the migration window.
       userId: foodUser._id,
-      sub: taxiUser._id,
-      capabilities: { food: 'enabled', taxi: 'enabled' },
+      sub: foodUser._id,
+      capabilities: { food: 'enabled' },
     });
     const { accessToken, refreshToken } = await issueTokens(tokenPayload);
 
@@ -354,12 +261,11 @@ export const verifyOtpUnified = async ({
       token: accessToken,
       role: ROLE_USER,
       identity: sanitizeIdentityForResponse(identity),
-      capabilities: { food: 'enabled', taxi: 'enabled' },
-      services: ['food', 'taxi'],
+      capabilities: { food: 'enabled' },
+      services: ['food'],
       isNewUser: isNewIdentity,
       needsOnboarding: false,
       user: {
-        // legacy shape — keep food clients happy
         id: String(foodUser._id),
         _id: String(foodUser._id),
         phone: identity.phone,
@@ -371,17 +277,13 @@ export const verifyOtpUnified = async ({
   }
 
   if (normalizedRole === ROLE_DRIVER) {
-    const [partner, driver] = await Promise.all([
-      findFoodPartnerForIdentity(identity),
-      findDriverForIdentity(identity),
-    ]);
+    const partner = await findFoodPartnerForIdentity(identity);
 
-    // Onboarding gate: brand-new driver hasn't entered KYC.
     if (!identity.onboardingComplete) {
       const tokenPayload = buildTokenPayload(identity, ROLE_DRIVER, {
         userId: identity._id,
         sub: identity._id,
-        capabilities: { food: 'not_enabled', taxi: 'not_enabled' },
+        capabilities: { food: 'not_enabled' },
       });
       const { accessToken, refreshToken } = await issueTokens(tokenPayload);
       await consumeOtp(phoneLast10);
@@ -391,7 +293,7 @@ export const verifyOtpUnified = async ({
         token: accessToken,
         role: ROLE_DRIVER,
         identity: sanitizeIdentityForResponse(identity),
-        capabilities: { food: 'not_enabled', taxi: 'not_enabled' },
+        capabilities: { food: 'not_enabled' },
         services: [],
         isNewUser: isNewIdentity,
         needsOnboarding: true,
@@ -399,13 +301,10 @@ export const verifyOtpUnified = async ({
       };
     }
 
-    // Already onboarded — return capability status. The same token works on
-    // both the food delivery and taxi driver endpoints because the JWT
-    // secret is shared and the payload carries both `userId` and `sub`.
     const tokenPayload = buildTokenPayload(identity, ROLE_DRIVER, {
       userId: partner?._id || identity._id,
-      sub: driver?._id || identity._id,
-      capabilities: summariseCapabilities(partner, driver),
+      sub: partner?._id || identity._id,
+      capabilities: summariseCapabilities(partner),
     });
     const { accessToken, refreshToken } = await issueTokens(tokenPayload);
 
@@ -414,14 +313,11 @@ export const verifyOtpUnified = async ({
       {
         $set: {
           'identityRefs.foodPartnerId': partner?._id || null,
-          'identityRefs.driverId': driver?._id || null,
         },
       },
     );
 
-    const services = [];
-    if (partner) services.push('food');
-    if (driver) services.push('taxi');
+    const services = partner ? ['food'] : [];
 
     await consumeOtp(phoneLast10);
     return {
@@ -430,7 +326,7 @@ export const verifyOtpUnified = async ({
       token: accessToken,
       role: ROLE_DRIVER,
       identity: sanitizeIdentityForResponse(identity),
-      capabilities: summariseCapabilities(partner, driver),
+      capabilities: summariseCapabilities(partner),
       services,
       isNewUser: isNewIdentity,
       needsOnboarding: false,
@@ -444,10 +340,6 @@ export const verifyOtpUnified = async ({
   throw new ValidationError('Unsupported role');
 };
 
-/**
- * Convenience getter used by the unified middleware to attach `req.identity`.
- * Cached only within a single request lifecycle by the caller.
- */
 export const getIdentityById = async (id) => {
   if (!id || !mongoose.Types.ObjectId.isValid(String(id))) return null;
   return BuddyIdentity.findById(id);

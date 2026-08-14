@@ -138,6 +138,8 @@ const normalizeCartData = (rawCart) => {
         restaurantId: normalizedRestaurantId,
         image: normalizedImage,
         imageUrl: normalizedImage,
+        isAddon: Boolean(item.isAddon || item.itemType === "addon"),
+        itemType: item.isAddon || item.itemType === "addon" ? "addon" : (item.itemType || "item"),
       }
     })
 }

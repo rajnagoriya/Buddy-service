@@ -36,21 +36,40 @@ function assertDiscountRules(data) {
     }
 }
 
-function parseOfferDates(result, { requireFutureEndDate = true } = {}) {
-    const endDate = result.data.endDate ? new Date(`${result.data.endDate}T00:00:00.000Z`) : undefined;
-    if (endDate && Number.isNaN(endDate.getTime())) {
-        throw new ValidationError('Invalid endDate');
-    }
-    const startDate = result.data.startDate ? new Date(`${result.data.startDate}T00:00:00.000Z`) : undefined;
-    if (startDate && Number.isNaN(startDate.getTime())) {
+/** Calendar start day at 00:00:00.000Z */
+function parseOfferStartDate(ymd) {
+    if (!ymd) return undefined;
+    const startDate = new Date(`${String(ymd).trim()}T00:00:00.000Z`);
+    if (Number.isNaN(startDate.getTime())) {
         throw new ValidationError('Invalid startDate');
     }
-    if (endDate && startDate && endDate.getTime() <= startDate.getTime()) {
-        throw new ValidationError('endDate must be after startDate');
+    return startDate;
+}
+
+/** Calendar end day at 23:59:59.999Z so same-day coupons remain valid all day */
+function parseOfferEndDate(ymd) {
+    if (!ymd) return undefined;
+    const endDate = new Date(`${String(ymd).trim()}T23:59:59.999Z`);
+    if (Number.isNaN(endDate.getTime())) {
+        throw new ValidationError('Invalid endDate');
     }
-    if (requireFutureEndDate && endDate && endDate.getTime() <= Date.now()) {
+    return endDate;
+}
+
+function assertOfferDateOrder(startDate, endDate, { requireFutureEndDate = true } = {}) {
+    // Same calendar day is allowed (end-of-day > start-of-day).
+    if (endDate && startDate && endDate.getTime() < startDate.getTime()) {
+        throw new ValidationError('endDate must be on or after startDate');
+    }
+    if (requireFutureEndDate && endDate && endDate.getTime() < Date.now()) {
         throw new ValidationError('endDate must be a future date');
     }
+}
+
+function parseOfferDates(result, { requireFutureEndDate = true } = {}) {
+    const endDate = parseOfferEndDate(result.data.endDate);
+    const startDate = parseOfferStartDate(result.data.startDate);
+    assertOfferDateOrder(startDate, endDate, { requireFutureEndDate });
 
     const isFreeDelivery = result.data.couponCategory === 'free_delivery';
     let maxDiscount = result.data.maxDiscount;
@@ -105,20 +124,9 @@ export const validateCreateOfferDto = (body) => {
         }
     }
 
-    const endDate = result.data.endDate ? new Date(`${result.data.endDate}T00:00:00.000Z`) : undefined;
-    if (endDate && Number.isNaN(endDate.getTime())) {
-        throw new ValidationError('Invalid endDate');
-    }
-    const startDate = result.data.startDate ? new Date(`${result.data.startDate}T00:00:00.000Z`) : undefined;
-    if (startDate && Number.isNaN(startDate.getTime())) {
-        throw new ValidationError('Invalid startDate');
-    }
-    if (endDate && startDate && endDate.getTime() <= startDate.getTime()) {
-        throw new ValidationError('endDate must be after startDate');
-    }
-    if (endDate && endDate.getTime() <= Date.now()) {
-        throw new ValidationError('endDate must be a future date');
-    }
+    const endDate = parseOfferEndDate(result.data.endDate);
+    const startDate = parseOfferStartDate(result.data.startDate);
+    assertOfferDateOrder(startDate, endDate, { requireFutureEndDate: true });
 
     let maxDiscount = result.data.maxDiscount;
     if (!isFreeDelivery && result.data.discountType === 'percentage') {
@@ -187,20 +195,9 @@ export const validateRestaurantCreateOfferDto = (body) => {
         throw new ValidationError(result.error.errors[0].message);
     }
 
-    const endDate = result.data.endDate ? new Date(`${result.data.endDate}T00:00:00.000Z`) : undefined;
-    if (endDate && Number.isNaN(endDate.getTime())) {
-        throw new ValidationError('Invalid endDate');
-    }
-    const startDate = result.data.startDate ? new Date(`${result.data.startDate}T00:00:00.000Z`) : undefined;
-    if (startDate && Number.isNaN(startDate.getTime())) {
-        throw new ValidationError('Invalid startDate');
-    }
-    if (endDate && startDate && endDate.getTime() <= startDate.getTime()) {
-        throw new ValidationError('endDate must be after startDate');
-    }
-    if (endDate && endDate.getTime() <= Date.now()) {
-        throw new ValidationError('endDate must be a future date');
-    }
+    const endDate = parseOfferEndDate(result.data.endDate);
+    const startDate = parseOfferStartDate(result.data.startDate);
+    assertOfferDateOrder(startDate, endDate, { requireFutureEndDate: true });
 
     let maxDiscount = result.data.maxDiscount;
     if (result.data.discountType === 'percentage') {

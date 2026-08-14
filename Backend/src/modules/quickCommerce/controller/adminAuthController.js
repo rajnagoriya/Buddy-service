@@ -59,7 +59,7 @@ export const bootstrapAdmin = async (req, res) => {
       active: true,
       status: "active",
       isVerified: true,
-      servicesAccess: ["food", "quickCommerce", "taxi"],
+      servicesAccess: ["food", "quickCommerce"],
     });
 
     const loginResult = await unifiedAdminLogin(payload.email, payload.password);
@@ -96,7 +96,7 @@ export const signupAdmin = async (req, res) => {
       active: true,
       status: "active",
       isVerified: true,
-      servicesAccess: ["food", "quickCommerce", "taxi"],
+      servicesAccess: ["food", "quickCommerce"],
     });
 
     const loginResult = await unifiedAdminLogin(payload.email, payload.password);

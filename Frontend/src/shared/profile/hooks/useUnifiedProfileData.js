@@ -97,7 +97,6 @@ export function useUnifiedProfileData() {
 
   const badgeValues = useMemo(() => {
     const foodWallet = Number(masterData?.wallets?.food_qc_balance ?? 0);
-    const taxiWallet = Number(masterData?.wallets?.taxi_balance ?? 0);
     const qcWallet = Number(masterData?.wallets?.food_qc_balance ?? foodWallet);
     const referralReward = Number(masterData?.referrals?.food_reward ?? 0);
     const qcWishlist = masterData?.modules?.qc?.wishlistCount ?? masterData?.qc?.wishlistCount ?? 0;
@@ -111,13 +110,9 @@ export function useUnifiedProfileData() {
       foodProfileCompletion: `${profileCompletion}% completed`,
       vegMode: vegMode ? "ON" : "OFF",
       appearance,
-      taxiWallet: `₹${taxiWallet.toFixed(0)}`,
-      taxiTrips: String(masterData?.taxi?.rideCount ?? 0),
-      taxiRating: String(masterData?.taxi?.rating ?? "4.9"),
       qcWallet: `₹${qcWallet.toFixed(0)}`,
       qcWishlist: String(qcWishlist),
       qcOrders: String(qcOrders),
-      taxiEnabled: masterData?.modules?.taxi?.enabled !== false,
     };
   }, [masterData, addresses, savedAddressSummary, profileCompletion, vegMode, appearance]);
 

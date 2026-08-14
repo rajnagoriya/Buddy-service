@@ -42,7 +42,7 @@ export default function RestaurantSignup() {
   const handleChange = (e) => {
     const { name, value } = e.target
     const nextValue =
-      name === "phone" ? value.replace(/\D/g, "").slice(0, 10) : value
+      name === "phone" ? String(value || "").replace(/\D/g, "").slice(-10) : value
 
     setFormData((prev) => ({
       ...prev,
@@ -103,8 +103,8 @@ export default function RestaurantSignup() {
       onBack={() => navigate("/food/restaurant/login")}
       badge="New partner"
     >
-      <form onSubmit={handleSubmit} className="w-full space-y-5">
-        <div className="space-y-2">
+      <form onSubmit={handleSubmit} className="w-full space-y-3 sm:space-y-5">
+        <div className="space-y-1.5 sm:space-y-2">
           <Label htmlFor="name" className="text-sm font-semibold text-gray-800">
             Restaurant name
           </Label>
@@ -119,7 +119,7 @@ export default function RestaurantSignup() {
               placeholder="Enter restaurant name"
               value={formData.name}
               onChange={handleChange}
-              className={`h-12 rounded-xl border pl-10 text-[15px] shadow-none transition-colors placeholder:text-gray-400 focus-visible:border-[var(--rt-primary-strong,#27A344)] focus-visible:ring-2 focus-visible:ring-[var(--rt-primary-soft,#E8F7EC)] ${
+              className={`h-11 rounded-xl border pl-10 text-[15px] shadow-none transition-colors placeholder:text-gray-400 focus-visible:border-[var(--rt-primary-strong,#27A344)] focus-visible:ring-2 focus-visible:ring-[var(--rt-primary-soft,#E8F7EC)] sm:h-12 ${
                 errors.name ? "border-red-500" : "border-[var(--rt-border,#e8edf2)]"
               }`}
               required
@@ -133,12 +133,12 @@ export default function RestaurantSignup() {
           ) : null}
         </div>
 
-        <div className="space-y-2">
+        <div className="space-y-1.5 sm:space-y-2">
           <Label htmlFor="phone" className="text-sm font-semibold text-gray-800">
             Mobile number
           </Label>
-          <div className="flex gap-2.5">
-            <div className="flex h-12 w-[4.25rem] shrink-0 items-center justify-center rounded-xl border border-[var(--rt-border,#e8edf2)] bg-[var(--rt-surface-muted,#f4f6f9)] text-sm font-semibold text-gray-700">
+          <div className="flex gap-2 sm:gap-2.5">
+            <div className="flex h-11 w-[4.25rem] shrink-0 items-center justify-center rounded-xl border border-[var(--rt-border,#e8edf2)] bg-[var(--rt-surface-muted,#f4f6f9)] text-sm font-semibold text-gray-700 sm:h-12">
               +91
             </div>
             <div className="relative min-w-0 flex-1">
@@ -149,12 +149,12 @@ export default function RestaurantSignup() {
                 id="phone"
                 name="phone"
                 type="tel"
-                inputMode="numeric"
+                inputMode="tel"
+                autoComplete="tel"
                 placeholder="10-digit number"
                 value={formData.phone}
                 onChange={handleChange}
-                maxLength={10}
-                className={`h-12 rounded-xl border pl-10 text-[15px] shadow-none transition-colors placeholder:text-gray-400 focus-visible:border-[var(--rt-primary-strong,#27A344)] focus-visible:ring-2 focus-visible:ring-[var(--rt-primary-soft,#E8F7EC)] ${
+                className={`h-11 rounded-xl border pl-10 text-[15px] shadow-none transition-colors placeholder:text-gray-400 focus-visible:border-[var(--rt-primary-strong,#27A344)] focus-visible:ring-2 focus-visible:ring-[var(--rt-primary-soft,#E8F7EC)] sm:h-12 ${
                   errors.phone ? "border-red-500" : "border-[var(--rt-border,#e8edf2)]"
                 }`}
                 required

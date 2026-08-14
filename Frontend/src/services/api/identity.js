@@ -4,7 +4,7 @@
  * One source of truth for:
  *   - Calling the new /auth/request-otp + /auth/verify-otp endpoints
  *   - Persisting the issued JWT into every legacy localStorage slot so
- *     existing modules (food user, taxi user, food delivery, taxi driver,
+ *     existing modules (food user, food delivery, driver portal,
  *     etc.) keep working without changes.
  *   - Driver onboarding wizard + mode selector API calls.
  */
@@ -20,7 +20,6 @@ const DRIVER_ROUTES = {
   ONBOARDING: "/driver/onboarding",
   ONBOARDING_SERVICES: "/driver/onboarding/services",
   ONBOARDING_VEHICLE_FOOD: "/driver/onboarding/vehicle-food",
-  ONBOARDING_VEHICLE_TAXI: "/driver/onboarding/vehicle-taxi",
   ONBOARDING_BASICS: "/driver/onboarding/basics",
   ONBOARDING_KYC: "/driver/onboarding/kyc",
   ONBOARDING_BANK: "/driver/onboarding/bank",
@@ -35,10 +34,10 @@ const DRIVER_ROUTES = {
 
 /**
  * Save a USER-role identity login into every storage slot the rest of the
- * frontend reads from (food, taxi user, generic, legacy fallbacks).
+ * frontend reads from (food, generic, legacy fallbacks).
  *
  * After this runs, ProtectedRoute / axios / cart guards on any of:
- *   /food/user, /taxi/user, /qc/*  will see the user as logged in.
+ *   /food/user, /qc/*  will see the user as logged in.
  */
 export function persistUserIdentitySession({ accessToken, refreshToken, user, identity }) {
   if (!accessToken) return;
@@ -48,7 +47,6 @@ export function persistUserIdentitySession({ accessToken, refreshToken, user, id
   setAuthData("user", accessToken, safeUser, refreshToken || null);
 
   try {
-    // taxi user module reads `userToken` first, then falls back to user_accessToken.
     localStorage.setItem("userToken", accessToken);
     localStorage.setItem("userInfo", JSON.stringify(safeUser));
 
@@ -75,7 +73,7 @@ export function persistUserIdentitySession({ accessToken, refreshToken, user, id
 
 /**
  * Save a DRIVER-role identity login into every legacy driver storage slot
- * so the existing food-delivery and taxi-driver portals work unchanged.
+ * so the existing food-delivery portal works unchanged.
  */
 export function persistDriverIdentitySession({ accessToken, refreshToken, identity, capabilities, activeService }) {
   if (!accessToken) return;
@@ -92,8 +90,6 @@ export function persistDriverIdentitySession({ accessToken, refreshToken, identi
   setAuthData("delivery", accessToken, safeIdentity, refreshToken || null);
 
   try {
-    // taxi driver tokens — registrationService.persistDriverAuthSession()
-    // writes the same three keys; we mirror so the older code paths Just Work.
     localStorage.setItem("driverToken", accessToken);
     localStorage.setItem("token", accessToken);
     localStorage.setItem("driverInfo", JSON.stringify({
@@ -189,8 +185,6 @@ export const driverOnboardingAPI = {
     ),
   saveFoodVehicle: (payload) =>
     apiClient.patch(DRIVER_ROUTES.ONBOARDING_VEHICLE_FOOD, payload, { contextModule: "driver" }),
-  saveTaxiVehicle: (payload) =>
-    apiClient.patch(DRIVER_ROUTES.ONBOARDING_VEHICLE_TAXI, payload, { contextModule: "driver" }),
   saveBasics: (payload) => apiClient.patch(DRIVER_ROUTES.ONBOARDING_BASICS, payload, { contextModule: "driver" }),
   saveKyc: (payload) => apiClient.patch(DRIVER_ROUTES.ONBOARDING_KYC, payload, { contextModule: "driver" }),
   saveBank: (payload) => apiClient.patch(DRIVER_ROUTES.ONBOARDING_BANK, payload, { contextModule: "driver" }),

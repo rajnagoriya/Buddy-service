@@ -1,6 +1,5 @@
 /**
- * Backfill BuddyIdentity rows from the four existing user-like collections
- * (FoodUser, TaxiUser, FoodDeliveryPartner, Driver) and link `identityId`
+ * Backfill BuddyIdentity rows from FoodUser and FoodDeliveryPartner collections.
  * back into each row.
  *
  * USAGE
@@ -25,9 +24,7 @@ import dotenv from 'dotenv';
 import { BuddyIdentity } from '../src/core/identity/buddyIdentity.model.js';
 import { normalizePhone } from '../src/core/identity/identity.helpers.js';
 import { FoodUser } from '../src/core/users/user.model.js';
-import { User as TaxiUser } from '../src/modules/taxi/user/models/User.js';
 import { FoodDeliveryPartner } from '../src/modules/food/delivery/models/deliveryPartner.model.js';
-import { Driver } from '../src/modules/taxi/driver/models/Driver.js';
 
 dotenv.config();
 
@@ -37,9 +34,7 @@ const summary = {
   identitiesCreated: 0,
   identitiesReused: 0,
   foodUsersLinked: 0,
-  taxiUsersLinked: 0,
   foodPartnersLinked: 0,
-  driversLinked: 0,
   phoneSkipped: 0,
   nameConflicts: [],
 };
@@ -228,15 +223,13 @@ async function run() {
   log(`Connecting to ${mongoUri}`);
   await mongoose.connect(mongoUri);
 
-  const [foodUsers, taxiUsers, partners, drivers] = await Promise.all([
+  const [foodUsers, partners] = await Promise.all([
     FoodUser.find({}).lean(),
-    TaxiUser.find({}).lean(),
     FoodDeliveryPartner.find({}).lean(),
-    Driver.find({}).lean(),
   ]);
 
   log(
-    `Found: FoodUser=${foodUsers.length} TaxiUser=${taxiUsers.length} FoodDeliveryPartner=${partners.length} Driver=${drivers.length}`,
+    `Found: FoodUser=${foodUsers.length} FoodDeliveryPartner=${partners.length}`,
   );
 
   // Group all docs by normalized phone.
@@ -251,9 +244,7 @@ async function run() {
   };
 
   for (const d of foodUsers) push(normalizePhone(d.phone), collectFromFoodUser(d));
-  for (const d of taxiUsers) push(normalizePhone(d.phone), collectFromTaxiUser(d));
   for (const d of partners) push(normalizePhone(d.phone), collectFromPartner(d));
-  for (const d of drivers) push(normalizePhone(d.phone), collectFromDriver(d));
 
   log(`Distinct phones across all collections: ${byPhone.size}`);
 
@@ -286,9 +277,7 @@ async function run() {
 
     const refs = {
       foodUserId: null,
-      taxiUserId: null,
       foodPartnerId: null,
-      driverId: null,
     };
 
     // Link each source row back to the identity (only when identityId is empty).
@@ -303,15 +292,6 @@ async function run() {
             );
           }
           summary.foodUsersLinked += 1;
-        } else if (s.source === 'TaxiUser') {
-          refs.taxiUserId = s.id;
-          if (APPLY) {
-            await TaxiUser.updateOne(
-              { _id: s.id, $or: [{ identityId: null }, { identityId: { $exists: false } }] },
-              { $set: { identityId: identity._id } },
-            );
-          }
-          summary.taxiUsersLinked += 1;
         } else if (s.source === 'FoodDeliveryPartner') {
           refs.foodPartnerId = s.id;
           if (APPLY) {
@@ -321,15 +301,6 @@ async function run() {
             );
           }
           summary.foodPartnersLinked += 1;
-        } else if (s.source === 'Driver') {
-          refs.driverId = s.id;
-          if (APPLY) {
-            await Driver.updateOne(
-              { _id: s.id, $or: [{ identityId: null }, { identityId: { $exists: false } }] },
-              { $set: { identityId: identity._id } },
-            );
-          }
-          summary.driversLinked += 1;
         }
       } catch (err) {
         log(`!! Failed to link ${s.source}/${s.id}:`, err.message);

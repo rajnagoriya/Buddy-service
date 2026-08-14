@@ -184,6 +184,7 @@ export default function DeliveryPartnerJoinDetailModal({
                     <DetailField label="Phone" value={`${details.countryCode || ""} ${details.phone || ""}`.trim()} />
                     <DetailField label="Email" value={details.email} />
                     <DetailField label="City" value={details.city} />
+                    <DetailField label="State" value={details.state} />
                     <DetailField label="Gender" value={details.gender} />
                     <DetailField label="Joined" value={formatDate(details.createdAt)} />
                     <DetailField label="Availability" value={details.availabilityStatus} />
@@ -268,13 +269,31 @@ export default function DeliveryPartnerJoinDetailModal({
 
               <Section title="Payout details" icon={CreditCard}>
                 {bank ? (
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <DetailField label="Account holder" value={bank.accountHolderName} />
-                    <DetailField label="Account number" value={bank.accountNumber} />
-                    <DetailField label="IFSC" value={bank.ifscCode} />
-                    <DetailField label="Bank name" value={bank.bankName} />
-                    <DetailField label="Branch" value={bank.branchName} />
-                    <DetailField label="UPI ID" value={bank.upiId} />
+                  <div className="space-y-3">
+                    <DetailField
+                      label="Payout method"
+                      value={
+                        bank.accountNumber && bank.upiId
+                          ? "Bank account + UPI"
+                          : bank.accountNumber || bank.ifscCode
+                            ? "Bank account"
+                            : bank.upiId
+                              ? "UPI"
+                              : null
+                      }
+                    />
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      {bank.accountHolderName ? (
+                        <DetailField label="Account holder" value={bank.accountHolderName} />
+                      ) : null}
+                      {bank.accountNumber ? (
+                        <DetailField label="Account number" value={bank.accountNumber} />
+                      ) : null}
+                      {bank.ifscCode ? <DetailField label="IFSC" value={bank.ifscCode} /> : null}
+                      {bank.bankName ? <DetailField label="Bank name" value={bank.bankName} /> : null}
+                      {bank.branchName ? <DetailField label="Branch" value={bank.branchName} /> : null}
+                      {bank.upiId ? <DetailField label="UPI ID" value={bank.upiId} /> : null}
+                    </div>
                   </div>
                 ) : (
                   <p className="text-sm text-slate-500">No payout details provided.</p>
@@ -290,8 +309,19 @@ export default function DeliveryPartnerJoinDetailModal({
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <DetailField label="Employment type" value={details.employmentType} />
                   <DetailField label="Onboarding complete" value={details.onboardingComplete ? "Yes" : "No"} />
-                  <DetailField label="Approved at" value={formatDate(details.approvedAt)} />
-                  <DetailField label="Rejected at" value={formatDate(details.rejectedAt)} />
+                  <DetailField
+                    label="Approved at"
+                    value={
+                      details.approvedAt
+                        ? formatDate(details.approvedAt)
+                        : details.status === "pending"
+                          ? "Pending approval"
+                          : null
+                    }
+                  />
+                  {details.rejectedAt || details.status === "blocked" || details.status === "rejected" ? (
+                    <DetailField label="Rejected at" value={formatDate(details.rejectedAt)} />
+                  ) : null}
                 </div>
               </Section>
 
@@ -342,7 +372,7 @@ export default function DeliveryPartnerJoinDetailModal({
                 onClick={() => onRejectService(adminService)}
                 className="w-full rounded-lg border border-red-300 bg-red-50 px-4 py-2.5 text-sm font-semibold text-red-700 hover:bg-red-100 sm:w-auto disabled:opacity-60"
               >
-                Reject {SERVICE_LABELS[adminService]}
+                Reject Driver
               </button>
               <button
                 type="button"
@@ -350,7 +380,7 @@ export default function DeliveryPartnerJoinDetailModal({
                 onClick={() => onApproveService(adminService)}
                 className="w-full rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-700 sm:w-auto disabled:opacity-60"
               >
-                Approve {SERVICE_LABELS[adminService]}
+                Approve Driver
               </button>
             </div>
           ) : null}

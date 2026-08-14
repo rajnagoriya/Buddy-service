@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Leaf, Moon, Sun, Check, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
@@ -39,7 +39,6 @@ const TEST_PUSH_STATUS_POLL_INTERVAL_MS = 1500;
 const TEST_PUSH_STATUS_MAX_ATTEMPTS = 20;
 
 function detectServiceFromPath(pathname) {
-  if (pathname.startsWith("/taxi")) return "taxi";
   if (pathname.startsWith("/qc")) return "qc";
   return "food";
 }
@@ -267,10 +266,6 @@ export default function UnifiedProfile() {
     }
   };
 
-  const taxiEnabled = badgeValues.taxiEnabled !== false;
-  const showTaxiInactive =
-    activeServiceId === "taxi" && activeService.inactiveFallback && !taxiEnabled;
-
   const headerActionState = {
     testPush: { loading: isTestingPush, disabled: isTestingPush },
   };
@@ -297,31 +292,13 @@ export default function UnifiedProfile() {
         />
 
         <div className="mt-4">
-          {showTaxiInactive ? (
-            <div className="profile-inactive-card mb-4">
-              <p className="text-sm font-semibold text-slate-800 dark:text-white mb-1">
-                {activeService.inactiveFallback.title}
-              </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
-                {activeService.inactiveFallback.description}
-              </p>
-              <Link
-                to={activeService.inactiveFallback.ctaPath}
-                className="inline-block text-white text-xs font-bold px-4 py-2 rounded-xl transition-colors"
-                style={{ backgroundColor: activeService.accent }}
-              >
-                {activeService.inactiveFallback.ctaLabel}
-              </Link>
-            </div>
-          ) : (
-            <ProfileMenuList
-              sections={activeService.sections}
-              onAction={handleMenuAction}
-              getItemBadge={getItemBadge}
-              getItemValue={getItemValue}
-              getItemSub={getItemSub}
-            />
-          )}
+          <ProfileMenuList
+            sections={activeService.sections}
+            onAction={handleMenuAction}
+            getItemBadge={getItemBadge}
+            getItemValue={getItemValue}
+            getItemSub={getItemSub}
+          />
 
           <ProfileAccountActions
             onLogout={() => setLogoutConfirmOpen(true)}
@@ -333,15 +310,6 @@ export default function UnifiedProfile() {
             isLoggingOut={isLoggingOut}
             showDelete={activeServiceId === "food"}
           />
-
-          {activeServiceId === "taxi" && (
-            <Link
-              to="/taxi/user/profile/delete-account"
-              className="block -mt-6 mb-8 text-center"
-            >
-              <span className="text-sm font-medium text-red-500">Delete taxi account</span>
-            </Link>
-          )}
         </div>
       </div>
 

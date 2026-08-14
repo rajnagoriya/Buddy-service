@@ -111,15 +111,15 @@ export default function RestaurantAuthLayout({
       {/* Form column */}
       <div className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden">
         {(showBack || (showBadge && badge)) && (
-          <header className="relative z-10 flex shrink-0 items-center gap-3 px-5 pt-[max(1rem,env(safe-area-inset-top))] sm:px-8 lg:px-12 lg:pt-10">
+          <header className="relative z-10 flex shrink-0 items-center gap-3 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-8 lg:px-12 lg:pt-10">
             {showBack ? (
               <button
                 type="button"
                 onClick={handleBack}
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[var(--rt-border,#e8edf2)] bg-white text-gray-600 shadow-sm transition hover:bg-gray-50"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[var(--rt-border,#e8edf2)] bg-white text-gray-600 shadow-sm transition hover:bg-gray-50 sm:h-10 sm:w-10"
                 aria-label="Go back"
               >
-                <ArrowLeft className="h-5 w-5" />
+                <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
               </button>
             ) : null}
 
@@ -133,37 +133,37 @@ export default function RestaurantAuthLayout({
           </header>
         )}
 
-        <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-y-auto px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:px-8 lg:px-12">
-          <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center py-3 sm:py-6">
+        <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-8 lg:px-12">
+          <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center py-2 sm:py-6">
             {/* Mobile: logo-first, minimal branding — not a link to consumer home */}
-            <div className="mb-6 flex flex-col items-center text-center lg:hidden">
-              <BrandLogo logoUrl={logoUrl} companyName={companyName} size="lg" />
-              <p className="mt-3 text-lg font-bold tracking-tight text-gray-900">
+            <div className="mb-3 flex flex-col items-center text-center sm:mb-6 lg:hidden">
+              <BrandLogo logoUrl={logoUrl} companyName={companyName} size="sm" />
+              <p className="mt-2 text-base font-bold tracking-tight text-gray-900 sm:mt-3 sm:text-lg">
                 {companyName}
               </p>
-              <p className="mt-0.5 text-xs font-medium text-[var(--rt-muted,#6b7280)]">
+              <p className="mt-0.5 text-[11px] font-medium text-[var(--rt-muted,#6b7280)] sm:text-xs">
                 Restaurant partner
               </p>
             </div>
 
             {(title || subtitle) ? (
-              <div className="mb-4 text-center lg:mb-5 lg:text-left">
+              <div className="mb-3 text-center sm:mb-4 lg:mb-5 lg:text-left">
                 {title ? (
-                  <h2 className="text-2xl font-bold tracking-tight text-gray-900">{title}</h2>
+                  <h2 className="text-xl font-bold tracking-tight text-gray-900 sm:text-2xl">{title}</h2>
                 ) : null}
                 {subtitle ? (
-                  <div className={`text-sm leading-relaxed text-[var(--rt-muted,#6b7280)] ${title ? "mt-1.5" : ""}`}>
+                  <div className={`text-sm leading-relaxed text-[var(--rt-muted,#6b7280)] ${title ? "mt-1" : ""}`}>
                     {subtitle}
                   </div>
                 ) : null}
               </div>
             ) : null}
 
-            <div className="w-full rounded-[var(--rt-radius-lg,18px)] border border-[var(--rt-border,#e8edf2)] bg-white p-5 shadow-[var(--rt-shadow,0_8px_30px_rgba(15,23,42,0.06))] sm:p-6">
+            <div className="w-full rounded-[var(--rt-radius-lg,18px)] border border-[var(--rt-border,#e8edf2)] bg-white p-3.5 shadow-[var(--rt-shadow,0_8px_30px_rgba(15,23,42,0.06))] sm:p-6">
               {children}
             </div>
 
-            {footer ? <div className="mt-4 w-full lg:mt-5">{footer}</div> : null}
+            {footer ? <div className="mt-3 w-full sm:mt-4 lg:mt-5">{footer}</div> : null}
           </div>
         </div>
       </div>

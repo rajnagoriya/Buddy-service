@@ -5,7 +5,6 @@ import {
   CheckCircle2,
   ChevronRight,
   Bike,
-  Car,
   Banknote,
   IdCard,
   User,
@@ -15,12 +14,11 @@ import {
   ImagePlus,
   ShieldCheck,
   AlertCircle,
-  CarTaxiFront,
   LogOut,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import apiClient, {
+import {
   driverOnboardingAPI,
   getApiErrorMessage,
   uploadAPI,
@@ -41,16 +39,12 @@ import {
 const buildSteps = (services = [], resubmitServices = null) => {
   const steps = [];
   const needsFoodVehicle = services.includes("food") || services.includes("quickCommerce");
-  const needsTaxiVehicle = services.includes("taxi");
 
   if (!resubmitServices) {
     steps.push({ key: "services", label: "Services", Icon: CheckCircle2 });
   }
   if (needsFoodVehicle && (!resubmitServices || resubmitServices.some((s) => s === "food" || s === "quickCommerce"))) {
     steps.push({ key: "vehicle_food", label: "Delivery", Icon: Bike });
-  }
-  if (needsTaxiVehicle && (!resubmitServices || resubmitServices.includes("taxi"))) {
-    steps.push({ key: "vehicle_taxi", label: "Taxi", Icon: Car });
   }
   if (!resubmitServices) {
     steps.push(
@@ -71,10 +65,6 @@ const STEP_META = {
   vehicle_food: {
     title: "Delivery vehicle",
     subtitle: "Used for Food and Quick Commerce deliveries.",
-  },
-  vehicle_taxi: {
-    title: "Your taxi vehicle",
-    subtitle: "Select a vehicle type and enter the plate number.",
   },
   basics: {
     title: "Tell us about yourself",
@@ -113,14 +103,11 @@ export default function OnboardingWizard() {
   const [activeIdx, setActiveIdx] = useState(0);
   const [furthestIdx, setFurthestIdx] = useState(0);
   const [bankMode, setBankMode] = useState("bank");
-  const [taxiVehicleTypes, setTaxiVehicleTypes] = useState([]);
-  const [taxiTypesLoading, setTaxiTypesLoading] = useState(false);
 
   const [state, setState] = useState({
     onboardingServices: [],
     foodVehicle: { type: "bike", number: "", make: "", model: "", color: "", photoUrl: "", rcUrl: "", insuranceUrl: "" },
-    taxiVehicle: { type: "", vehicleTypeId: "", name: "", number: "", make: "", model: "", color: "", photoUrl: "", rcUrl: "", insuranceUrl: "", commercialPermitUrl: "", pucUrl: "" },
-    basics: { name: "", email: "", gender: "", city: "" },
+    basics: { name: "", email: "", gender: "", city: "", state: "" },
     kyc: {
       aadhaar: { number: "", documentUrl: "", backDocumentUrl: "" },
       pan: { number: "", documentUrl: "" },
@@ -171,7 +158,8 @@ export default function OnboardingWizard() {
             : [],
         );
 
-        const services = Array.isArray(data?.onboardingServices) ? data.onboardingServices : [];
+        const services = (Array.isArray(data?.onboardingServices) ? data.onboardingServices : [])
+          .filter((service) => service !== "taxi");
         const steps = buildSteps(services, data?.resubmitAllowed ? data.rejectedServices || [] : null);
         const stepIdx = data?.resubmitAllowed
           ? 0
@@ -187,14 +175,6 @@ export default function OnboardingWizard() {
         const foodVehicle = data?.foodVehicle?.number
           ? data.foodVehicle
           : { type: legacyVehicle.type || "bike", number: legacyVehicle.number || "" };
-        const taxiVehicle = data?.taxiVehicle?.number
-          ? data.taxiVehicle
-          : {
-            type: legacyVehicle.type || "",
-            vehicleTypeId: legacyVehicle.model || "",
-            name: legacyVehicle.make || "",
-            number: legacyVehicle.number || "",
-          };
 
         setState((prev) => ({
           ...prev,
@@ -209,25 +189,12 @@ export default function OnboardingWizard() {
             rcUrl: foodVehicle.rcUrl || "",
             insuranceUrl: foodVehicle.insuranceUrl || "",
           },
-          taxiVehicle: {
-            type: taxiVehicle.type || "",
-            vehicleTypeId: taxiVehicle.vehicleTypeId || taxiVehicle.model || "",
-            name: taxiVehicle.make || taxiVehicle.name || "",
-            number: taxiVehicle.number || "",
-            make: taxiVehicle.make || "",
-            model: taxiVehicle.model || "",
-            color: taxiVehicle.color || "",
-            photoUrl: taxiVehicle.photoUrl || "",
-            rcUrl: taxiVehicle.rcUrl || "",
-            insuranceUrl: taxiVehicle.insuranceUrl || "",
-            commercialPermitUrl: taxiVehicle.commercialPermitUrl || "",
-            pucUrl: taxiVehicle.pucUrl || "",
-          },
           basics: {
             name: data?.basics?.name || prev.basics.name,
             email: data?.basics?.email || prev.basics.email,
             gender: data?.basics?.gender || prev.basics.gender,
             city: data?.basics?.city || prev.basics.city,
+            state: data?.basics?.state || prev.basics.state,
           },
           kyc: {
             aadhaar: {
@@ -273,46 +240,6 @@ export default function OnboardingWizard() {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   }, [activeIdx]);
-
-  useEffect(() => {
-    if (!state.onboardingServices.includes("taxi")) return;
-    let cancelled = false;
-    setTaxiTypesLoading(true);
-    apiClient
-      .get("/taxi/users/vehicle-types")
-      .then((res) => {
-        if (cancelled) return;
-        const payload = res?.data?.data || res?.data || {};
-        const items = Array.isArray(payload?.results)
-          ? payload.results
-          : Array.isArray(payload)
-            ? payload
-            : [];
-        const active = items.filter((item) => item?.active !== false && Number(item?.status ?? 1) !== 0);
-        setTaxiVehicleTypes(active);
-        if (active.length && !state.taxiVehicle.type) {
-          const first = active[0];
-          setState((prev) => ({
-            ...prev,
-            taxiVehicle: {
-              ...prev.taxiVehicle,
-              type: first.icon_types || first.name || "car",
-              vehicleTypeId: String(first.id || first._id || ""),
-              name: first.name || "",
-            },
-          }));
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setTaxiVehicleTypes([]);
-      })
-      .finally(() => {
-        if (!cancelled) setTaxiTypesLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [state.onboardingServices.includes("taxi")]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const steps = useMemo(
     () => buildSteps(state.onboardingServices, resubmitMode ? rejectedServices : null),
@@ -432,19 +359,6 @@ export default function OnboardingWizard() {
         number: finalState.foodVehicle.number,
         make: finalState.foodVehicle.make,
         model: finalState.foodVehicle.model,
-      });
-    } else if (current.key === "vehicle_taxi") {
-      await persistAndAdvance(driverOnboardingAPI.saveTaxiVehicle, {
-        type: finalState.taxiVehicle.type,
-        number: finalState.taxiVehicle.number,
-        vehicleTypeId: finalState.taxiVehicle.vehicleTypeId,
-        name: finalState.taxiVehicle.name,
-        make: finalState.taxiVehicle.make,
-        model: finalState.taxiVehicle.model,
-        rcUrl: finalState.taxiVehicle.rcUrl,
-        insuranceUrl: finalState.taxiVehicle.insuranceUrl,
-        commercialPermitUrl: finalState.taxiVehicle.commercialPermitUrl,
-        pucUrl: finalState.taxiVehicle.pucUrl,
       });
     } else if (current.key === "basics") {
       await persistAndAdvance(driverOnboardingAPI.saveBasics, finalState.basics);
@@ -618,26 +532,11 @@ export default function OnboardingWizard() {
                     title="Food & Quick Delivery"
                     subtitle="Deliver restaurant and quick-commerce orders"
                   />
-                  <ServiceToggle
-                    checked={state.onboardingServices.includes("taxi")}
-                    onChange={(checked) => {
-                      markTouched("onboardingServices");
-                      setState((s) => ({
-                        ...s,
-                        onboardingServices: checked
-                          ? Array.from(new Set([...s.onboardingServices, "taxi"]))
-                          : s.onboardingServices.filter((x) => x !== "taxi"),
-                      }));
-                    }}
-                    Icon={Car}
-                    title="Taxi & Cab"
-                    subtitle="Take ride and parcel requests"
-                  />
                   {showErr("onboardingServices") ? (
                     <p className="text-[11px] font-semibold text-red-400">{showErr("onboardingServices")}</p>
                   ) : null}
                   <div className="rounded-2xl bg-white shadow-sm border border-gray-200 p-3 text-[11px] text-gray-400 leading-relaxed">
-                    You'll only be active on one service at a time. The other pauses while you're on a job.
+                    You'll receive food and quick-commerce delivery requests when online.
                   </div>
                 </>
               )}
@@ -703,168 +602,6 @@ export default function OnboardingWizard() {
                 </>
               )}
 
-              {current.key === "vehicle_taxi" && (
-                <>
-                  <div>
-                    <label className="text-[11px] text-gray-400 font-bold uppercase tracking-widest mb-2 block">
-                      Vehicle Type <span className="text-red-400">*</span>
-                    </label>
-                    {taxiTypesLoading ? (
-                      <div className="flex items-center justify-center py-8 text-gray-400 text-sm gap-2">
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Loading vehicle types…
-                      </div>
-                    ) : taxiVehicleTypes.length > 0 ? (
-                      <div className="grid grid-cols-2 gap-2">
-                        {taxiVehicleTypes.map((item) => {
-                          const id = String(item.id || item._id || "");
-                          const selected = state.taxiVehicle.vehicleTypeId === id;
-                          return (
-                            <button
-                              key={id}
-                              type="button"
-                              onClick={() => {
-                                setState((prev) => ({
-                                  ...prev,
-                                  taxiVehicle: {
-                                    ...prev.taxiVehicle,
-                                    type: item.icon_types || item.name || "car",
-                                    vehicleTypeId: id,
-                                    name: item.name || "",
-                                  },
-                                }));
-                                markTouched("taxiVehicle.type");
-                              }}
-                              className={[
-                                "flex flex-col items-center gap-2 p-3 rounded-xl border transition-all text-center",
-                                selected
-                                  ? "bg-green-600/15 border-green-600 text-gray-900"
-                                  : "bg-white shadow-sm border-gray-200 text-gray-400 hover:border-gray-200",
-                              ].join(" ")}
-                            >
-                              {item.image || item.map_icon ? (
-                                <img
-                                  src={item.image || item.map_icon}
-                                  alt={item.name}
-                                  className="w-10 h-10 object-contain"
-                                />
-                              ) : (
-                                <Car className={["w-8 h-8", selected ? "text-green-600" : ""].join(" ")} />
-                              )}
-                              <span className="text-[11px] font-bold leading-tight">{item.name}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-3 gap-2">
-                        {[
-                          { value: "bike", label: "Bike", Icon: Bike },
-                          { value: "auto", label: "Auto", Icon: CarTaxiFront },
-                          { value: "car", label: "Car", Icon: Car },
-                        ].map(({ value, label, Icon }) => {
-                          const selected = state.taxiVehicle.type === value;
-                          return (
-                            <button
-                              key={value}
-                              type="button"
-                              onClick={() => {
-                                setField("taxiVehicle.type", value);
-                                setField("taxiVehicle.name", label);
-                                markTouched("taxiVehicle.type");
-                              }}
-                              className={[
-                                "flex flex-col items-center gap-1.5 p-3 rounded-xl border transition-all",
-                                selected
-                                  ? "bg-green-600/15 border-green-600 text-gray-900"
-                                  : "bg-white shadow-sm border-gray-200 text-gray-400 hover:border-gray-200",
-                              ].join(" ")}
-                            >
-                              <Icon className={["w-5 h-5", selected ? "text-green-600" : ""].join(" ")} />
-                              <span className="text-[10px] font-bold">{label}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                    {showErr("taxiVehicle.type") ? (
-                      <p className="text-[11px] font-semibold text-red-400 mt-2">{showErr("taxiVehicle.type")}</p>
-                    ) : null}
-                  </div>
-                  <Field
-                    label="Vehicle Number"
-                    required
-                    value={state.taxiVehicle.number}
-                    onChange={(v) => setField("taxiVehicle.number", v.toUpperCase().replace(/\s+/g, "").slice(0, FIELD_LIMITS.vehicleNumber))}
-                    onBlur={() => markTouched("taxiVehicle.number")}
-                    error={showErr("taxiVehicle.number")}
-                    placeholder="MH12AB1234"
-                  />
-                  <Field
-                    label="Make / Brand"
-                    required
-                    value={state.taxiVehicle.make}
-                    onChange={(v) => setField("taxiVehicle.make", v.slice(0, FIELD_LIMITS.vehicleMake))}
-                    onBlur={() => markTouched("taxiVehicle.make")}
-                    error={showErr("taxiVehicle.make")}
-                    placeholder="e.g. Maruti Suzuki, Tata"
-                  />
-                  <Field
-                    label="Model"
-                    required
-                    value={state.taxiVehicle.model}
-                    onChange={(v) => setField("taxiVehicle.model", v.slice(0, FIELD_LIMITS.vehicleModel))}
-                    onBlur={() => markTouched("taxiVehicle.model")}
-                    error={showErr("taxiVehicle.model")}
-                    placeholder="e.g. Swift Dzire, Indica"
-                  />
-                  <DocumentUpload
-                    label="RC document"
-                    hint="Registration certificate"
-                    value={state.taxiVehicle.rcUrl}
-                    error={showErr("taxiVehicle.rcUrl")}
-                    onChange={(preview, file) => {
-                      setField("taxiVehicle.rcUrl", preview);
-                      setPendingUploads((p) => ({ ...p, "taxiVehicle.rcUrl": file }));
-                      markTouched("taxiVehicle.rcUrl");
-                    }}
-                  />
-                  <DocumentUpload
-                    label="Insurance"
-                    hint="Valid vehicle insurance"
-                    value={state.taxiVehicle.insuranceUrl}
-                    error={showErr("taxiVehicle.insuranceUrl")}
-                    onChange={(preview, file) => {
-                      setField("taxiVehicle.insuranceUrl", preview);
-                      setPendingUploads((p) => ({ ...p, "taxiVehicle.insuranceUrl": file }));
-                      markTouched("taxiVehicle.insuranceUrl");
-                    }}
-                  />
-                  <DocumentUpload
-                    label="Commercial permit"
-                    hint="Mandatory for taxi operations"
-                    value={state.taxiVehicle.commercialPermitUrl}
-                    error={showErr("taxiVehicle.commercialPermitUrl")}
-                    onChange={(preview, file) => {
-                      setField("taxiVehicle.commercialPermitUrl", preview);
-                      setPendingUploads((p) => ({ ...p, "taxiVehicle.commercialPermitUrl": file }));
-                      markTouched("taxiVehicle.commercialPermitUrl");
-                    }}
-                  />
-                  <DocumentUpload
-                    label="PUC certificate"
-                    hint="Pollution under control certificate"
-                    value={state.taxiVehicle.pucUrl}
-                    error={showErr("taxiVehicle.pucUrl")}
-                    onChange={(preview, file) => {
-                      setField("taxiVehicle.pucUrl", preview);
-                      setPendingUploads((p) => ({ ...p, "taxiVehicle.pucUrl": file }));
-                      markTouched("taxiVehicle.pucUrl");
-                    }}
-                  />
-                </>
-              )}
-
               {current.key === "basics" && (
                 <>
                   <Field
@@ -901,6 +638,15 @@ export default function OnboardingWizard() {
                     value={state.basics.city}
                     onChange={(v) => setField("basics.city", v.slice(0, FIELD_LIMITS.city))}
                     placeholder="e.g. Indore (optional)"
+                  />
+                  <Field
+                    label="State"
+                    required
+                    value={state.basics.state}
+                    onChange={(v) => setField("basics.state", v.slice(0, FIELD_LIMITS.state))}
+                    onBlur={() => markTouched("basics.state")}
+                    error={showErr("basics.state")}
+                    placeholder="e.g. Madhya Pradesh"
                   />
                 </>
               )}

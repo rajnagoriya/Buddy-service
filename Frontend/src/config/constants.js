@@ -5,7 +5,6 @@ export const APP_CONFIG = {
 
 export const MODULES = {
   FOOD: 'Food',
-  TAXI: 'taxi',
   QUICK_COMMERCE: 'quickCommerce',
 };
 

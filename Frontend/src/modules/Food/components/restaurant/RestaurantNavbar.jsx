@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useOutletContext } from "react-router-dom"
 import { Search, Menu, ChevronRight, MapPin, X, Bell, HelpCircle } from "lucide-react"
 import { restaurantAPI } from "@food/api"
 import { getRestaurantAvailabilityStatus } from "@food/utils/restaurantAvailability"
@@ -28,8 +28,10 @@ export default function RestaurantNavbar({
   showSearch = true,
   showOfflineOnlineTag = true,
   showNotifications = true,
+  onMenuClick,
 }) {
   const navigate = useNavigate()
+  const { openSidebar } = useOutletContext() || {}
   const [isSearchActive, setIsSearchActive] = useState(false)
   const [searchValue, setSearchValue] = useState("")
   const [status, setStatus] = useState("Offline")
@@ -368,6 +370,14 @@ export default function RestaurantNavbar({
   }
 
   const handleMenuClick = () => {
+    if (typeof onMenuClick === "function") {
+      onMenuClick()
+      return
+    }
+    if (typeof openSidebar === "function") {
+      openSidebar()
+      return
+    }
     navigate("/food/restaurant/explore")
   }
 
@@ -401,8 +411,16 @@ export default function RestaurantNavbar({
         </div>
       )}
 
-      {/* Left Side - Restaurant Info */}
-      <div className="flex-1 min-w-0 pr-4 flex items-center gap-3">
+      {/* Left — hamburger (same as panel header) + restaurant info */}
+      <div className="flex-1 min-w-0 pr-4 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={handleMenuClick}
+          className="inline-flex shrink-0 rounded-xl border border-gray-200 p-2 hover:bg-gray-50 lg:hidden"
+          aria-label="Open menu"
+        >
+          <Menu className="h-5 w-5 text-gray-700" />
+        </button>
         {logoUrl && (
           <img src={logoUrl} alt="Logo" className="h-10 w-10 object-contain rounded-lg" />
         )}
@@ -487,15 +505,6 @@ export default function RestaurantNavbar({
           aria-label="Support"
         >
           <HelpCircle className="w-5 h-5 text-gray-700" />
-        </button>
-
-        {/* Hamburger Menu Icon */}
-        <button
-          onClick={handleMenuClick}
-          className="p-2 hover:bg-gray-100 rounded-full transition-colors"
-          aria-label="Menu"
-        >
-          <Menu className="w-5 h-5 text-gray-700" />
         </button>
       </div>
       

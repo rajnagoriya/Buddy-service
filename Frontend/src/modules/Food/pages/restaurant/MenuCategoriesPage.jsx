@@ -36,6 +36,7 @@ import {
 import { toast } from "sonner"
 import { ImageSourcePicker } from "@food/components/ImageSourcePicker"
 import { isFlutterBridgeAvailable } from "@food/utils/imageUploadUtils"
+import { getAllowedFoodTypeScopes } from "@food/utils/dietaryType"
 
 const PAGE_SIZE = 15
 
@@ -77,12 +78,40 @@ export default function MenuCategoriesPage() {
   const [uploadingImage, setUploadingImage] = useState(false)
   const [isPhotoPickerOpen, setIsPhotoPickerOpen] = useState(false)
   const fileInputRef = useRef(null)
+  const [restaurantProfile, setRestaurantProfile] = useState(null)
+  const allowedFoodTypeScopes = getAllowedFoodTypeScopes(restaurantProfile)
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
   useEffect(() => {
     fetchCategories(page)
   }, [page])
+
+  useEffect(() => {
+    const fetchRestaurantProfile = async () => {
+      try {
+        const response = await restaurantAPI.getCurrentRestaurant()
+        const profile =
+          response?.data?.data?.restaurant ||
+          response?.data?.restaurant ||
+          response?.data?.data ||
+          null
+        setRestaurantProfile(profile)
+      } catch {
+        setRestaurantProfile(null)
+      }
+    }
+    fetchRestaurantProfile()
+  }, [])
+
+  useEffect(() => {
+    if (!allowedFoodTypeScopes.includes(formData.foodTypeScope)) {
+      setFormData((prev) => ({
+        ...prev,
+        foodTypeScope: allowedFoodTypeScopes[0] || "Veg",
+      }))
+    }
+  }, [allowedFoodTypeScopes, formData.foodTypeScope])
 
   useEffect(() => {
     const draftCategoryName = String(location.state?.draftCategoryName || "").trim()
@@ -535,9 +564,9 @@ export default function MenuCategoriesPage() {
               onChange={(e) => setFormData((prev) => ({ ...prev, foodTypeScope: e.target.value }))}
               className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900"
             >
-              <option value="Veg">Veg</option>
-              <option value="Non-Veg">Non-Veg</option>
-              <option value="Both">Both</option>
+              {allowedFoodTypeScopes.includes("Veg") && <option value="Veg">Veg</option>}
+              {allowedFoodTypeScopes.includes("Non-Veg") && <option value="Non-Veg">Non-Veg</option>}
+              {allowedFoodTypeScopes.includes("Both") && <option value="Both">Both</option>}
             </select>
           </div>
 

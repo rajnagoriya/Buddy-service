@@ -4,7 +4,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowRight,
   Loader2,
-  Car,
   Bike,
   ShieldCheck,
   ChevronDown,
@@ -16,6 +15,7 @@ import { toast } from "sonner";
 import { identityAPI, persistDriverIdentitySession } from "@food/api";
 
 const RESEND_COOLDOWN_SECONDS = 60;
+const DRIVER_LOGIN_PHONE_KEY = "driverLoginPhone";
 
 /**
  * Single Driver Login. Phone + OTP. Server figures out whether this
@@ -35,6 +35,18 @@ export default function DriverLogin() {
   const navigate = useNavigate();
   const location = useLocation();
   const intendedRedirect = String(location.state?.redirect || "");
+
+  useEffect(() => {
+    try {
+      if (phone) {
+        sessionStorage.setItem(DRIVER_LOGIN_PHONE_KEY, phone);
+      } else {
+        sessionStorage.removeItem(DRIVER_LOGIN_PHONE_KEY);
+      }
+    } catch {
+      // ignore
+    }
+  }, [phone]);
 
   useEffect(() => {
     if (step !== 2 || resendTimer <= 0) return;
@@ -139,6 +151,12 @@ export default function DriverLogin() {
         activeService: data.activeService,
       });
 
+      try {
+        sessionStorage.removeItem(DRIVER_LOGIN_PHONE_KEY);
+      } catch {
+        // ignore
+      }
+
       if (data?.needsOnboarding) {
         toast.success("Welcome! Let's finish your onboarding.");
         navigate("/driver/onboarding", { replace: true });
@@ -183,11 +201,10 @@ export default function DriverLogin() {
             </p>
             <h1 className="text-white text-[30px] leading-[1.15] font-extrabold tracking-tight mb-2">
               One partner account.<br />
-              Food orders <span className="text-green-300">and</span> Taxi rides.
+              Food <span className="text-green-300">&</span> Quick Commerce.
             </h1>
             <p className="text-green-50 text-[13px] font-medium max-w-[290px]">
-              Sign in once to receive both food deliveries and taxi rides — switch
-              modes any time, never both at once.
+              Sign in once to receive restaurant and quick-commerce deliveries.
             </p>
           </div>
         </div>
@@ -226,6 +243,8 @@ export default function DriverLogin() {
                         type="tel"
                         required
                         autoFocus
+                        autoComplete="tel-national"
+                        inputMode="numeric"
                         value={phone}
                         onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
                         maxLength={10}
@@ -341,10 +360,9 @@ export default function DriverLogin() {
           </div>
 
           <div className="mt-auto px-7 py-6 border-t border-gray-100 shadow-[0_-4px_20px_rgba(0,0,0,0.02)]">
-            <div className="grid grid-cols-3 gap-3 mb-5">
+            <div className="grid grid-cols-2 gap-3 mb-5">
               {[
                 { Icon: Bike, label: "Food" },
-                { Icon: Car, label: "Taxi" },
                 { Icon: IndianRupee, label: "Earnings" },
               ].map(({ Icon, label }) => (
                 <div key={label} className="rounded-2xl bg-white/5 border border-gray-100 shadow-[0_-4px_20px_rgba(0,0,0,0.02)] p-3 text-center">

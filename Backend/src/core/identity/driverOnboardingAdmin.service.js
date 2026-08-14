@@ -2,14 +2,12 @@ import mongoose from 'mongoose';
 import { ValidationError, NotFoundError } from '../auth/errors.js';
 import { BuddyIdentity } from './buddyIdentity.model.js';
 import { FoodDeliveryPartner } from '../../modules/food/delivery/models/deliveryPartner.model.js';
-import { Driver } from '../../modules/taxi/driver/models/Driver.js';
 
-export const ONBOARDING_SERVICES = ['food', 'quickCommerce', 'taxi'];
+export const ONBOARDING_SERVICES = ['food', 'quickCommerce'];
 
 const SERVICE_LABELS = {
   food: 'Food',
   quickCommerce: 'Quick Commerce',
-  taxi: 'Taxi',
 };
 
 const normalizeService = (service) => {
@@ -43,15 +41,7 @@ const legacyQcStatus = (partner) => {
   return 'pending';
 };
 
-const legacyTaxiStatus = (driver) => {
-  if (!driver) return 'not_enabled';
-  const s = String(driver.status || '').toLowerCase();
-  if (s === 'rejected') return 'rejected';
-  if (driver.approve === true || s === 'approved' || s === 'active') return 'approved';
-  return 'pending';
-};
-
-export const getEffectiveServiceStatus = (identity, service, partner = null, driver = null) => {
+export const getEffectiveServiceStatus = (identity, service, partner = null) => {
   const svc = normalizeService(service);
   const stored = identity?.serviceStatuses?.[svc];
   if (stored?.status && stored.status !== 'not_enabled') {
@@ -79,21 +69,13 @@ export const getEffectiveServiceStatus = (identity, service, partner = null, dri
       approvedAt: partner?.approvedAt || null,
     };
   }
-  if (svc === 'quickCommerce') {
-    const status = legacyQcStatus(partner);
-    return {
-      status,
-      rejectionReason: partner?.rejectionReason || '',
-      rejectedAt: partner?.rejectedAt || null,
-      approvedAt: partner?.approvedAt || null,
-    };
-  }
-  const status = legacyTaxiStatus(driver);
+
+  const status = legacyQcStatus(partner);
   return {
     status,
-    rejectionReason: driver?.rejectionReason || driver?.rejected_reason || '',
-    rejectedAt: driver?.rejectedAt || null,
-    approvedAt: driver?.approvedAt || null,
+    rejectionReason: partner?.rejectionReason || '',
+    rejectedAt: partner?.rejectedAt || null,
+    approvedAt: partner?.approvedAt || null,
   };
 };
 
@@ -144,46 +126,33 @@ export const resolveIdentityFromRequestId = async (id) => {
     return BuddyIdentity.findById(partner.identityId);
   }
 
-  const driver = await Driver.findById(id).select('identityId phone').lean();
-  if (driver?.identityId) {
-    return BuddyIdentity.findById(driver.identityId);
-  }
-
   return null;
 };
 
 const findProfilesForIdentity = async (identityId) => {
-  const [partner, driver] = await Promise.all([
-    FoodDeliveryPartner.findOne({ identityId }).lean(),
-    Driver.findOne({ identityId }).lean(),
-  ]);
-  return { partner, driver };
+  const partner = await FoodDeliveryPartner.findOne({ identityId }).lean();
+  return { partner };
 };
 
 const formatServicesLabel = (services = []) =>
   services.map((s) => SERVICE_LABELS[s] || s).join(', ');
 
-const buildJoinRequestRow = (identity, service, partner, driver, index = 0) => {
-  const svcStatus = getEffectiveServiceStatus(identity, service, partner, driver);
+const buildJoinRequestRow = (identity, service, partner, index = 0) => {
+  const svcStatus = getEffectiveServiceStatus(identity, service, partner);
   const services = Array.isArray(identity.onboardingServices) ? identity.onboardingServices : [];
   const foodVehicle = identity.foodVehicle || {};
-  const taxiVehicle = identity.taxiVehicle || {};
 
   return {
     _id: partner?._id || identity._id,
     identityId: identity._id,
     partnerId: partner?._id || null,
-    driverId: driver?._id || null,
     sl: index + 1,
     name: identity.name || partner?.name || '',
     email: identity.email || partner?.email || '',
     phone: identity.phone || partner?.phone || '',
     zone: identity.city || partner?.city || '',
     jobType: partner?.jobType || '',
-    vehicleType:
-      service === 'taxi'
-        ? taxiVehicle.type || driver?.vehicleType || ''
-        : foodVehicle.type || partner?.vehicleType || '',
+    vehicleType: foodVehicle.type || partner?.vehicleType || '',
     services,
     servicesLabel: formatServicesLabel(services),
     service,
@@ -201,7 +170,7 @@ const buildJoinRequestRow = (identity, service, partner, driver, index = 0) => {
         ? { url: partner.profilePhoto }
         : null,
     serviceStatuses: ONBOARDING_SERVICES.reduce((acc, svc) => {
-      acc[svc] = getEffectiveServiceStatus(identity, svc, partner, driver);
+      acc[svc] = getEffectiveServiceStatus(identity, svc, partner);
       return acc;
     }, {}),
   };
@@ -239,32 +208,22 @@ export async function getJoinRequests(service, query = {}) {
   const identities = await BuddyIdentity.find(filter).sort({ updatedAt: -1 }).lean();
   const identityIds = identities.map((i) => i._id);
 
-  const [partners, drivers] = await Promise.all([
-    FoodDeliveryPartner.find({ identityId: { $in: identityIds } }).lean(),
-    Driver.find({ identityId: { $in: identityIds } }).lean(),
-  ]);
-
+  const partners = await FoodDeliveryPartner.find({ identityId: { $in: identityIds } }).lean();
   const partnerByIdentity = new Map(partners.map((p) => [String(p.identityId), p]));
-  const driverByIdentity = new Map(drivers.map((d) => [String(d.identityId), d]));
 
   const matched = [];
   for (const identity of identities) {
     const partner = partnerByIdentity.get(String(identity._id)) || null;
-    const driver = driverByIdentity.get(String(identity._id)) || null;
-    const svcStatus = getEffectiveServiceStatus(identity, svc, partner, driver);
+    const svcStatus = getEffectiveServiceStatus(identity, svc, partner);
     if (svcStatus.status !== listStatus) continue;
 
     if (query.vehicleType && String(query.vehicleType).trim()) {
       const vt = String(query.vehicleType).trim().toLowerCase();
-      const rowType = (
-        svc === 'taxi'
-          ? identity.taxiVehicle?.type || driver?.vehicleType || ''
-          : identity.foodVehicle?.type || partner?.vehicleType || ''
-      ).toLowerCase();
+      const rowType = (identity.foodVehicle?.type || partner?.vehicleType || '').toLowerCase();
       if (!rowType.includes(vt)) continue;
     }
 
-    matched.push(buildJoinRequestRow(identity, svc, partner, driver, matched.length));
+    matched.push(buildJoinRequestRow(identity, svc, partner, matched.length));
   }
 
   return { requests: matched.slice(skip, skip + limitNum) };
@@ -274,22 +233,22 @@ export async function getJoinRequestDetail(identityId) {
   const identity = await BuddyIdentity.findById(identityId).lean();
   if (!identity) return null;
 
-  const { partner, driver } = await findProfilesForIdentity(identity._id);
+  const { partner } = await findProfilesForIdentity(identity._id);
   const services = Array.isArray(identity.onboardingServices) ? identity.onboardingServices : [];
 
   const serviceStatuses = ONBOARDING_SERVICES.reduce((acc, svc) => {
-    acc[svc] = getEffectiveServiceStatus(identity, svc, partner, driver);
+    acc[svc] = getEffectiveServiceStatus(identity, svc, partner);
     return acc;
   }, {});
 
   return {
     identityId: identity._id,
     partnerId: partner?._id || null,
-    driverId: driver?._id || null,
     name: identity.name || '',
     email: identity.email || '',
     phone: identity.phone || '',
     city: identity.city || '',
+    state: identity.state || '',
     gender: identity.gender || '',
     onboardingServices: services,
     servicesLabel: formatServicesLabel(services),
@@ -300,13 +259,11 @@ export async function getJoinRequestDetail(identityId) {
     kyc: identity.kyc || {},
     bank: identity.bank || {},
     foodVehicle: identity.foodVehicle || {},
-    taxiVehicle: identity.taxiVehicle || {},
     selfieUrl: identity.onboardingSelfieUrl || '',
     submissionHistory: Array.isArray(partner?.submissionHistory) ? partner.submissionHistory : [],
     partner: partner || null,
-    driver: driver || null,
   };
-};
+}
 
 const syncFoodPartnerForService = async (identity, service, statusPatch) => {
   const partner = await FoodDeliveryPartner.findOne({ identityId: identity._id });
@@ -346,30 +303,6 @@ const syncFoodPartnerForService = async (identity, service, statusPatch) => {
   return partner;
 };
 
-const syncTaxiDriverForService = async (identity, statusPatch) => {
-  const driver = await Driver.findOne({ identityId: identity._id });
-  if (!driver) return null;
-
-  if (statusPatch.status === 'approved') {
-    driver.approve = true;
-    driver.status = 'approved';
-    driver.approvedAt = statusPatch.approvedAt || new Date();
-  } else if (statusPatch.status === 'rejected') {
-    driver.approve = false;
-    driver.status = 'rejected';
-    driver.rejectionReason = statusPatch.rejectionReason || '';
-    driver.rejectedAt = statusPatch.rejectedAt || new Date();
-  } else if (statusPatch.status === 'pending') {
-    driver.approve = false;
-    driver.status = 'pending';
-    driver.rejectionReason = '';
-    driver.rejectedAt = undefined;
-  }
-
-  await driver.save();
-  return driver;
-};
-
 export async function approveDriverService(requestId, service) {
   const svc = normalizeService(service);
   const identity = await resolveIdentityFromRequestId(requestId);
@@ -377,7 +310,7 @@ export async function approveDriverService(requestId, service) {
 
   const services = Array.isArray(identity.onboardingServices) ? identity.onboardingServices : [];
   if (!services.includes(svc)) {
-    throw new ValidationError(`Driver did not apply for ${SERVICE_LABELS[svc]}`);
+    throw new ValidationError(`Driver did not apply for ${SERVICE_LABELS[svc] === 'Food' ? 'delivery' : SERVICE_LABELS[svc]}`);
   }
 
   const approvedAt = new Date();
@@ -392,12 +325,9 @@ export async function approveDriverService(requestId, service) {
   if (svc === 'food' || svc === 'quickCommerce') {
     await syncFoodPartnerForService(identity, svc, { status: 'approved', approvedAt });
   }
-  if (svc === 'taxi') {
-    await syncTaxiDriverForService(identity, { status: 'approved', approvedAt });
-  }
 
-  const { partner, driver } = await findProfilesForIdentity(identity._id);
-  return buildJoinRequestRow(identity.toObject(), svc, partner, driver);
+  const { partner } = await findProfilesForIdentity(identity._id);
+  return buildJoinRequestRow(identity.toObject(), svc, partner);
 }
 
 export async function rejectDriverService(requestId, service, reason) {
@@ -412,7 +342,7 @@ export async function rejectDriverService(requestId, service, reason) {
 
   const services = Array.isArray(identity.onboardingServices) ? identity.onboardingServices : [];
   if (!services.includes(svc)) {
-    throw new ValidationError(`Driver did not apply for ${SERVICE_LABELS[svc]}`);
+    throw new ValidationError(`Driver did not apply for ${SERVICE_LABELS[svc] === 'Food' ? 'delivery' : SERVICE_LABELS[svc]}`);
   }
 
   const rejectedAt = new Date();
@@ -431,20 +361,12 @@ export async function rejectDriverService(requestId, service, reason) {
       rejectedAt,
     });
   }
-  if (svc === 'taxi') {
-    await syncTaxiDriverForService(identity, {
-      status: 'rejected',
-      rejectionReason: normalizedReason,
-      rejectedAt,
-    });
-  }
 
-  const { partner, driver } = await findProfilesForIdentity(identity._id);
-  return buildJoinRequestRow(identity.toObject(), svc, partner, driver);
+  const { partner } = await findProfilesForIdentity(identity._id);
+  return buildJoinRequestRow(identity.toObject(), svc, partner);
 }
 
-export const summariseCapabilitiesFromIdentity = (identity, partner = null, driver = null) => ({
-  food: getEffectiveServiceStatus(identity, 'food', partner, driver).status,
-  quickCommerce: getEffectiveServiceStatus(identity, 'quickCommerce', partner, driver).status,
-  taxi: getEffectiveServiceStatus(identity, 'taxi', partner, driver).status,
+export const summariseCapabilitiesFromIdentity = (identity, partner = null) => ({
+  food: getEffectiveServiceStatus(identity, 'food', partner).status,
+  quickCommerce: getEffectiveServiceStatus(identity, 'quickCommerce', partner).status,
 });

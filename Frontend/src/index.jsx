@@ -47,7 +47,6 @@ function getNativePathname() {
 function isExplicitPortalPath(pathname = '') {
   return (
     pathname.startsWith('/driver') ||
-    pathname.startsWith('/taxi') ||
     pathname.startsWith('/qc') ||
     pathname.startsWith('/admin') ||
     pathname.startsWith('/food/') ||
@@ -61,7 +60,6 @@ function isExplicitPortalPath(pathname = '') {
 function samePortalFamily(pathname = '', hashPath = '') {
   const pathOnly = String(hashPath).split('?')[0] || ''
   if (pathname.startsWith('/driver')) return pathOnly.startsWith('/driver')
-  if (pathname.startsWith('/taxi')) return pathOnly.startsWith('/taxi')
   if (pathname.startsWith('/qc')) return pathOnly.startsWith('/qc')
   if (pathname.startsWith('/admin')) return pathOnly.startsWith('/admin')
   if (pathname.startsWith('/food/') || pathname.startsWith('/restaurant') || pathname.startsWith('/delivery') || pathname.startsWith('/user')) {
@@ -112,7 +110,6 @@ function resolveNativeInitialRoute() {
   // Always honor the URL the native shell opened — do not replace /driver/*
   // with a stale restaurant/user route from localStorage or another role's auth.
   if (pathname.startsWith('/driver')) return pathname
-  if (pathname.startsWith('/taxi')) return pathname
   if (pathname.startsWith('/qc')) return pathname
   if (pathname.startsWith('/food/')) return pathname
   if (pathname.startsWith('/restaurant')) return `/food${pathname}`
@@ -124,8 +121,7 @@ function resolveNativeInitialRoute() {
   if (
     storedRoute.startsWith('/food/') ||
     storedRoute.startsWith('/admin') ||
-    storedRoute.startsWith('/driver') ||
-    storedRoute.startsWith('/taxi')
+    storedRoute.startsWith('/driver')
   ) {
     return storedRoute
   }

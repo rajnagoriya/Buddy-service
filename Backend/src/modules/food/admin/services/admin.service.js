@@ -1796,22 +1796,41 @@ export async function updateSupportTicket(id, body = {}) {
 }
 
 // ----- Restaurant Commission (admin) -----
+const formatDisplayRestaurantId = (mongoId) => {
+    if (!mongoId) return '';
+    const s = String(mongoId);
+    return `REST${s.slice(-6).padStart(6, '0')}`;
+};
+
 export async function getRestaurantCommissions() {
     const list = await FoodRestaurantCommission.find({})
         .sort({ createdAt: -1 })
         .populate({ path: 'restaurantId', select: 'restaurantName' })
         .lean();
 
-    const commissions = list.map((c, index) => ({
-        _id: c._id,
-        sl: index + 1,
-        restaurantId: c.restaurantId?._id ? String(c.restaurantId._id) : String(c.restaurantId),
-        restaurantName: c.restaurantId?.restaurantName || '',
-        restaurant: c.restaurantId?._id ? { _id: c.restaurantId._id, name: c.restaurantId.restaurantName } : null,
-        defaultCommission: c.defaultCommission || { type: 'percentage', value: 0 },
-        notes: c.notes || '',
-        status: c.status !== false
-    }));
+    const commissions = list.map((c, index) => {
+        const mongoId = c.restaurantId?._id
+            ? String(c.restaurantId._id)
+            : String(c.restaurantId || '');
+        const displayId = formatDisplayRestaurantId(mongoId);
+        return {
+            _id: c._id,
+            sl: index + 1,
+            restaurantMongoId: mongoId,
+            restaurantId: displayId,
+            restaurantName: c.restaurantId?.restaurantName || '',
+            restaurant: c.restaurantId?._id
+                ? {
+                    _id: c.restaurantId._id,
+                    name: c.restaurantId.restaurantName,
+                    restaurantId: displayId,
+                }
+                : null,
+            defaultCommission: c.defaultCommission || { type: 'percentage', value: 0 },
+            notes: c.notes || '',
+            status: c.status !== false,
+        };
+    });
 
     return { commissions };
 }
@@ -1823,13 +1842,15 @@ export async function getRestaurantCommissionBootstrap() {
     ]);
 
     const commissionByRestaurantId = new Set(
-        (commissionsData.commissions || []).map((c) => String(c.restaurantId))
+        (commissionsData.commissions || []).map((c) =>
+            String(c.restaurantMongoId || c.restaurant?._id || ''),
+        ),
     );
 
     const restaurants = (restaurantsData.restaurants || []).map((r) => ({
         _id: r._id,
         name: r.restaurantName || r.name || '',
-        restaurantId: r._id ? `REST${r._id.toString().slice(-6).padStart(6, '0')}` : '',
+        restaurantId: r._id ? formatDisplayRestaurantId(r._id) : '',
         ownerName: r.ownerName || '',
         hasCommissionSetup: commissionByRestaurantId.has(String(r._id))
     }));
@@ -1843,10 +1864,21 @@ export async function getRestaurantCommissionById(id) {
         .populate({ path: 'restaurantId', select: 'restaurantName' })
         .lean();
     if (!doc) return null;
+    const mongoId = doc.restaurantId?._id
+        ? String(doc.restaurantId._id)
+        : String(doc.restaurantId || '');
+    const displayId = formatDisplayRestaurantId(mongoId);
     return {
         _id: doc._id,
-        restaurantId: doc.restaurantId?._id ? String(doc.restaurantId._id) : String(doc.restaurantId),
-        restaurant: doc.restaurantId?._id ? { _id: doc.restaurantId._id, name: doc.restaurantId.restaurantName } : null,
+        restaurantMongoId: mongoId,
+        restaurantId: displayId,
+        restaurant: doc.restaurantId?._id
+            ? {
+                _id: doc.restaurantId._id,
+                name: doc.restaurantId.restaurantName,
+                restaurantId: displayId,
+            }
+            : null,
         restaurantName: doc.restaurantId?.restaurantName || '',
         defaultCommission: doc.defaultCommission || { type: 'percentage', value: 0 },
         notes: doc.notes || '',
@@ -3617,9 +3649,24 @@ export async function createRestaurantByAdmin(body) {
         ownerEmail: toStr(body.ownerEmail),
         ownerPhone: toStr(body.ownerPhone),
         primaryContactNumber: toStr(body.primaryContactNumber) || toStr(body.ownerPhone),
-        pureVegRestaurant: body.pureVegRestaurant !== undefined
-            ? parseBooleanLike(body.pureVegRestaurant, 'pureVegRestaurant')
-            : false,
+        dietaryType: (() => {
+            const raw = String(body.dietaryType || '').toLowerCase().trim().replace(/[\s-]+/g, '_');
+            if (raw === 'veg' || raw === 'pure_veg') return 'veg';
+            if (raw === 'mixed') return 'mixed';
+            if (raw === 'non_veg' || raw === 'nonveg') return 'non_veg';
+            if (body.pureVegRestaurant !== undefined) {
+                return parseBooleanLike(body.pureVegRestaurant, 'pureVegRestaurant') ? 'veg' : 'non_veg';
+            }
+            return undefined;
+        })(),
+        pureVegRestaurant: (() => {
+            const raw = String(body.dietaryType || '').toLowerCase().trim().replace(/[\s-]+/g, '_');
+            if (raw === 'veg' || raw === 'pure_veg') return true;
+            if (raw === 'mixed' || raw === 'non_veg' || raw === 'nonveg') return false;
+            return body.pureVegRestaurant !== undefined
+                ? parseBooleanLike(body.pureVegRestaurant, 'pureVegRestaurant')
+                : false;
+        })(),
         addressLine1: toStr(loc.addressLine1),
         addressLine2: toStr(loc.addressLine2),
         area: toStr(loc.area),
@@ -3694,6 +3741,27 @@ export async function createRestaurantByAdmin(body) {
     }
     if (!doc.ownerPhone && !doc.primaryContactNumber) {
         throw new ValidationError('Owner phone or primary contact number is required');
+    }
+    if (!doc.dietaryType) {
+        throw new ValidationError('Restaurant type (veg / non_veg / mixed) is required');
+    }
+    if (!doc.zoneId) {
+        throw new ValidationError('Service zone is required');
+    }
+    if (latitude === null || longitude === null) {
+        throw new ValidationError('Restaurant map location (latitude/longitude) is required');
+    }
+    if (!toStr(loc.area) || !toStr(loc.city)) {
+        throw new ValidationError('Area and city are required');
+    }
+    if (!/^\d{6}$/.test(toStr(loc.pincode))) {
+        throw new ValidationError('Pincode must be exactly 6 digits');
+    }
+    if (!Array.isArray(body.cuisines) || body.cuisines.length === 0) {
+        throw new ValidationError('At least one cuisine is required');
+    }
+    if (!toStr(body.estimatedDeliveryTime)) {
+        throw new ValidationError('Estimated delivery time is required');
     }
 
     const restaurant = await createRestaurant(doc, { source: CREATION_SOURCE.ADMIN });
@@ -3997,8 +4065,8 @@ export async function createAdminOffer(body, adminId) {
         terms: body.terms,
         couponCategory: body.couponCategory || COUPON_CATEGORY.NORMAL,
         isGlobal: body.restaurantScope === 'all',
-        approvalStatus: 'pending',
-        status: 'inactive',
+        approvalStatus: 'approved',
+        status: (body.endDate && new Date(body.endDate).getTime() < Date.now()) ? 'inactive' : 'active',
         showInCart: true,
         createdBy: 'admin',
         createdById: adminId || undefined,
@@ -4058,9 +4126,15 @@ export async function updateAdminOffer(id, body, adminId) {
     }
 
     if (!isRestaurantCoupon && !body.status) {
-        const endTs = body.endDate ? new Date(body.endDate).getTime() : null;
-        updateFields.status = endTs && endTs <= Date.now() ? 'inactive' : 'inactive';
-        updateFields.approvalStatus = 'pending';
+        const endTs = body.endDate
+            ? new Date(body.endDate).getTime()
+            : (existing.endDate ? new Date(existing.endDate).getTime() : null);
+        const isExpired = Boolean(endTs && endTs < Date.now());
+        // Admin-created coupons stay auto-approved; only expire when end date has passed.
+        updateFields.status = isExpired ? 'inactive' : 'active';
+        updateFields.approvalStatus = 'approved';
+        updateFields.rejectionReason = '';
+        updateFields.rejectedAt = null;
     }
 
     const updated = await FoodOffer.findByIdAndUpdate(
@@ -5260,7 +5334,6 @@ const buildDeliveryPartnerDetail = (partner, identity = null) => {
     const kyc = identity?.kyc || {};
     const bank = identity?.bank || {};
     const foodVehicle = identity?.foodVehicle || {};
-    const taxiVehicle = identity?.taxiVehicle || {};
 
     const aadhaarNumber = pickText(kyc.aadhaar?.number) || pickText(partner.aadharNumber);
     const aadhaarFront = pickText(kyc.aadhaar?.documentUrl) || pickText(partner.aadharPhoto);
@@ -5296,6 +5369,7 @@ const buildDeliveryPartnerDetail = (partner, identity = null) => {
         phone: pickText(partner.phone) || pickText(identity?.phone),
         countryCode: partner.countryCode || identity?.countryCode || '+91',
         city: pickText(partner.city) || pickText(identity?.city),
+        state: pickText(partner.state) || pickText(identity?.state) || null,
         gender: pickText(identity?.gender) || null,
         deliveryId,
         status: partner.status === 'rejected' ? 'blocked' : partner.status,
@@ -5349,11 +5423,11 @@ const buildDeliveryPartnerDetail = (partner, identity = null) => {
                     : null,
         },
         location:
-            partner.address || partner.city || partner.state || identity?.city
+            partner.address || partner.city || partner.state || identity?.city || identity?.state
                 ? {
                       addressLine1: pickText(partner.address) || null,
                       city: pickText(partner.city) || pickText(identity?.city) || null,
-                      state: pickText(partner.state) || null,
+                      state: pickText(partner.state) || pickText(identity?.state) || null,
                   }
                 : null,
         vehicle:
@@ -5374,21 +5448,6 @@ const buildDeliveryPartnerDetail = (partner, identity = null) => {
                       insuranceUrl: pickText(foodVehicle.insuranceUrl) || null,
                   }
                 : null,
-        taxiVehicle: taxiVehicle?.number
-            ? {
-                  type: pickText(taxiVehicle.type) || null,
-                  make: pickText(taxiVehicle.make) || null,
-                  model: pickText(taxiVehicle.model) || null,
-                  number: pickText(taxiVehicle.number) || null,
-                  vehicleTypeId: pickText(taxiVehicle.vehicleTypeId) || null,
-                  color: pickText(taxiVehicle.color) || null,
-                  photoUrl: pickText(taxiVehicle.photoUrl) || null,
-                  rcUrl: pickText(taxiVehicle.rcUrl) || null,
-                  insuranceUrl: pickText(taxiVehicle.insuranceUrl) || null,
-                  commercialPermitUrl: pickText(taxiVehicle.commercialPermitUrl) || null,
-                  pucUrl: pickText(taxiVehicle.pucUrl) || null,
-              }
-            : null,
     };
 };
 
@@ -5400,6 +5459,9 @@ export async function getDeliveryPartnerById(id) {
     if (partner.identityId) {
         identity = await BuddyIdentity.findById(partner.identityId).lean();
     }
+    if (!identity && partner.phone) {
+        identity = await BuddyIdentity.findOne({ phone: partner.phone }).lean();
+    }
 
     const detail = buildDeliveryPartnerDetail(partner, identity);
 
@@ -5407,10 +5469,8 @@ export async function getDeliveryPartnerById(id) {
         const { getEffectiveServiceStatus, ONBOARDING_SERVICES } = await import(
             '../../../../core/identity/driverOnboardingAdmin.service.js'
         );
-        const { Driver } = await import('../../../taxi/driver/models/Driver.js');
-        const driver = await Driver.findOne({ identityId: identity._id }).lean();
         detail.serviceStatuses = ONBOARDING_SERVICES.reduce((acc, svc) => {
-            acc[svc] = getEffectiveServiceStatus(identity, svc, partner, driver);
+            acc[svc] = getEffectiveServiceStatus(identity, svc, partner);
             return acc;
         }, {});
     }
@@ -5901,7 +5961,7 @@ export async function approveDeliveryPartner(id, service = 'food') {
             { ownerType: 'DELIVERY_PARTNER', ownerId: partner._id },
             {
                 title: 'Welcome Aboard!',
-                body: `Your ${service || 'food'} application has been approved. You can now go online and start earning!`,
+                body: 'Your driver application has been approved. You can now go online and start earning!',
                 image: 'https://i.ibb.co/3m2Yh7r/Appzeto-Brand-Image.png',
                 data: {
                     type: 'onboarding_approved',
@@ -5939,7 +5999,7 @@ export async function rejectDeliveryPartner(id, reason, service = 'food') {
                 { ownerType: 'DELIVERY_PARTNER', ownerId: updated._id },
                 {
                     title: 'Onboarding Update',
-                    body: `Your ${service || 'food'} application was rejected. Reason: ${normalizedReason}.`,
+                    body: `Your driver application was rejected. Reason: ${normalizedReason}.`,
                     image: 'https://i.ibb.co/3m2Yh7r/Appzeto-Brand-Image.png',
                     data: {
                         type: 'onboarding_rejected',

@@ -7,7 +7,7 @@ import {
   Loader2,
   Utensils,
   ShoppingBag,
-  Car,
+  IndianRupee,
   ChevronDown,
   ShieldCheck,
   Zap,
@@ -28,7 +28,14 @@ import { Label } from "@food/components/ui/label"
 
 export default function UnifiedOTPFastLogin() {
   const RESEND_COOLDOWN_SECONDS = 60
-  const [phoneNumber, setPhoneNumber] = useState("")
+  const USER_LOGIN_PHONE_KEY = "userLoginPhone"
+  const [phoneNumber, setPhoneNumber] = useState(() => {
+    try {
+      return sessionStorage.getItem(USER_LOGIN_PHONE_KEY) || ""
+    } catch {
+      return ""
+    }
+  })
   const [otp, setOtp] = useState("")
   const [step, setStep] = useState(1)
   const [loading, setLoading] = useState(false)
@@ -42,6 +49,18 @@ export default function UnifiedOTPFastLogin() {
   const navigate = useNavigate()
   const loginLocation = useLocation()
   const submitting = useRef(false)
+
+  useEffect(() => {
+    try {
+      if (phoneNumber) {
+        sessionStorage.setItem(USER_LOGIN_PHONE_KEY, phoneNumber)
+      } else {
+        sessionStorage.removeItem(USER_LOGIN_PHONE_KEY)
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [phoneNumber])
 
   const normalizedPhone = () => {
     const digits = String(phoneNumber).replace(/\D/g, "").slice(-15)
@@ -169,6 +188,12 @@ export default function UnifiedOTPFastLogin() {
         identity: data.identity,
       })
 
+      try {
+        sessionStorage.removeItem(USER_LOGIN_PHONE_KEY)
+      } catch {
+        /* ignore */
+      }
+
       if (!user?.name || String(user.name).trim() === "") {
         setTempAuth({ accessToken, user, refreshToken, identity: data.identity })
         setShowNameModal(true)
@@ -263,6 +288,11 @@ export default function UnifiedOTPFastLogin() {
           user,
           identity: data.identity,
         })
+        try {
+          sessionStorage.removeItem(USER_LOGIN_PHONE_KEY)
+        } catch {
+          /* ignore */
+        }
         setPendingVerify(null)
         toast.success(`Welcome, ${newName.trim()}!`)
         setShowNameModal(false)
@@ -279,6 +309,12 @@ export default function UnifiedOTPFastLogin() {
         user: updatedUser,
         identity: tempAuth.identity,
       })
+
+      try {
+        sessionStorage.removeItem(USER_LOGIN_PHONE_KEY)
+      } catch {
+        /* ignore */
+      }
 
       toast.success(`Welcome, ${newName.trim()}!`)
       setShowNameModal(false)
@@ -446,9 +482,9 @@ export default function UnifiedOTPFastLogin() {
 
               <div className="flex flex-1 flex-col items-center gap-1">
                 <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white shadow-sm sm:h-10 sm:w-10">
-                  <Car className="h-4 w-4 text-primary sm:h-5 sm:w-5" strokeWidth={2} />
+                  <IndianRupee className="h-4 w-4 text-primary sm:h-5 sm:w-5" strokeWidth={2} />
                 </div>
-                <span className="text-[9px] font-semibold text-white sm:text-[10px]">Taxi</span>
+                <span className="text-[9px] font-semibold text-white sm:text-[10px]">Rewards</span>
               </div>
             </div>
           </div>
@@ -483,7 +519,7 @@ export default function UnifiedOTPFastLogin() {
                     <Label className="mb-1.5 ml-1 block text-[13px] font-bold text-foreground">
                       Mobile Number
                     </Label>
-                    <div className="flex h-12 items-center overflow-hidden rounded-[14px] border border-primary/40 bg-white shadow-sm transition-all focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20">
+                    <div className="flex h-12 items-center overflow-hidden rounded-[14px] border border-gray-200 bg-white shadow-sm transition-all focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20">
                       <div className="flex h-full shrink-0 items-center gap-1.5 px-3 text-gray-800">
                         <span className="text-sm font-bold">+91</span>
                         <ChevronDown className="hidden h-4 w-4 text-gray-400 sm:block" strokeWidth={3} />
@@ -493,13 +529,14 @@ export default function UnifiedOTPFastLogin() {
                         type="tel"
                         required
                         autoFocus
+                        autoComplete="tel-national"
                         value={phoneNumber}
                         onChange={(e) =>
                           setPhoneNumber(e.target.value.replace(/\D/g, "").slice(0, 10))
                         }
                         maxLength={10}
                         inputMode="numeric"
-                        className="h-full min-w-0 flex-1 px-3 text-sm font-bold text-gray-900 outline-none placeholder:text-gray-400"
+                        className="login-phone-input h-full min-w-0 flex-1 bg-white px-3 text-sm font-bold text-gray-900 outline-none placeholder:text-gray-400"
                         placeholder="Enter mobile number"
                       />
                     </div>

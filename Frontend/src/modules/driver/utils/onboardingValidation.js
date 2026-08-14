@@ -15,6 +15,7 @@ export const FIELD_LIMITS = {
   name: 80,
   email: 120,
   city: 60,
+  state: 60,
   vehicleMake: 60,
   vehicleModel: 60,
   vehicleNumber: 15,
@@ -172,33 +173,6 @@ export const buildValidators = () => ({
       matches(RE_VEHICLE_TEXT, "Use letters and numbers only"),
     ),
   },
-  vehicle_taxi: {
-    "taxiVehicle.type": required("Vehicle type"),
-    "taxiVehicle.number": compose(
-      required("Vehicle number"),
-      maxLen("Vehicle number", FIELD_LIMITS.vehicleNumber),
-      matches(RE_VEHICLE, "Vehicle number must look like MH12AB1234"),
-    ),
-    "taxiVehicle.make": compose(
-      required("Vehicle make"),
-      minLen("Vehicle make", 2),
-      maxLen("Vehicle make", FIELD_LIMITS.vehicleMake),
-      matches(RE_VEHICLE_TEXT, "Use letters and numbers only"),
-    ),
-    "taxiVehicle.model": compose(
-      required("Vehicle model"),
-      minLen("Vehicle model", 2),
-      maxLen("Vehicle model", FIELD_LIMITS.vehicleModel),
-      matches(RE_VEHICLE_TEXT, "Use letters and numbers only"),
-    ),
-    "taxiVehicle.rcUrl": compose(required("RC document"), matches(RE_URL, "Upload RC document")),
-    "taxiVehicle.insuranceUrl": compose(required("Insurance document"), matches(RE_URL, "Upload insurance document")),
-    "taxiVehicle.commercialPermitUrl": compose(
-      required("Commercial permit"),
-      matches(RE_URL, "Upload commercial permit"),
-    ),
-    "taxiVehicle.pucUrl": compose(required("PUC certificate"), matches(RE_URL, "Upload PUC certificate")),
-  },
   selfie: {
     "selfie.selfieUrl": compose(required("Selfie"), matches(RE_URL, "Please take or upload a selfie")),
   },
@@ -278,12 +252,6 @@ export const STEP_MEDIA_PATHS = {
     "kyc.aadhaar.backDocumentUrl",
     "kyc.pan.documentUrl",
     "kyc.drivingLicense.documentUrl",
-  ],
-  vehicle_taxi: [
-    "taxiVehicle.rcUrl",
-    "taxiVehicle.insuranceUrl",
-    "taxiVehicle.commercialPermitUrl",
-    "taxiVehicle.pucUrl",
   ],
   selfie: ["selfie.selfieUrl"],
 };
